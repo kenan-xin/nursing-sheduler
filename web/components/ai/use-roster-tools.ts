@@ -23,6 +23,7 @@ import {
   buildTradeView,
   describeRosterChangeOutcome,
   readRosterForAssistant,
+  rowsOf,
   shiftName,
   STEP_LABEL,
   summarizeRoster,
@@ -33,7 +34,13 @@ import {
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import { generateDateItems } from "@/lib/dates/date-id";
 import type { AssistantCommandV1 } from "@/lib/proposal";
-import { deriveCurrentDays } from "@/lib/roster";
+import {
+  rosterAxisContext,
+  rosterCurrentDays,
+  withBorrowedRows,
+  type RosterBorrowedRow,
+  type RosterDocument,
+} from "@/lib/roster";
 import { readRosterChangeOutcome, type RosterCellChange } from "@/lib/roster/change-request";
 import { countHeadroom, dayCode, deriveRuleModel, plainDate } from "@/lib/roster-viewer/rule-check";
 import {
@@ -267,7 +274,14 @@ const LOAD_FIRST =
   "Ask the user to open the Roster screen and press Load first, so the swap is made on the roster they mean.";
 
 type Resolved =
-  | { ok: true; ctx: SwapContext; personIdx: number; dateIdxs: number[]; baselineId: string }
+  | {
+      ok: true;
+      ctx: SwapContext;
+      personIdx: number;
+      dateIdxs: number[];
+      baselineId: string;
+      document: RosterDocument;
+    }
   | { ok: false; message: string };
 
 function resolveSwap(
@@ -311,10 +325,13 @@ function resolveSwap(
   }
   return {
     ok: true,
-    ctx: { context, days: deriveCurrentDays(document.solvedDays, document.edits), model },
+    // Swaps are planned among the submitted people only: the rules know nothing about
+    // a borrowed (temporary) row, so it is left out of the rule checks.
+    ctx: { context, days: rosterCurrentDays(document).slice(0, context.people.length), model },
     personIdx,
     dateIdxs,
     baselineId: document.provenance.solvedBaselineId,
+    document,
   };
 }
 
@@ -464,7 +481,7 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
               "noTemporaryNurse true." +
               (args.reason === "sick_or_emergency"
                 ? " If they only want the absence recorded, call prepare_roster_swap without a partner."
-                : " For a swap, say it takes effect after the next optimiser run.") +
+                : "") +
               PLAIN_WORDS,
           };
         }
@@ -683,7 +700,7 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         if (token === null) return SUPERSEDED;
         const resolved = resolveSwap(read, args.person, args.dates);
         if (!resolved.ok) return resolved.message;
-        const { ctx, personIdx, dateIdxs, baselineId } = resolved;
+        const { ctx, personIdx, dateIdxs, baselineId, document } = resolved;
         const giving = givingProblem(ctx, personIdx, dateIdxs);
         if (giving !== null) return `${giving} Ask the user which dates they mean.`;
         const ladder = findCoverLadder(ctx, personIdx, dateIdxs, args.reason);
@@ -722,8 +739,7 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
               weight: "must",
             }),
           ),
-          // A swap: the borrowed nurse cannot sit on this roster yet (C2, bead g1p), so
-          // the asking nurse's off request is what frees them at the next run.
+          // A swap: the off request keeps the asking nurse free at the next run too.
           ...(sick
             ? addLeave(personId, personIsos)
             : personIsos.map(
@@ -752,27 +768,56 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         if (question === undefined) {
           return "The app did not ask the lending ward to confirm this nurse, so no card was shown and nothing was altered.";
         }
-        // C1: the roster only records the absence (sick reason). The nurse's row needs
-        // roster-file/2 (Task 12), so it appears after the next run.
-        const cells: RosterCellChange[] = sick
-          ? dateIdxs.map((d) => ({
+        // roster-file/2 (bead g1p): her row joins the roster in the same Apply, off
+        // every day, and her cover shifts are ordinary cell changes on it.
+        const row: RosterBorrowedRow = {
+          id: name,
+          description: BORROW_SOURCE[args.source],
+          groups,
+          days: isos.map(() => ({ kind: "off" })),
+        };
+        const rowIdx = rosterAxisContext(document).people.length;
+        const cells: RosterCellChange[] = [
+          ...dateIdxs.map(
+            (d): RosterCellChange => ({
               personIdx,
               dateIdx: d,
               before: ctx.days[personIdx][d],
-              after: { kind: "leave" },
-            }))
-          : [];
+              after: sick ? { kind: "leave" } : { kind: "off" },
+            }),
+          ),
+          ...ladder.borrow.map(
+            (n): RosterCellChange => ({
+              personIdx: rowIdx,
+              dateIdx: n.dateIdx,
+              before: { kind: "off" },
+              after: { kind: "shift", shiftId: n.shift },
+            }),
+          ),
+        ];
         const needs = ladder.borrow.map((n) => ({
           date: plainDate(isos[n.dateIdx]),
           shift: shiftName(ctx.context, n.shift),
         }));
-        const view = buildBorrowView(name, args.source, groups, needs, question, args.summary);
-        const person = personName(ctx.context, personIdx);
-        const swapNote = `The swap takes effect after the next run: ${person} keeps these shifts until then.`;
+        const axis = rosterAxisContext(withBorrowedRows(document, [row]));
+        const view = buildBorrowView(
+          name,
+          args.source,
+          groups,
+          needs,
+          rowsOf(axis, cells),
+          question,
+          args.summary,
+        );
         const shown = showCard(
           {
-            request: cells.length > 0 ? { solvedBaselineId: baselineId, cells } : null,
-            view: sick ? view : { ...view, notes: [...view.notes, swapNote] },
+            request: {
+              solvedBaselineId: baselineId,
+              cells,
+              addPeople: [row],
+              peopleCount: rowIdx,
+            },
+            view,
             linked: {
               proposalId: prepared.linked.proposalId,
               assumptionIds: prepared.linked.assumptionIds,
@@ -783,12 +828,9 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         );
         if (!shown) return ROSTER_BUSY;
         return (
-          `${CARD_SHOWN} Tell the user ${name}'s roster row appears after the next optimiser run, ` +
-          (sick
-            ? ""
-            : `and the swap takes effect after the next optimiser run (${person} keeps these shifts until then), `) +
-          `and to let their ${ROSTER_OWNER} know about the temporary nurse. Offer ` +
-          "request_optimize_run once they have applied it."
+          `${CARD_SHOWN} Apply adds ${name} to the staff list and puts ${name}'s row on the ` +
+          `roster with the cover shifts. Tell the user to let their ${ROSTER_OWNER} know about ` +
+          "the temporary nurse."
         );
       },
     },

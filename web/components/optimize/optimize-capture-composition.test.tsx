@@ -480,7 +480,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
       // container's own coordinates, and the recomputed baseline identity.
       const row = await store.readCandidate<RosterDocument>("opt_1");
       const document = row!.document;
-      expect(document.schemaVersion).toBe("roster-file/1");
+      expect(document.schemaVersion).toBe("roster-file/2");
       expect(document.submission.canonicalYaml).toBe(fixtureSubmission().canonicalYaml);
       // De-anonymized through the SNAPSHOT's reverse map: `P1` → "Alice Ng", `P2` → 7
       // with its numeric identity preserved.

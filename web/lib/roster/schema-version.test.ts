@@ -1,10 +1,9 @@
 // The roster-file version matrix (F3).
 //
 // Compatibility is the file's business, not the app's. These tests cover all five
-// verdicts and the whole migration chain — including migrate-older, which at v1 is
-// only reachable through the injected policy the module exposes for exactly this
-// reason. Shipping the chain machinery untested would mean writing the first real
-// migration on top of unproven code.
+// verdicts and the whole migration chain. The chain is exercised through the
+// injected policy the module exposes, so longer chains are proven before a real
+// v3 needs them.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -40,9 +39,13 @@ describe("the shipped version", () => {
     );
   });
 
-  it("ships no migrations yet, because v1 is the first version", () => {
-    expect(ROSTER_FILE_MIGRATIONS).toEqual([]);
-    expect(CURRENT_ROSTER_FILE_VERSION).toBe(1);
+  it("ships the v1 -> v2 migration, which adds no borrowed rows", () => {
+    expect(CURRENT_ROSTER_FILE_VERSION).toBe(2);
+    expect(ROSTER_FILE_MIGRATIONS.map((migration) => migration.from)).toEqual([1]);
+    expect(migrateRosterFileDocument({ schemaVersion: "roster-file/1", edits: [] }, 1)).toEqual({
+      ok: true,
+      document: { schemaVersion: "roster-file/2", edits: [], borrowed: [] },
+    });
   });
 });
 
@@ -50,12 +53,13 @@ describe("classifyRosterFileVersion", () => {
   it("loads an exact match", () => {
     expect(classifyRosterFileVersion(ROSTER_DOCUMENT_SCHEMA_VERSION)).toEqual({
       status: "exact",
-      version: 1,
+      version: 2,
     });
+    expect(classifyRosterFileVersion("roster-file/1")).toEqual({ status: "migrate", version: 1 });
   });
 
   it("rejects a NEWER file rather than best-effort loading it", () => {
-    expect(classifyRosterFileVersion("roster-file/2")).toEqual({ status: "newer", version: 2 });
+    expect(classifyRosterFileVersion("roster-file/3")).toEqual({ status: "newer", version: 3 });
     expect(classifyRosterFileVersion("roster-file/99")).toEqual({ status: "newer", version: 99 });
   });
 

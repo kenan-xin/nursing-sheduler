@@ -244,6 +244,29 @@ describe("patchFrozenXlsxWithEdits — real C5 plain workbook", () => {
     expect(sheet.getCell(7, 1).value).toBe("Status");
     expect(sheet.getCell(7, 2).value).toBe("OPTIMAL");
   });
+
+  it("appends a borrowed nurse's row after the people, before Score/Status (bead g1p)", async () => {
+    const N = { kind: "shift", shiftId: "N" } as const;
+    const patched = await patchFrozenXlsxWithEdits({
+      frozenXlsx: fixtureBlob(meta.file),
+      // Row index 3 is the borrowed row; her date-0 cell is edited to D.
+      edits: [{ personIdx: 3, dateIdx: 0, day: { kind: "shift", shiftId: "D" } }],
+      borrowed: [{ id: "Mei", groups: [], days: [{ kind: "off" }, N, { kind: "leave" }] }],
+      coordinateMap,
+      provenance: fixtureProvenance(),
+    });
+    const sheet = (await reRead(patched)).worksheets[0];
+    expect(sheet.getCell(4, 2).value).toBe("E"); // a submitted person, untouched
+    expect([1, 2, 3, 4].map((col) => sheet.getCell(6, col).value)).toEqual([
+      "Mei",
+      "D",
+      "N",
+      "Leave",
+    ]);
+    expect(sheet.getCell(7, 1).value).toBe("Score");
+    expect(sheet.getCell(7, 2).value).toBe(9);
+    expect(sheet.getCell(8, 1).value).toBe("Status");
+  });
 });
 
 describe("patchFrozenXlsxWithEdits — real C5 prettify workbook (history columns)", () => {
@@ -281,6 +304,38 @@ describe("patchFrozenXlsxWithEdits — real C5 prettify workbook (history column
       3,
     ).border;
     expect(sheet.getCell(3, 3).border).toEqual(uneditedNeighbour);
+  });
+
+  it("writes a borrowed nurse's row past the history column and moves Score down (bead g1p)", async () => {
+    const frozen = (await reRead(fixtureBlob(meta.file))).worksheets[0];
+    const scoreRow = [6, 7, 8].find((row) => frozen.getCell(row, 1).value === "Score");
+    expect(scoreRow).toBe(6);
+    const patched = await patchFrozenXlsxWithEdits({
+      frozenXlsx: fixtureBlob(meta.file),
+      edits: [],
+      borrowed: [
+        {
+          id: "Mei",
+          groups: [],
+          days: [{ kind: "off" }, { kind: "shift", shiftId: "N" }, { kind: "leave" }],
+        },
+      ],
+      coordinateMap,
+      provenance: fixtureProvenance(),
+    });
+    const sheet = (await reRead(patched)).worksheets[0];
+    // Name in col A, history col B left empty, dates from col C.
+    expect([1, 3, 4, 5].map((col) => sheet.getCell(6, col).value)).toEqual([
+      "Mei",
+      "",
+      "N",
+      "Leave",
+    ]);
+    expect(sheet.getCell(6, 2).value).toBeNull();
+    // The people above are untouched; Score/Status moved down one row.
+    expect(sheet.getCell(5, 1).value).toBe(frozen.getCell(5, 1).value);
+    expect(sheet.getCell(7, 1).value).toBe("Score");
+    expect(sheet.getCell(8, 1).value).toBe("Status");
   });
 
   // Gated on `DIFF_PYTHON`, not short-circuited inside the body (qq0.28.1). An absent

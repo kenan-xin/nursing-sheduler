@@ -13,8 +13,7 @@
 
 import type { RosterStorage, WorkingPromotionOutcome } from "@/lib/store";
 import { decodeRosterFile, decodeRosterFileBytes } from "./file";
-import type { RosterVersionPolicy } from "./schema-version";
-import { validateRosterDocument } from "./validate";
+import { validateStoredRosterDocument, type RosterVersionPolicy } from "./schema-version";
 import type { RosterDocument } from "./types";
 
 /** Re-exported so the roster barrel can surface the promotion outcome type. */
@@ -51,7 +50,7 @@ export function promoteRosterDocumentToWorking(
     // Deliberately the REAL validator, not a pass-through: F1 stores exactly what
     // the validator returns, so the value that lands in `working` is the one this
     // gate approved rather than one that merely passed an earlier check.
-    validate: validateRosterDocument,
+    validate: validateStoredRosterDocument,
     expectedWorkingRevision: fence.expectedWorkingRevision,
     expectedClearEpoch: fence.expectedClearEpoch,
   });
@@ -111,7 +110,8 @@ export function promoteCandidateRosterToWorking(
   return fence.storage.promoteCandidateToWorking<RosterDocument>({
     jobId: ref.jobId,
     expectedCandidateVersion: ref.candidateVersion,
-    validate: validateRosterDocument,
+    // A candidate stored by an older build is upgraded first (roster-file/1 -> 2).
+    validate: validateStoredRosterDocument,
     expectedWorkingRevision: fence.expectedWorkingRevision,
     expectedClearEpoch: fence.expectedClearEpoch,
   });

@@ -218,12 +218,12 @@ describe("structural and version rejection", () => {
 
   it("rejects a NEWER file with a message naming both versions", async () => {
     const raw = await rawOf(await fixtureRosterDocument());
-    raw.schemaVersion = "roster-file/2";
+    raw.schemaVersion = "roster-file/3";
     const result = await decodeRosterFileBytes(reencode(raw));
     expect(result).toMatchObject({ ok: false });
     if (!result.ok) {
       expect(result.reason).toContain("newer version of the app");
-      expect(result.reason).toContain("roster-file/2");
+      expect(result.reason).toContain("roster-file/3");
     }
   });
 
@@ -238,9 +238,9 @@ describe("structural and version rejection", () => {
   it("migrates an OLDER file end to end and IMPORTS it successfully", async () => {
     // The real contract: a supported older file migrates, passes FULL validation at
     // the version it was migrated TO, and decodes. Exercised through an injected
-    // policy because v1 is the first version, so migrate-older is otherwise
-    // unreachable — and the policy's `currentVersion` and validator advance together,
-    // which is precisely what makes this success path reachable at all.
+    // policy with a synthetic step, so this pins the mechanism apart from the shipped
+    // v1 -> v2 step (`borrowed.test.ts`) — and the policy's `currentVersion` and
+    // validator advance together, which is what makes this success path reachable.
     const document = await fixtureRosterDocument();
     const raw = await rawOf(document);
     const legacy = { ...raw, schemaVersion: rosterFileVersionString(1), legacyNote: "retired" };

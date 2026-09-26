@@ -20,6 +20,7 @@
 import { useCallback, useMemo, useState, type DragEvent, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { FaChevronDown } from "@/components/icons";
+import { Badge } from "@/components/ui/badge";
 import { typedIdKey, type EditCoordinate } from "@/lib/roster";
 import type { RosterContext, RosterDayGrid, RosterDayState, RosterCalendarDay } from "@/lib/roster";
 import {
@@ -278,6 +279,19 @@ export function RosterGrid({
                     <span className="min-w-0 whitespace-nowrap text-meta font-semibold text-ink">
                       {String(person.id)}
                     </span>
+                    {person.temporary ? (
+                      // The People table's Temporary badge: added after the solve.
+                      <Badge
+                        variant="neutral"
+                        className="normal-case"
+                        title={
+                          person.description ?? "Borrowed from another ward, float pool or agency"
+                        }
+                        data-testid={`roster-temporary-${personIdx}`}
+                      >
+                        Temporary
+                      </Badge>
+                    ) : null}
                   </div>
                 </th>
                 {/* Assignment cells. */}

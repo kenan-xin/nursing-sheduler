@@ -73,6 +73,32 @@ describe("requestStillMatches", () => {
       false,
     );
   });
+
+  it("refuses a temporary-nurse card when another temporary nurse was added first (bead g1p)", async () => {
+    const document = await fixtureRosterDocument();
+    const OFF = { kind: "off" } as const;
+    const N = { kind: "shift", shiftId: "N" } as const;
+    const row = (id: string) => ({ id, groups: [], days: [OFF, OFF, OFF, OFF] });
+    // Both cards read a 2-person roster, so both address row 2 for their nurse.
+    const card = (id: string): RosterChangeRequest => ({
+      solvedBaselineId: document.provenance.solvedBaselineId,
+      peopleCount: 2,
+      addPeople: [row(id)],
+      cells: [{ personIdx: 2, dateIdx: 1, before: OFF, after: N }],
+    });
+    expect(requestStillMatches(document, card("Mei"))).toBe(true);
+    // Mei is applied: row 2 is now Mei, all off. Lin's stale card would put her
+    // night on Mei's row, so it must be refused.
+    const withMei = { ...document, borrowed: [row("Mei")] };
+    expect(requestStillMatches(withMei, card("Lin"))).toBe(false);
+    // A card rebuilt on the new roster addresses row 3 and is accepted.
+    const fresh = {
+      ...card("Lin"),
+      peopleCount: 3,
+      cells: [{ personIdx: 3, dateIdx: 1, before: OFF, after: N }],
+    };
+    expect(requestStillMatches(withMei, fresh)).toBe(true);
+  });
 });
 
 describe("awaitRosterChangeOutcome", () => {

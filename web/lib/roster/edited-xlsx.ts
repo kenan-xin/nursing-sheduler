@@ -36,7 +36,14 @@
 import type ExcelJS from "exceljs";
 
 import { dayStateDisplay } from "./day-state";
-import type { RosterCoordinateMap, RosterDayState, RosterEdit, RosterProvenance } from "./types";
+import { deriveCurrentDays } from "./overlay";
+import type {
+  RosterBorrowedRow,
+  RosterCoordinateMap,
+  RosterDayState,
+  RosterEdit,
+  RosterProvenance,
+} from "./types";
 
 /** The day-state patch for one edited coordinate. */
 export interface EditedCellPatch {
@@ -61,6 +68,11 @@ export interface EditedXlsxPatchInput {
   readonly frozenXlsx: Blob;
   /** The normalized edit overlay (one entry per edited coordinate). */
   readonly edits: readonly RosterEdit[];
+  /**
+   * Borrowed rows (roster-file/2). Each becomes a plain row inserted right after the
+   * last person row, so Score/Status and the rows below move down by one.
+   */
+  readonly borrowed?: readonly RosterBorrowedRow[];
   /** Explicit 1-based worksheet axes — never re-derived from the workbook. */
   readonly coordinateMap: RosterCoordinateMap;
   /** Solve provenance, written "as solved" into the dedicated sheet. */
@@ -126,14 +138,26 @@ export function buildEditedCellPatches(
  * every edited cell is patched in one pass before re-serialization.
  */
 export async function patchFrozenXlsxWithEdits(input: EditedXlsxPatchInput): Promise<Blob> {
-  if (input.edits.length === 0) {
+  const borrowed = input.borrowed ?? [];
+  if (input.edits.length === 0 && borrowed.length === 0) {
     // No edits: the frozen bytes are the export. Avoid an ExcelJS round-trip that
     // would re-serialize the whole workbook for no semantic change — the captured
     // bytes are exactly what the export should be.
     return input.frozenXlsx;
   }
 
-  const patches = buildEditedCellPatches(input.edits, input.coordinateMap);
+  // Edits on a borrowed row are written with her whole row below, not patched.
+  const solvedCount = input.coordinateMap.peopleRows.length;
+  const patches = buildEditedCellPatches(
+    input.edits.filter((edit) => edit.personIdx < solvedCount),
+    input.coordinateMap,
+  );
+  const borrowedDays = deriveCurrentDays(
+    borrowed.map((row) => row.days),
+    input.edits
+      .filter((edit) => edit.personIdx >= solvedCount)
+      .map((edit) => ({ ...edit, personIdx: edit.personIdx - solvedCount })),
+  );
   const ExcelJs = await loadExcelJs();
 
   const workbook = new ExcelJs.Workbook();
@@ -173,6 +197,20 @@ export async function patchFrozenXlsxWithEdits(input: EditedXlsxPatchInput): Pro
   // 2. Rebuild the Notes sheet: drop every row for an edited coordinate, then
   //    rewrite the surviving rows contiguously and fix every affected hyperlink.
   rebuildNotesSheet(workbook, sheet, editedAddressSet);
+
+  // 2b. Borrowed rows: inserted plain (no inherited fills) after the last person
+  //     row. Notes only point at person rows above, so no hyperlink moves.
+  //     ponytail: extra columns/rows (per-person and per-date counts) are not
+  //     recomputed for her, as they are not for any edit.
+  const lastPersonRow = input.coordinateMap.peopleRows[solvedCount - 1];
+  borrowed.forEach((row, i) => {
+    const rowNumber = lastPersonRow + 1 + i;
+    sheet.insertRow(rowNumber, []);
+    sheet.getCell(rowNumber, 1).value = String(row.id);
+    input.coordinateMap.dateColumns.forEach((col, dateIdx) => {
+      sheet.getCell(rowNumber, col).value = dayStateDisplay(borrowedDays[i][dateIdx]);
+    });
+  });
 
   // 3. Provenance: a dedicated sheet, never the schedule sheet. Remove any prior
   //    provenance sheet first so a re-export replaces rather than duplicates.

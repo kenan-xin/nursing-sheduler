@@ -19,12 +19,17 @@
 //     plus `edits` (see `./overlay`); neither is ever stored.
 //   • `edits` is a normalized overlay: sorted, one entry per coordinate, and no
 //     entry whose value equals its solved day-state.
+//   • `borrowed` (roster-file/2) holds rows for temporary nurses added AFTER the
+//     solve. They extend the person axis: borrowed row `i` is person index
+//     `context.people.length + i`. Their `days` are the base the overlay is
+//     measured against, exactly as `solvedDays` is for submitted people (see
+//     `./borrowed`). They are outside `solvedBaselineId`: the solve never saw them.
 
 import type { IsoDate, PersonId, ShiftTypeId } from "@/lib/scenario";
 import type { ReverseMapTuple } from "@/lib/scenario";
 
 /** The current roster-document schema version. Independent of `appBuild`. */
-export const ROSTER_DOCUMENT_SCHEMA_VERSION = "roster-file/1";
+export const ROSTER_DOCUMENT_SCHEMA_VERSION = "roster-file/2";
 
 /**
  * The submission-snapshot envelope version. This is the `submission.schemaVersion`
@@ -87,6 +92,11 @@ export interface RosterContextPerson {
   readonly id: PersonId;
   readonly description?: string;
   readonly history?: readonly string[];
+  /**
+   * Set only on a borrowed row's axis entry (`rosterAxisContext`), never in the
+   * derived, validated `context`: the submission's people are the ward's own roster.
+   */
+  readonly temporary?: true;
 }
 
 /** A shift type, carrying only real canonical shift-type fields. */
@@ -144,6 +154,19 @@ export interface RosterEdit {
 }
 
 /**
+ * A temporary nurse (relief pool, another ward, an agency) added to a solved
+ * roster. `groups` are the scenario people-group ids she counts in, so the
+ * staffing checks treat her as qualified the way her staff record says.
+ */
+export interface RosterBorrowedRow {
+  readonly id: PersonId;
+  readonly description?: string;
+  readonly groups: readonly string[];
+  /** One day-state per calendar day: the base her edits are measured against. */
+  readonly days: readonly RosterDayState[];
+}
+
+/**
  * Explicit 1-based worksheet coordinates, produced by the scheduler alongside the
  * ordered axes. The client never re-derives the exporter's layout from them.
  */
@@ -170,8 +193,10 @@ export interface RosterDocument {
   readonly context: RosterContext;
   /** `[personIdx][dateIdx]`; immutable and complete. */
   readonly solvedDays: RosterDayGrid;
-  /** Normalized overlay — see `./overlay`. */
+  /** Normalized overlay over solved AND borrowed rows — see `./overlay`. */
   readonly edits: readonly RosterEdit[];
+  /** Temporary nurses added after the solve (roster-file/2). */
+  readonly borrowed: readonly RosterBorrowedRow[];
   readonly coordinateMap: RosterCoordinateMap;
   /** The de-anonymized styled workbook, frozen as solved. */
   readonly frozenXlsx: Blob;
@@ -200,6 +225,7 @@ export const ROSTER_DOCUMENT_FIELDS = [
   "context",
   "solvedDays",
   "edits",
+  "borrowed",
   "coordinateMap",
   "frozenXlsx",
 ] as const;
