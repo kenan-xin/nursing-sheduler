@@ -1957,6 +1957,20 @@ describe("set_staffing_requirement_on_date", () => {
     expect(dayCard(result.next).requiredNumPeopleOverrides).toEqual([["2026-04-14", 1]]);
   });
 
+  it("changes only the exception, not the rest of an imported card (e6n)", () => {
+    const before = ruleWardScenario();
+    const result = applyAssistantCommand(before, onDate("2026-04-14", 1));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // `req-day` is an imported shape the form would rewrite (a scalar shiftType, no
+    // qualified people or date, a weight it would force to -1). The arm must leave all of
+    // that as it stands, so the Preview reads the change as the one line it is.
+    expect(dayCard(result.next)).toEqual({
+      ...dayCard(before),
+      requiredNumPeopleOverrides: [["2026-04-14", 1]],
+    });
+  });
+
   it("sending the rule's own number removes the exception", () => {
     const second = applyAssistantCommand(withException(), onDate("2026-04-14", 2));
     expect(second.ok).toBe(true);
@@ -2035,8 +2049,14 @@ describe("set_staffing_requirement_on_date", () => {
       ok: false,
       rejection: { code: "invalid_value", message: expect.stringContaining("preferred number") },
     });
-    // RN + Senior need 3; the ceiling on 14 Apr is the preferred 3, not the date's 2.
-    expect(applyAssistantCommand(s, onDate("2026-04-14", 2)).ok).toBe(true);
+    // RN + Senior need 3; the ceiling on 14 Apr is the preferred 3, not the date's 2. The
+    // row passes the skill-mix check, and is refused only as the no-op it is (2 is the
+    // rule's own number, so the form drops the row).
+    expect(applyAssistantCommand(s, onDate("2026-04-14", 2))).toMatchObject({
+      ok: false,
+      rejection: { code: "no_effect" },
+    });
+    expect(applyAssistantCommand(s, onDate("2026-04-14", 3)).ok).toBe(true);
   });
 
   it("refuses a date below the skill mix (F1)", () => {

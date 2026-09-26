@@ -527,6 +527,22 @@ export function skillMixFloor(card: Pick<RequirementCardBody, "skillMix">): numb
 }
 
 /**
+ * A draft's exception rows as the card stores them: an exception equal to the rule's own
+ * number says nothing, so it is dropped (as `preferredNumPeople` is), and what is left is
+ * ordered by date. Shared with the assistant's one-date arm, which writes these rows onto
+ * the card it already holds rather than rebuilding the whole card (bead e6n).
+ */
+export function savedOverrides(
+  rows: readonly OverrideRow[],
+  requiredNumPeople: RequirementNumberValue,
+): RequirementOverride[] {
+  return rows
+    .filter((row) => row.requiredNumPeople !== requiredNumPeople)
+    .map((row): RequirementOverride => [row.date, row.requiredNumPeople as number])
+    .sort(([a], [b]) => a.localeCompare(b));
+}
+
+/**
  * Assemble the saved requirement card from a validated draft (spec 05 FR-PR-20..26,
  * EDGE-PR-03). The weight/preferred pair is FORCED when preferred does not differ
  * from required — `preferredNumPeople` omitted and `weight` stamped `-1` — even if
@@ -559,10 +575,7 @@ export function buildRequirementCard(
       }),
     );
   // An exception equal to the rule's own number says nothing: drop it, as preferred is dropped.
-  const overrides = form.requiredNumPeopleOverrides
-    .filter((row) => row.requiredNumPeople !== form.requiredNumPeople)
-    .map((row): RequirementOverride => [row.date, row.requiredNumPeople as number])
-    .sort(([a], [b]) => a.localeCompare(b));
+  const overrides = savedOverrides(form.requiredNumPeopleOverrides, form.requiredNumPeople);
   if (overrides.length > 0) body.requiredNumPeopleOverrides = overrides;
   return { uid, ...body };
 }
