@@ -128,8 +128,25 @@ export function toggleRef(selection: readonly CoveringRef[], ref: CoveringRef): 
 
 // --- Option builders --------------------------------------------------------
 
+/**
+ * The scenario fields the Coverings screen reads: the people and shift-type
+ * domains its selectors offer (and against which a selected group is checked for
+ * a reserved day-state), plus the dates it scopes them by. A `Pick` rather than the
+ * whole `ScenarioUiState` because it is ALSO the shape of the screen's store
+ * subscription (`useCoverings`) and of its form's `state` prop: narrowing all
+ * three to the SAME set is what keeps an edit to any OTHER slice (a shift's
+ * working time, the scenario name) from re-rendering — and reprojecting — this
+ * screen.
+ */
+export type CoveringsScenarioInput = Pick<
+  ScenarioUiState,
+  "staff" | "staffGroups" | "shifts" | "shiftGroups" | "rangeStart" | "rangeEnd" | "dateGroups"
+>;
+
 /** People options: staff items + people groups (spec 11 FR-CV-13/14). */
-export function buildPeopleOptions(state: ScenarioUiState): CoveringOptionGroups {
+export function buildPeopleOptions(
+  state: Pick<ScenarioUiState, "staff" | "staffGroups">,
+): CoveringOptionGroups {
   return {
     items: state.staff.map((p) => ({
       ref: p.id,
@@ -149,7 +166,7 @@ export function buildPeopleOptions(state: ScenarioUiState): CoveringOptionGroups
  */
 export function shiftGroupContainsDayState(
   groupId: CoveringRef,
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shiftGroups">,
   seen: ReadonlySet<string> = new Set(),
 ): boolean {
   const key = refValue(groupId);
@@ -175,7 +192,9 @@ export function shiftGroupContainsDayState(
  * disabled: a covering selector is string-only (`ShiftTypeRef`), and the Python
  * shift map keys the raw numeric id, so `"7"` would not resolve it.
  */
-export function buildShiftTypeOptions(state: ScenarioUiState): CoveringOptionGroups {
+export function buildShiftTypeOptions(
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
+): CoveringOptionGroups {
   return {
     items: state.shifts.map((s) => {
       const reserved = isDayStateSelector(String(s.id));
@@ -233,7 +252,7 @@ export type CoveringErrors = Partial<Record<CoveringSelectField, string>>;
  */
 export function validateCoveringForm(
   form: CoveringFormState,
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shiftGroups">,
 ): CoveringErrors {
   const errors: CoveringErrors = {};
   if (form.preceptors.length === 0) errors.preceptors = COVERING_MESSAGES.preceptors;
@@ -249,7 +268,7 @@ export function validateCoveringForm(
 /** Whether any selected shift-type ref is (or expands to) an OFF/LEAVE day-state. */
 export function selectionReachesDayState(
   shiftTypes: readonly ShiftTypeRef[],
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shiftGroups">,
 ): boolean {
   return shiftTypes.some(
     (ref) => isDayStateSelector(String(ref)) || shiftGroupContainsDayState(ref, state),
@@ -369,7 +388,7 @@ function toTransferOption(o: CoveringOption): TransferOption<CoveringRef> {
 }
 
 /** People options as transfer-list `items` + `groups` arrays (M2). */
-export function buildPeopleTransferOptions(state: ScenarioUiState): {
+export function buildPeopleTransferOptions(state: Pick<ScenarioUiState, "staff" | "staffGroups">): {
   items: TransferOption<CoveringRef>[];
   groups: TransferOption<CoveringRef>[];
 } {
@@ -379,7 +398,9 @@ export function buildPeopleTransferOptions(state: ScenarioUiState): {
 
 /** Shift-type options as transfer-list `items` + `groups` arrays (M2). OFF/LEAVE
  *  + numeric-id options arrive already `disabled` from `buildShiftTypeOptions`. */
-export function buildShiftTypeTransferOptions(state: ScenarioUiState): {
+export function buildShiftTypeTransferOptions(
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
+): {
   items: TransferOption<CoveringRef>[];
   groups: TransferOption<CoveringRef>[];
 } {
@@ -392,7 +413,9 @@ export function buildShiftTypeTransferOptions(state: ScenarioUiState): {
  *  screen uses, so the labels and membership match the rest of the app. Empty when
  *  no range is set. Only the group `id`/`description` cross the boundary (the stored
  *  chip value is the group id); members are used solely to drop empty scopes. */
-export function buildDateScopeAutoScopes(state: ScenarioUiState): DateScopeOption[] {
+export function buildDateScopeAutoScopes(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd">,
+): DateScopeOption[] {
   const items = generateDateItems({ start: state.rangeStart, end: state.rangeEnd });
   return deriveDateGroups(items)
     .filter((g) => g.members.length > 0)
@@ -400,7 +423,9 @@ export function buildDateScopeAutoScopes(state: ScenarioUiState): DateScopeOptio
 }
 
 /** Authored date groups as date-scope chips (M3). */
-export function buildDateScopeDateGroups(state: ScenarioUiState): DateScopeOption[] {
+export function buildDateScopeDateGroups(
+  state: Pick<ScenarioUiState, "dateGroups">,
+): DateScopeOption[] {
   return state.dateGroups.map((g) => ({
     id: refValue(g.id),
     label: labelFor(g.id, g.description),
@@ -408,7 +433,9 @@ export function buildDateScopeDateGroups(state: ScenarioUiState): DateScopeOptio
 }
 
 /** In-range concrete dates for the "specific dates" text field (M3), chronological. */
-export function buildDateScopeDateItems(state: ScenarioUiState): DateScopeItem[] {
+export function buildDateScopeDateItems(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd">,
+): DateScopeItem[] {
   return expandDateRange(state.rangeStart, state.rangeEnd).map((iso) => ({
     id: iso,
     dayOfMonth: Number(iso.slice(8)),

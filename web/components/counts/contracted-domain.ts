@@ -90,7 +90,7 @@ export interface ContractedFormState {
  * the map error separately rather than throwing here.
  */
 export function buildContractedCoefficientDomain(
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
   selection: readonly ShiftTypeRef[],
 ): CoefficientDomain {
   let map: ReturnType<typeof buildShiftTypeIndexMap>;

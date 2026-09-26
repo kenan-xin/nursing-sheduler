@@ -32,6 +32,17 @@ export interface RequirementMatch {
 }
 
 /**
+ * The scenario slices this lookup reads: the shift item/group lists group refs are
+ * expanded through, and the requirement cards themselves. Every OTHER slice is
+ * irrelevant, so a screen can hand this module a narrow projection of the store
+ * rather than subscribing to the whole scenario (`cardsByKind` is itself narrowed
+ * to the one card kind read — a card edit in another kind cannot change the result).
+ */
+export type RequirementCoverageState = Pick<ScenarioUiState, "shifts" | "shiftGroups"> & {
+  cardsByKind: Pick<ScenarioUiState["cardsByKind"], "requirements">;
+};
+
+/**
  * The ACTIVE (non-disabled) requirements that cover `id`, each classified. Group
  * membership is expanded (nested groups included), so a requirement targeting a
  * group that contains the shift is reported as `GROUP-DERIVED`; one targeting
@@ -40,7 +51,7 @@ export interface RequirementMatch {
  * covers the shift. Pure — reads state, never mutates it.
  */
 export function requirementsForShiftType(
-  state: ScenarioUiState,
+  state: RequirementCoverageState,
   id: ShiftTypeId,
 ): RequirementMatch[] {
   const target = String(id);

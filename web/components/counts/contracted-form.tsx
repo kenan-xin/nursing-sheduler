@@ -27,7 +27,7 @@
 // MANUALLY here.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { formatUncreditedLeaveWarning, type ScenarioUiState } from "@/lib/scenario";
+import { formatUncreditedLeaveWarning } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Surface } from "@/components/ui/surface";
@@ -55,6 +55,7 @@ import {
   buildPeopleTransferOptions,
   summarizeRefs,
   toggleInSelection,
+  type CountScenarioInput,
 } from "./counts-model";
 import {
   addLeaveCreditToContractDraft,
@@ -82,7 +83,7 @@ import {
 } from "./half-hour-codec";
 
 interface ContractedFormProps {
-  state: ScenarioUiState;
+  state: CountScenarioInput;
   mode: "add" | "edit";
   initialForm: ContractedFormState;
   /** Whether the source card is enabled (`!sourceCard.disabled`; always true for a

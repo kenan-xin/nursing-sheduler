@@ -25,6 +25,20 @@ import type { DateScopeOption, DateScopeItem } from "@/components/card-editor/da
 import { isValidWeightValue, type WeightFieldValue } from "@/components/card-editor/weight-value";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
 
+/**
+ * The scenario fields the Successions screen reads: the people and shift-type
+ * domains its selectors offer, and the dates it scopes them by. A `Pick` rather
+ * than the whole `ScenarioUiState` because it is ALSO the shape of the screen's
+ * store subscription (`useSuccessions`) and of its form's `state` prop: narrowing
+ * all three to the SAME set is what keeps an edit to any OTHER slice (a shift's
+ * working time, the scenario name) from re-rendering — and reprojecting — this
+ * screen.
+ */
+export type SuccessionsScenarioInput = Pick<
+  ScenarioUiState,
+  "staff" | "staffGroups" | "shifts" | "shiftGroups" | "rangeStart" | "rangeEnd" | "dateGroups"
+>;
+
 /** Verbatim validation messages (spec 05 "Shift Type Successions" validation table). */
 export const SUCCESSION_MESSAGES = {
   person: "At least one person must be selected",
@@ -78,7 +92,7 @@ function labelFor(id: PersonRef | ShiftTypeRef, description?: string): string {
 }
 
 /** People options: staff items + people groups (spec 05 FR-PR-31) — unrestricted. */
-export function buildPeopleTransferOptions(state: ScenarioUiState): {
+export function buildPeopleTransferOptions(state: Pick<ScenarioUiState, "staff" | "staffGroups">): {
   items: TransferOption<PersonRef>[];
   groups: TransferOption<PersonRef>[];
 } {
@@ -106,7 +120,9 @@ const SYNTHETIC_SHIFT_GROUP = { id: RESERVED_SHIFT_TYPE.all, description: "Every
  * LEAVE, unlike Requirements/Coverings). A numeric shift-type entity id is
  * disabled with an actionable reason (structural — see `SUCCESSION_MESSAGES.numericShiftId`).
  */
-export function buildPatternShiftTypeOptions(state: ScenarioUiState): {
+export function buildPatternShiftTypeOptions(
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
+): {
   items: TransferOption<PatternShiftTypeOptionValue>[];
   groups: TransferOption<PatternShiftTypeOptionValue>[];
 } {
@@ -138,7 +154,9 @@ export function buildPatternShiftTypeOptions(state: ScenarioUiState): {
 }
 
 /** The auto-derived date-scope chips (ALL / WEEKDAY / WEEKEND / day-of-week). */
-export function buildDateScopeAutoScopes(state: ScenarioUiState): DateScopeOption[] {
+export function buildDateScopeAutoScopes(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd">,
+): DateScopeOption[] {
   const items = generateDateItems({ start: state.rangeStart, end: state.rangeEnd });
   return deriveDateGroups(items)
     .filter((g) => g.members.length > 0)
@@ -146,7 +164,9 @@ export function buildDateScopeAutoScopes(state: ScenarioUiState): DateScopeOptio
 }
 
 /** Authored date groups as date-scope chips. */
-export function buildDateScopeDateGroups(state: ScenarioUiState): DateScopeOption[] {
+export function buildDateScopeDateGroups(
+  state: Pick<ScenarioUiState, "dateGroups">,
+): DateScopeOption[] {
   return state.dateGroups.map((g) => ({ id: String(g.id), label: labelFor(g.id, g.description) }));
 }
 
@@ -166,7 +186,9 @@ export function expandDateRange(rangeStart: string, rangeEnd: string): string[] 
 }
 
 /** In-range concrete dates for the "specific dates" text field, chronological. */
-export function buildDateScopeDateItems(state: ScenarioUiState): DateScopeItem[] {
+export function buildDateScopeDateItems(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd">,
+): DateScopeItem[] {
   return expandDateRange(state.rangeStart, state.rangeEnd).map((iso) => ({
     id: iso,
     dayOfMonth: Number(iso.slice(8)),
