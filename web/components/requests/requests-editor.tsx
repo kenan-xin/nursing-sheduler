@@ -139,7 +139,12 @@ export function RequestsEditor() {
 
   const historyOptions: HistoryOption[] = useMemo(
     () => [
-      ...state.shifts.map((s) => ({ id: String(s.id), label: String(s.id) })),
+      // `id — description` (bare id when undescribed), matching the entity
+      // editor's member labels and this file's own paint/cell target names.
+      ...state.shifts.map((s) => ({
+        id: String(s.id),
+        label: s.description ? `${s.id} — ${s.description}` : String(s.id),
+      })),
       { id: "OFF", label: "OFF" },
       { id: "LEAVE", label: "LEAVE" },
     ],

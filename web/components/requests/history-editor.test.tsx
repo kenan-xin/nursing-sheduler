@@ -32,6 +32,25 @@ describe("HistoryEditor", () => {
     );
   });
 
+  it("keeps a long shift label inside the dialog and readable in full on hover", () => {
+    const label = `XG — ${"Morning shift covering the surgical step-down unit ".repeat(4).trim()}`;
+    render(
+      <HistoryEditor
+        open
+        who="Kevin Ong"
+        positionLabel="H-2"
+        currentValue={null}
+        options={[{ id: "XG", label }]}
+        onSet={vi.fn()}
+        onClear={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const option = screen.getByTestId("history-editor-option-XG");
+    expect(option).toHaveClass("max-w-full", "truncate");
+    expect(option).toHaveAttribute("title", label);
+  });
+
   it("marks the current value's option as selected", () => {
     render(
       <HistoryEditor

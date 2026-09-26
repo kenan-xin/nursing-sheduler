@@ -174,6 +174,23 @@ describe("RequestsEditor — history item set includes OFF/LEAVE (P1)", () => {
   });
 });
 
+describe("RequestsEditor — history option labels name the shift (FR-SR-19)", () => {
+  it("labels a worked item `id — description`, falling back to the bare id", async () => {
+    await seed({
+      ...BASE_SEED,
+      shifts: [{ id: "AM", description: "Morning" }, { id: "PM" }],
+    });
+    render(<RequestsEditor />);
+    fireEvent.click(screen.getByTestId("hist-Aisha-0"));
+
+    // A described shift reads like the entity editor's member labels; an
+    // undescribed one keeps the bare id; OFF/LEAVE keep their reserved labels.
+    expect(screen.getByTestId("history-editor-option-AM")).toHaveTextContent("AM — Morning");
+    expect(screen.getByTestId("history-editor-option-PM")).toHaveTextContent(/^PM$/);
+    expect(screen.getByTestId("history-editor-option-OFF")).toHaveTextContent(/^OFF$/);
+  });
+});
+
 describe("RequestsEditor — Normal history editor saves AND closes (FR-SR-19)", async () => {
   it("selecting an option commits and closes the modal", async () => {
     await seed(BASE_SEED);
