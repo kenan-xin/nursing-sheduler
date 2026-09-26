@@ -8,8 +8,9 @@
 // members (emptied groups are LEFT for normal empty-group validation — FR-RI-17);
 // the five preference cards (filter fields → drop when a required field empties);
 // the person×date matrix (a cell losing its person/date/worked-shift is dropped);
-// people history (deleted shift-type ids blank to `""`, positions preserved —
-// FR-RI-09); and the Export Layout rows (filter → drop emptied — FR-RI-12).
+// people history (truncated at the newest deleted shift-type id, keeping the
+// usable suffix — FR-RI-09, decision D7); and the Export Layout rows (filter →
+// drop emptied — FR-RI-12).
 
 import type {
   CardsByKind,
@@ -20,6 +21,9 @@ import type {
   UiPerson,
   UiRequestCell,
 } from "@/lib/scenario";
+// Deep import: the history rule (FR-RI-09) is shared with the import path's
+// repair of blank slots, so it lives beside the scenario contract it defines.
+import { truncateHistoryAfterUnusable } from "@/lib/scenario/person-history";
 import type { EntityDomain, EntityRef } from "./domain";
 import {
   CARD_COEFFICIENT_FIELD,
@@ -99,11 +103,16 @@ function pruneReqData(
   });
 }
 
-/** Blank deleted shift-type ids in history to `""`, preserving positions (FR-RI-09). */
+/** Truncate each person's history at the newest deleted shift-type id (FR-RI-09).
+ *  History is right-anchored, so only the suffix newer than that id stays usable;
+ *  a blank slot would be rejected by the producer and core (D7). */
 function pruneHistory(staff: UiPerson[], deleted: ReadonlySet<RefLeaf>): UiPerson[] {
   return staff.map((person) =>
     person.history?.some((h) => deleted.has(h))
-      ? { ...person, history: person.history.map((h) => (deleted.has(h) ? "" : h)) }
+      ? {
+          ...person,
+          history: truncateHistoryAfterUnusable(person.history, (h) => deleted.has(h)),
+        }
       : person,
   );
 }
@@ -164,7 +173,7 @@ function pruneExportLayout(
  * Remove the deleted entity/group from its container and prune the id from every
  * same-domain group's members. An emptied group is left in place for normal
  * empty-group validation (FR-RI-17); the cascade never flattens it. For a
- * shift-type delete this also blanks history (FR-RI-09).
+ * shift-type delete this also truncates history (FR-RI-09).
  */
 function pruneDefinitions(
   state: ScenarioUiState,
