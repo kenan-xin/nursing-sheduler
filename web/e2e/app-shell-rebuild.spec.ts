@@ -283,13 +283,18 @@ test.describe("T08 rebuild — sidebar prototype-conformance audit", () => {
     }
   });
 
-  test("M5 — footer is one 36px theme button and no gear", async ({ page }) => {
+  test("M5 — the rail footer's theme button is 36px and there is no gear", async ({ page }) => {
     // 36, not the v1 34: the v2 SideNav sizes this control at 36px
     // (SideNav.dc.html:66), which is exactly the shared `icon` control token
     // (--ctl). The R1 re-skin therefore dropped the caller-side `size-[34px]`
     // override rather than keeping a one-off geometry for a shared control.
     await expect(page.getByTestId("display-settings-trigger")).toHaveCount(0);
-    const theme = page.getByRole("button", { name: /switch to .* theme/i });
+    // Scoped to the rail: since D2 the top bar carries a second, always-visible
+    // copy of the same control (Nurse Scheduling v2.dc.html:252), so an unscoped
+    // role lookup would be ambiguous here.
+    const theme = page
+      .getByTestId("desktop-sidebar")
+      .getByRole("button", { name: /switch to .* theme/i });
     await expect(theme).toBeVisible();
     // RAW dimensions, never rounded — `size-control` is the absolute 36px token,
     // and `Math.round` would accept anything in [35.5, 36.5) as "exactly 36".
@@ -335,9 +340,18 @@ test.describe("T08 rebuild — sidebar prototype-conformance audit", () => {
       expect(media.coarse, "the context must report (pointer: coarse)").toBe(true);
       expect(media.touchPoints).toBeGreaterThanOrEqual(1);
 
-      // Below 920px the rail is a drawer, so open it to reach the footer.
+      // D2: the top bar carries its own theme control, so switching the theme no
+      // longer requires opening this drawer — the rail copy is `display:none` at
+      // this width. Asserted before the drawer opens, which is the whole point.
+      await expect(
+        page.getByTestId("top-bar").getByRole("button", { name: /switch to .* theme/i }),
+      ).toBeVisible();
+
+      // Below 920px the rail is a drawer, so open it to reach the footer copy.
       await page.getByTestId("mobile-nav-trigger").click();
-      const theme = page.getByRole("button", { name: /switch to .* theme/i });
+      const theme = page
+        .getByTestId("mobile-nav-drawer")
+        .getByRole("button", { name: /switch to .* theme/i });
       await expect(theme).toBeVisible();
 
       // RAW dimensions, never rounded. `Math.round` here would be a hole in the
