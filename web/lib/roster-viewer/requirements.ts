@@ -584,6 +584,15 @@ function applyCoversToEquations(
       // entry for the date means the lowering was written as an exception instead.
       if (dates.length === 1 && !equation.requiredByDate.has(dates[0])) required += mark.required;
       if (mark.preferred !== undefined) preferred = (preferred ?? 0) + mark.preferred;
+      // KNOWN LIMITATION (d582). `mark.mix` indexes the AUTHORED floor list, but
+      // `applyCovers` DROPS a floor the cover lowered to 0 from the date copy it
+      // submits — so when a cover zeroes one floor of a multi-floor card while
+      // another floor survives, the copy's positions no longer line up with the
+      // authored indices and there is no signal left to tell the two apart (both
+      // readings satisfy the same `[entryIdx, by]` ledger). The ledger needs to
+      // carry the authored value or the floor's group for this to be exact; until
+      // then a missing position is left at its submitted value rather than
+      // guessed at, because inventing a floor is the one thing this model refuses.
       for (const [entryIdx, by] of mark.mix ?? []) {
         const floor = skillMix[entryIdx];
         if (floor !== undefined) floor.minNumPeople += by;
