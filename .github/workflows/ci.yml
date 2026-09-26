@@ -20,13 +20,13 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Standard setup actions (no local-dev tool manager in CI): pnpm from
       # web/package.json packageManager and node 24.14.0.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.14.0
       - name: Install dependencies
@@ -50,16 +50,16 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.14.0
       # Python from .python-version (3.12.13, the project requirement the deploy
       # guards and validate_origin.py's 3.10+ PEP 604 syntax both rely on).
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         id: python
         with:
           python-version-file: .python-version
@@ -96,11 +96,11 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.14.0
       - name: Install dependencies
@@ -126,8 +126,8 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version-file: .python-version
           cache: pip
@@ -141,9 +141,9 @@ jobs:
       - name: Install backend dependencies
         run: python3 -m pip install -r requirements-optional.txt
       - name: Ruff lint
-        run: ruff check .
+        run: ruff check . ../docker
       - name: Ruff format
-        run: ruff format --check .
+        run: ruff format --check . ../docker
       # Real-Redis store variants skip unless NURSE_TEST_REDIS_URL is set.
       # Serial on purpose: pytest-xdist on the 4-vCPU runner was slower (6m04s vs
       # 4.9m) and starved the wall-clock solver/process tests. core is off the
@@ -169,11 +169,11 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.14.0
       - name: Install dependencies
@@ -189,7 +189,7 @@ jobs:
       # upload-artifact's per-file cost and hidden-dir (.next) exclusion.
       - name: Pack build
         run: tar -cf next-e2e.tar --exclude=.next/cache .next
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: next-e2e-build
           path: web/next-e2e.tar
@@ -217,11 +217,11 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.14.0
       - name: Install dependencies
@@ -230,7 +230,7 @@ jobs:
       # the download, and only chromium is installed.
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: next-e2e-build
           path: web
@@ -244,7 +244,7 @@ jobs:
         run: pnpm exec playwright test --shard=${{ matrix.shard }}/4
       - name: Upload blob report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: blob-report-${{ matrix.shard }}
           path: web/blob-report
@@ -263,18 +263,18 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.14.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: next-e2e-build
           path: web
@@ -296,23 +296,23 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.14.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: web/all-blob-reports
           pattern: blob-report-*
           merge-multiple: true
       - name: Merge reports
         run: pnpm exec playwright merge-reports --reporter html ./all-blob-reports
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: e2e-html-report
           path: web/playwright-report

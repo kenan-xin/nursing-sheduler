@@ -87,9 +87,7 @@ def _start_server() -> uvicorn.Server:
         ordinary_reserved_slots=RESERVED_FOR_ORDINARY,
     )
     app = create_app(settings=settings, start_background=False)
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="error", access_log=False)
-    )
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="error", access_log=False))
     threading.Thread(target=server.run, daemon=True).start()
 
     deadline = time.monotonic() + 30.0
@@ -134,9 +132,7 @@ def main() -> None:
             status, body = _submit("assistant_diagnostic")
             assert status == 202, f"diagnostic {index + 1} was refused with {status}: {body}"
             assert body["request"]["purpose"] == "assistant_diagnostic", body["request"]
-            assert body["queue_position"] == index + 1, (
-                f"diagnostic {index + 1} took position {body['queue_position']}"
-            )
+            assert body["queue_position"] == index + 1, f"diagnostic {index + 1} took position {body['queue_position']}"
             created.append(body["id"])
 
         # 2. The next diagnostic must be refused, and refused for the RESERVE
@@ -178,15 +174,8 @@ def main() -> None:
             cancel_status, cancel_body = _request("POST", f"/optimize/{job_id}/cancel")
             delete_status, _ = _request("DELETE", f"/optimize/{job_id}")
             get_status, _ = _request("GET", f"/optimize/{job_id}")
-            if (
-                cancel_status != 202
-                or not cancel_body.get("terminal")
-                or delete_status != 204
-                or get_status != 404
-            ):
-                cleanup["residue"].append(
-                    f"{job_id}:{cancel_status}/{delete_status}/{get_status}"
-                )
+            if cancel_status != 202 or not cancel_body.get("terminal") or delete_status != 204 or get_status != 404:
+                cleanup["residue"].append(f"{job_id}:{cancel_status}/{delete_status}/{get_status}")
         # Belt and braces: nothing may remain under this probe's namespace, including
         # index entries an incomplete delete could have orphaned.
         store = RedisJobStore(url=URL, key_prefix=PREFIX)
