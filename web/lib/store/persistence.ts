@@ -19,7 +19,7 @@ import { SCENARIO_KEYS } from "./fingerprint";
 export const SCENARIO_PERSIST_KEY = "nurse-scheduler/scenario";
 
 /** Current persistence payload version; a bump triggers `migrateScenarioState`. */
-export const SCENARIO_PERSIST_VERSION = 6;
+export const SCENARIO_PERSIST_VERSION = 7;
 
 /**
  * The persisted `state` payload at the current version: the durable scenario
@@ -62,6 +62,10 @@ export type PersistedScenarioState = ScenarioUiState & {
  * taken from a scenario whose `guidedRules` was the empty list, names bytes this
  * build can no longer reproduce. Clear it to `null` (unknown), following the v3 → v4
  * precedent, so no stale backup is falsely reported current.
+ * v6 → v7: the durable slice gained `temporaryCover` (d582), which the producer
+ * schema requires. Default it to `[]` — a pre-v7 record had no covers, so this is a
+ * lossless addition (the sanitizer requires the slice; the migration is the only
+ * place a missing one is defaulted).
  */
 export function migrateScenarioState(persisted: unknown, fromVersion: number): unknown {
   if (fromVersion > SCENARIO_PERSIST_VERSION) {
@@ -108,6 +112,12 @@ export function migrateScenarioState(persisted: unknown, fromVersion: number): u
     // The Workspace document the fingerprint hashes lost its `guidedRules` key, so
     // a pre-v6 backup can no longer be reproduced byte-for-byte. Reset to unknown.
     migrated.backupFingerprint = null;
+  }
+
+  if (fromVersion < 7) {
+    // `temporaryCover` joined the durable slice (d582). A pre-v7 record held no
+    // covers, so an empty slice is lossless.
+    migrated.temporaryCover = [];
   }
 
   return migrated;
@@ -300,6 +310,30 @@ function validateGroupCollection(value: unknown, field: string): void {
       }
     }
   }
+}
+
+/**
+ * The temporary-cover slice (d582): each entry is a display `name` (never a person
+ * id), a date, a worked shift-type id, and optional staff-group membership. The
+ * slice itself is REQUIRED by the producer schema; the migration is the only place
+ * a missing one is defaulted, so the sanitizer never synthesizes it.
+ */
+function validateTemporaryCover(value: unknown): void {
+  requireObjectArray(value, "temporaryCover").forEach((el, i) => {
+    const label = `temporaryCover[${i}]`;
+    requireOptionalString(el._k, `${label}._k`);
+    requireString(el.name, `${label}.name`);
+    requireString(el.date, `${label}.date`);
+    requireString(el.shiftType, `${label}.shiftType`);
+    if (!Array.isArray(el.groups)) {
+      throw new Error(`Persisted ${label}.groups must be an array.`);
+    }
+    for (const group of el.groups) {
+      if (typeof group !== "string") {
+        throw new Error(`Persisted ${label}.groups entry must be a string.`);
+      }
+    }
+  });
 }
 
 function validateReqData(value: unknown): void {
@@ -647,6 +681,9 @@ function validateScenarioField(key: string, value: unknown): void {
       break;
     case "reqData":
       validateReqData(value);
+      break;
+    case "temporaryCover":
+      validateTemporaryCover(value);
       break;
     case "rangeStart":
     case "rangeEnd":

@@ -167,6 +167,58 @@ describe("renameEntity — rewrites everywhere (spec 06 FR-RI-03..07)", () => {
     expect(after.staffGroups[0].id).toBe("TeamZ");
     expect(after.staffGroups[1].members).toEqual(["TeamZ", "P3"]); // nested ref rewritten
   });
+
+  it("a shift-type rename follows into the covers (d582)", () => {
+    const state: ScenarioUiState = {
+      ...fixture(),
+      temporaryCover: [
+        { name: "Haseena (Ward 3)", date: "2026-05-14", shiftType: "N", groups: [] },
+      ],
+    };
+    const after = renameEntity(state, "shift", "N", "Night");
+    expect(after.temporaryCover[0].shiftType).toBe("Night");
+  });
+
+  it("a staff-group rename follows into the covers (d582)", () => {
+    const state: ScenarioUiState = {
+      ...fixture(),
+      temporaryCover: [
+        {
+          name: "Haseena (Ward 3)",
+          date: "2026-05-14",
+          shiftType: "D",
+          groups: ["TeamA", "TeamB"],
+        },
+      ],
+    };
+    const after = renameEntity(state, "person", "TeamA", "TeamZ");
+    expect(after.temporaryCover[0].groups).toEqual(["TeamZ", "TeamB"]);
+    expect(after.temporaryCover[0].shiftType).toBe("D"); // untouched by a person rename
+  });
+
+  it("a date-group rename leaves covers alone (their dates are full ISO, not span ids)", () => {
+    const state: ScenarioUiState = {
+      ...fixture(),
+      temporaryCover: [
+        { name: "Haseena (Ward 3)", date: "2026-05-14", shiftType: "D", groups: [] },
+      ],
+    };
+    const after = renameEntity(state, "date", "WKND", "Vacation");
+    expect(after.temporaryCover).toEqual(state.temporaryCover);
+  });
+});
+
+describe("temporaryCover — a delete leaves covers alone (d582)", () => {
+  it("deleting a shift type leaves the cover in place", () => {
+    const state: ScenarioUiState = {
+      ...fixture(),
+      temporaryCover: [
+        { name: "Haseena (Ward 3)", date: "2026-05-14", shiftType: "N", groups: [] },
+      ],
+    };
+    const after = deleteEntity(state, "shift", "N");
+    expect(after.temporaryCover).toEqual(state.temporaryCover);
+  });
 });
 
 describe("deleteEntity — cascade + prune emptied preferences (findings #3/#4)", () => {

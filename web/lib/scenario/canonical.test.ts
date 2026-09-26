@@ -81,6 +81,17 @@ function makeUiState(): ScenarioUiState {
       extraRows: [],
     },
     maxOneShiftPerDay: { description: "structural" },
+    // d582: a display-only temporary cover. She is never a solver person, so the
+    // canonical projection must ignore this slice entirely.
+    temporaryCover: [
+      {
+        _k: "c0",
+        name: "Haseena (Ward 3)",
+        date: "2026-02-10",
+        shiftType: "LD",
+        groups: ["Seniors"],
+      },
+    ],
   };
 }
 
@@ -252,6 +263,22 @@ describe("people", () => {
       { id: "Float" },
       { id: "Plain" },
     ]);
+  });
+});
+
+describe("temporaryCover", () => {
+  it("covers never reach the canonical document", () => {
+    // `makeUiState` carries one cover; the projection must return identical
+    // canonical bytes with or without it.
+    const withCovers = makeUiState();
+    const withoutCovers: ScenarioUiState = { ...withCovers, temporaryCover: [] };
+    expect(toCanonicalScenarioDocument(withCovers)).toEqual(
+      toCanonicalScenarioDocument(withoutCovers),
+    );
+  });
+
+  it("builds an empty slice in the zero value", () => {
+    expect(createEmptyScenarioUiState().temporaryCover).toEqual([]);
   });
 });
 

@@ -165,6 +165,7 @@ const importTarget = {
     extraColumns: [extraColumn],
     extraRows: [extraRow],
   },
+  temporaryCover: [],
 } satisfies ImportNormalizationTarget;
 
 // T04's job: hydrate the keyless bodies into store-keyed cards.

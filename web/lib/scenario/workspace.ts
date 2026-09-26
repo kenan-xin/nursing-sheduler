@@ -819,6 +819,9 @@ export function normalizeWorkspaceToImportTarget(
         []) as unknown as ImportNormalizationTarget["exportLayout"]["extraRows"],
     },
     cardsByKind,
+    // Workspace V1 gains an optional `temporaryCover` field in a later step (d582);
+    // the slice is required on the durable state, so default it here meanwhile.
+    temporaryCover: [],
   };
   if (maxOneShiftPerDay !== undefined) target.maxOneShiftPerDay = maxOneShiftPerDay;
   return target;
