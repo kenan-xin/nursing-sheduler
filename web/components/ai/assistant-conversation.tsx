@@ -30,6 +30,8 @@ import { useAssistantFollowUps } from "./use-assistant-follow-ups";
 import { CardDockContext, DockedComposer } from "./assistant-card-dock";
 import { AssistantReceipts } from "./assistant-receipts";
 import { ApplyNavigationNotice } from "./apply-navigation-notice";
+import { useAssistantRetry } from "./use-assistant-retry";
+import { Button } from "@/components/ui/button";
 import { Surface } from "@/components/ui/surface";
 
 /** The app's own welcome content. Local text; no provider request produces it. */
@@ -70,8 +72,13 @@ export function RefusalNotice() {
  * ("Stopping…" above "Stopped." reads as a contradiction). The wording itself lives in
  * `lifecycle.ts` beside the classes it describes, so a new settlement class cannot
  * ship without wording.
+ *
+ * `onRetry` is the HOST's, and only for the settlement that has one: it is the
+ * failed-turn Retry, and a notice rendered without it -- the historical panel, the
+ * interruption line -- simply states the fact and offers nothing. The wording already
+ * says "Send again to retry." for exactly the settlements this appears beside.
  */
-export function LifecycleNotice() {
+export function LifecycleNotice({ onRetry = null }: { onRetry?: (() => void) | null }) {
   const interruption = useAssistantStore((state) => state.interruption);
   const settlement = useAssistantStore((state) => state.lastSettlement);
 
@@ -92,15 +99,20 @@ export function LifecycleNotice() {
 
   if (!settlement) return null;
   return (
-    <p
-      className="px-4 pb-2 text-meta text-ink2"
-      role="status"
-      aria-live="polite"
-      data-testid="assistant-settlement"
-      data-settlement={settlement.settlement}
-    >
-      {describeSettlement(settlement.settlement, settlement.trigger)}
-    </p>
+    <div className="flex flex-wrap items-center gap-2 px-4 pb-2" role="status" aria-live="polite">
+      <p
+        className="text-meta text-ink2"
+        data-testid="assistant-settlement"
+        data-settlement={settlement.settlement}
+      >
+        {describeSettlement(settlement.settlement, settlement.trigger)}
+      </p>
+      {onRetry && (
+        <Button variant="secondary" size="sm" onClick={onRetry} data-testid="assistant-retry">
+          Retry
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -191,12 +203,22 @@ export function AssistantLiveConversation({
     () => ({ onSend: sendMessage, disabled: running, proposals }),
     [sendMessage, running, proposals],
   );
+  // The failed turn's Retry, through the SESSION'S OWN send -- the same function the
+  // composer's path calls, given the failed turn's id so the gate replaces it. Deliberately
+  // not wrapped in another adapter: an adapter here is one more place a send option could
+  // be dropped, and the retry's whole contract is that it carries that id to the gate.
+  // It closes an open option card itself, for the same reason the composer does.
+  const retry = useAssistantRetry({
+    threadId,
+    send: session.send,
+    busy: running || session.sending,
+  });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-live-conversation">
       {session.messages.length === 0 && <WelcomeState />}
       <RefusalNotice />
-      <LifecycleNotice />
+      <LifecycleNotice onRetry={retry.canRetry ? retry.retry : null} />
       <AssistantReceipts controller={proposals} />
       <ApplyNavigationNotice controller={proposals} />
       <ActivityContext.Provider value={session.activity}>

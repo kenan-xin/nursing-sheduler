@@ -22,6 +22,7 @@ export {
 } from "./scope";
 
 export {
+  type RequirementCoverageState,
   type RequirementMatchKind,
   type RequirementMatch,
   requirementsForShiftType,

@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import { toast } from "sonner";
+import { useShallow } from "zustand/react/shallow";
 import { FaCircleInfo, FaLayerGroup, FaTableCells } from "@/components/icons";
 // Not re-exported from the icon barrel (icons.tsx is owned by a concurrently
 // edited ticket) — imported directly per the project's react-icons/fa6
@@ -32,7 +33,7 @@ import { CurrentRequestsTable, type CurrentRequestRow } from "./current-requests
 import { CurrentHistoryTable, type CurrentHistoryPerson } from "./current-history-table";
 import { cellPreferenceSet, resolveDayStatePrecedence, weightDisplayLabel } from "./requests-model";
 import { validatePeopleHistoryCsv, validateShiftRequestCsv } from "./requests-csv";
-import { useRequests } from "./use-requests";
+import { useRequests, pickRequestsScenario } from "./use-requests";
 
 type ConfirmState = { text: string; onConfirm: () => void } | null;
 type CsvKind = "requests" | "history" | null;
@@ -55,7 +56,9 @@ const RESERVED_TARGET_LABELS: Record<string, string> = {
 };
 
 export function RequestsEditor() {
-  const state = useScenarioStore((s) => s);
+  // The same read shape the controller subscribes to (`use-requests`), so this
+  // screen no longer re-renders on edits to slices it does not read at all.
+  const state = useScenarioStore(useShallow(pickRequestsScenario));
   const [mode, setMode] = useState<"normal" | "quick">("normal");
   const [quickSelectedIds, setQuickSelectedIds] = useState<string[]>([]);
   const [quickWeightText, setQuickWeightText] = useState("0");

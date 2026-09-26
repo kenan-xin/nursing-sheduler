@@ -21,6 +21,7 @@ import { useAssistantTurnRunner } from "./copilotkit-core-access";
 import type { AgentSubscriber, Message } from "@ag-ui/client";
 import { AI_AGENT_ID } from "@/lib/ai/protocol";
 import {
+  deleteTurnMessages,
   persistThreadMessages,
   readThread,
   readThreadMessages,
@@ -153,6 +154,18 @@ function describeTurnActivity(messages: readonly Message[]): AssistantActivity {
   return THINKING;
 }
 
+/**
+ * What a caller may say about a send beyond its text.
+ *
+ * There is deliberately only one of these, and it is not a second send path: it names
+ * the settled turn this send REPLACES, which is how the failed-turn Retry replays a
+ * question through exactly the same gate, history and authority checks as the composer.
+ */
+export interface AssistantSendOptions {
+  /** The failed or interrupted turn whose own messages this send replaces. */
+  replaceTurnId?: string;
+}
+
 export interface AssistantSession {
   messages: Message[];
   isRunning: boolean;
@@ -169,7 +182,7 @@ export interface AssistantSession {
    * a send already in flight. Refusals during preparation or launch are published
    * through the store and still resolve true.
    */
-  send(text: string): Promise<boolean>;
+  send(text: string, options?: AssistantSendOptions): Promise<boolean>;
   stop(): void;
 }
 
@@ -316,7 +329,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
   const [sendInFlight, setSendInFlight] = useState(false);
 
   const runSend = useCallback(
-    async (text: string) => {
+    async (text: string, options?: AssistantSendOptions) => {
       // Captured before anything can await: see `quarantine` for why a LAUNCH count,
       // and not the turn epoch, is what tells a revoked send from a superseded one.
       // Mutable: it moves to include THIS turn's own binding once it launches, so a
@@ -338,12 +351,14 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           turnEpoch: turnEpochForSend,
           busy: agent.isRunning,
           interrupting: isInterrupting(),
+          replaceTurnId: options?.replaceTurnId,
         },
         {
           readSettings: () => readAssistantSettings(),
           readWriterContext: () => readWriterContext(),
           selectActiveThread: (scenarioId) => selectActiveThread(scenarioId),
           readThreadMessages: (threadId) => readThreadMessages(threadId),
+          deleteTurnMessages: (turnId) => deleteTurnMessages(turnId),
           recordPreparingTurn: (turn) => recordPreparingTurn(turn),
           newRunId: () => crypto.randomUUID(),
           // The launch instance is stamped on every runtime response and reported by
@@ -909,7 +924,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
   );
 
   const send = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, options?: AssistantSendOptions): Promise<boolean> => {
       if (input.historical) {
         assistantActions.refuse("not_writer");
         return false;
@@ -921,7 +936,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
       sending.current = true;
       setSendInFlight(true);
       try {
-        await runSend(text);
+        await runSend(text, options);
         return true;
       } finally {
         sending.current = false;

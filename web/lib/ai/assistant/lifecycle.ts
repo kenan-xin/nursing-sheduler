@@ -134,6 +134,21 @@ export function isDetachedSettlement(settlement: AssistantSettlement): boolean {
   return settlement.startsWith("detached_");
 }
 
+/**
+ * Whether a settled turn may be sent again in one click.
+ *
+ * A PRODUCT STATEMENT, and it lives beside the wording it is derived from: every
+ * settlement EXCEPT `completed` describes work the user never received -- a failed
+ * run, a Stop, a takeover, a lease loss, a reload, a revocation -- and each of their
+ * messages already ends "Send again to retry." `completed` is the one that answered.
+ *
+ * Stated over the whole list rather than as a set of the bad ones, so a new settlement
+ * class has to make this decision in the same place it is defined.
+ */
+export function isRetryableSettlement(settlement: AssistantSettlement): boolean {
+  return settlement !== "completed";
+}
+
 /** The clear triggers -- the two that bump a write generation and delete content. */
 export function isClearTrigger(trigger: InterruptionTrigger): boolean {
   return trigger === "clear_history" || trigger === "clear_all";

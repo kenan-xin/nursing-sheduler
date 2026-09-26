@@ -81,6 +81,19 @@ preferences:
     }
   });
 
+  it("accepts country in an old strict file and drops it on import", () => {
+    // v1 sync X9: the lenient import schema still accepts `country` for old backend
+    // files, but the normalized target never carries it forward.
+    const withCountry = BACKEND_YAML.replace(
+      "apiVersion: alpha\n",
+      "apiVersion: alpha\ncountry: SG\n",
+    );
+    const r = importScenarioYaml(withCountry);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.target.meta).not.toHaveProperty("country");
+  });
+
   it("accepts backend-valid YAML (omitted type, scalar/list, nested, .inf)", () => {
     const result = importScenarioYaml(BACKEND_YAML);
     expect(result.ok).toBe(true);

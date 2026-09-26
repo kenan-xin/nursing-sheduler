@@ -9,12 +9,46 @@
  */
 export type CoefficientMemberId = number | string;
 
+/** How a coefficient source derives from WORKING TIME — the minutes it contributes,
+ *  and whether those minutes are a fixed paid-leave CREDIT rather than a worked
+ *  shift's time. Carried on a {@link CoefficientEntity} only by a domain that
+ *  derives coefficients (guided Contracted Hours); a generic count / requirement
+ *  domain omits it, so no hint is shown for its rows. */
+export interface CoefficientDerivation {
+  /** Working minutes the coefficient derives from (a shift's duration, or the
+   *  paid-leave credit). Always a positive multiple of the half-hour step. */
+  minutes: number;
+  /** The minutes are a fixed paid-leave CREDIT, not a worked shift's time — the
+   *  row hint copy differs (`credit` vs `× 2 · from working time`). */
+  credit: boolean;
+}
+
 /** One coefficient-domain entity. A coefficient SOURCE id is always a string (the
  *  persisted `CoefficientEntry` / `ShiftTypeRef` is string-only), so numeric shift
  *  items are never modelled as items here — they only ever appear as typed group
  *  `members`. */
 export interface CoefficientEntity {
   id: string;
+  /** The source's working-time derivation, for a domain that derives coefficients
+   *  (guided Contracted Hours). Absent ⇒ no derivation info (a generic domain shows
+   *  no hint) — NOT the same as a derivable domain's non-derivable row, which the
+   *  renderer shows as the set-by-hand message. */
+  derivation?: CoefficientDerivation;
+}
+
+/**
+ * The per-row working-time hint beside a derived coefficient input (guided
+ * Contracted Hours, ScreenCards): a worked shift reads `"{hours}h × 2 · from
+ * working time"` — its half-hour coefficient is twice its hours — and a paid-leave
+ * day reads `"{hours}h credit · editable"`. Hours render as a plain JS number
+ * (`8`, `8.5`), matching the prototype's raw interpolation. An absent derivation is
+ * the NON-DERIVABLE source (no working time on the half-hour grid): its coefficient
+ * must be set by hand, so it reads `"no working time — set manually"`.
+ */
+export function derivedCoefficientHintText(derivation?: CoefficientDerivation): string {
+  if (!derivation) return "no working time — set manually";
+  const hours = derivation.minutes / 60;
+  return derivation.credit ? `${hours}h credit · editable` : `${hours}h × 2 · from working time`;
 }
 
 /** One coefficient-domain group; `members` are the ids it expands to — a member
