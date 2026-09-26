@@ -11,7 +11,9 @@
 // `maxOneShiftPerDay.description`), exactly as an Advanced edit does — so the
 // Rules screen never becomes a second source of truth for a rule's label.
 
-import { useScenarioStore, scenarioCommands } from "@/lib/store";
+import { useMemo } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { useScenarioStore, scenarioCommands, type ScenarioStoreState } from "@/lib/store";
 import type {
   AffinityCard,
   CardsByKind,
@@ -19,7 +21,6 @@ import type {
   CoveringCard,
   GuidedRuleConstraintKind,
   RequirementCard,
-  ScenarioUiState,
   SuccessionCard,
 } from "@/lib/scenario";
 import { projectGuidedRules } from "./registry";
@@ -42,7 +43,7 @@ import {
   toggleRequirementRule,
   toggleSuccessionRule,
 } from "./mutations";
-import type { GuidedMutationOutcome, GuidedRuleRow } from "./types";
+import type { GuidedMutationOutcome, GuidedRuleRow, GuidedRulesScenario } from "./types";
 
 function replaceInPlace<TCard extends { uid: string }>(
   cards: readonly TCard[],
@@ -163,7 +164,7 @@ function renamedCardsByKind(
 }
 
 export interface GuidedRulesController {
-  state: ScenarioUiState;
+  state: GuidedRulesScenario;
   rows: GuidedRuleRow[];
   /** Toggle a rule's enabled state — writes the source card's `disabled`
    *  marker. A no-op (returns `missing-source`) for a built-in/locked row. */
@@ -186,9 +187,20 @@ export interface GuidedRulesController {
   rename(row: GuidedRuleRow, title: string): void;
 }
 
+/** The two slices the Rules screen reads. Kept next to the hook rather than in
+ *  `lib/store` because it is this screen's read list, not a store concept. */
+function pickGuidedRulesScenario(state: ScenarioStoreState): GuidedRulesScenario {
+  return { cardsByKind: state.cardsByKind, maxOneShiftPerDay: state.maxOneShiftPerDay };
+}
+
 export function useGuidedRules(): GuidedRulesController {
-  const state: ScenarioUiState = useScenarioStore((s) => s);
-  const rows = projectGuidedRules(state);
+  // `useShallow` compares the picked REFERENCES rather than the fresh wrapper
+  // object's identity — without it, zustand v5 reads a new snapshot on every
+  // render ("getSnapshot should be cached"). The wrapper is otherwise stable, so
+  // a mutation to another slice (a staff edit, say) leaves `state` untouched and
+  // the screen does not re-render or reproject.
+  const state = useScenarioStore(useShallow(pickGuidedRulesScenario));
+  const rows = useMemo(() => projectGuidedRules(state), [state]);
 
   return {
     state,

@@ -221,7 +221,12 @@ export function capOf(expression: string, target: number, weight: number): numbe
   return Infinity;
 }
 
-function makeDates(state: ScenarioUiState) {
+/** The date fields `makeDates` reads — a `Pick`, like the expansion helpers, so a
+ *  caller that holds only the date slice (the Requirements editor's store
+ *  subscription) can expand a card's dates without a whole scenario. */
+type DateScopeState = Pick<ScenarioUiState, "rangeStart" | "rangeEnd" | "dateGroups">;
+
+function makeDates(state: DateScopeState) {
   const range = { start: state.rangeStart, end: state.rangeEnd };
   const items = generateDateItems(range);
   const allDateIds = items.map((item) => item.id);
@@ -238,7 +243,7 @@ function makeDates(state: ScenarioUiState) {
 
 /** The span ids a requirement covers in this roster period. */
 export function requirementDateIds(
-  state: ScenarioUiState,
+  state: DateScopeState,
   card: Pick<RequirementCard, "date">,
 ): string[] {
   const { allDateIds, expand } = makeDates(state);
@@ -248,7 +253,7 @@ export function requirementDateIds(
 
 /** The ISO dates a requirement covers in this roster period, in order. */
 export function requirementDateIsos(
-  state: ScenarioUiState,
+  state: DateScopeState,
   card: Pick<RequirementCard, "date">,
 ): string[] {
   const { items, expand } = makeDates(state);
@@ -264,6 +269,33 @@ export function requiredOn(
   return (
     card.requiredNumPeopleOverrides?.find(([date]) => date === iso)?.[1] ?? card.requiredNumPeople
   );
+}
+
+/**
+ * Drop every per-date override a requirement no longer covers, keeping the cards
+ * (and the overrides) that still resolve. An override is valid only while its ISO
+ * date is one of the requirement's RESOLVED dates (`requirementDateIsos`); a date
+ * the requirement stopped covering — a deleted/edited date group, a shrunk range
+ * — would otherwise reach the solver and raise, and the run would fail with a
+ * generic error instead of a named one. Pure: returns the same state when nothing
+ * is dropped, so a mutation that changes no coverage makes no spurious entry.
+ */
+export function dropUncoveredOverrides(state: ScenarioUiState): ScenarioUiState {
+  let dropped = false;
+  const requirements = state.cardsByKind.requirements.map((card) => {
+    const overrides = card.requiredNumPeopleOverrides;
+    if (!overrides?.length) return card;
+    const covered = new Set(requirementDateIsos(state, card));
+    const kept = overrides.filter(([iso]) => covered.has(iso));
+    if (kept.length === overrides.length) return card;
+    dropped = true;
+    if (kept.length === 0) {
+      const { requiredNumPeopleOverrides: _uncovered, ...rest } = card;
+      return rest;
+    }
+    return { ...card, requiredNumPeopleOverrides: kept };
+  });
+  return dropped ? { ...state, cardsByKind: { ...state.cardsByKind, requirements } } : state;
 }
 
 /** Greedily picks equations over pairwise-separate shifts, largest head count that date first. */

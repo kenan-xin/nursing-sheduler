@@ -213,6 +213,7 @@ export function StartOverCard({
           }}
           title={confirm.title}
           description={confirm.description}
+          detail={confirm.detail}
           onContinue={confirm.onContinue}
         />
       ) : null}

@@ -140,6 +140,17 @@ const isNamed = (card: RequirementCard | undefined) => {
 /** A card that limits who counts: named qualifiedPeople (bans others) or a skill mix (bans nobody). */
 const isSkillMix = (card: RequirementCard | undefined) =>
   isNamed(card) || (card?.skillMix?.length ?? 0) > 0;
+/**
+ * A skill group: a staff group some requirement counts by, named in its skill mix or its
+ * named qualifiedPeople. Who is in one decides qualification, so only the manager or a
+ * confirmed borrow changes it.
+ */
+const countedGroup = (ctx: Ctx, groupId: string) =>
+  ctx.state.cardsByKind.requirements.some(
+    (c) =>
+      (c.skillMix ?? []).some((e) => String(e.people) === groupId) ||
+      (isNamed(c) && asList(c.qualifiedPeople).map(String).includes(groupId)),
+  );
 /** One plain head count the Rules quick edit can change (the host's `targetsOneShiftType`). */
 const isHeadCount = (card: RequirementCard) =>
   asList(card.qualifiedPeople).every(isAll) &&
@@ -998,13 +1009,14 @@ export function violatesSafetyFloor(
         }
         case "remove_people_group":
           // Deleting a group prunes it from every skill mix and qualified list that names it.
-          return ctx.state.cardsByKind.requirements.some(
-            (c) =>
-              (c.skillMix ?? []).some((e) => String(e.people) === op.groupId) ||
-              (isNamed(c) && asList(c.qualifiedPeople).map(String).includes(op.groupId)),
-          )
-            ? skillMix
-            : null;
+          return countedGroup(ctx, op.groupId) ? skillMix : null;
+        case "edit_people_group": {
+          // A counted group re-writes that requirement when its members change. Renaming its
+          // id drops the group the requirement names, the way a delete would.
+          const group = ctx.state.staffGroups.find((g) => String(g.id) === op.groupId);
+          const keeps = op.newGroupId === op.groupId && sameSet(op.members, group?.members);
+          return countedGroup(ctx, op.groupId) && !keeps ? skillMix : null;
+        }
         case "edit_count_rule": {
           const card = hardCount(op.ruleId);
           if (!card || typeof card.target !== "number") return null;
@@ -1034,8 +1046,20 @@ export function violatesSafetyFloor(
           return op.groups.length > 0 && op.temporary !== true && !loaned.has(op.name)
             ? skillGroup
             : null;
-        case "edit_person":
-          return op.name === String(op.personId) ? null : invented;
+        case "edit_person": {
+          if (op.name !== String(op.personId)) return invented;
+          // Joining a skill group asserts a qualification. Only a borrow the Preview asks the
+          // lender about (add_person, temporary) may put a nurse in one: keeping a group she is
+          // already in is no change, and a nurse added earlier in this change is in none yet.
+          const joins = (groupId: string) =>
+            countedGroup(ctx, groupId) &&
+            !ctx.state.staffGroups.some(
+              (group) =>
+                String(group.id) === groupId &&
+                asList(group.members).map(String).includes(String(op.personId)),
+            );
+          return op.groups.some(joins) ? skillGroup : null;
+        }
         default:
           return null;
       }

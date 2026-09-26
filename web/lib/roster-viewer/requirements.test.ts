@@ -415,6 +415,107 @@ describe("requiredNumPeopleOverrides", () => {
   });
 });
 
+describe("skill mix (spec 2026-09-24-skill-mix-rules.md)", () => {
+  // People: Ada, Bo, Cy, Di. Group Seniors = Ada, Bo. Shifts: D(0) D+(1) E(2) N(3).
+  const SENIORS_ONE = { people: "Seniors", minNumPeople: 1 };
+
+  it("counts the named group among the equation's own staff and flags a short floor", () => {
+    const document = documentWith([
+      requirement({ shiftType: "D", requiredNumPeople: 2, skillMix: [SENIORS_ONE] }),
+    ]);
+    const equations = buildEquations(document);
+    // The floor is folded into the requirement's ONE equation, never its own row.
+    expect(equations).toHaveLength(1);
+    expect(equations[0].skillMix.map((floor) => floor.label)).toEqual(["Seniors"]);
+    // Ada + Cy on day 0 (one Senior), Cy + Di on day 1 (no Senior).
+    const days: RosterDayGrid = [
+      [shift("D"), OFF],
+      [OFF, OFF],
+      [shift("D"), shift("D")],
+      [OFF, shift("D")],
+    ];
+    const index = indexFor(document, days);
+    const satisfied = checked(evaluateRequirementCell(equations[0], index, 0));
+    expect(satisfied.units).toBe(2);
+    expect(satisfied.mix).toEqual([{ label: "Seniors", count: 1, required: 1, short: 0 }]);
+    expect(satisfied.mismatch).toBe(false);
+
+    // The head count still holds at exactly 2 — only the floor broke, and a
+    // satisfied numerator must never hide it.
+    const short = checked(evaluateRequirementCell(equations[0], index, 1));
+    expect(short.short).toBe(0);
+    expect(short.over).toBe(0);
+    expect(short.unqualified).toBe(0);
+    expect(short.mix).toEqual([{ label: "Seniors", count: 0, required: 1, short: 1 }]);
+    expect(short.mismatch).toBe(true);
+  });
+
+  it("NEGATIVE CONTROL: a non-member still counts toward the head count (nobody is banned)", () => {
+    const document = documentWith([
+      requirement({ shiftType: "D", requiredNumPeople: 2, skillMix: [SENIORS_ONE] }),
+    ]);
+    // Cy and Di are both non-Seniors. A `qualifiedPeople` reading would ban them
+    // and report Unqualified 2; a skill mix bans nobody, so they fill the shift.
+    const days: RosterDayGrid = [
+      [OFF, OFF],
+      [OFF, OFF],
+      [shift("D"), OFF],
+      [shift("D"), OFF],
+    ];
+    const cell = checked(
+      evaluateRequirementCell(buildEquations(document)[0], indexFor(document, days), 0),
+    );
+    expect(cell.units).toBe(2);
+    expect(cell.unqualified).toBe(0);
+    expect(cell.mix[0]).toEqual({ label: "Seniors", count: 0, required: 1, short: 1 });
+  });
+
+  it("counts the floor across an AGGREGATE selector's shifts, not per shift", () => {
+    const document = documentWith(
+      [
+        requirement({
+          shiftType: "AllDays",
+          requiredNumPeople: 2,
+          skillMix: [{ people: "Seniors", minNumPeople: 1 }],
+        }),
+      ],
+      [{ id: "AllDays", members: ["D", "D+"] }],
+    );
+    // One Senior on D, one non-member on D+: the one equation's floor is met.
+    const days: RosterDayGrid = [
+      [shift("D"), OFF],
+      [OFF, OFF],
+      [shift("D+"), OFF],
+      [OFF, OFF],
+    ];
+    const cell = checked(
+      evaluateRequirementCell(buildEquations(document)[0], indexFor(document, days), 0),
+    );
+    expect(cell.units).toBe(2);
+    expect(cell.mix).toEqual([{ label: "Seniors", count: 1, required: 1, short: 0 }]);
+  });
+
+  it("fails closed when a floor's people selector does not resolve", () => {
+    const document = documentWith([
+      requirement({
+        shiftType: "D",
+        requiredNumPeople: 1,
+        skillMix: [{ people: "NoSuchGroup", minNumPeople: 1 }],
+      }),
+    ]);
+    expect(buildEquations(document)[0].unavailable).toContain("NoSuchGroup");
+  });
+
+  it("never becomes the exact-shift target (the floor is not a per-shift quota)", () => {
+    const document = documentWith([
+      requirement({ shiftType: "D", requiredNumPeople: 2, skillMix: [SENIORS_ONE] }),
+    ]);
+    const model = { equations: buildEquations(document), reason: null };
+    // No second equation is invented, so the head's target stays unambiguously 2.
+    expect(exactShiftRequirement(model, 0, 0)).toBe(2);
+  });
+});
+
 describe("grid, summary and day health", () => {
   const document = documentWith(
     [

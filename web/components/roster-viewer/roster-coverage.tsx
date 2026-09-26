@@ -138,6 +138,10 @@ function mismatchLabels(cell: Extract<RequirementCell, { status: "checked" }>): 
   if (cell.short > 0) labels.push(`Short ${cell.short}`);
   if (cell.over > 0) labels.push(`Over ${cell.over}`);
   if (cell.unqualified > 0) labels.push(`Unqualified ${cell.unqualified}`);
+  // A broken skill-mix floor names its group: a met head count must never hide it.
+  for (const floor of cell.mix) {
+    if (floor.short > 0) labels.push(`${floor.label} short ${floor.short}`);
+  }
   return labels;
 }
 

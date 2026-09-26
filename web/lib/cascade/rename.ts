@@ -18,6 +18,10 @@ import type {
   UiPerson,
   UiRequestCell,
 } from "@/lib/scenario";
+// Deep import: the override-scope rule (a requirement's overrides must be dates it
+// still resolves) is shared with the date-group delete/membership paths, so it
+// lives beside `requirementDateIsos`, its authority.
+import { dropUncoveredOverrides } from "@/lib/rules/shortfalls";
 import { assertNoRenameCollision, type EntityDomain, type EntityRef } from "./domain";
 import { CARD_COEFFICIENT_FIELD, CARD_REF_FIELDS, type CardKind } from "./card-fields";
 import { renameRefTree, sameRef, type RefLeaf, type RefTree } from "./reference-tree";
@@ -195,7 +199,7 @@ export function renameEntity(
   if (sameRef(oldId, newId)) return state;
 
   const cards = state.cardsByKind;
-  return {
+  const next: ScenarioUiState = {
     ...state,
     ...renameDefinitions(state, domain, oldId, newId),
     cardsByKind: {
@@ -210,6 +214,11 @@ export function renameEntity(
     reqData: renameReqData(state.reqData, domain, oldId, newId),
     exportLayout: renameExportLayout(state.exportLayout, domain, oldId, newId),
   };
+  // A date-group rename rewrites the group id and every reference to it, so the
+  // dates a requirement resolves to are unchanged and no override goes stale —
+  // reconciling anyway keeps the "date-domain definitions changed" rule uniform
+  // (it is a no-op today) and guards a rename that ever alters coverage (ze1).
+  return domain === "date" ? dropUncoveredOverrides(next) : next;
 }
 
 /** Acceptance-matrix alias for {@link renameEntity} (`applyRename(state, …)`). */

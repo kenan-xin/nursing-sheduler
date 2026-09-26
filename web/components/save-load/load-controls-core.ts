@@ -19,18 +19,28 @@ import {
 export interface VersionMismatchCopy {
   title: string;
   description: string;
+  /**
+   * The file/current app-version pair for the confirm's mono bordered detail box
+   * (prototype ScreenSaveLoad.dc.html:150), as `\n`-separated lines. Present only
+   * in the two cases that compare a FILE version against the current one; the
+   * `missing` case has no file version and states the current one inline.
+   */
+  detail?: string;
 }
 
 /**
- * FR-SL-19's exactly-three warning cases, verbatim (spec 08). `description` is
+ * FR-SL-19's exactly-three warning cases, verbatim (spec 08). The wording is
  * reproduced byte-for-byte from the spec (including its embedded `\n\n`
- * paragraph breaks) — do not paraphrase or reflow it.
+ * paragraph breaks) — do not paraphrase or reflow it. The two version lines are
+ * lifted out of `description` into `detail` (CW-4 follow-up) so the confirm can
+ * box them; the words themselves are unchanged.
  */
 export function versionMismatchCopy(
   status: VersionConfirmStatus,
   fileVersion: string | undefined,
   current: string,
 ): VersionMismatchCopy {
+  const versionDetail = `File app version: ${fileVersion}\nCurrent app version: ${current}`;
   switch (status) {
     case "missing":
       return {
@@ -44,20 +54,18 @@ export function versionMismatchCopy(
         title: "Development build detected",
         description:
           `Dirty app version detected.\n\n` +
-          `File app version: ${fileVersion}\n` +
-          `Current app version: ${current}\n\n` +
           `This YAML was created by a development build with uncommitted changes. It may not ` +
           `match a reproducible application version. If nothing breaks, you can continue.`,
+        detail: versionDetail,
       };
     case "incompatible":
       return {
         title: "App version mismatch detected",
         description:
           `App version mismatch detected.\n\n` +
-          `File app version: ${fileVersion}\n` +
-          `Current app version: ${current}\n\n` +
           `Older YAML may not work after breaking changes, though we try to preserve compatibility. ` +
           `If nothing breaks, you can continue.`,
+        detail: versionDetail,
       };
   }
 }
@@ -78,6 +86,8 @@ export const REPLACEMENT_CONFIRM_BODY =
 export interface LoadConfirmCopy {
   title: string;
   description: string;
+  /** The FR-SL-19 mono version box lines, when the version case applies (see `VersionMismatchCopy.detail`). */
+  detail?: string;
 }
 
 /**
@@ -85,7 +95,8 @@ export interface LoadConfirmCopy {
  * true when the current workspace is non-empty (its content would be overwritten);
  * `versionStatus` is `null` on a version match, or the FR-SL-19 case otherwise.
  * When both apply they are merged into one dialog (replacement lead + the exact
- * FR-SL-19 version wording, unaltered); either alone yields its own copy.
+ * FR-SL-19 version wording, unaltered); either alone yields its own copy. A
+ * replacement-only confirm carries no version box.
  */
 export function loadConfirmCopy(
   versionStatus: VersionConfirmStatus | null,
@@ -99,6 +110,7 @@ export function loadConfirmCopy(
     return {
       title: REPLACEMENT_CONFIRM_TITLE,
       description: `${REPLACEMENT_CONFIRM_BODY}\n\n${version.title}\n\n${version.description}`,
+      detail: version.detail,
     };
   }
   if (version) return version;

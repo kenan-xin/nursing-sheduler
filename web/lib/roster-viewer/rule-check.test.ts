@@ -252,6 +252,34 @@ describe("staffing requirements", () => {
   });
 });
 
+describe("skill mix", () => {
+  // Nights = Ana, Ben. Cy is neither. A floor of two on nights bans nobody.
+  const MIXED_NIGHTS = {
+    type: PREFERENCE_TYPE.shiftTypeRequirement,
+    description: "Two night nurses",
+    shiftType: "N",
+    requiredNumPeople: 2,
+    skillMix: [{ people: "Nights", minNumPeople: 2 }],
+    weight: -1,
+  } as CanonicalPreference;
+
+  it("flags a change that drops the floor while the head count still holds", () => {
+    // Both days have two on N; only the SECOND loses its second Night nurse.
+    const before = [[OFF, s("N"), OFF], [OFF, s("N"), OFF], idle()];
+    const after = [[OFF, s("N"), OFF], idle(), [OFF, s("N"), OFF]];
+    const result = check([MIXED_NIGHTS], before, after);
+    expect(result.hard.map((issue) => issue.message)).toEqual([
+      "8 Oct: “Two night nurses” has 1 of the 2 needed from Nights.",
+    ]);
+  });
+
+  it("does not blame a change that keeps the floor", () => {
+    const before = [[OFF, s("N"), OFF], idle(), idle()];
+    const after = [[OFF, s("N"), OFF], [OFF, s("N"), OFF], idle()];
+    expect(check([MIXED_NIGHTS], before, after).hard).toEqual([]);
+  });
+});
+
 describe("what it cannot check", () => {
   it("lists a hard affinity instead of calling it fine", () => {
     const pairing = {
