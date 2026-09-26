@@ -29,6 +29,7 @@ import {
 import { generateDateItems, hasCompleteRange, type DateRange } from "@/lib/dates";
 import {
   RESERVED_SHIFT_TYPE,
+  isDayStateSelector,
   type DateRef,
   type PersonId,
   type PersonRef,
@@ -473,6 +474,18 @@ export function useRequests({
     for (const d of deltas) {
       const person = typedIdByString.get(d.personId);
       if (person === undefined) continue;
+      // A matrix export writes day-states as their reserved labels (OFF/LEAVE);
+      // route them back to a leave/off cell so an export → import round-trip
+      // restores the pin rather than a request cell named "OFF"/"LEAVE" (which
+      // the projection rejects). Everything else is a worked request delta.
+      if (isDayStateSelector(d.shiftType)) {
+        hot.stagePaintDayState(
+          person,
+          d.dateId,
+          d.shiftType === RESERVED_SHIFT_TYPE.leave ? { kind: "leave" } : { kind: "off", weight },
+        );
+        continue;
+      }
       hot.stagePaintRequestDelta(person, d.dateId, d.shiftType, weight);
     }
     void commitPaintGesture(useHotStore);

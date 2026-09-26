@@ -37,7 +37,12 @@ import {
   resolveDayStatePrecedence,
   weightDisplayLabel,
 } from "./requests-model";
-import { validatePeopleHistoryCsv, validateShiftRequestCsv } from "./requests-csv";
+import {
+  serializeShiftRequestCsv,
+  validatePeopleHistoryCsv,
+  validateShiftRequestCsv,
+} from "./requests-csv";
+import { downloadBlob } from "@/lib/utils/download";
 import { useRequests, pickRequestsScenario } from "./use-requests";
 
 type ConfirmState = { text: string; onConfirm: () => void } | null;
@@ -289,6 +294,18 @@ export function RequestsEditor() {
     );
   }
 
+  // FR-SR-36 inverse: serialize the current matrix in the exact matrix shape the
+  // Requests CSV import reads, so an export → edit → re-import keeps the same
+  // (person, date, selector) cells. Individual people × date items only — the
+  // group rows and date-group/`H-n` columns have no CSV representation.
+  function handleDownloadCsv() {
+    const csv = serializeShiftRequestCsv(state.reqData, {
+      people: state.staff.map((p) => p.id),
+      dateItemIds: columns.filter((c) => c.kind === "date-item").map((c) => c.ref),
+    });
+    downloadBlob(new Blob([csv], { type: "text/csv" }), "shift-requests.csv");
+  }
+
   // --- Clear data ------------------------------------------------------------
   function askConfirm(text: string, onConfirm: () => void) {
     setConfirm({ text, onConfirm });
@@ -481,6 +498,7 @@ export function RequestsEditor() {
         onSetMode={setMode}
         onOpenRequestsCsv={() => setCsvOpen("requests")}
         onOpenHistoryCsv={() => setCsvOpen("history")}
+        onDownloadCsv={handleDownloadCsv}
         clearOpen={clearOpen}
         onToggleClear={() => setClearOpen((v) => !v)}
         requestsCsvDisabled={requestsCsvDisabled}
