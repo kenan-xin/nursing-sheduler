@@ -23,7 +23,7 @@ import { useMemo } from "react";
 import { useScenarioStore } from "@/lib/store";
 import { hasCompleteRange, rangeDayCount } from "@/lib/dates";
 import { isValidIso } from "@/lib/dates/date-id";
-import type { ScenarioUiState } from "@/lib/scenario";
+import { countEnabledRules, type ScenarioUiState } from "@/lib/scenario";
 
 /** The scenario fields the summary is derived from (the rest is irrelevant here). */
 type SummaryInput = Pick<
@@ -54,6 +54,12 @@ export interface ScenarioSummary {
   shiftTypesCount: number;
   shiftRequestsCount: number;
   rulesTotal: number;
+  /**
+   * ENABLED rules (the always-on built-ins plus every non-disabled card) — the
+   * Home "RULES ON" tile's value, never the raw card total. Shared with the
+   * Rules screen and the Optimize stat grid via `countEnabledRules`.
+   */
+  rulesEnabled: number;
   ruleCounts: {
     requirements: number;
     successions: number;
@@ -110,6 +116,7 @@ export function computeScenarioSummary(state: SummaryInput): ScenarioSummary {
     ruleCounts.shiftCounts +
     ruleCounts.affinities +
     ruleCounts.coverings;
+  const rulesEnabled = countEnabledRules(cards);
   const exportRulesCount =
     state.exportLayout.formatting.length +
     state.exportLayout.extraColumns.length +
@@ -136,6 +143,7 @@ export function computeScenarioSummary(state: SummaryInput): ScenarioSummary {
     shiftTypesCount: state.shifts.length,
     shiftRequestsCount: state.reqData.length,
     rulesTotal,
+    rulesEnabled,
     ruleCounts,
     exportRulesCount,
     durationDays: rangeDayCount(range),
