@@ -726,6 +726,8 @@ def test_native_feasible_timeout_completes_with_solver_timeout_reason():
     assert result.output.artifact is not None
 
 
+# Races the child's exit against the pipe read; under xdist load the exit wins (CI run 36226925087).
+@pytest.mark.serial
 def test_executor_reports_abrupt_child_exit_without_waiting_for_timeout():
     # The worker wraps this into JobFailure("optimization_failed", str(error)), so the
     # prose reaches the user: assert the UK-English wording, not just the code.
