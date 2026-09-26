@@ -8,9 +8,6 @@ requires-python = ">=3.12"
 # example the slow real CP-SAT capability probe) can never be collected or
 # executed by an ordinary pytest run.
 testpaths = ["tests"]
-# `serial` tests mutate state shared by every xdist worker (for example the
-# real Redis server config). CI runs them in a separate non-parallel pass.
-markers = ["serial: not parallel-safe; excluded from the `-n auto` pass"]
 
 [tool.ruff]
 target-version = "py312"

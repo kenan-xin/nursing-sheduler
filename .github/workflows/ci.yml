@@ -145,18 +145,14 @@ jobs:
       - name: Ruff format
         run: ruff format --check .
       # Real-Redis store variants skip unless NURSE_TEST_REDIS_URL is set.
-      # pytest-xdist spreads the suite over every CPU. Tests marked `serial`
-      # (shared Redis config, spawned-child wall-clock budgets) run after, alone.
+      # Serial on purpose: pytest-xdist on the 4-vCPU runner was slower (6m04s vs
+      # 4.9m) and starved the wall-clock solver/process tests. core is off the
+      # critical path, so it gains nothing from parallelism.
       - name: Pytest (memory, fakeredis, real Redis)
         env:
           NURSE_TEST_REDIS_URL: redis://localhost:6379/0
           PYTHONPATH: .
-        run: python3 -m pytest -q -rs -n auto -m "not serial"
-      - name: Pytest serial-only tests
-        env:
-          NURSE_TEST_REDIS_URL: redis://localhost:6379/0
-          PYTHONPATH: .
-        run: python3 -m pytest -q -rs -m serial
+        run: python3 -m pytest -q -rs
       - name: Score ground-truth replay (patch P0)
         env:
           PYTHONPATH: .

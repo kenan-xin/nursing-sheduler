@@ -479,8 +479,6 @@ def test_cleanup_reaps_exited_child_before_signaling_process_group(monkeypatch):
 # The runner reports both child PIDs before cancellation is requested. The
 # executor must remove the wrapper and its solver descendant before returning.
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux process-tree verification")
-# Wall-clock budget on a spawned child; starved when every xdist worker is busy.
-@pytest.mark.serial
 def test_cancellation_terminates_solver_descendants():
     proof = _run_process_cleanup_probe("cancelled-descendant")
 
@@ -499,8 +497,6 @@ def test_cancellation_terminates_solver_descendants():
 # SIGKILL bypasses supervisor cleanup. The child parent-death signal and guard
 # must still terminate the optimization child.
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux parent-death verification")
-# Wall-clock budget on a spawned child; starved when every xdist worker is busy.
-@pytest.mark.serial
 def test_supervisor_death_terminates_optimization_child():
     proof = _run_process_cleanup_probe("parent-death")
 
@@ -517,8 +513,6 @@ def test_supervisor_death_terminates_optimization_child():
 # The injected guard start never completes. Killing the supervisor must close
 # the startup gate before the runner can launch an external solver descendant.
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux guard-start verification")
-# Wall-clock budget on a spawned child; starved when every xdist worker is busy.
-@pytest.mark.serial
 def test_runner_waits_for_process_tree_guard_before_starting():
     proof = _run_process_cleanup_probe("delayed-guard-start")
 
@@ -538,8 +532,6 @@ def test_runner_waits_for_process_tree_guard_before_starting():
 # The supervisor must detect the guard sentinel, report a supervision error,
 # and terminate the wrapper and solver descendant.
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux guard-death verification")
-# Wall-clock budget on a spawned child; starved when every xdist worker is busy.
-@pytest.mark.serial
 def test_guard_death_aborts_optimization_process_tree():
     proof = _run_process_cleanup_probe("guard-death")
 
@@ -726,8 +718,6 @@ def test_native_feasible_timeout_completes_with_solver_timeout_reason():
     assert result.output.artifact is not None
 
 
-# Races the child's exit against the pipe read; under xdist load the exit wins (CI run 36226925087).
-@pytest.mark.serial
 def test_executor_reports_abrupt_child_exit_without_waiting_for_timeout():
     # The worker wraps this into JobFailure("optimization_failed", str(error)), so the
     # prose reaches the user: assert the UK-English wording, not just the code.

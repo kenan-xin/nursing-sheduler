@@ -31,7 +31,6 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
-import pytest
 from fastapi.testclient import TestClient
 
 from nurse_scheduling.server.app import create_app
@@ -180,8 +179,6 @@ def test_job_creation_offloads_the_synchronous_store_write():
     assert store.create_thread_id != event_loop_thread_id
 
 
-# Wall-clock budget on a spawned child; starved when every xdist worker is busy.
-@pytest.mark.serial
 def test_cancel_running_job_stops_worker_and_discards_result():
     runner = StoppableRunner()
     with _client(runner) as client:
@@ -196,8 +193,6 @@ def test_cancel_running_job_stops_worker_and_discards_result():
         assert cancelled["result"] is None
 
 
-# Wall-clock budget on a spawned child; starved when every xdist worker is busy.
-@pytest.mark.serial
 def test_finish_now_completes_with_current_feasible_result():
     runner = StoppableRunner()
     with _client(runner) as client:
