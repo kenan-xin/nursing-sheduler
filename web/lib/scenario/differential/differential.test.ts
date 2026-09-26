@@ -2,8 +2,8 @@
 // designates over zod preflight. Each check runs bytes/scenarios through the
 // vendored Python backend via `oracle.py` and asserts against a DECLARED expected
 // outcome ("mutated" is never itself an oracle). Covers C1 (load_data + exact
-// canonical model dump), C3 (scheduler/context setup + group_map + producer-reject
-// vs backend-accept + contracted-hours coverage), C5 (exporter — exact workbook
+// canonical model dump), C3 (scheduler/context setup + shift-type index map +
+// producer-reject vs backend-accept + contracted-hours coverage), C5 (exporter — exact workbook
 // cells/fills/notes), the import round-trip semantic-equivalence invariant (through
 // the producer boundary), and both the normal AND anonymized paths.
 //
@@ -241,9 +241,9 @@ preferences: [{type: at most one shift per day}]
   );
 });
 
-describe.skipIf(!AVAILABLE)("differential — C3 (scheduler/context setup + group_map)", () => {
+describe.skipIf(!AVAILABLE)("differential — C3 (scheduler/context setup + shift-type map)", () => {
   it(
-    "group_map: JS port matches the backend, incl. mixed group → [-2, 0]",
+    "shift-type index map: JS port matches the backend, incl. mixed group → [-2, 0]",
     { timeout: oracleBudget(1) },
     () => {
       const items = ["D", "E"];
@@ -261,7 +261,7 @@ describe.skipIf(!AVAILABLE)("differential — C3 (scheduler/context setup + grou
   );
 
   it(
-    "group_map: forward reference fails in both backend and JS port",
+    "shift-type index map: forward reference fails in both backend and JS port",
     { timeout: oracleBudget(1) },
     () => {
       const groups = [

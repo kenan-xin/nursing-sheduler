@@ -291,6 +291,19 @@ preferences: []
 });
 
 describe("workspace strict projection", () => {
+  it("accepts country in an old saved file and drops it from the strict projection", () => {
+    // v1 sync X9: the strict model dropped `country`, so an old Workspace backup that
+    // still carries it loads — but the projected strict document never emits it.
+    const withCountry = READY_WORKSPACE.replace(
+      "apiVersion: alpha\n",
+      "apiVersion: alpha\ncountry: SG\n",
+    );
+    const result = convert(withCountry);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(serializeCanonicalDocument(result.document)).not.toMatch(/country/);
+  });
+
   it("converts a ready workspace and strips disabled records + authoring metadata", () => {
     const result = convert(READY_WORKSPACE);
     expect(result.status).toBe("ok");
@@ -376,6 +389,18 @@ describe("workspace full-authoring round trip (hydration, separate from strict p
     expect(incompleteLoaded.issues).toEqual([]);
     expect(incompleteLoaded.target?.rangeStart).toBe("");
     expect(incompleteLoaded.target?.rangeEnd).toBe("");
+  });
+
+  it("accepts country in an old saved file and drops it on import", () => {
+    // The import boundary still ACCEPTS `country` so pre-X9 backups load, but it
+    // never carries the value into the keyless import target (v1 sync X9).
+    const withCountry = READY_WORKSPACE.replace(
+      "apiVersion: alpha\n",
+      "apiVersion: alpha\ncountry: SG\n",
+    );
+    const loaded = prepareScenarioLoad(withCountry);
+    expect(loaded.issues).toEqual([]);
+    expect(loaded.target?.meta).not.toHaveProperty("country");
   });
 
   it("routes a legacy (no workspaceVersion) file through the unchanged legacy path", () => {

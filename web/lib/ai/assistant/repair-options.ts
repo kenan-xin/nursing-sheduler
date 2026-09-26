@@ -487,23 +487,54 @@ function relaxOption(
   });
 }
 
-/** The staff group a borrowed nurse must join: null = none needed, undefined = needed but unknown. */
-function skillGroup(ctx: Ctx, findings: StaffingFinding[]): string | null | undefined {
-  const skilled = findings.filter((f) => f.skillMix);
-  if (skilled.length === 0) return null;
-  const mixed = skilled.find((f) => f.mixPeople && ctx.groupIds.has(f.mixPeople));
-  if (mixed) return mixed.mixPeople;
-  for (const f of skilled) {
-    for (const uid of f.ruleIds) {
-      const card = requirementCard(ctx, uid);
-      if (!isNamed(card)) continue;
-      const group = asList(card?.qualifiedPeople)
-        .map(String)
-        .find((ref) => ctx.groupIds.has(ref));
-      if (group) return group;
-    }
+/**
+ * The staff group a short finding needs a borrowed nurse in: the group its skill mix is
+ * short of (`mixPeople`), else a counted group its named qualified people list. `undefined`
+ * when a short finding counts no counted group at all (the qualification is unknown, so no
+ * loan is offered); `null` when it needs no group.
+ */
+function findingGroup(ctx: Ctx, f: StaffingFinding): string | null | undefined {
+  if (!f.skillMix) return null;
+  const counted = (ref: string) => ctx.groupIds.has(ref) && countedGroup(ctx, ref);
+  if (f.mixPeople && counted(f.mixPeople)) return f.mixPeople;
+  for (const uid of f.ruleIds) {
+    const card = requirementCard(ctx, uid);
+    if (!isNamed(card)) continue;
+    const group = asList(card?.qualifiedPeople).map(String).find(counted);
+    if (group) return group;
   }
   return undefined;
+}
+
+interface SkillGroupNeed {
+  group: string;
+  /** Short dates the group covers, in roster order. */
+  dateIds: string[];
+  /** Borrowed nurses it needs: its largest shortfall over those dates. */
+  count: number;
+}
+
+/**
+ * One borrowed nurse per short skill group per date it is short, so a second group's gap
+ * does not stay open. `undefined` when a short group's qualification is unknown.
+ */
+function skillGroupNeeds(ctx: Ctx, dated: StaffingFinding[]): SkillGroupNeed[] | undefined {
+  // group -> short date id -> the largest gap a finding there reports for that group.
+  const gaps = new Map<string, Map<string, number>>();
+  for (const f of dated) {
+    if (f.dateId === null) continue;
+    const group = findingGroup(ctx, f);
+    if (group === undefined) return undefined;
+    if (group === null) continue;
+    const byDate = gaps.get(group) ?? new Map<string, number>();
+    byDate.set(f.dateId, Math.max(byDate.get(f.dateId) ?? 0, f.required - f.available));
+    gaps.set(group, byDate);
+  }
+  const dates = ctx.items.map((i) => i.id);
+  return [...gaps].map(([group, byDate]) => {
+    const dateIds = dates.filter((id) => byDate.has(id));
+    return { group, dateIds, count: Math.max(1, ...dateIds.map((id) => byDate.get(id) ?? 0)) };
+  });
 }
 
 function placeholderNames(ctx: Ctx, count: number): string[] {
@@ -516,19 +547,19 @@ function placeholderNames(ctx: Ctx, count: number): string[] {
   return names;
 }
 
-/** Whether a rule's people would take in a nurse who joins `group` (everyone is in ALL). */
-const wouldBind = (refs: PersonRef | PersonRef[], group: string | null) =>
-  asList(refs).some((r) => isAll(r) || (group !== null && String(r) === group));
+/** Whether a rule's people would take in a nurse who joins one of `groups` (everyone is in ALL). */
+const wouldBind = (refs: PersonRef | PersonRef[], groups: readonly string[]) =>
+  asList(refs).some((r) => isAll(r) || groups.some((g) => String(r) === g));
 
 /**
  * Hard count rules a borrowed nurse would inherit, narrowed to the ward's own staff. A
  * contracted-hours minimum or a cap would bind her on days she is not here. `null` =
  * one cannot be narrowed by `edit_count_rule`, so no loan is offered.
  */
-function narrowedCounts(ctx: Ctx, group: string | null): AssistantCommandV1[] | null {
+function narrowedCounts(ctx: Ctx, groups: readonly string[]): AssistantCommandV1[] | null {
   const ops: AssistantCommandV1[] = [];
   for (const card of ctx.state.cardsByKind.counts) {
-    if (card.disabled || Number.isFinite(card.weight) || !wouldBind(card.person, group)) continue;
+    if (card.disabled || Number.isFinite(card.weight) || !wouldBind(card.person, groups)) continue;
     const staff = staffIn(ctx, card.person);
     if (!editableCount(card) || staff.length === 0) return null;
     ops.push(
@@ -553,64 +584,90 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
   const findings = gapsOnly(all);
   const dated = findings.filter((f) => f.dateId !== null);
   const capped = findings.find((f) => f.kind === "cap_short");
-  const count = dated.length
+  const gap = dated.length
     ? Math.max(...dated.map((f) => f.required - f.available))
     : capped
       ? Math.ceil((capped.required - capped.available) / cappedDateCount(ctx, capped))
       : 0;
-  if (count < 1 || count > MAX_BORROWED || ctx.items.length === 0) return null;
-  const group = skillGroup(ctx, findings);
-  if (group === undefined) return null;
-  const narrowed = narrowedCounts(ctx, group);
+  if (ctx.items.length === 0) return null;
+  const ids = ctx.items.map((i) => i.id);
+  const short = shortDates(ctx, dated);
+
+  // One borrowed nurse per short skill group per date it is short, then one per head-count
+  // gap those nurses do not already fill: she joins the group the date's own shortfall
+  // needs, so a second group's gap does not stay open (bead nursing-sheduler-efi).
+  const nurses: { group: string | null; dateIds: string[] }[] = [];
+  if (short.length === 0) {
+    // No short date: a whole-period loan, sized from the period's cap shortfall.
+    const group = capped ? findingGroup(ctx, capped) : null;
+    if (group === undefined) return null;
+    for (let n = 0; n < gap; n++) nurses.push({ group, dateIds: ids });
+  } else {
+    const needs = skillGroupNeeds(ctx, dated);
+    if (needs === undefined) return null;
+    for (const need of needs)
+      for (let n = 0; n < need.count; n++)
+        nurses.push({ group: need.group, dateIds: need.dateIds });
+    const covered = new Map<string, number>();
+    for (const need of needs)
+      for (const id of need.dateIds) covered.set(id, (covered.get(id) ?? 0) + need.count);
+    const spare = (id: string) => Math.max(0, gapOn(dated, id) - (covered.get(id) ?? 0));
+    const spareCount = Math.max(0, ...short.map(spare));
+    for (let n = 0; n < spareCount; n++)
+      nurses.push({ group: null, dateIds: short.filter((id) => spare(id) > n) });
+  }
+  if (nurses.length < 1 || nurses.length > MAX_BORROWED) return null;
+  const groups = [...new Set(nurses.flatMap((n) => (n.group === null ? [] : [n.group])))];
+  const narrowed = narrowedCounts(ctx, groups);
   if (narrowed === null) return null;
 
-  // She is here on the short dates only (or the whole period) and must be off on every
-  // other date: a free day between two short dates would be a hire the caps no longer
-  // bind. On a whole-period loan she has no days off at all, so `temporary: true` is
-  // what marks her as borrowed rather than a new hire.
-  const short = shortDates(ctx, dated);
-  const loanIds = short.length ? short : ctx.items.map((i) => i.id);
-  const offRuns = runsOf(ctx, (id) => (loanIds.includes(id) ? null : "off"));
-  // On a date short on ONE shift, pin that shift, but only as many nurses as it is short
-  // (counts are exact). A hard sequence rule she would inherit could clash with the pins.
+  // Each nurse is here on the dates she covers and must be off on every other date: a free
+  // day between two short dates would be a hire the caps no longer bind. On a whole-period
+  // loan she has no days off at all, so `temporary: true` is what marks her as borrowed
+  // rather than a new hire.
+  // On a date short on ONE shift, pin her to that shift. A hard sequence rule she would
+  // inherit could clash with the pins.
   const pinnable = !ctx.state.cardsByKind.successions.some(
-    (c) => !c.disabled && !Number.isFinite(c.weight) && wouldBind(c.person, group),
+    (c) => !c.disabled && !Number.isFinite(c.weight) && wouldBind(c.person, groups),
   );
   const shortShift = (id: string) => {
     const shifts = new Set(dated.filter((f) => f.dateId === id).flatMap((f) => f.shiftTypes));
     return shifts.size === 1 ? [...shifts][0] : null;
   };
-  const operations: AssistantCommandV1[] = placeholderNames(ctx, count).flatMap(
-    (name, index): AssistantCommandV1[] => [
-      { type: "add_person", name, groups: group ? [group] : [], temporary: true },
-      ...offRuns.map(
-        ({ from, to }): AssistantCommandV1 => ({
-          type: "set_off_request",
-          personId: name,
-          startDate: from,
-          endDate: to,
-          weight: "must",
-        }),
-      ),
-      ...(pinnable
-        ? runsOf(ctx, (id) => (gapOn(dated, id) > index ? shortShift(id) : null))
-        : []
-      ).map(
-        ({ from, to, key }): AssistantCommandV1 => ({
-          type: "set_shift_request",
-          personId: name,
-          shiftType: key,
-          startDate: from,
-          endDate: to,
-          weight: "must",
-        }),
-      ),
-    ],
+  const names = placeholderNames(ctx, nurses.length);
+  const operations: AssistantCommandV1[] = nurses.flatMap(
+    ({ group, dateIds }, index): AssistantCommandV1[] => {
+      const name = names[index];
+      const here = (id: string) => dateIds.includes(id);
+      return [
+        { type: "add_person", name, groups: group ? [group] : [], temporary: true },
+        ...runsOf(ctx, (id) => (here(id) ? null : "off")).map(
+          ({ from, to }): AssistantCommandV1 => ({
+            type: "set_off_request",
+            personId: name,
+            startDate: from,
+            endDate: to,
+            weight: "must",
+          }),
+        ),
+        ...(pinnable ? runsOf(ctx, (id) => (here(id) ? shortShift(id) : null)) : []).map(
+          ({ from, to, key }): AssistantCommandV1 => ({
+            type: "set_shift_request",
+            personId: name,
+            shiftType: key,
+            startDate: from,
+            endDate: to,
+            weight: "must",
+          }),
+        ),
+      ];
+    },
   );
   operations.push(...narrowed);
   if (operations.length > MAX_ASSISTANT_OPERATIONS) return null;
 
-  const labels = loanIds.map((id) => dateLabel(ctx, id));
+  const loanIds = ids.filter((id) => nurses.some((n) => n.dateIds.includes(id)));
+  const labels = (loanIds.length ? loanIds : ids).map((id) => dateLabel(ctx, id));
   const when = !short.length
     ? `${labels[0]} to ${labels[labels.length - 1]}`
     : labels.length === 1
@@ -618,21 +675,23 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
       : labels.length <= 3
         ? `${labels.slice(0, -1).join("; ")} and ${labels[labels.length - 1]}`
         : `${labels.length} days from ${labels[0]} to ${labels[labels.length - 1]}`;
-  const who = count === 1 ? "a nurse" : `${count} nurses`;
-  const skill = group ? `, qualified as ${group}` : "";
+  const who = nurses.length === 1 ? "a nurse" : `${nurses.length} nurses`;
+  const skill = groups.length ? `, qualified as ${groups.join(" and ")}` : "";
   return makeOption("borrow_temporary_nurse", {
     title: `Borrow ${who}${skill} from the float pool, an agency or another ward for ${when}`,
     why: dated.length
-      ? `${dated.length === 1 ? "That day is" : "Those days are"} short by up to ${count} ${count === 1 ? "nurse" : "nurses"} even with everyone free working.`
+      ? `${dated.length === 1 ? "That day is" : "Those days are"} short by up to ${gap} ${gap === 1 ? "nurse" : "nurses"} even with everyone free working.`
       : "More hands over the period remove the pressure the current staff cannot absorb.",
     operations,
     // `temporary: true` makes the Preview ask the lender (assumptions.ts), for a
     // whole-period loan too, so the agreement is always a host question.
     enforcedBy: "host_question",
-    confirmationQuestion: `Has the lending ward or agency confirmed ${count === 1 ? "the nurse" : "the nurses"} for ${when}${skill}?`,
+    confirmationQuestion: `Has the lending ward or agency confirmed ${nurses.length === 1 ? "the nurse" : "the nurses"} for ${when}${skill}?`,
     needsFromUser: [
       "Which ward, float pool or agency can lend the nurse, and the name to show on the roster (or keep the placeholder).",
-      ...(group ? [`That the borrowed nurse is qualified as ${group}.`] : []),
+      ...(groups.length
+        ? [`That the borrowed nurse is qualified as ${groups.join(" and ")}.`]
+        : []),
       ...(narrowed.length
         ? ["That the ward's own hard shift limits need not apply to the borrowed nurse."]
         : []),
