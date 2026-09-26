@@ -62,7 +62,7 @@ export function convertContractedToGeneric(card: ContractedHoursCountCard): Coun
  */
 export function seedContractedFormFromGeneric(
   card: OrdinaryCountCard,
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
 ): ContractedFormState {
   const countShiftTypes = Array.isArray(card.countShiftTypes)
     ? [...card.countShiftTypes]

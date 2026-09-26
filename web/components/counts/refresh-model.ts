@@ -96,7 +96,7 @@ function deriveCoefficientValue(
  */
 export function deriveContractedRefresh(
   form: ContractedFormState,
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
 ): RefreshPreview {
   const durationById = new Map<string, number | undefined>();
   for (const shift of state.shifts) {

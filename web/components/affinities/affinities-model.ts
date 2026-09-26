@@ -90,9 +90,23 @@ function labelFor(id: PersonRef | ShiftTypeRef, description?: string): string {
   return description ? `${base} — ${description}` : base;
 }
 
+/**
+ * The scenario fields the Affinities screen reads: the people and shift-type
+ * domains its selectors offer, and the dates it scopes them by. A `Pick` rather
+ * than the whole `ScenarioUiState` because it is ALSO the shape of the screen's
+ * store subscription (`useAffinities`) and of its form's `state` prop: narrowing
+ * all three to the SAME set is what keeps an edit to any OTHER slice (a shift's
+ * working time, the scenario name) from re-rendering — and reprojecting — this
+ * screen.
+ */
+export type AffinitiesScenarioInput = Pick<
+  ScenarioUiState,
+  "staff" | "staffGroups" | "shifts" | "shiftGroups" | "rangeStart" | "rangeEnd" | "dateGroups"
+>;
+
 /** People options: staff items + people groups (spec 05 FR-PR-61) — unrestricted,
  *  shared by both People 1 and People 2. */
-export function buildPeopleTransferOptions(state: ScenarioUiState): {
+export function buildPeopleTransferOptions(state: Pick<ScenarioUiState, "staff" | "staffGroups">): {
   items: TransferOption<PersonRef>[];
   groups: TransferOption<PersonRef>[];
 } {
@@ -121,7 +135,9 @@ const SYNTHETIC_SHIFT_GROUP = { id: RESERVED_SHIFT_TYPE.all, description: "Every
  * A numeric shift-type entity id is disabled with an actionable reason
  * (structural — see `AFFINITY_MESSAGES.numericShiftId`).
  */
-export function buildAffinityShiftTypeTransferOptions(state: ScenarioUiState): {
+export function buildAffinityShiftTypeTransferOptions(
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
+): {
   items: TransferOption<AffinityShiftTypeOptionValue>[];
   groups: TransferOption<AffinityShiftTypeOptionValue>[];
 } {
@@ -153,7 +169,9 @@ export function buildAffinityShiftTypeTransferOptions(state: ScenarioUiState): {
 }
 
 /** The auto-derived date-scope chips (ALL / WEEKDAY / WEEKEND / day-of-week). */
-export function buildDateScopeAutoScopes(state: ScenarioUiState): DateScopeOption[] {
+export function buildDateScopeAutoScopes(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd">,
+): DateScopeOption[] {
   const items = generateDateItems({ start: state.rangeStart, end: state.rangeEnd });
   return deriveDateGroups(items)
     .filter((g) => g.members.length > 0)
@@ -161,7 +179,9 @@ export function buildDateScopeAutoScopes(state: ScenarioUiState): DateScopeOptio
 }
 
 /** Authored date groups as date-scope chips. */
-export function buildDateScopeDateGroups(state: ScenarioUiState): DateScopeOption[] {
+export function buildDateScopeDateGroups(
+  state: Pick<ScenarioUiState, "dateGroups">,
+): DateScopeOption[] {
   return state.dateGroups.map((g) => ({ id: String(g.id), label: labelFor(g.id, g.description) }));
 }
 
@@ -181,7 +201,9 @@ export function expandDateRange(rangeStart: string, rangeEnd: string): string[] 
 }
 
 /** In-range concrete dates for the "specific dates" text field, chronological. */
-export function buildDateScopeDateItems(state: ScenarioUiState): DateScopeItem[] {
+export function buildDateScopeDateItems(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd">,
+): DateScopeItem[] {
   return expandDateRange(state.rangeStart, state.rangeEnd).map((iso) => ({
     id: iso,
     dayOfMonth: Number(iso.slice(8)),

@@ -33,7 +33,7 @@ import {
   validateCoefficientPairs,
   type CoefficientPair,
 } from "@/components/card-editor/coefficient-fields";
-import { buildCountShiftTypeDomain, COUNT_MESSAGES } from "./counts-model";
+import { buildCountShiftTypeDomain, COUNT_MESSAGES, type CountScenarioInput } from "./counts-model";
 import { formatHalfHours, LEAVE_CREDIT_HALF_HOURS, parseHalfHours } from "./half-hour-codec";
 import { applyContractedRefresh, deriveContractedRefresh } from "./refresh-model";
 import {
@@ -87,7 +87,9 @@ export function emptyContractedForm(): ContractedFormState {
  * time is left as a blank, non-derivable row for the existing commit gate to
  * block on.
  */
-export function defaultContractedForm(state: ScenarioUiState): ContractedFormState {
+export function defaultContractedForm(
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
+): ContractedFormState {
   const workedShiftTypes = state.shifts
     .filter((shift) => typeof shift.id === "string")
     .map((shift) => shift.id as string);
@@ -109,7 +111,7 @@ export function defaultContractedForm(state: ScenarioUiState): ContractedFormSta
  */
 export function toContractedForm(
   card: ContractedHoursCountCard,
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
 ): ContractedFormState {
   const policy = card.policy === "range" ? "range" : "exact";
   const countShiftTypes = Array.isArray(card.countShiftTypes)
@@ -222,7 +224,7 @@ function encodeContractedExpression(policy: "exact" | "range"): string | string[
  */
 export function validateContractedCommit(
   form: ContractedFormState,
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
 ): ContractedErrors {
   const errors = validateContractedForm(form);
 
@@ -310,7 +312,7 @@ export function hasContractedErrors(errors: ContractedErrors): boolean {
  */
 export function buildContractedCard(
   form: ContractedFormState,
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
   uid: string = crypto.randomUUID(),
 ): ContractedHoursCountCard {
   // Selectors keep their FULL-domain canonical order (a group/`ALL` sorts among the
@@ -380,7 +382,7 @@ function selectorsAlreadyCreditLeave(
  */
 export function addLeaveCreditToContractDraft(
   form: ContractedFormState,
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
 ): ContractedFormState {
   // Defensive scalar normalization: `countShiftTypes` is typed as an array, but a
   // draft seeded from a not-yet-normalized scalar selector (mirroring
@@ -425,7 +427,7 @@ export function addLeaveCreditToContractDraft(
  */
 export function findContractedDraftLeaveAdvisory(
   form: ContractedFormState,
-  state: ScenarioUiState,
+  state: CountScenarioInput,
   isEnabled: boolean,
 ): string[] | null {
   if (!isEnabled) return null;

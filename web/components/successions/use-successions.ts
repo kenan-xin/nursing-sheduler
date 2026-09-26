@@ -7,10 +7,11 @@
 // logic lives in `successions-model`; this hook is only the store glue (mirrors
 // `use-counts.ts`).
 
-import { useScenarioStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
+import { useScenarioStore, type ScenarioStoreState } from "@/lib/store";
 import type { CommandOutcome } from "@/lib/store";
 import { commitCardsSlice, commitCardsTransform } from "@/components/card-editor/commit-cards";
-import type { ScenarioUiState, SuccessionCard } from "@/lib/scenario";
+import type { SuccessionCard } from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 import {
@@ -18,12 +19,13 @@ import {
   reorderByDrop,
   withCardDisabled,
   type SuccessionFormState,
+  type SuccessionsScenarioInput,
 } from "./successions-model";
 
 /** Replace the successions list in one tracked mutation (fresh refs for history). */
 
 export interface SuccessionsController {
-  state: ScenarioUiState;
+  state: SuccessionsScenarioInput;
   successions: SuccessionCard[];
   /** Read the LIVE successions slice at call time (not a render snapshot) — the
    *  stale guard keys on its ref-identity change since the draft opened. */
@@ -42,10 +44,28 @@ export interface SuccessionsController {
   setDisabled: (uid: string, value: boolean) => void;
 }
 
+/** The slices the Successions screen reads — the people/shift domains its
+ *  selectors offer and the dates it scopes them by. `cardsByKind` is deliberately
+ *  NOT among them: the succession cards arrive from their own subscription, so
+ *  editing a count or affinity card must not re-render this editor. */
+function pickSuccessionsScenario(state: ScenarioStoreState): SuccessionsScenarioInput {
+  return {
+    staff: state.staff,
+    staffGroups: state.staffGroups,
+    shifts: state.shifts,
+    shiftGroups: state.shiftGroups,
+    rangeStart: state.rangeStart,
+    rangeEnd: state.rangeEnd,
+    dateGroups: state.dateGroups,
+  };
+}
+
 export function useSuccessions(): SuccessionsController {
-  // The durable store state is a superset of `ScenarioUiState`, so it satisfies
-  // the pure model's input directly.
-  const state: ScenarioUiState = useScenarioStore((s) => s);
+  // `useShallow` compares the picked references, not the fresh wrapper object's
+  // identity — without it zustand v5 reads a new snapshot every render. The
+  // wrapper is otherwise stable, so a mutation outside these slices leaves `state`
+  // untouched and the screen neither re-renders nor reprojects.
+  const state = useScenarioStore(useShallow(pickSuccessionsScenario));
   const successions = useScenarioStore((s) => s.cardsByKind.successions);
 
   return {

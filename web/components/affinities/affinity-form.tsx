@@ -12,7 +12,6 @@
 // mutation. All validation/build/load logic lives in affinities-model.
 
 import { useEffect, useRef, useState } from "react";
-import type { ScenarioUiState } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
 import { CardEditorForm } from "@/components/card-editor/card-editor-shell";
 import { FieldShell } from "@/components/card-editor/field-shell";
@@ -28,12 +27,13 @@ import {
   buildPeopleTransferOptions,
   toggleInSelection,
   validateAffinityForm,
+  type AffinitiesScenarioInput,
   type AffinityErrors,
   type AffinityFormState,
 } from "./affinities-model";
 
 interface AffinityFormProps {
-  state: ScenarioUiState;
+  state: AffinitiesScenarioInput;
   mode: "add" | "edit";
   initialForm: AffinityFormState;
   onSave: (form: AffinityFormState) => void;

@@ -38,10 +38,11 @@
 // staffing tie-in and every `data-testid` are untouched.
 
 import * as React from "react";
+import { useShallow } from "zustand/react/shallow";
 import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
 import { SHIFT_TYPES_ADD_ANCHOR } from "./capability-anchors";
 import { toast } from "sonner";
-import { useScenarioStore, scenarioCommands } from "@/lib/store";
+import { useScenarioStore, scenarioCommands, type ScenarioStoreState } from "@/lib/store";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import type { ScenarioUiState, UiShiftType } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
@@ -93,6 +94,7 @@ import {
   ShiftRequirementValidationError,
   ShiftSaveRefusedError,
   StaleShiftRequirementError,
+  type ShiftTypesScenario,
   type StaffingCardState,
 } from "./save-shift-card";
 
@@ -103,6 +105,25 @@ import {
  */
 type Commit = (transform: (live: ScenarioUiState) => ScenarioUiState | null) => void;
 type CurrentState = () => ScenarioUiState;
+
+/**
+ * The scenario fields the grid subscribes to, minus the requirement cards: the
+ * item/group lists it renders (and `expandShiftTypeRefs` resolves through — they
+ * are exactly what `shiftTypesDescriptor.readItems/readGroups` return) and the
+ * dates requirement coverage is scoped against.
+ */
+type ShiftGridScope = Omit<ShiftTypesScenario, "cardsByKind">;
+
+/** Those slices, picked for the grid's store subscription. */
+function pickShiftGridScope(state: ScenarioStoreState): ShiftGridScope {
+  return {
+    shifts: state.shifts,
+    shiftGroups: state.shiftGroups,
+    rangeStart: state.rangeStart,
+    rangeEnd: state.rangeEnd,
+    dateGroups: state.dateGroups,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Shift-groups config for the shared GroupsSection ("Shifts" copy — no member
@@ -189,9 +210,24 @@ type Sel =
 
 export function ShiftTypeGrid() {
   const descriptor = shiftTypesDescriptor;
-  const scenario = useScenarioStore((state) => state as ScenarioUiState);
-  const items = descriptor.readItems(scenario);
-  const groups = descriptor.readGroups(scenario);
+  // Narrow, per-slice subscriptions (the T04 `b8z` pattern): the grid reads the
+  // shift items and groups it draws, the dates requirement coverage is scoped
+  // against, and the REQUIREMENT cards the staffing summaries resolve from — and
+  // nothing else. Reading the whole scenario here meant a write to any unrelated
+  // slice (a succession card, the scenario name) re-rendered every card on this
+  // screen.
+  const scope = useScenarioStore(useShallow(pickShiftGridScope));
+  // `cardsByKind` itself changes identity on an edit to ANY card kind, so the
+  // subscription is one level deeper — the requirement list alone — and only then
+  // recomposed into the shape the card-state helpers take. The memo keeps that
+  // object (and so every card's props) stable while its six inputs are.
+  const requirements = useScenarioStore((s) => s.cardsByKind.requirements);
+  const scenario = React.useMemo<ShiftTypesScenario>(
+    () => ({ ...scope, cardsByKind: { requirements } }),
+    [scope, requirements],
+  );
+  const items = scope.shifts;
+  const groups = scope.shiftGroups;
   // The form-open token (captured on the closed⇌open transition below). Declared
   // here because `commit` has to read it at CALL time.
   const openToken = React.useRef<{ items: UiShiftType[]; groups: EditorGroup[] } | null>(null);
@@ -542,7 +578,7 @@ function ShiftCard({
 }: {
   cardKey: string;
   item: UiShiftType;
-  scenario: ScenarioUiState;
+  scenario: ShiftTypesScenario;
   canDrag: boolean;
   canReorder: boolean;
   isFirst: boolean;
@@ -772,7 +808,7 @@ function StaffingContextChips({ chips, testKey }: { chips: readonly string[]; te
   );
 }
 
-function StaffingSummary({ state, item }: { state: ScenarioUiState; item: UiShiftType }) {
+function StaffingSummary({ state, item }: { state: ShiftTypesScenario; item: UiShiftType }) {
   const staffing = resolveStaffingCardState(state, item.id);
   const testKey = entityKey(item.id);
   if (staffing.kind === "none") return null;

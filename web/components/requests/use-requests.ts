@@ -9,22 +9,30 @@
 // draft here and commits with exactly one `mutateScenario` per drag — the T11
 // replacement for the old app's `replaceLatestHistoryEntry` chaining hack.
 //
-// Render-loop safety (zustand v5): every `useScenarioStore` selector here either
-// returns the raw state object (`(s) => s`, a stable reference until the store
-// itself changes) or a primitive/array slice already stored on that object —
-// never a freshly-constructed object literal — so no selector needs `useShallow`.
-// Derived data (rows/columns/history/order index) is computed with `useMemo`,
-// not inside a selector.
+// Render-loop safety (zustand v5): every `useScenarioStore` selector here returns
+// either a raw slice of the state (a stable reference until that slice changes) or
+// the `useShallow`-compared read shape below — never a freshly-constructed object
+// literal read as a snapshot — so no selector trips the v5 render-loop trap.
+// Derived data (rows/columns/history/order index) is computed with `useMemo`, not
+// inside a selector.
 
 import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
-import { commitPaintGesture, useHotStore, useScenarioStore, scenarioCommands } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
+import {
+  commitPaintGesture,
+  useHotStore,
+  useScenarioStore,
+  scenarioCommands,
+  type ScenarioStoreState,
+} from "@/lib/store";
 import { generateDateItems, hasCompleteRange, type DateRange } from "@/lib/dates";
 import {
   RESERVED_SHIFT_TYPE,
   type DateRef,
   type PersonId,
   type PersonRef,
+  type ScenarioUiState,
   type UiPerson,
   type UiRequestCell,
 } from "@/lib/scenario";
@@ -109,6 +117,41 @@ export interface UseRequestsOptions {
 }
 
 /**
+ * The scenario fields the Requests screen reads: the roster it builds rows and
+ * history columns from, the shift domain it offers as paint targets, the dates it
+ * scopes them by, and the request matrix itself. A `Pick` rather than the whole
+ * `ScenarioUiState` because it is ALSO the shape of the editor's own store
+ * subscription — narrowing both to the SAME set is what keeps an edit to any OTHER
+ * slice (a card of any kind, the scenario name) from re-rendering — and
+ * reprojecting — this screen.
+ */
+export type RequestsScenarioInput = Pick<
+  ScenarioUiState,
+  | "staff"
+  | "staffGroups"
+  | "shifts"
+  | "shiftGroups"
+  | "rangeStart"
+  | "rangeEnd"
+  | "dateGroups"
+  | "reqData"
+>;
+
+/** The slices the Requests screen reads (see {@link RequestsScenarioInput}). */
+export function pickRequestsScenario(state: ScenarioStoreState): RequestsScenarioInput {
+  return {
+    staff: state.staff,
+    staffGroups: state.staffGroups,
+    shifts: state.shifts,
+    shiftGroups: state.shiftGroups,
+    rangeStart: state.rangeStart,
+    rangeEnd: state.rangeEnd,
+    dateGroups: state.dateGroups,
+    reqData: state.reqData,
+  };
+}
+
+/**
  * The per-coordinate identity key of a request cell: a `request` cell is keyed by
  * its worked selector, a day-state cell by its `kind`. Two edits that re-emit the
  * same selector at a coordinate resolve to the same key, so identity is preserved
@@ -142,10 +185,11 @@ export function useRequests({
   quickPaintSelectedIds,
   quickPaintWeightText,
 }: UseRequestsOptions): RequestsController {
-  // Whole-state selector — a stable reference until the store itself replaces it,
-  // never a freshly-constructed object — so this never trips the zustand v5
-  // render-loop trap (mirrors `use-counts.ts` / `use-successions.ts`).
-  const state = useScenarioStore((s) => s);
+  // `useShallow` compares the picked references, not the fresh wrapper object's
+  // identity — without it zustand v5 reads a new snapshot every render. The
+  // wrapper is otherwise stable, so a mutation outside these slices leaves `state`
+  // untouched and the screen neither re-renders nor reprojects.
+  const state = useScenarioStore(useShallow(pickRequestsScenario));
   const stagedPaint = useHotStore((s) => s.paint);
 
   const range: DateRange = { start: state.rangeStart, end: state.rangeEnd };
