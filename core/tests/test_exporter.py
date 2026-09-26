@@ -213,7 +213,7 @@ dates:
     startDate: 2025-01-01
     endDate: 2025-01-02
   groups:
-    - id: NON-WORKDAY
+    - id: FREEDAY
       members: [2025-01-02]
 people:
   items:
@@ -228,7 +228,7 @@ preferences:
     requiredNumPeople: 0
   - type: shift request
     person: n1
-    date: ["01", NON-WORKDAY]
+    date: ["01", FREEDAY]
     shiftType: D
     weight: -5
 export:
@@ -452,60 +452,84 @@ export:
     with pytest.raises(ValueError, match="weightRange minimum"):
         schedule(yaml_content, prettify=True)
 
+    wrong_cardinality_yaml = yaml_content.replace(b"weightRange: [10, -10]", b"weightRange: [10]")
+    with pytest.raises(ValueError, match="weightRange must contain exactly two values"):
+        schedule(wrong_cardinality_yaml, prettify=True)
 
-def test_export_formatting_rejects_non_cell_when_and_annotations():
-    base_ctx = SimpleNamespace(
-        export=SimpleNamespace(formatting=[]),
-        map_pid_p={"n1": [0]},
-        map_did_d={},
-        map_sid_s={},
-    )
 
-    base_ctx.export.formatting = [
-        SimpleNamespace(
-            type="row",
-            people=["n1"],
-            backgroundColor="#22c55e",
-            bottomBorderColor=None,
-            rightBorderColor=None,
-            fontColor=None,
-            when=SimpleNamespace(),
-            appendText=None,
-            note=None,
-        )
-    ]
-    with pytest.raises(ValueError, match="'when' is only supported"):
-        exporter._build_custom_export_style_info(
-            base_ctx,
-            n_rows=1,
-            n_cols=1,
-            n_leading_rows=0,
-            n_leading_cols=0,
-            n_history_cols=0,
-        )
+def test_export_annotation_rejects_unsupported_preference_type():
+    yaml_content = b"""
+apiVersion: alpha
+dates:
+  range:
+    startDate: 2025-01-01
+    endDate: 2025-01-01
+people:
+  items:
+    - id: n1
+shiftTypes:
+  items:
+    - id: D
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    shiftType: D
+    requiredNumPeople: 0
+export:
+  formatting:
+    - type: cell
+      appendText: " [X]"
+      people: [ALL]
+      dates: [ALL]
+      shiftTypes: [D]
+      when:
+        preference:
+          types: [shift count]
+"""
 
-    base_ctx.export.formatting = [
-        SimpleNamespace(
-            type="row",
-            people=["n1"],
-            backgroundColor="#22c55e",
-            bottomBorderColor=None,
-            rightBorderColor=None,
-            fontColor=None,
-            when=None,
-            appendText=" [X]",
-            note=None,
-        )
-    ]
-    with pytest.raises(ValueError, match="annotations are only supported"):
-        exporter._build_custom_export_style_info(
-            base_ctx,
-            n_rows=1,
-            n_cols=1,
-            n_leading_rows=0,
-            n_leading_cols=0,
-            n_history_cols=0,
-        )
+    with pytest.raises(ValueError, match="Input should be 'shift request'"):
+        schedule(yaml_content, prettify=True)
+
+
+@pytest.mark.parametrize(
+    ("extra_field", "message"),
+    [
+        (
+            "      when:\n        preference:\n          types: [shift request]",
+            "'when' is only supported for rules with type 'cell'",
+        ),
+        ('      appendText: " [X]"', "annotations are only supported for rules with type 'cell'"),
+        ("      note:\n        text: X", "annotations are only supported for rules with type 'cell'"),
+    ],
+)
+def test_export_formatting_rejects_non_cell_when_and_annotations(extra_field, message):
+    yaml_content = f"""
+apiVersion: alpha
+dates:
+  range:
+    startDate: 2025-01-01
+    endDate: 2025-01-01
+people:
+  items:
+    - id: n1
+shiftTypes:
+  items:
+    - id: D
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    shiftType: D
+    requiredNumPeople: 0
+export:
+  formatting:
+    - type: row
+      people: [n1]
+      backgroundColor: "#22c55e"
+{extra_field}
+"""
+
+    with pytest.raises(ValueError, match=message):
+        schedule(yaml_content.encode(), prettify=False)
 
 
 def test_export_annotation_unknown_request_shape_matches_all_but_not_specific_shape():
@@ -653,7 +677,7 @@ preferences:
     assert df.iloc[0, 3] == "2025/1/2"
 
 
-def test_prettify_off_annotations_and_workday_nonworkday_headers():
+def test_prettify_off_annotations_and_workday_freeday_headers():
     yaml_content = b"""
 apiVersion: alpha
 dates:
@@ -663,7 +687,7 @@ dates:
   groups:
     - id: WORKDAY
       members: [2025-01-02, 2025-01-03]
-    - id: NON-WORKDAY
+    - id: FREEDAY
       members: [2025-01-01]
 people:
   items:
@@ -706,9 +730,9 @@ export:
       countShiftTypes: [OFF]
       countDates: [WORKDAY]
     - type: count
-      header: OFF (NON-WORKDAY)
+      header: OFF (FREEDAY)
       countShiftTypes: [OFF]
-      countDates: [NON-WORKDAY]
+      countDates: [FREEDAY]
   extraRows:
     - type: count
       header: OFF Count
@@ -727,10 +751,10 @@ export:
     # History fallback branch for person without history.
     assert df.iloc[3, 1] == ""
 
-    # Workday/nonworkday summary headers should be present when both groups are found.
+    # Workday/freeday summary headers should be present when both groups are found.
     headers = list(df.iloc[1, :])
     assert "OFF (WORKDAY)" in headers
-    assert "OFF (NON-WORKDAY)" in headers
+    assert "OFF (FREEDAY)" in headers
     assert df.iloc[7, 0] == "OFF Count"
     assert df.iloc[7, 2] == 2
 
@@ -901,21 +925,25 @@ export:
 
 def test_build_custom_export_style_info_ignores_out_of_bounds_targets():
     ctx = SimpleNamespace(
-        export=SimpleNamespace(
-            formatting=[
-                SimpleNamespace(
-                    type="row",
-                    people=["n1"],
-                    backgroundColor="#22c55e",
-                    bottomBorderColor=None,
-                    rightBorderColor=None,
-                    fontColor=None,
-                )
-            ]
+        scenario=SimpleNamespace(
+            export=SimpleNamespace(
+                formatting=[
+                    SimpleNamespace(
+                        type="row",
+                        people=["n1"],
+                        backgroundColor="#22c55e",
+                        bottomBorderColor=None,
+                        rightBorderColor=None,
+                        fontColor=None,
+                    )
+                ]
+            )
         ),
-        map_pid_p={"n1": [0]},
-        map_did_d={},
-        map_sid_s={},
+        compiled_schedule=SimpleNamespace(
+            export=SimpleNamespace(
+                formatting=[SimpleNamespace(people=(0,), dates=(), shift_types=())],
+            )
+        ),
     )
 
     # n_rows=0 forces set_style to hit out-of-bounds guard and skip writes.
@@ -938,35 +966,33 @@ def test_dataframe_generation_supports_multiple_assigned_shift_types():
         def get_objective_value(self):
             return 0
 
-    ctx = SimpleNamespace(
-        n_shift_types=2,
+    date = SimpleNamespace(
+        year=2025,
+        month=1,
+        day=1,
+        weekday=lambda: 2,
+        strftime=lambda fmt: "Wed" if fmt == "%a" else "1",
+    )
+    scenario = SimpleNamespace(
         shiftTypes=SimpleNamespace(
             items=[SimpleNamespace(id="D"), SimpleNamespace(id="E")],
             groups=[],
         ),
         people=SimpleNamespace(items=[SimpleNamespace(id="n1", history=None)]),
-        dates=SimpleNamespace(
-            items=[
-                SimpleNamespace(
-                    year=2025, month=1, day=1, weekday=lambda: 2, strftime=lambda fmt: "Wed" if fmt == "%a" else "1"
-                )
-            ],
-            groups=[],
-            range=SimpleNamespace(
-                startDate=SimpleNamespace(year=2025, month=1), endDate=SimpleNamespace(year=2025, month=1)
-            ),
-        ),
-        map_dp_s={(0, 0): {0, 1}},
+        preferences=[],
+        export=None,
+    )
+    ctx = SimpleNamespace(
+        scenario=scenario,
+        compiled_schedule=SimpleNamespace(dates=(date,)),
+        n_days=1,
+        n_shift_types=2,
+        n_people=1,
         shifts={(0, 0, 0): "v_d", (0, 1, 0): "v_e"},
         offs={(0, 0): "v_off"},
         leaves={(0, 0): "v_leave"},
-        preferences=[],
-        map_sid_s={},
-        map_pid_p={},
-        map_did_d={},
         solver=DummySolver(),
         solver_status="OPTIMAL",
-        export=None,
     )
 
     df, info = exporter.get_people_versus_date_dataframe(ctx, prettify=False)
@@ -974,7 +1000,7 @@ def test_dataframe_generation_supports_multiple_assigned_shift_types():
     assert info["styles"] == {}
 
 
-def test_prettify_styling_does_not_add_default_nonworkday_or_weekend_colors():
+def test_prettify_styling_does_not_add_default_freeday_or_weekend_colors():
     yaml_content = b"""
 apiVersion: alpha
 dates:
@@ -984,7 +1010,7 @@ dates:
   groups:
     - id: WORKDAY
       members: [2025-01-03]
-    - id: NON-WORKDAY
+    - id: FREEDAY
       members: [2025-01-05]
 people:
   items:
