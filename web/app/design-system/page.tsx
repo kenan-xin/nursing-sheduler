@@ -110,7 +110,11 @@ const ACCENTS = ["teal", "sage", "rose", "plum"] as const;
 // visible as dead rather than looking like a choice.
 const TYPE_STEPS = [
   { name: "display", cls: "text-display font-heading font-bold", note: "base-h × 0.9" },
-  { name: "h2", cls: "text-h2 font-heading font-bold", note: "alias of display — unused today" },
+  {
+    name: "h2",
+    cls: "text-h2 font-heading font-bold",
+    note: "alias of display — the Settings heading",
+  },
   { name: "cardhead", cls: "text-cardhead font-heading font-semibold", note: "card titles" },
   { name: "title", cls: "text-title font-heading font-semibold", note: "base-h × 0.6 × 0.9" },
   { name: "h3", cls: "text-h3 font-heading font-semibold", note: "alias of title" },
@@ -1166,10 +1170,9 @@ export default function StyleReferencePage() {
             One treatment, applied globally by <span className="font-mono">.ns-toast</span>:
             bottom-centre, an <span className="font-mono">--ink</span> fill with{" "}
             <span className="font-mono">--on-ink</span> text and leading ✓ mark, the card radius,
-            and <span className="font-mono">--shadow-toast</span> (an alias of the{" "}
-            <span className="font-mono">--sh-3</span> modal layer). Sonner renders it; call sites
-            pass no styling. v1's green 3px left-edge rule and its square corner are both retired,
-            along with the no-side-stripe exception that justified the rule.
+            and the <span className="font-mono">--sh-3</span> modal-layer shadow. Sonner renders it;
+            call sites pass no styling. v1's green 3px left-edge rule and its square corner are both
+            retired, along with the no-side-stripe exception that justified the rule.
           </Rule>
           <Rule term="Reduced motion" guard="e2e — skeleton animation must drop below 0.05s">
             A global <span className="font-mono">prefers-reduced-motion</span> rule collapses every
