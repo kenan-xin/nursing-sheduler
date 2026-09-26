@@ -137,6 +137,7 @@ export function SaveLoadWorkspace() {
           }}
           title={confirm.title}
           description={confirm.description}
+          detail={confirm.detail}
           onContinue={confirm.onContinue}
         />
       ) : null}
