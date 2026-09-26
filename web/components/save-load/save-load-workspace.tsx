@@ -71,7 +71,10 @@ export function SaveLoadWorkspace() {
     clearIssues();
   };
 
-  const handleResetComplete = () => {
+  // A committed replacement of the whole scenario — a confirmed Start over OR a
+  // loaded example — discards any open editor and its staged import, so the
+  // preview/editor never renders a stale draft over the new state.
+  const handleScenarioReplaced = () => {
     setEditing(false);
     setDraft("");
     clearImportState();
@@ -101,7 +104,10 @@ export function SaveLoadWorkspace() {
             onUpload={openUpload}
             onStartEdit={startEdit}
           />
-          <StartOverCard onResetComplete={handleResetComplete} />
+          <StartOverCard
+            onResetComplete={handleScenarioReplaced}
+            onExampleLoaded={handleScenarioReplaced}
+          />
           <AnonymiseCard />
         </div>
         <ScenarioYamlPreview
