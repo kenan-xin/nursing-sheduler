@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyScenarioUiState, toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
-import { PREFERENCE_TYPE, type ScenarioUiState } from "@/lib/scenario/types";
+import { PREFERENCE_TYPE, type ScenarioUiState, type UiPerson } from "@/lib/scenario/types";
 
 // A representative durable UI state exercising every slice and every F2 marker.
 function makeUiState(): ScenarioUiState {
@@ -243,17 +243,13 @@ describe("toCanonicalScenarioDocument", () => {
   });
 });
 
-describe("the temporary flag", () => {
-  it("emits temporary only for a temporary person", () => {
+describe("people", () => {
+  it("emits no temporary field", () => {
     const state = makeUiState();
-    state.staff = [
-      { id: "Float", temporary: true },
-      { id: "Own", temporary: false },
-      { id: "Plain" },
-    ];
+    // A stray flag from an older build's store is never written out (d582).
+    state.staff = [{ id: "Float", temporary: true } as UiPerson, { id: "Plain" }];
     expect(toCanonicalScenarioDocument(state).people.items).toEqual([
-      { id: "Float", temporary: true },
-      { id: "Own" },
+      { id: "Float" },
       { id: "Plain" },
     ]);
   });

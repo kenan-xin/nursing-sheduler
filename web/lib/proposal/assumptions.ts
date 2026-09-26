@@ -243,13 +243,9 @@ function cancelledLeave(before: ScenarioUiState, lost: readonly UiRequestCell[])
 
 /**
  * A borrowed nurse, read from validated targets, never from model prose: an
- * `add_person` with `temporary: true`, or one with a hard `set_off_request` ("must")
- * in the same change (the loan shape `repair-options.ts` builds, and what a stored
- * command prepared before the flag existed looks like). The loan is read from the
- * AFTER document: the days she is NOT hard-off, which is the whole period when she
- * has none. An ordinary hire (not temporary, no hard days off) is not asked about.
- * Setting the flag on someone already on the staff is a label, not a new loan, so it
- * asks nothing.
+ * `add_person` with a hard `set_off_request` ("must") in the same change (the loan
+ * shape `repair-options.ts` builds). The loan is read from the AFTER document: the
+ * days she is NOT hard-off. An ordinary hire (no hard days off) is not asked about.
  */
 function borrowedStaff(
   after: ScenarioUiState,
@@ -265,7 +261,7 @@ function borrowedStaff(
   const items = generateDateItems({ start: after.rangeStart, end: after.rangeEnd });
   return commands.flatMap((command) => {
     if (command.type !== "add_person") return [];
-    if (command.temporary !== true && !loaned.has(command.name)) return [];
+    if (!loaned.has(command.name)) return [];
     const off = new Set(
       after.reqData
         .filter(

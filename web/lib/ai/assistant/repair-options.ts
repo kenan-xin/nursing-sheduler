@@ -8,8 +8,8 @@
 // user applies.
 //
 // Controller rulings (2026-09-24) shape the operations: a borrowed nurse is
-// `add_person` with `temporary: true`, plus `set_off_request` "must" outside the loan
-// when the loan is shorter than the period (no `mark_person_off` arm);
+// `add_person`, plus `set_off_request` "must" outside the loan (no `mark_person_off`
+// arm);
 // staffing requirements are EXACT counts; a requirement is lowered for one date through a
 // date exception (set_staffing_requirement_on_date), or lowered outright when it targets
 // that date alone; a skill-mix requirement is never lowered, and no repair creates one (a
@@ -617,14 +617,15 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
       nurses.push({ group: null, dateIds: short.filter((id) => spare(id) > n) });
   }
   if (nurses.length < 1 || nurses.length > MAX_BORROWED) return null;
+  // Her hard days off mark her as borrowed, so the Preview asks the lender. A loan over
+  // the whole period has none and would read as a new hire: none is offered (d582).
+  if (nurses.some((n) => n.dateIds.length === ids.length)) return null;
   const groups = [...new Set(nurses.flatMap((n) => (n.group === null ? [] : [n.group])))];
   const narrowed = narrowedCounts(ctx, groups);
   if (narrowed === null) return null;
 
   // Each nurse is here on the dates she covers and must be off on every other date: a free
-  // day between two short dates would be a hire the caps no longer bind. On a whole-period
-  // loan she has no days off at all, so `temporary: true` is what marks her as borrowed
-  // rather than a new hire.
+  // day between two short dates would be a hire the caps no longer bind.
   // On a date short on ONE shift, pin her to that shift. A hard sequence rule she would
   // inherit could clash with the pins.
   const pinnable = !ctx.state.cardsByKind.successions.some(
@@ -640,7 +641,7 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
       const name = names[index];
       const here = (id: string) => dateIds.includes(id);
       return [
-        { type: "add_person", name, groups: group ? [group] : [], temporary: true },
+        { type: "add_person", name, groups: group ? [group] : [] },
         ...runsOf(ctx, (id) => (here(id) ? null : "off")).map(
           ({ from, to }): AssistantCommandV1 => ({
             type: "set_off_request",
@@ -683,8 +684,8 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
       ? `${dated.length === 1 ? "That day is" : "Those days are"} short by up to ${gap} ${gap === 1 ? "nurse" : "nurses"} even with everyone free working.`
       : "More hands over the period remove the pressure the current staff cannot absorb.",
     operations,
-    // `temporary: true` makes the Preview ask the lender (assumptions.ts), for a
-    // whole-period loan too, so the agreement is always a host question.
+    // Her hard days off make the Preview ask the lender (assumptions.ts), so the
+    // agreement is always a host question.
     enforcedBy: "host_question",
     confirmationQuestion: `Has the lending ward or agency confirmed ${nurses.length === 1 ? "the nurse" : "the nurses"} for ${when}${skill}?`,
     needsFromUser: [
@@ -1101,14 +1102,12 @@ export function violatesSafetyFloor(
         case "add_person":
           if (!PLACEHOLDER.test(op.name) || ctx.staffIds.has(op.name) || ctx.groupIds.has(op.name))
             return invented;
-          // A temporary nurse, or one with hard days off, is a loan the Preview asks the lender about.
-          return op.groups.length > 0 && op.temporary !== true && !loaned.has(op.name)
-            ? skillGroup
-            : null;
+          // A nurse with hard days off is a loan the Preview asks the lender about.
+          return op.groups.length > 0 && !loaned.has(op.name) ? skillGroup : null;
         case "edit_person": {
           if (op.name !== String(op.personId)) return invented;
           // Joining a skill group asserts a qualification. Only a borrow the Preview asks the
-          // lender about (add_person, temporary) may put a nurse in one: keeping a group she is
+          // lender about (add_person with hard days off) may put a nurse in one: keeping a group she is
           // already in is no change, and a nurse added earlier in this change is in none yet.
           const joins = (groupId: string) =>
             countedGroup(ctx, groupId) &&
@@ -1259,10 +1258,9 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
       case "move_leave":
         return nurseAsked && real(op.personId);
       case "add_person":
-        // A placeholder (the floor), marked temporary, in real groups, and a skill group only with a host question.
+        // A placeholder (the floor), in real groups, and a skill group only with a host question.
         return (
           loan &&
-          op.temporary === true &&
           op.groups.every((g) => ctx.groupIds.has(g)) &&
           (op.groups.length === 0 || option.enforcedBy === "host_question")
         );

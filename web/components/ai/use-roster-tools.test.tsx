@@ -443,7 +443,6 @@ describe("the escalation ladder in the tools", () => {
       type: "add_person",
       name: "Mei",
       groups: ["Nights"],
-      temporary: true,
     });
   });
 
@@ -474,7 +473,7 @@ describe("the escalation ladder in the tools", () => {
       {},
     );
     expect(fixture.prepare.mock.calls[0][0].commands).toEqual([
-      { type: "add_person", name: "Mei", groups: ["Nights"], temporary: true },
+      { type: "add_person", name: "Mei", groups: ["Nights"] },
       {
         type: "set_off_request",
         personId: "Mei",

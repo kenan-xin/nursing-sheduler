@@ -12,7 +12,6 @@ people:
     - id: en3
     - id: Borrowed nurse 1
       history: []
-      temporary: true
   groups:
     - id: RN
       members:

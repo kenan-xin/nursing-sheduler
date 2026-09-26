@@ -699,7 +699,7 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         const isos = ctx.context.calendar.map((day) => day.iso);
         const needDates = new Set(ladder.borrow.map((n) => isos[n.dateIdx]));
         const commands: AssistantCommandV1[] = [
-          { type: "add_person", name, groups, temporary: true },
+          { type: "add_person", name, groups },
           // ponytail: one "must be off" per other date; merge into runs if proposals get long.
           ...isos
             .filter((iso) => !needDates.has(iso))
