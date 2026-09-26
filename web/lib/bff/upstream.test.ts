@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { proxyJsonRequest, relayJsonResponse } from "@/lib/bff/upstream";
+import { backendUnreachable, proxyJsonRequest, relayJsonResponse } from "@/lib/bff/upstream";
 
 // Post-header body-consumption failure (this ticket): `fetch()` resolving only
 // proves headers arrived — the body stream itself can still reset or truncate
@@ -37,6 +37,21 @@ async function expectBackendUnreachable(response: Response) {
   });
   expect(response.headers.get("cache-control")).toBe("no-store");
 }
+
+// The `path` handed to `backendUnreachable` is a log label, and it can carry a
+// caller-controlled segment (a URL-decoded `[id]`). A raw CR/LF there would forge
+// a second log line, so the sink must render it as escaped single-line content.
+describe("backendUnreachable — log forging", () => {
+  it("escapes a CR/LF in the label so it cannot forge a second log line", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    backendUnreachable(new Error("connection refused"), "/optimize/foo\r\nbar/xlsx");
+    const label = String(consoleError.mock.calls[0]?.[0] ?? "");
+    expect(label).not.toMatch(/[\r\n]/);
+    expect(label).toContain("foo");
+    expect(label).toContain("bar");
+    consoleError.mockRestore();
+  });
+});
 
 describe("relayJsonResponse — body-consumption failure", () => {
   it("maps an arrayBuffer() rejection to a code-first 502, not an uncaught throw", async () => {

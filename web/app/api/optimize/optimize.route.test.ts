@@ -343,6 +343,31 @@ describe("GET /api/optimize/{id}/xlsx", () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual(body);
   });
+
+  // The `[id]` route segment arrives URL-decoded, so a request for
+  // `/optimize/foo%0Abar/xlsx` hands the route an id containing a line break. The
+  // id is interpolated into the server-side log label; a raw CR/LF would forge a
+  // second log line.
+  it("escapes a CR/LF in the id so a job id cannot forge a second log line", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockUpstream(() => {
+      throw new Error("connection refused");
+    });
+
+    const response = await downloadXlsx(
+      new Request("http://localhost/api/optimize/opt_x/xlsx"),
+      params("foo\r\nbar"),
+    );
+
+    expect(response.status).toBe(502);
+    const label = String(consoleError.mock.calls[0]?.[0] ?? "");
+    // The decoded id lives in the label as escaped content only — no raw line
+    // break survives to forge a second line.
+    expect(label).not.toMatch(/[\r\n]/);
+    expect(label).toContain("foo");
+    expect(label).toContain("bar");
+    consoleError.mockRestore();
+  });
 });
 
 // The roster container is the B2/B3 authoritative structured view of a
