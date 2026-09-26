@@ -33,6 +33,7 @@ import {
 import { parseSubmissionDocument } from "@/lib/roster/context";
 import { typedIdKey } from "@/lib/roster/day-state";
 import type {
+  RosterBorrowedRow,
   RosterContext,
   RosterDayGrid,
   RosterDayState,
@@ -43,6 +44,7 @@ import {
   buildEquations,
   evaluateRequirementCell,
   type RequirementEquation,
+  withBorrowedPeople,
 } from "./requirements";
 
 /** One rule broken on one grid. */
@@ -158,8 +160,17 @@ export function dayCode(day: RosterDayState): string {
   return day.kind === "off" ? "OFF" : "LEAVE";
 }
 
-/** Build the rule model from the canonical document the roster was solved from. */
-export function buildRuleModel(document: CanonicalScenarioDocument): RuleModel {
+/**
+ * Build the rule model from the canonical document the roster was solved from. A
+ * borrowed (temporary) nurse counts by the groups on her row, exactly as the
+ * requirements projection does (`withBorrowedPeople`), so a shift she covers is not
+ * reported short (bead d88).
+ */
+export function buildRuleModel(
+  authored: CanonicalScenarioDocument,
+  borrowed: readonly Pick<RosterBorrowedRow, "groups">[] = [],
+): RuleModel {
+  const document = withBorrowedPeople(authored, borrowed);
   const items = document.shiftTypes.items;
   const resolver = buildScenarioResolutionContext({
     staff: document.people.items,
@@ -305,9 +316,10 @@ export function buildRuleModel(document: CanonicalScenarioDocument): RuleModel {
 /** The rule model of a roster's own submission, or null when it cannot be read. */
 export function deriveRuleModel(
   submission: Pick<RosterSubmission, "canonicalYaml">,
+  borrowed: readonly Pick<RosterBorrowedRow, "groups">[] = [],
 ): RuleModel | null {
   const parsed = parseSubmissionDocument(submission.canonicalYaml);
-  return parsed.ok ? buildRuleModel(parsed.document) : null;
+  return parsed.ok ? buildRuleModel(parsed.document, borrowed) : null;
 }
 
 function cellIndex(model: RuleModel, day: RosterDayState): number {

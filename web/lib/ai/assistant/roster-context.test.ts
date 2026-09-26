@@ -5,6 +5,7 @@ import {
   ashaContext,
   ashaDocument,
   ashaGrid,
+  borrowedCoverRosterDocument,
   overtimeContext,
   overtimeDocument,
   overtimeGrid,
@@ -88,6 +89,13 @@ describe("summarizeRoster", () => {
     if (typeof summary === "string") throw new Error(summary);
     expect(summary.dates).toEqual(["2026-10-08", "2026-10-09"]);
     expect(summary.rows).toEqual([{ person: "SN-Priya", days: ["N", "N"] }]);
+    expect(summary.rulesBrokenNow).toEqual([]);
+  });
+
+  it("counts a borrowed nurse's cover, so it is not reported as short (bead d88)", () => {
+    const summary = summarizeRoster(borrowedCoverRosterDocument(), {}, false);
+    if (typeof summary === "string") throw new Error(summary);
+    expect(summary.rows).toContainEqual({ person: "Mei", days: ["OFF", "OFF", "N"] });
     expect(summary.rulesBrokenNow).toEqual([]);
   });
 

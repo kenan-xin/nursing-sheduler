@@ -12,6 +12,7 @@ import { fixtureSubmission } from "@/lib/roster/test-fixtures";
 import { PREFERENCE_TYPE, type CanonicalScenarioDocument } from "@/lib/scenario";
 import {
   ashaRosterDocument,
+  borrowedCoverRosterDocument,
   borrowRosterDocument,
   overtimeContext,
   overtimeDocument,
@@ -250,6 +251,14 @@ const useShort = () => {
     candidateSource: { jobId: "job-1", candidateVersion: 1 },
   };
 };
+const useBorrowedCover = () => {
+  fixture.working = {
+    document: borrowedCoverRosterDocument(),
+    revision: 1,
+    candidateSource: { jobId: "job-1", candidateVersion: 1 },
+  };
+  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09" };
+};
 const idFor = (iso: string) =>
   generateDateItems({ start: "2026-10-07", end: "2026-10-14" }).find((item) => item.iso === iso)
     ?.id;
@@ -479,6 +488,20 @@ describe("the escalation ladder in the tools", () => {
     expect(card?.linked?.record).toBe("staff");
     expect(answer).toMatch(/nurse manager or nurse clinician/);
     expect(answer).not.toMatch(/next optimiser run/);
+  });
+
+  it("counts a borrowed nurse already on the roster instead of asking for a second one", async () => {
+    // Bead d88: Mei (borrowed, Nights) already covers 9 Oct and is off on 8 Oct, the
+    // only Nights nurse who can take Priya's night. Skipping her row reports 9 Oct
+    // short and escalates to step 3, asking for a SECOND temporary nurse.
+    useBorrowedCover();
+    const answer = (await tool("find_swap_partners").handler(
+      { person: "SN-Priya", dates: ["2026-10-08"], reason: "swap" },
+      {},
+    )) as { step: number; overtime: { partner: string }[]; temporary?: unknown };
+    expect(answer.step).toBe(2);
+    expect(answer.overtime.map((c) => c.partner)).toEqual(["Mei"]);
+    expect(answer.temporary).toBeUndefined();
   });
 
   it("cancels the linked proposal of a card it replaces", async () => {
