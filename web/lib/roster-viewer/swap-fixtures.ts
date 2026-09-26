@@ -236,6 +236,50 @@ export function borrowedCoverRosterDocument(): RosterDocument {
   };
 }
 
+/**
+ * The d88 borrowed-cover roster plus ONE ward-wide count rule whose person is `ALL`
+ * (bead d88 review). The g1p loan narrows the ward's hard count rules away from the
+ * borrowed nurse (`narrowedCounts`, `web/lib/ai/assistant/repair-options.ts`), so her
+ * row must not take them up: a minimum must not report her short, and a cap must not
+ * block her cover.
+ */
+export function borrowedWardCountRosterDocument(count: {
+  description: string;
+  countShiftTypes: string;
+  expression: string;
+  target: number;
+}): RosterDocument {
+  const document = borrowedCoverDocument();
+  return {
+    ...borrowedCoverRosterDocument(),
+    // Priya works three shifts (two of them nights), so a hard minimum of two still holds
+    // for her after she gives one night away: only the borrowed row is the rule's business.
+    solvedDays: [
+      [N, N, AM],
+      [AM, AM, AM],
+    ],
+    submission: fixtureSubmission(
+      {
+        ...document,
+        preferences: [
+          ...document.preferences,
+          {
+            type: PREFERENCE_TYPE.shiftCount,
+            description: count.description,
+            person: "ALL",
+            countDates: "ALL",
+            countShiftTypes: count.countShiftTypes,
+            expression: count.expression,
+            target: count.target,
+            weight: Infinity,
+          },
+        ],
+      },
+      [],
+    ),
+  };
+}
+
 // The Priya/Asha fixture (step 2): nobody can swap or cover Priya's nights on 8-9 Oct.
 //            7   8   9   10  11  12  13  14 Oct
 // SN-Priya   AM  N   N   OFF OFF OFF OFF OFF

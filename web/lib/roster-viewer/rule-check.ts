@@ -161,10 +161,13 @@ export function dayCode(day: RosterDayState): string {
 }
 
 /**
- * Build the rule model from the canonical document the roster was solved from. A
- * borrowed (temporary) nurse counts by the groups on her row, exactly as the
- * requirements projection does (`withBorrowedPeople`), so a shift she covers is not
- * reported short (bead d88).
+ * Build the rule model from the canonical document the roster was solved from.
+ *
+ * A borrowed (temporary) nurse extends the person axis, so the staffing projection counts a
+ * shift she covers as staffed (bead d88) — and only that projection: a succession, request or
+ * count rule is the ward's own staff's rule, which the g1p loan narrows away from her
+ * (`narrowedCounts`, `web/lib/ai/assistant/repair-options.ts`). So the staffing equations see
+ * her row and the rules' subjects resolve against the submitted people alone.
  */
 export function buildRuleModel(
   authored: CanonicalScenarioDocument,
@@ -173,8 +176,8 @@ export function buildRuleModel(
   const document = withBorrowedPeople(authored, borrowed);
   const items = document.shiftTypes.items;
   const resolver = buildScenarioResolutionContext({
-    staff: document.people.items,
-    staffGroups: document.people.groups ?? [],
+    staff: authored.people.items,
+    staffGroups: authored.people.groups ?? [],
     shifts: items,
     shiftGroups: document.shiftTypes.groups ?? [],
     rangeStart: document.dates.range.startDate,
