@@ -395,6 +395,19 @@ describe("the escalation ladder in the tools", () => {
     expect(fixture.prepare).not.toHaveBeenCalled();
   });
 
+  it("refuses a temporary nurse whose groups name a staff group the roster does not have (bead 6yn)", async () => {
+    useBorrow();
+    const answer = await tool("prepare_borrowed_cover").handler(
+      { ...BORROW_MEI, groups: ["Ward6"], summary: "Borrow." },
+      {},
+    );
+    expect(answer).toMatch(/Ward6/);
+    expect(answer).toMatch(/no card was shown/);
+    expect(answer).toMatch(/Nights/);
+    expect(fixture.prepare).not.toHaveBeenCalled();
+    expect(useAssistantStore.getState().activeRosterChange).toBeNull();
+  });
+
   it("prepares step 3 with shipped ops and the skill group the night needs", async () => {
     useBorrow();
     const found = (await tool("find_swap_partners").handler(

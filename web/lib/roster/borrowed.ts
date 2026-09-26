@@ -7,6 +7,7 @@
 // autosave revision) and "set it back" clears it, as for a solved cell.
 
 import { checkExactFields } from "./container";
+import { parseSubmissionDocument } from "./context";
 import { isRosterDayState, isTypedId, typedIdKey } from "./day-state";
 import { freezeDayState } from "./immutable";
 import { deriveCurrentDays } from "./overlay";
@@ -16,6 +17,7 @@ import type {
   RosterContextPerson,
   RosterDayGrid,
   RosterDocument,
+  RosterSubmission,
 } from "./types";
 
 /** Solved rows then borrowed rows: the base every overlay entry is measured against. */
@@ -52,6 +54,26 @@ export function withBorrowedRows(
   rows: readonly RosterBorrowedRow[],
 ): RosterDocument {
   return rows.length === 0 ? document : { ...document, borrowed: [...document.borrowed, ...rows] };
+}
+
+/**
+ * The staff-group ids the roster's OWN scenario declares, or `null` when its
+ * submission cannot be read (bead nursing-sheduler-6yn).
+ *
+ * A borrowed row's `groups` must be a subset of these. The staffing model
+ * (`lib/roster-viewer/requirements.ts`, `withBorrowedPeople`) adds her to exactly
+ * the groups the SUBMITTED scenario has, so an id it does not carry is silently
+ * ignored: she is counted nowhere and reads as unqualified, while her row and her
+ * shifts look ordinary. Group ids survive the Optimize submission's people-only
+ * anonymization (`people: true, groups: false`), so the submission is the
+ * authority — not the live scenario, which may have moved on since the solve.
+ */
+export function scenarioStaffGroupIds(
+  submission: Pick<RosterSubmission, "canonicalYaml">,
+): ReadonlySet<string> | null {
+  const parsed = parseSubmissionDocument(submission.canonicalYaml);
+  if (!parsed.ok) return null;
+  return new Set((parsed.document.people.groups ?? []).map((group) => String(group.id)));
 }
 
 const ROW_FIELDS = ["id", "groups", "days"] as const;
