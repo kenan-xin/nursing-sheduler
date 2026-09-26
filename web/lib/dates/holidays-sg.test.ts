@@ -63,18 +63,29 @@ describe("classification", () => {
 });
 
 describe("supported window (FR-DC-29/30/31)", () => {
-  it("derives the window from the dataset min/max", () => {
+  it("derives the window as whole calendar years of the dataset min/max", () => {
+    // data.gov.sg publishes whole years, so the window spans 1 January of the
+    // first listed year to 31 December of the last — not the first/last holiday.
+    const firstYear = SINGAPORE_HOLIDAYS[0].date.slice(0, 4);
+    const lastYear = SINGAPORE_HOLIDAYS[SINGAPORE_HOLIDAYS.length - 1].date.slice(0, 4);
     const supported = getSupportedRange();
     expect(supported).toEqual({
-      start: SINGAPORE_HOLIDAYS[0].date,
-      end: SINGAPORE_HOLIDAYS[SINGAPORE_HOLIDAYS.length - 1].date,
+      start: `${firstYear}-01-01`,
+      end: `${lastYear}-12-31`,
     });
     expect(getSupportLabel()).toBe(`${supported!.start} to ${supported!.end}`);
+    expect(getSupportLabel()).toBe("2024-01-01 to 2027-12-31");
+  });
+
+  it("supports the days after the last holiday of the final year", () => {
+    // Last listed entry is 2027-12-25; the rest of December is known non-holiday.
+    expect(isRangeSupported({ start: "2027-12-01", end: "2027-12-31" })).toBe(true);
   });
 
   it("range support uses lexicographic ISO comparison and requires both endpoints", () => {
     expect(isRangeSupported({ start: "2026-07-01", end: "2026-07-31" })).toBe(true);
     expect(isRangeSupported({ start: "2023-01-01", end: "2026-07-31" })).toBe(false); // before window
+    expect(isRangeSupported({ start: "2026-07-01", end: "2028-01-01" })).toBe(false); // after window
     expect(isRangeSupported({ start: "2026-07-01", end: "" })).toBe(false);
   });
 
