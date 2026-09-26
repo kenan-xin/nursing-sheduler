@@ -48,11 +48,28 @@ export type DeriveContextResult =
   | { ok: false; reason: string };
 
 /**
+ * Drop a legacy top-level `country` from a STORED submission before the strict
+ * producer parse (v1 sync X9). A roster captured by a pre-X9 build still carries
+ * the field; the strict model no longer has it and web no longer produces it, so
+ * the stored-submission boundary accepts and drops it exactly as the import
+ * boundary does. The producer schema itself stays strict for every new document.
+ * A non-object parse result is returned untouched so the schema still reports it.
+ */
+function dropLegacyCountry(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
+  if (!("country" in raw)) return raw;
+  const rest = { ...(raw as Record<string, unknown>) };
+  delete rest.country;
+  return rest;
+}
+
+/**
  * Parse the exact submitted YAML back into its canonical document. The submission
  * is the strict producer document the backend accepted, so it is validated with
  * the same strict producer schema rather than the lenient import path — a
  * submission that no longer parses strictly is a corrupt document, not something
- * to be leniently coerced.
+ * to be leniently coerced (a legacy top-level `country` is the one accepted-and-
+ * dropped exception).
  */
 export function parseSubmissionDocument(
   canonicalYaml: string,
@@ -69,7 +86,7 @@ export function parseSubmissionDocument(
       reason: `submission.canonicalYaml is not parseable YAML: ${String(error)}`,
     };
   }
-  const parsed = producerScenarioSchema.safeParse(raw);
+  const parsed = producerScenarioSchema.safeParse(dropLegacyCountry(raw));
   if (!parsed.success) {
     const first = parsed.error.issues[0];
     const path = first?.path.join(".") ?? "";
