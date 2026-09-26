@@ -3,10 +3,9 @@ language: TypeScript
 severity: error
 message: >-
   Elevation is authored here instead of aliased. Every shadow in the system goes through one
-  of the six canonical `--sh-*` tokens, published as `shadow-1/2/3/edge/well/side` plus the
-  `shadow-dialog` alias of `--sh-3`. An arbitrary `shadow-[...]` is
-  rejected EVEN WHEN its value is byte-identical to a token, because a duplicate stops
-  tracking the value it was copied from the moment either is retuned.
+  of the six canonical `--sh-*` tokens, published as `shadow-1/2/3/edge/well/side`. An
+  arbitrary `shadow-[...]` is rejected EVEN WHEN its value is byte-identical to a token,
+  because a duplicate stops tracking the value it was copied from the moment either is retuned.
 note: >-
   Migrated from the arbitrary-elevation and untokened-suffix checks in the TSX half of
   `app/v2-style-contract.test.ts` and the `components/ui/**` shadow sweep in

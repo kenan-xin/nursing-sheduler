@@ -581,8 +581,6 @@ if (FOUNDATION_SELECTED) {
       // The directional exception. The runtime and Tailwind namespace names differ
       // on purpose, so the emitted theme contains no self-reference (T7).
       ["--shadow-side", "--sh-side"],
-      // Semantic alias of the modal layer, carrying no independent value.
-      ["--shadow-dialog", "--sh-3"],
     ])("%s: var(%s)", (alias, runtime) => {
       expect(globals).toContain(`${alias}: var(${runtime});`);
     });
@@ -593,7 +591,6 @@ if (FOUNDATION_SELECTED) {
         "--shadow-1",
         "--shadow-2",
         "--shadow-3",
-        "--shadow-dialog",
         "--shadow-edge",
         "--shadow-side",
         "--shadow-well",
