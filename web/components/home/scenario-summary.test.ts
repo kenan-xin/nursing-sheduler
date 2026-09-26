@@ -57,6 +57,34 @@ describe("computeScenarioSummary — date-range readiness", () => {
   });
 });
 
+describe("computeScenarioSummary — enabled rule count (Home 'RULES ON')", () => {
+  it("counts the always-on built-in plus every non-disabled card, not the raw total", () => {
+    const base = createEmptyScenarioUiState();
+    const s = computeScenarioSummary({
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        requirements: [
+          { uid: "c1", shiftType: "AM", requiredNumPeople: 1, weight: 1 },
+          { uid: "c2", shiftType: "AM", requiredNumPeople: 2, weight: 1, disabled: true },
+          { uid: "c3", shiftType: "PM", requiredNumPeople: 1, weight: 1, disabled: true },
+        ],
+      },
+    });
+    // The prototype's "RULES ON" is the count of ENABLED rules, not the raw card
+    // total. Three cards exist and one is enabled; the always-on built-in
+    // structural rule ("at most one shift per day") is enabled by construction.
+    expect(s.rulesTotal).toBe(3);
+    expect(s.rulesEnabled).toBe(2);
+  });
+
+  it("reports just the built-in on an empty scenario", () => {
+    const s = computeScenarioSummary(createEmptyScenarioUiState());
+    expect(s.rulesTotal).toBe(0);
+    expect(s.rulesEnabled).toBe(1);
+  });
+});
+
 describe("computeScenarioSummary — prerequisites vs Generate completion", () => {
   it("reports all prerequisites met without asserting Generate completion", () => {
     const s = computeScenarioSummary(allPrerequisites());

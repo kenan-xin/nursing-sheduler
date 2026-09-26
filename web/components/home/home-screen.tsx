@@ -32,7 +32,9 @@ export function HomeScreen() {
     { value: String(summary.seniorsCount), label: "Seniors" },
     { value: String(summary.shiftTypesCount), label: "Shifts" },
     { value: String(summary.durationDays), label: "Roster Days" },
-    { value: String(summary.rulesTotal), label: "Rules" },
+    // Prototype D3: "RULES ON" counts ENABLED rules, not the raw card total
+    // (Nurse Scheduling v2.dc.html:1382). Rendered uppercase by the strip.
+    { value: String(summary.rulesEnabled), label: "Rules On" },
   ];
 
   return (
