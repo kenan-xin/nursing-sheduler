@@ -896,6 +896,12 @@ function coversOn(model: RequirementModel, iso: string): string[] {
     .sort();
 }
 
+/** The skill-mix floors one equation states on a date, as `label>=need`, in authored order. */
+function floorList(model: RequirementModel, dateIdx: number): string[] {
+  const equation = model.equations.find((entry) => entry.dateIndices.has(dateIdx));
+  return (equation?.skillMix ?? []).map((floor) => `${floor.label}>=${floor.minNumPeople}`);
+}
+
 describe("temporary cover (d582)", () => {
   it("requirement model counts a temporary cover", () => {
     const state = coveredWard([wardCard("night", "N", 2)], [coverOnN()]);
@@ -1039,6 +1045,48 @@ describe("temporary cover (d582)", () => {
     // `groupId` is what `mixCredit` is asked about, so a scalar group selector
     // has to be readable as a real group id.
     expect(authored.skillMix[0].groupId).toBe("RN");
+  });
+
+  it("rebuilds a floor the cover zeroed out of the submitted copy", () => {
+    // `applyCovers` DROPS a floor the cover lowered to 0 from the date copy it
+    // submits — the copy below carries only HCA. So the submitted positions no
+    // longer line up with the authored ones, and a ledger that recorded only an
+    // index would credit the wrong floor and lose RN entirely: exactly what this
+    // pins. The ledger records the AUTHORED floor instead.
+    const state = coveredWard(
+      [
+        wardCard("night", "N", 3, {
+          skillMix: [
+            { people: "RN", minNumPeople: 1 },
+            { people: "HCA", minNumPeople: 1 },
+          ],
+        }),
+      ],
+      [{ ...coverOnN(), groups: ["RN"] }],
+    );
+    const applied = applyCovers(state);
+    // `pref` 2, not 1: the split emits the remainder-dates card first and the
+    // covered date's copy second, so the copy is the second submitted requirement.
+    expect(applied.decrements).toEqual([
+      {
+        pref: 2,
+        iso: NOV03,
+        required: 1,
+        mix: [{ entryIdx: 0, people: "RN", authored: 1, by: 1 }],
+      },
+    ]);
+
+    // Take her out: the ledger alone must give back BOTH authored floors at
+    // their authored values — RN>=1 (the one she zeroed) and HCA>=1 (untouched).
+    const removed = deriveRequirementModel(
+      { canonicalYaml: serializeCanonicalDocument(toCanonicalScenarioDocument(applied.state)) },
+      { decrements: applied.decrements, live: [] },
+    );
+    expect(floorList(removed, 2)).toEqual(["RN>=1", "HCA>=1"]);
+
+    // With her still booked the ward need is what the solver saw: her shift
+    // satisfies the RN floor (so the ward needs nobody for it), HCA untouched.
+    expect(floorList(solvedModel(state), 2)).toEqual(["RN>=0", "HCA>=1"]);
   });
 });
 

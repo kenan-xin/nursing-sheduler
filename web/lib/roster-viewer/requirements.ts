@@ -43,6 +43,7 @@ import {
   mixCredit,
   wardNeed,
   type CoverDecrement,
+  type CoverMixDecrement,
   type CoverTarget,
 } from "@/lib/scenario/temporary-cover";
 // DIRECT LEAF IMPORTS, not the `@/lib/roster` barrel (see `tallies.ts`).
@@ -524,6 +525,58 @@ export function buildEquations(
 }
 
 /**
+ * The AUTHORED skill-mix floors, rebuilt from a date copy the cover lowered.
+ *
+ * `applyCovers` submits only the floors that survive a cover: a floor it zeroes
+ * out is DROPPED from the copy (a 0 floor asks the solver for nothing), so the
+ * copy's positions no longer line up with the authored card's and cannot name the
+ * floor that went missing. The ledger carries the authored floor for exactly that
+ * reason — `entryIdx` names the authored position, `people`/`authored` the floor
+ * itself. A marked floor the copy still holds (`by < authored`) is read off the
+ * copy as usual; only a DROPPED one (`by === authored`, since every authored floor
+ * is at least 1) has to be resolved from the ledger.
+ *
+ * Only a date copy ever carries mix marks — `lowerPart` writes them with the split
+ * it makes for the covered date — so the copy's floors plus the dropped ones ARE
+ * the authored list, in authored order.
+ */
+function rebuildAuthoredFloors(
+  submitted: readonly RequirementMixFloor[],
+  marks: readonly CoverMixDecrement[],
+  equation: RequirementEquation,
+  resolver: ReturnType<typeof buildScenarioResolutionContext>,
+  staffGroupIds: ReadonlySet<string>,
+): RequirementMixFloor[] {
+  const byIndex = new Map(marks.map((mark) => [mark.entryIdx, mark]));
+  const dropped = marks.filter((mark) => mark.by >= mark.authored).length;
+  const floors: RequirementMixFloor[] = [];
+  let at = 0;
+  for (let entryIdx = 0; entryIdx < submitted.length + dropped; entryIdx += 1) {
+    const mark = byIndex.get(entryIdx);
+    if (mark === undefined || mark.by < mark.authored) {
+      const kept = submitted[at];
+      at += 1;
+      if (kept === undefined) continue;
+      floors.push(mark === undefined ? kept : { ...kept, minNumPeople: mark.authored });
+      continue;
+    }
+    const members = resolver.resolvePeople(mark.people);
+    if (!members.resolved) continue;
+    const qualified = equation.qualifiedPeople;
+    floors.push({
+      label: selectorLabel(mark.people),
+      people:
+        qualified === null
+          ? members.values
+          : new Set([...members.values].filter((person) => qualified.has(person))),
+      minNumPeople: mark.authored,
+      groupId: mixGroupId(mark.people, staffGroupIds),
+    });
+  }
+  return floors;
+}
+
+/**
  * The authored requirement, then the ward need (spec §4).
  *
  * The ledger is undone FIRST: the submission is the solver form, so a solved
@@ -560,7 +613,7 @@ function applyCoversToEquations(
   return equations.map((equation) => {
     const requiredByDate = new Map(equation.requiredByDate);
     const coverByDate = new Map<number, number>();
-    const skillMix = equation.skillMix.map((floor) => ({ ...floor }));
+    let skillMix = equation.skillMix.map((floor) => ({ ...floor }));
     let required = equation.required;
     let preferred = equation.preferred;
     const dates = [...equation.dateIndices].sort((a, b) => a - b);
@@ -571,6 +624,7 @@ function applyCoversToEquations(
     };
 
     // 1. Undo the ledger: the authored requirement.
+    const mixMarks: CoverMixDecrement[] = [];
     for (const mark of cover.decrements) {
       if (mark.pref !== equation.preferenceIndex) continue;
       const day = resolver.resolveDates(mark.iso);
@@ -584,19 +638,10 @@ function applyCoversToEquations(
       // entry for the date means the lowering was written as an exception instead.
       if (dates.length === 1 && !equation.requiredByDate.has(dates[0])) required += mark.required;
       if (mark.preferred !== undefined) preferred = (preferred ?? 0) + mark.preferred;
-      // KNOWN LIMITATION (d582). `mark.mix` indexes the AUTHORED floor list, but
-      // `applyCovers` DROPS a floor the cover lowered to 0 from the date copy it
-      // submits — so when a cover zeroes one floor of a multi-floor card while
-      // another floor survives, the copy's positions no longer line up with the
-      // authored indices and there is no signal left to tell the two apart (both
-      // readings satisfy the same `[entryIdx, by]` ledger). The ledger needs to
-      // carry the authored value or the floor's group for this to be exact; until
-      // then a missing position is left at its submitted value rather than
-      // guessed at, because inventing a floor is the one thing this model refuses.
-      for (const [entryIdx, by] of mark.mix ?? []) {
-        const floor = skillMix[entryIdx];
-        if (floor !== undefined) floor.minNumPeople += by;
-      }
+      if (mark.mix !== undefined) mixMarks.push(...mark.mix);
+    }
+    if (mixMarks.length > 0) {
+      skillMix = rebuildAuthoredFloors(skillMix, mixMarks, equation, resolver, staffGroupIds);
     }
 
     // 2. The live credit, per date.
