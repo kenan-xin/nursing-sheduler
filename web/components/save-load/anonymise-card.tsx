@@ -130,7 +130,9 @@ export function AnonymiseCard() {
           <FaUserSecret aria-hidden />
           Download anonymised
         </Button>
-        {issues ? <ScenarioIssuesList issues={issues} /> : null}
+        {issues ? (
+          <ScenarioIssuesList issues={issues} action="this scenario can be exported" />
+        ) : null}
       </div>
     </section>
   );

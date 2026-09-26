@@ -1,7 +1,9 @@
 // Shared V-issues renderer (T17a-4). Both the Scenario-file card and the
 // read-only YAML preview surface the exact same `ScenarioValidationIssue[]`
 // from `prepareExport` on an invalid draft — this is the one place that list
-// is rendered, so the two surfaces cannot drift in wording or styling.
+// is rendered, so the two surfaces cannot drift in wording or styling. The
+// `action` prop keeps that single renderer while letting a non-save caller
+// (the anonymised export) name what its issues actually block.
 //
 // R7 v2: an inset ISLAND inside an L1 card, so it takes `--r-ctl` (DESIGN.md §5,
 // "inner bordered boxes") rather than staying square. Heading and list move onto
@@ -16,7 +18,17 @@
 import type { ScenarioValidationIssue } from "@/lib/scenario";
 import { FaTriangleExclamation } from "@/components/icons";
 
-export function ScenarioIssuesList({ issues }: { issues: ScenarioValidationIssue[] }) {
+export function ScenarioIssuesList({
+  issues,
+  action = "this scenario can be saved",
+}: {
+  issues: ScenarioValidationIssue[];
+  /**
+   * Completes "N issues must be fixed before ___." Callers whose action is not a
+   * save (e.g. the anonymised export) name what the issues actually block.
+   */
+  action?: string;
+}) {
   return (
     <div
       className="rounded-control border border-error bg-errortint p-3 text-meta text-errorink"
@@ -24,8 +36,7 @@ export function ScenarioIssuesList({ issues }: { issues: ScenarioValidationIssue
     >
       <div className="mb-1.5 flex items-center gap-2 font-semibold">
         <FaTriangleExclamation className="size-3.5 shrink-0 text-error" aria-hidden />
-        {issues.length} issue{issues.length === 1 ? "" : "s"} must be fixed before this scenario can
-        be saved.
+        {issues.length} issue{issues.length === 1 ? "" : "s"} must be fixed before {action}.
       </div>
       <ul className="list-disc space-y-1 pl-5">
         {issues.map((issue, index) => (

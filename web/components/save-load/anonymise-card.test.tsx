@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { prepareScenarioLoad, serializeScenario } from "@/lib/scenario";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
-import { loadScenario } from "@/lib/store";
+import { loadScenario, scenarioCommands } from "@/lib/store";
 import { AnonymiseCard } from "./anonymise-card";
 import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
@@ -56,5 +56,24 @@ describe("AnonymiseCard — scatter fallback warning (FR-SL-38 / V20 / AC-SL-24)
     fireEvent.click(screen.getByTestId("anonymise-toggle-scatter"));
 
     expect(screen.queryByTestId("anonymise-scatter-fallback-warning")).not.toBeInTheDocument();
+  });
+});
+
+describe("AnonymiseCard — a blocked download reads as an export, not a save", () => {
+  // An empty range makes Scatter's source validation fail, so the shared
+  // blocking-issue list renders. Nothing is being saved here, so the heading
+  // must name the export (the card's own action), not a save.
+  it("labels the blocking-issue list with the export clause", async () => {
+    await seedValidScenario();
+    await act(async () => {
+      await scenarioCommands.mutate({ rangeStart: "", rangeEnd: "" });
+    });
+    render(<AnonymiseCard />);
+    fireEvent.click(screen.getByTestId("anonymise-toggle-scatter"));
+    fireEvent.click(screen.getByTestId("anonymise-download-button"));
+
+    const list = await screen.findByTestId("scenario-export-issues");
+    expect(list).toHaveTextContent("must be fixed before this scenario can be exported.");
+    expect(list).not.toHaveTextContent("can be saved");
   });
 });

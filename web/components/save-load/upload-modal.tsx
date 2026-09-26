@@ -62,7 +62,15 @@ export function UploadModal({ open, onOpenChange, onFile, onLoadSample }: Upload
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
     if (!validateFile(file)) return;
-    const text = await readFileText(file);
+    let text: string;
+    try {
+      text = await readFileText(file);
+    } catch {
+      // `File.text()` can reject (unreadable/vanished file). Without this the
+      // rejection is unobserved and the drop silently does nothing.
+      alert("Could not read the file. Please try again.");
+      return;
+    }
     onFile(text);
   };
 
