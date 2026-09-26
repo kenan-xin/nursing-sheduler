@@ -14,6 +14,7 @@ import {
   buildRuleModel,
   checkRosterChange,
   deriveRuleModel,
+  listIssues,
   plainDate,
   type LeaveMove,
 } from "./rule-check";
@@ -294,6 +295,57 @@ describe("what it cannot check", () => {
     expect(check([pairing], [idle(), idle(), idle()], [idle(), idle(), idle()]).unchecked).toEqual([
       "Ana and Ben never together",
     ]);
+  });
+});
+
+describe("a borrowed nurse and the ward's own rules", () => {
+  // The ward's rules stay the ward's. The g1p loan narrows its hard count rules away from
+  // the borrowed nurse (`narrowedCounts`, lib/ai/assistant/repair-options.ts), so her row
+  // must not take them up (bead d88 review). Ana, Ben and Cy each work enough shifts; row 3
+  // is the borrowed nurse's, one night — and the only Nights nurse on 9 Oct.
+  const AT_LEAST_TWO = (person: string): CanonicalPreference =>
+    ({
+      type: PREFERENCE_TYPE.shiftCount,
+      description: "At least two shifts",
+      person,
+      countDates: "ALL",
+      countShiftTypes: "ALL",
+      expression: "x >= T",
+      target: 2,
+      weight: Infinity,
+    }) as CanonicalPreference;
+  const NIGHTS_ONE = {
+    type: PREFERENCE_TYPE.shiftTypeRequirement,
+    description: "One night nurse",
+    shiftType: "N",
+    requiredNumPeople: 1,
+    qualifiedPeople: "Nights",
+    weight: -1,
+  } as CanonicalPreference;
+  const grid = [
+    [s("N"), s("N"), OFF],
+    [s("AM"), s("AM"), s("AM")],
+    [s("AM"), s("AM"), s("AM")],
+    [OFF, OFF, s("N")],
+  ];
+  const borrowed = [{ groups: ["Nights"] }];
+  const issuesFor = (person: string) => {
+    const document = doc([NIGHTS_ONE, AT_LEAST_TWO(person)]);
+    const context = contextFor(document);
+    return listIssues(
+      buildRuleModel(document, borrowed),
+      { ...context, people: [...context.people, { id: "Mei" }] },
+      grid,
+      { people: [0, 1, 2, 3], dates: [0, 1, 2] },
+    );
+  };
+
+  it("does not judge her by a ward-wide minimum, while her cover still staffs the night", () => {
+    expect(issuesFor("ALL")).toEqual([]);
+  });
+
+  it("does not judge her by a minimum scoped to a group she is in", () => {
+    expect(issuesFor("Nights")).toEqual([]);
   });
 });
 

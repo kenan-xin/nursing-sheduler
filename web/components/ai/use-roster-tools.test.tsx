@@ -13,6 +13,8 @@ import { PREFERENCE_TYPE, type CanonicalScenarioDocument } from "@/lib/scenario"
 import {
   ashaRosterDocument,
   borrowDocument,
+  borrowedCoverRosterDocument,
+  borrowedWardCountRosterDocument,
   borrowRosterDocument,
   overtimeContext,
   overtimeDocument,
@@ -250,6 +252,23 @@ const useShort = () => {
     revision: 1,
     candidateSource: { jobId: "job-1", candidateVersion: 1 },
   };
+};
+const useBorrowedCover = () => {
+  fixture.working = {
+    document: borrowedCoverRosterDocument(),
+    revision: 1,
+    candidateSource: { jobId: "job-1", candidateVersion: 1 },
+  };
+  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09" };
+};
+/** The d88 borrowed cover plus one ward-wide hard count rule (bead d88 review). */
+const useBorrowedWardCount = (count: Parameters<typeof borrowedWardCountRosterDocument>[0]) => {
+  fixture.working = {
+    document: borrowedWardCountRosterDocument(count),
+    revision: 1,
+    candidateSource: { jobId: "job-1", candidateVersion: 1 },
+  };
+  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09" };
 };
 const idFor = (iso: string) =>
   generateDateItems({ start: "2026-10-07", end: "2026-10-14" }).find((item) => item.iso === iso)
@@ -544,6 +563,56 @@ describe("the escalation ladder in the tools", () => {
     expect(card?.linked?.record).toBe("staff");
     expect(answer).toMatch(/nurse manager or nurse clinician/);
     expect(answer).not.toMatch(/next optimiser run/);
+  });
+
+  it("counts a borrowed nurse already on the roster instead of asking for a second one", async () => {
+    // Bead d88: Mei (borrowed, Nights) already covers 9 Oct and is off on 8 Oct, the
+    // only Nights nurse who can take Priya's night. Skipping her row reports 9 Oct
+    // short and escalates to step 3, asking for a SECOND temporary nurse.
+    useBorrowedCover();
+    const answer = (await tool("find_swap_partners").handler(
+      { person: "SN-Priya", dates: ["2026-10-08"], reason: "swap" },
+      {},
+    )) as { step: number; overtime: { partner: string }[]; temporary?: unknown };
+    expect(answer.step).toBe(2);
+    expect(answer.overtime.map((c) => c.partner)).toEqual(["Mei"]);
+    expect(answer.temporary).toBeUndefined();
+  });
+
+  it("still offers the borrowed nurse under a ward-wide hard count minimum (bead d88 review)", async () => {
+    // The ward's own "each nurse works at least N shifts" is not the borrowed nurse's rule
+    // (g1p `narrowedCounts`), so it must not hand her spare capacity she does not have.
+    useBorrowedWardCount({
+      description: "Every nurse works at least two shifts",
+      countShiftTypes: "ALL",
+      expression: "x >= T",
+      target: 2,
+    });
+    const answer = (await tool("find_swap_partners").handler(
+      { person: "SN-Priya", dates: ["2026-10-08"], reason: "swap" },
+      {},
+    )) as { step: number; overtime: { partner: string }[]; temporary?: unknown };
+    expect(answer.step).toBe(2);
+    expect(answer.overtime.map((c) => c.partner)).toEqual(["Mei"]);
+    expect(answer.temporary).toBeUndefined();
+  });
+
+  it("still offers the borrowed nurse under a ward-wide hard count cap (bead d88 review)", async () => {
+    // Priya is over the cap before the swap and under it after; only a rule that wrongly
+    // binds the borrowed row would block her taking the night.
+    useBorrowedWardCount({
+      description: "Every nurse works at most one night",
+      countShiftTypes: "N",
+      expression: "x <= T",
+      target: 1,
+    });
+    const answer = (await tool("find_swap_partners").handler(
+      { person: "SN-Priya", dates: ["2026-10-08"], reason: "swap" },
+      {},
+    )) as { step: number; overtime: { partner: string }[]; temporary?: unknown };
+    expect(answer.step).toBe(2);
+    expect(answer.overtime.map((c) => c.partner)).toEqual(["Mei"]);
+    expect(answer.temporary).toBeUndefined();
   });
 
   it("cancels the linked proposal of a card it replaces", async () => {
