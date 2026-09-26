@@ -961,6 +961,28 @@ function StaffingEditor({
             placeholder="—"
             onChange={(event) => onRequiredChange(numberDraft(event.target.value))}
           />
+          {staffing.baseline?.requiredNumPeopleOverrides?.length ? (
+            // Read-only: the inline Min. nurses field only owns the rule's base
+            // count, so per-date exceptions are edited on the requirement card, not
+            // here. Same `14 Oct: 1 · 24 Oct: 3` summary the Requirements card list
+            // and this grid's own read-only staffing row (6rn) use.
+            <p className="text-meta text-ink3" data-testid={`${prefix}-staffing-exceptions`}>
+              Exceptions:{" "}
+              <span className="font-mono font-semibold text-ink2">
+                {staffing.baseline.requiredNumPeopleOverrides
+                  .map(([iso, n]) => `${formatShortDate(iso)}: ${n}`)
+                  .join(" · ")}
+              </span>
+              {" — "}
+              <GuardedLink
+                href={REQUIREMENTS_HREF}
+                data-testid={`${prefix}-staffing-exceptions-link`}
+                className="font-semibold text-brandink hover:underline"
+              >
+                edit in Requirements
+              </GuardedLink>
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1.5">
