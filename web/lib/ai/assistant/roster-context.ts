@@ -91,8 +91,9 @@ export function summarizeRoster(
   if (dateIdxs.length === 0) {
     return `No roster dates fall in that range. This roster runs from ${first} to ${last}.`;
   }
-  // Rows cover the whole axis, borrowed (temporary) nurses included. Rule checks
-  // stay on the submitted people: the rules know nothing about a borrowed nurse.
+  // Rows cover the whole axis, borrowed (temporary) nurses included. The staffing
+  // check counts her by the groups on her row, so a shift she covers is not reported
+  // short; the succession, count and request checks stay on the submitted people.
   const axis = rosterAxisContext(document);
   const allDays = rosterCurrentDays(document);
   let people = axis.people.map((_person, idx) => idx);
@@ -105,13 +106,12 @@ export function summarizeRoster(
     }
     people = [...new Set(found)];
   }
-  const days = allDays.slice(0, context.people.length);
-  const model = deriveRuleModel(document.submission);
+  const model = deriveRuleModel(document.submission, document.borrowed);
   // ponytail: the whole range goes back in one answer; a ward period is about 4-6 weeks.
   const rulesBrokenNow =
     model === null
       ? []
-      : listIssues(model, context, days, {
+      : listIssues(model, axis, allDays, {
           people: context.people.map((_p, i) => i),
           dates: dateIdxs,
         })
