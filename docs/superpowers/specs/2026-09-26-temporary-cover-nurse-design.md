@@ -1,318 +1,276 @@
-# Temporary cover nurse: a first-class concept
+# Temporary cover nurse: a staffing credit, not a solver person
 
-Confidence: 7.4/10
+Confidence: 7.6/10
 
-The solver side is well grounded. Core already renders OFF as a blank Excel cell (`core/nurse_scheduling/exporter.py:471-481`, asserted at `:504`). The compile step emits only existing preference shapes. So `core/` needs no change. The user's answers removed the compatibility work and the open design choices. Two things still lower the score. First, the form-driven Apply (§6) is a new mechanism: iwo only opens the screen and highlights after a background write. Second, the pending-row path reuses g1p code in a new role.
+The model is small, and every piece rests on read code. The solver counts per requirement equation (`core/nurse_scheduling/preference_types.py:81-124`). A per-date count already exists (`requiredNumPeopleOverrides`, `:79-82`). All web staffing reads go through a few seams: `requiredOn` (`web/lib/rules/shortfalls.ts:265`), `buildEquations` (`web/lib/roster-viewer/requirements.ts:302`) and the Excel restoration boundary (`web/lib/optimize/restore-people-ids-in-xlsx.ts:227-270`). Three things lower the score:
+- A per-date override is per **card**, not per equation (`preference_types.py:82`). Multi-shift cards therefore need a split at submission (F1).
+- Skill-mix floors and `preferredNumPeople` have no per-date form, so a cover cannot lower them (F1, F2, open question).
+- The un-decrement ledger for solved rosters (§4) is new bookkeeping.
 
-**Beads:** `nursing-sheduler-d582` is this spec. It supersedes the intent of the plan `plans/2026-09-26-d582-remove-borrowed-rows.md`. Related: `9h6` (superseded), `2vtv` (the offer to re-run Optimize), `iwo` (Apply opens the changed screen).
+**Beads:** `nursing-sheduler-d582` is this spec. It supersedes the plan `plans/2026-09-26-d582-remove-borrowed-rows.md` and every earlier version of this file. Related: `9h6` (superseded), `2vtv` (the offer to re-run Optimize), `iwo` (Apply opens the changed screen).
 
-**Binding user decisions (2026-09-26, d582 notes and memory `assistant-apply-navigates`):**
-- She is EXTERNAL. She comes from another ward for specific date+shift slots, one time only, and never belongs to this ward.
-- She has her own **Temporary cover** section on the Staff screen: name, from-ward, optional staff groups, and one or more date+shift slots.
-- There is no "skill group" concept. Staff groups are arbitrary. She can join existing staff groups (optional), with the same picker ward staff use.
-- She is staffing only:
-  - A requirement that names a group counts her only as a member of that group.
-  - A requirement open to everyone counts her.
-  - No ward rule touches her (counts, fairness, sequences, preferences, everyone-scoped rules).
-  - Her shift is fixed, and Optimize never moves it.
-- On the roster and in every Excel export, she is a row with only her shift(s) filled. Every other day is BLANK, never OFF. Her per-person summary cells are blank too.
-- When she is added to a solved roster, her row appears at once and the app offers to re-run Optimize. The assistant runs it only after the user confirms (2vtv).
-- The assistant never writes silently. On Apply, the app opens the Staff page and makes the edit in the Temporary cover form, so the user sees it happen.
-- No old scenario files exist. The `temporary` flag and the borrowed-row storage go with no migration and no compatibility notes.
-- Core stays unchanged and close to upstream v1. The web compiles her into ordinary solver input.
+**Binding user decisions (d582 notes, memories `temporary-nurse-concept` and `assistant-apply-navigates`):**
+- A temporary cover is **not** a solver person. A cover entry is a name (for example "Haseena (Ward 3)"), a date, a shift type, and optional staff groups.
+- A cover lowers that date's staffing requirement for that shift by one, through the per-date exception mechanism, and carries her name.
+- The roster viewer and every Excel export show one display row per cover name. Only her shift(s) are filled. Her per-person summary cells are blank.
+- The Staff screen has a "Temporary cover" section. The assistant's Apply opens it and fills the form in view.
+- The `temporary` flag and the g1p borrowed rows go, with no migration.
+- Staff groups are arbitrary. There is no "skill group" concept.
+- After a cover change on a solved roster, the app offers to re-run Optimize (2vtv).
 
 ---
 
-## 1. Data model and scenario file
+## 1. Data model
 
-**Store.** Add one slice to `ScenarioStateShared` (`web/lib/scenario/types.ts:614`):
+**Store.** Add one slice to `ScenarioStateShared` (`web/lib/scenario/types.ts:614`). Each entry is one shift:
 
 ```ts
 export interface UiTemporaryCover {
-  _k?: string;               // React key, F2-only
-  name: string;              // unique in the person namespace (staff ids, cover names, group ids)
-  fromWard: string;          // free text, non-empty: "Ward 3", "Relief pool", "Agency"
-  groups: GroupId[];         // existing staff groups she joins; may be empty
-  slots: { date: IsoDate; shiftType: ShiftTypeRef }[];  // >=1, at most one per date, worked shifts only
+  _k?: string;          // React key, F2-only
+  name: string;         // display label, e.g. "Haseena (Ward 3)"; not a person id
+  date: IsoDate;
+  shiftType: ShiftTypeRef;   // a worked shift type id
+  groups: GroupId[];    // existing staff groups she counts as; may be empty
 }
 // ScenarioStateShared.temporaryCover: UiTemporaryCover[]
 ```
 
-- She is **not** in `staff`, so the Staff table, the Requests matrix, rules pickers and ALL never list her. Group member lists on the Staff screen do not show her either. Her groups live on her cover entry.
-- `createEmptyScenarioUiState` (`canonical.ts:355`) gets `temporaryCover: []`. The persistence validator (`lib/store/persistence.ts`) requires the slice. The fingerprint projection (`lib/store/fingerprint.ts`) includes it, so a cover change marks the scenario dirty and the roster stale.
-- Cascades (`lib/cascade/rename.ts`, `delete.ts`):
-  - Renaming a shift type or group follows into `slots[].shiftType` and `groups`.
-  - Deleting a shift type drops the slots that use it. A cover left with no slots is removed.
-  - Deleting a group removes it from `groups`.
-  - A name collision raises the existing `RenameCollisionError`.
+- Entries that share a `name` are one person: one display row, with several shifts.
+- She is not in `staff`, so no staff list, picker, rule or ALL ever contains her. She is never in the solver document.
+- `createEmptyScenarioUiState` (`canonical.ts:355`) gets `temporaryCover: []`. The persistence validator (`lib/store/persistence.ts`) requires the slice. The fingerprint (`lib/store/fingerprint.ts`) includes it, so a cover change marks the scenario dirty and the roster stale.
+- **Workspace file:** an optional top-level `temporaryCover` list under `workspaceVersion: 1`. An empty list is omitted. This is the least-risk choice. Files without cover stay byte-identical and load in every build. Only a file with cover fails in an older build, and it fails loudly on the unknown field. The Python half (`core/nurse_scheduling/server/workspace.py:156`) accepts the field. `convert_workspace_to_strict` (`:542`) rejects a non-empty list with a located issue at `temporaryCover`, because the decrement is a web step (§2).
+- **Strict YAML export** (`prepare-export.ts:105`) is solver input, so it carries the decremented counts (§2).
 
-**Workspace file (Save/Load).** Add an optional top-level `temporaryCover` to Workspace V1. An empty list is omitted.
+## 2. The decrement: stored apart, applied when read
 
-```yaml
-temporaryCover:
-  - name: Haseena
-    fromWard: Ward 3
-    groups: [RN]
-    slots:
-      - { date: 2026-10-14, shiftType: N }
-```
-
-- **TS:** add it to the V1 schema, `buildWorkspaceDocument` (`workspace.ts:608`) and the hydration bridge.
-- **Python** (`core/nurse_scheduling/server/workspace.py:156`, `WorkspaceSchedulingDataV1`, `extra="forbid"`): accept the field. `convert_workspace_to_strict` (`:542`) rejects a non-empty list with a located issue at `temporaryCover`. The message is "compile temporary cover in the app before submitting". The web never submits it (§2), so the compile logic is not duplicated in Python. Differential fixtures with cover are TS-only.
-- **Version: stay at `workspaceVersion: 1`.** This is the least-risk choice. Every file without cover stays byte-identical and loads in every build. No version-dispatch code changes. Only a file that uses cover fails in an older build, and it fails loudly on the unknown field. A bump to 2 does the opposite: every newly saved file becomes unreadable to older builds, and it needs new dispatch and hydration code in both languages.
-
-**Strict YAML export** (`prepare-export.ts:105`) is solver input, so it emits the **compiled** document (§2).
-
-## 2. Compile step (web, at submission)
-
-One pure function in a new `web/lib/scenario/temporary-cover.ts`:
+Covers are **never written** into a card's `requiredNumPeopleOverrides`. The stored card holds only hand-written exceptions. One pure module, `web/lib/scenario/temporary-cover.ts`, applies the covers wherever a staffing count is read:
 
 ```ts
-compileTemporaryCover(state: ScenarioUiState): ScenarioUiState   // identity when no in-period cover
-toSolverDocument(state) = toCanonicalScenarioDocument(compileTemporaryCover(state))
+coverCredit(equation, iso, covers, groupsContaining): number   // sum of her coefficients, eligible covers only
+wardNeed(count, credit) = Math.max(0, count - credit)
+withCoverOverrides(state): ScenarioUiState   // derived, never stored or saved
 ```
 
-It works at the UI-state level, so every consumer that must "see" her gets her by calling it, with no second projection. Examples are `findStaffingShortfalls(state)` (`lib/rules/shortfalls.ts:313`) and the canonical projection.
+`withCoverOverrides` writes, per card and covered date, `wardNeed(requiredOn(card, iso), credit)` as a derived override. It merges with any hand override on that date and drops any result equal to the rule's own count. That is the existing normalization in `2026-09-24-per-date-staffing-override.md`.
 
-**Call sites switch to `toSolverDocument`:**
-- the Optimize submit (`components/optimize/optimize-and-export-screen.tsx:478`)
-- the AI diagnostic rerun (`lib/ai/diagnostic/diagnostic-orchestrator.ts:333`)
+**Why stored apart (F3):**
+- Removing a cover restores the count exactly, because nothing was overwritten.
+- A hand edit to the same exception composes. A hand "2 on 14 Oct" with one cover means the ward supplies 1.
+- A renamed or deleted card or shift type, and a period change, cannot leave a stale exception behind. `dropUncoveredOverrides` (`shortfalls.ts:283`) stays hand-only.
+
+**Which cards a cover lowers.** Take a cover with date `d`, shift `s` and groups `G`. It lowers exactly the requirement equations that count her as a person. The rule mirrors `preference_types.py:83-120`:
+1. The card is enabled, and `d` is one of its resolved dates (`requirementDateIsos`, `shortfalls.ts:252`).
+2. One of its top-level shift selectors expands to a set containing `s` (`preference_types.py:83`). That selector's equation is the one she counts in.
+3. She is eligible (`:104-109`). One of these holds:
+   - `qualifiedPeople` is absent or `ALL`.
+   - One of its refs is a group in `G`, or a group that contains a group in `G` (group closure via `lib/rules/expansion.ts:119`).
+
+   A person-id ref never matches her.
+4. Her credit is the card's coefficient for `s`, default 1 (`:120`). For a plain card that is "by one".
+
+**Where it is applied:**
+- the Optimize submit (`optimize-and-export-screen.tsx:478`)
+- the AI diagnostic rerun (`diagnostic-orchestrator.ts:333`)
 - the strict export (`prepare-export.ts:105`)
-- the static shortfall analysis
+- the static shortfall check (`findStaffingShortfalls`, `shortfalls.ts:313`)
+- Preview and diff (`lib/proposal/diff.ts:249,270`)
+- the repair options (`repair-options.ts:752,1039,1151,1197`)
 
-Save/Workspace, the fingerprint and the assistant's scenario context keep the **authored** form. `projectScenarioDocument` itself does not change.
+Each site calls `toCanonicalScenarioDocument(withCoverOverrides(state))` or reads `requiredOn` on the derived state. Save, the fingerprint and the Requirements editor keep the authored state.
 
-**Submission format.** The code submits strict canonical YAML (`optimize-and-export-screen.tsx:478` → `prepareOptimizeSubmission`), and this spec treats the code as the truth. The genie sync spec says otherwise (`2026-09-25-v1-genie-sync-design.md:18`: "The web submits Workspace V1"). That line is stale. Correct it at the next edit of that spec.
+The code submits strict canonical YAML (`optimize-and-export-screen.tsx:478` → `prepareOptimizeSubmission`). The genie sync spec line that says "The web submits Workspace V1" (`2026-09-25-v1-genie-sync-design.md:18`) is stale. Correct it at the next edit of that spec.
 
-For each cover `c` with at least one slot inside `rangeStart..rangeEnd`:
+With no cover, `withCoverOverrides(state)` returns `state` itself, so the submitted bytes do not change.
 
-| Output | How | Why it holds |
-|---|---|---|
-| Person | Add `{ id: c.name }` to `staff` (no description, no history). | An ordinary `Person` (`models.py:57`). |
-| Groups | Add `c.name` to `members` of each group in `c.groups`. | A requirement naming one of those groups counts her. A requirement naming another group does not. `ALL` counts her. |
-| Fixed shift | One `reqData` cell per in-period slot: `{kind: "request", person, date, shiftType, weight: Infinity}`. | A hard shift request. Optimize cannot move it. |
-| Absent elsewhere | One `{kind: "off", person, date, weight: Infinity}` per other date in the period. | The one-state-per-day constraint (`scheduler.py:362`) plus a hard OFF means she works nothing else. |
-| Excluded from rules | In every **non-staffing** selector, `ALL` becomes `W` = a generated group of every non-cover person. Any group whose expansion contains a cover nurse becomes its generated twin (the same members, flattened, minus cover). | "No ward rule touches her." |
+## 3. Foot-guns
 
-**Staffing selectors are left as authored (she counts):**
-- requirement `qualifiedPeople` and `skillMix[].people`
-- `export.extraRows[].countPeople`
+Each item gives a decision and the test that pins it.
 
-`skillMix` needs `qualifiedPeople` to stay `ALL` (`models.py:401`). That is one more reason not to rewrite requirements.
+**F1. Overlapping cards, groups, skill mix and shift-type groups.**
+- *Decision:*
+  - Every equation she counts in (§2 rule) is lowered, and no other.
+  - An all-staff card is lowered for any cover. A card with `qualifiedPeople: RN` is lowered only for a cover in RN. A non-member lowers only open cards.
+  - An aggregate selector is one equation. Examples are `[[AM, PM]]` and a shift-type group "Day" = AM+PM. A cover on AM or PM lowers it.
+  - Several top-level selectors (`[AM, PM]`) make two equations. One per-date override applies to every equation on that date (`preference_types.py:82`). So an override cannot lower one shift only.
+  - For such a card, `withCoverOverrides` splits it at submission into one card per selector with identical fields. It does this only for a card that a cover touches. The split is solver-equivalent, because each selector is already its own equation and its own preferred-count objective (`:83-152`). Authored state is untouched.
+  - **Skill-mix entries are not lowered.** They have no per-date form, and adding one is a core change. A cover in the mix group does not satisfy the floor. The form and the Preview say: "Haseena is in RN, but this rule's RN skill mix still needs 1 RN from the ward." See the open question.
+  - A card can restrict a shift to a group she is not in. Then the form warns: "Under <rule>, only RN work N. Haseena is not in RN." She still counts for the open cards.
+- *Tests* (`temporary-cover.test.ts`, table-driven):
+  - `lowers the all-staff card for a cover with no groups`
+  - `lowers a qualifiedPeople card only for a member`
+  - `lowers an aggregate shift-group card for either member shift`
+  - `splits a multi-selector card and lowers only the covered shift`
+  - `leaves skill-mix floors untouched`
+  - `nested group membership counts`
+  - plus one real-solver case: `split card is solver-equivalent` (pytest over the two YAMLs: the same status and objective)
 
-**Non-staffing selectors (rewritten):**
-- count `person`, succession `person`, affinity `people1/people2`, covering `preceptors/preceptees`
-- authored `reqData.person`
-- `export.formatting[].people` (row, people-header, history and cell rules)
+**F2. Soft and preferred counts.**
+- *Decision:* a requirement's `requiredNumPeople` is always hard (`preference_types.py:121-124`). The cover lowers it. With `preferredNumPeople` set, that number is the floor. `preferredNumPeople` is card-wide and has no per-date form, so it is **not** lowered. On that date the solver still aims for `preferred` ward staff as a soft target. The Preview line says so: "Haseena lowers the minimum. The preferred number stays 4." Per-person soft rules (shift counts with finite weight) never involve her, because she is not a person.
+- *Tests:* `lowers the floor and keeps preferredNumPeople`, and `never produces an override above preferredNumPeople`.
 
-Rewriting the formatting rules keeps OFF-request or request-satisfied cell rules from styling or annotating her row. Generated group ids are `"<G> (ward staff)"` and `"Ward staff"`, suffixed ` 2`, ` 3`… until unique. Twins keep nested affinity structure intact, because a group ref is replaced by a group ref and never by an inline list.
+**F3. Drift.**
+- *Decision:* stored apart and applied on read (§2). A cover that no longer resolves is **flagged, never silently dropped**. That covers a date outside the period, a deleted shift type, a deleted group in `groups`, or no enabled card that she counts in. A flagged cover lowers nothing. The Staff row shows a warning badge with the reason, and Optimize preflight lists it as a non-blocking warning. Renames follow through the cascade (`lib/cascade/rename.ts`). Deletes do not remove covers.
+- *Tests:* `removing a cover restores the exact hand-written count`, `hand override and cover compose`, `renamed shift type follows into the cover`, `deleted shift type flags the cover`, `out-of-period cover is flagged and lowers nothing`, `no-card cover is flagged`.
 
-**Out of period.** Slots outside the range are skipped. A cover with no in-period slot is not compiled at all, so she is not a person for that run. The entry is **kept**, not deleted (§5).
+**F4. Several covers on one slot, and covers past the requirement.**
+- *Decision:* credits add up. The ward need is clamped at 0 (`wardNeed`). A clamp shows a warning on the form and in the Preview: "N on 14 Oct needs 2 from <rule>. 3 covers are booked, so 1 is extra." The Preview shows the count going to 0, never below.
+- *Tests:* `two covers lower by two`, `clamps at zero with an extra-cover warning`, `a requirement already at 0 stays 0 and warns`.
 
-**Validation** (producer issues, located at `temporaryCover.<i>...`, blocking Optimize like any other issue):
-- the name is unique in the person namespace
-- `fromWard` is non-empty
-- every group exists
-- each slot's shift type exists and is a worked shift (not OFF, LEAVE or ALL)
-- no two slots share a date
+**F5. Every coverage consumer counts her.**
+- *Decision:* every staffing reader compares ward staff against `wardNeed` and shows covers alongside ("2/2 from the ward · +1 cover"). The readers:
+  - solver input, static shortfalls, Preview and diff, repair options (§2)
+  - roster viewer coverage and the per-cell check (`requirements.ts:302`, `coverage.ts`)
+  - roster rule-check (`rule-check.ts`, `checkRosterChange`)
+  - the swap ladder (`swap.ts` `borrowNeeds`)
+  - the assistant's roster summaries (`roster-context.ts`)
+  - Excel count rows (§5)
 
-**Identity rules** (tested as properties):
-- With no in-period cover, `toSolverDocument(s)` deep-equals `toCanonicalScenarioDocument(s)`, so a ward without cover submits identical bytes.
-- Anonymization (`prepare-optimize-submission.ts:171`) treats her as one more person, and the reverse map covers her.
+  I searched `web/components` and `web/lib` and found no other staffing reader. Any future reader uses `wardNeed`. On the roster, solved covers are already in the submitted counts, and pending covers apply through the same `coverCredit` (§4).
+- *Tests:* one per reader, each named `<reader> counts a temporary cover`, plus the property `no slot with a matching cover reads short`.
 
-**Results mapping.** She comes back as an ordinary solved person. Her `solvedDays` row is `shift` on her slots and `off` elsewhere (`scheduler.py:162-172`). What makes her "cover" on the roster is metadata captured at submit:
-- `buildStagedSubmission` (`lib/optimize/submission-snapshot.ts:91`) gets a `cover` field: the in-period entries as `{id, fromWard, groups, slots: [{iso, shiftId}]}`.
-- `assembleRosterDocument` copies it into the roster document's `cover` (§4).
+**F6. Excel restoration and re-import.**
+- *Decision:* her display rows are **appended after the last used row** of the schedule sheet. That is after Status and any extra count rows. A blank separator and a label row "Temporary cover" come first. The rows are never inserted into the people window `[3, 3 + peopleCount)` or before Score/Status. Restoration asserts that boundary and reads column A only inside it (`restore-people-ids-in-xlsx.ts:227-270`). The edited export keeps the same boundary (`edited-xlsx.ts:31-34`). Restoration runs **before** the append. With rows appended below, no insert or conditional-format shifting is needed.
+- *Tests:* `restoration of an exported workbook with cover rows reads exactly peopleCount people`, `Score/Status stay adjacent to the people window`, `cover rows are below the extra count rows`.
 
-**Blank, not OFF.** Core can express it without change:
-- The workbook writes `""` for OFF (`exporter.py:471-481`, asserted at `:504`).
-- The roster payload says `{"kind": "off"}` (`scheduler.py:170`), and the web chooses how to display it (`OFF_DISPLAY = ""`, `lib/roster/day-state.ts:12`).
+**F7. Assistant awareness, cancel and no-show.**
+- *Decision:* `temporaryCover` appears in the scenario context JSON (`scenario-context.ts:37`) and in the roster context. The host refuses a proposal that repeats an existing name, date and shift. The message is "Haseena (Ward 3) already covers N on 14 Oct." A cancel or no-show is `remove_temporary_cover {name, date, shiftType}`. Its Apply opens Staff and deletes the row in view. The assistant then offers re-Optimize (2vtv), because the slot is now short.
+- *Tests:* `context lists covers`, `duplicate cover refused`, `remove_temporary_cover Apply deletes in the form`, `after removal the assistant offers Optimize`.
 
-The per-person summary cells are the one leak. Under prettify, `export.extraColumns` render on every person row (`exporter.py:370`) and have no `people` field. An OFF-count column then prints a number on her row. The web blanks them in every export (§4), so no core patch is needed.
+**F8. The roster after a solve.**
+- *Decision:* adding or removing a cover changes the coverage display at once (§4). Solved assignments stay as they are until a re-run. The change banner offers `Run Optimize`, and a new run replaces hand edits (the existing Load dialog guards that).
+- *Tests:* `adding a cover after the solve fills the short slot at once`, `removing a solved cover makes the slot read short at once`, `assignments do not change without a run`.
 
-## 3. Staff screen: the "Temporary cover" section
+## 4. Roster viewer and roster file
 
-This is a third card below Staff groups on `/people` (`components/people/people-table.tsx`). It copies the prototype's section pattern (`docs/design_prototype/source/ScreenStaff.dc.html:116-135`): an L1 `Surface` on `--r-card`, a header band with the title, a one-line `--ink2` description and a secondary pill `+ Cover`, then the body. The table is square (DESIGN.md §5 Radius).
-
-- **Header:** "Temporary cover". The description reads "Nurses from another ward for specific shifts. They count toward staffing only. Ward rules do not apply to them."
-- **Row** (a real `<table>`: Nurse / From / Groups / Shifts / Actions):
-  - The name has avatar initials.
-  - "From" shows `fromWard` in `--ink2`.
-  - Groups are chips.
-  - Shifts are palette chips (`shift-chip.tsx` builder) labelled `Night · 14 Oct`.
-  - Actions are Edit and Delete. There is no Duplicate and no drag-reorder.
-- **Inline editor** (same pattern and `Sel` single-selection as staff rows):
-  - Fields: name `Input`, from-ward `Input`, and the group toggle chips ward staff rows use (none selected by default). Under the chips, one line in `--ink3`: "Counts on shifts open to everyone, and on shifts that need a group she is in."
-  - A slot list follows. Each slot is a native `<input type="date">` bounded to the period, plus a shift select (worked shifts only). "+ Add shift" adds a slot, and each slot has a remove button.
-  - Save is one `scenarioCommands.mutate` (one undo entry). Validation messages come from §2, shown inline.
-  - The editor takes an optional prefilled draft and an `origin: "user" | "assistant"` (§6).
-- **Out-of-period slot:** its chip is muted with the tip "Outside this schedule's dates (1-28 Oct). Not used." A cover with only such slots shows a `NOT IN THIS PERIOD` badge (neutral tier). Nothing is auto-deleted.
-- **Empty state:** the dashed `∅` pattern. The title is "No temporary cover". The text is "Add a nurse from another ward for the shifts they will work."
-- **After Save or Delete while a working roster exists:** a `Callout tone="info"` reads "Haseena is on the roster for Night on 14 Oct. Run Optimize again so the rest of the roster plans around her." Its `Run Optimize` button opens the Optimize screen. It does not start a run.
-- The `Temporary (borrowed or agency)` switch and the `Temporary` badge on staff rows are removed (`people-table.tsx:612-617`, `:789-852`).
-
-## 4. Roster viewer, roster file and Excel
-
-**Roster file version.** `origin/main` writes `roster-file/1`. The `/2` with `borrowed` exists only on `develop` and is dropped with no compatibility. `roster-file/2` is redefined as v1 plus `cover`:
+**Roster file.** `origin/main` writes `roster-file/1`. The develop-only `/2` with `borrowed` is dropped with no compatibility. `roster-file/2` is redefined as v1 plus `cover`:
 
 ```ts
-readonly cover: readonly RosterCover[];   // solver-seen cover, captured at submit
-interface RosterCover { id: PersonId; fromWard: string; groups: readonly string[];
-                        slots: readonly { iso: IsoDate; shiftId: ShiftTypeId }[] }
+readonly cover: {
+  readonly entries: readonly { name: string; iso: IsoDate; shiftId: ShiftTypeId; groups: readonly string[] }[];
+  readonly decrements: readonly [prefIdx: number, iso: IsoDate, by: number][];  // applied at submission
+};
 ```
 
-- **Writer:** writes `roster-file/2` with `cover`.
-- **Reader:** accepts `/1` and `/2`. The existing `1→2` step (`lib/roster/schema-version.ts:46-56`) now adds `cover: []` instead of `borrowed: []`. A develop-era `/2` document with `borrowed` fails exact-field validation (`validate.ts:70`), and that is accepted.
-- There is no `roster-file/3`, no dropped-row notes and no upgrade Callout. The d582 plan's §2 is not needed.
+- The writer writes `/2`. The reader accepts `/1` (the existing `1→2` step at `lib/roster/schema-version.ts:46-56` now adds an empty `cover`) and `/2`.
+- A develop-era `/2` with `borrowed` fails exact-field validation (`validate.ts:70`), and that is accepted.
+- The entries and decrements come from the staged submission (`buildStagedSubmission`, `lib/optimize/submission-snapshot.ts:91`), computed by the same `withCoverOverrides` run that built the YAML. So the roster knows exactly what the solve already subtracted.
 
-`validateRosterDocument` requires, for each entry:
-- `id` is in `context.people`, once
-- the slot isos are in `calendar`
-- the slot shift ids are known
-- her `solvedDays` row equals the slot-derived row (shift on slots, off elsewhere)
-- **no `edits` entry** touches her row
+**Coverage on the roster.** For each equation and date:
+- authored count = submitted count + solved decrement
+- ward need = `wardNeed(authored count, credit(live covers))`
 
-**Pending cover (added after the solve, before a re-run).** These rows are **derived from the current scenario, never stored**:
+Live covers are the current scenario's covers on the roster's calendar. So a cover added after the solve lowers the need at once, and a solved cover later removed raises it at once (F8). The decrement ledger removes the clamp ambiguity: the submitted count alone cannot tell 0 from "clamped to 0".
 
-```ts
-pendingCoverRows(document, liveCover): RosterCover[]
-```
+**Display rows.** These form a separate band below the staff rows in the same grid (`roster-grid.tsx`), headed "Temporary cover". They are not on the person axis: no `personIdx`, no edits, no rule check, no tallies, no swaps.
+- A row is one cover name.
+- Cells show her shift chip on her dates. Every other cell is empty: no chip and no `·` rest glyph (`roster-grid.tsx:657`).
+- A cover in the live scenario but not in `cover.entries` has a neutral `NOT OPTIMIZED YET` badge. A solved cover since removed from the scenario shows struck through, with `REMOVED`, until the next run.
+- The tip is "Temporary cover. Change it on Staff."
 
-It returns the live `temporaryCover` entries whose name is not in `context.people`. It filters slots to the roster's calendar and shift ids, and keeps entries with at least one slot. The Staff form saves her, and her row appears at once. Delete her, and the row goes. No cross-store write and no roster autosave revision are needed. The roster JSON file does not carry pending rows, and a re-run is the expected next step.
+## 5. Excel exports
 
-**Axis and lenses** (reusing the g1p axis helpers, renamed):
-- `rosterAxisContext`: the people axis is `context.people` then the pending rows. Pending cells are `off` except on slots. Every row gets `cover?: {fromWard}` from `document.cover` or the pending entry.
-- **Grid** (`roster-grid.tsx`):
-  - The cover name cell shows the name plus `fromWard` in `--ink3` ("Haseena · Ward 3"). This replaces the `temporary` badge at `:282`.
-  - Her `off` cells render **empty**: no chip and no `·` rest glyph (`:657`).
-  - Her cells are read-only, with the tip "Temporary cover. Change it on Staff."
-  - A pending row has a neutral `NOT OPTIMIZED YET` badge.
-- **Staffing** (`requirements.ts`, `coverage.ts`, day lens): solver-seen cover is already in the submission's groups. Pending rows join via `withBorrowedPeople` → `withCoverPeople(document, pending)` (`requirements.ts:275`), keyed by each row's `groups`.
-- **Rule model / tallies** (`rule-check.ts`, `tallies.ts`): skip every cover row. Solver-seen cover is already outside the rules, because the submission's non-staffing selectors were compiled to twins. The skip also covers pending rows, and it replaces d88's `narrowedCounts`.
-- **Change banner:** a callout shows while pending rows exist. It reads "Haseena was added after this roster was optimized. Run Optimize again so the rest of the roster plans around her." It has `Run Optimize`, and the assistant offers the same (2vtv). A new run replaces hand edits, and the existing Load confirmation guards that.
+The same helper runs on the **raw Optimize download** and on the **edited roster export**:
+- **Raw:** `applyPeopleIdRestoration` (`restore-people-ids-in-xlsx.ts:365`) returns plain runs byte-for-byte today (`:369`). It gains the covers from the staged submission. The bypass now needs a plain run **and** no cover. Otherwise it restores ids (anonymized runs only), then appends.
+- **Edited:** `edited-xlsx.ts`. Any cover forces the ExcelJS path past the no-edit short-circuit (`:145`).
+- **Rows:** as F6. Column A is the cover name. Day cells hold her shift id on her dates and `""` elsewhere. History and summary (extra-column) cells are `""`. The style is copied from the last person row (`copyRowStyle`, kept from 6iw).
+- **Count rows** (`export.extraRows`, `exporter.py:526-532`) count solver people only. The helper adds her credit to a count row's date cell under two conditions. Its `countShiftTypes` contains her shift. Its `countPeople` is `ALL` or contains one of her groups. This covers F5 for Excel.
 
-**Excel: one rule for every export.** A cover row reads `"<name> (<fromWard>)"` in column 1. Her day cells hold the shift id on her slots and `""` elsewhere. Her per-person summary cells (every column right of the last `coordinateMap.dateColumns` entry) are `""`.
-- **Raw Optimize download.** `applyPeopleIdRestoration` (`lib/optimize/restore-people-ids-in-xlsx.ts:365`) is the one download seam. Today it returns plain runs byte-for-byte (`:369`). It gains the cover row indices from the staged submission. The bypass then needs a plain run **and** no cover. Otherwise one ExcelJS pass restores ids (when anonymized), relabels her row and blanks her summary cells.
-- **Edited roster export** (`lib/roster/edited-xlsx.ts`). Any cover row, solved or pending, forces the ExcelJS path past the no-edit short-circuit at `:145`.
-  - Pending rows are inserted after the last person row. Keep the 6iw insert, `copyRowStyle`, and conditional-format shifting (`:209-226`, `:316-396`).
-  - The same relabel and blanking helper runs on every cover row. `frozenXlsx` is not assumed to be already clean (unconfirmed: which seam produces it at capture).
+## 6. Staff screen: the "Temporary cover" section
 
-## 5. When the period no longer includes her dates
+This is a third card below Staff groups on `/people` (`components/people/people-table.tsx`). It follows the prototype's section pattern (`docs/design_prototype/source/ScreenStaff.dc.html:116-135`). The pattern is an L1 `Surface` with a header band. The band holds the title, a one-line `--ink2` description and a secondary pill `+ Cover`. A square table follows (DESIGN.md §5).
 
-- Changing `rangeStart..rangeEnd` never edits `temporaryCover`.
-- Compile skips out-of-period slots. A cover with no in-period slot is not a person in the run (§2).
-- The Staff section mutes those slots and badges the entry (§3). The user deletes it by hand.
-- `pendingCoverRows` filters to the roster's own calendar, so an old roster never shows a cover whose dates it does not contain.
-- A solved roster keeps its `cover` metadata whatever the scenario later does.
+- **Header:** "Temporary cover". The description reads "Nurses from another ward for single shifts. Each one lowers that shift's staffing need by one."
+- **Table:** Name / Shift / Date / Groups / Effect / Actions, one row per entry, sorted by date.
+  - "Effect" reads "N on 14 Oct: 3 → 2 (All nurses)", or the F1–F4 warning badge.
+  - The actions are Edit and Delete.
+- **Inline editor:**
+  - Fields: a name `Input` and a native `<input type="date">` bounded to the period.
+  - A shift select offers worked shifts only. The group toggle chips are the ones ward staff rows use, with none selected by default.
+  - Under the chips, one line in `--ink3`: "She counts on rules open to everyone, and on rules for a group she is in."
+  - Save is one `scenarioCommands.mutate` (one undo entry).
+  - Validation: a non-empty name, a date, a worked shift, groups that exist, and no duplicate name+date. The same name on one date with two shifts is also refused ("one shift a day").
+- **Empty state:** the dashed `∅` pattern. The title is "No temporary cover". The text is "Add a nurse from another ward for a shift they will work."
+- **Working roster present:** after Save or Delete, a `Callout tone="info"` reads "Night on 14 Oct now needs 2 from the ward. Run Optimize again so the roster plans around Haseena." The `Run Optimize` button opens Optimize and does not start a run.
+- **Requirements screen:** a card's "Exceptions" field lists cover effects read-only, apart from hand exceptions: `14 Oct: 2 · Haseena (Ward 3) covering`, with a link to Staff.
+- The `Temporary (borrowed or agency)` switch and badge on staff rows are removed (`people-table.tsx:612-617`, `:789-852`).
 
-## 6. Assistant
+## 7. Assistant
 
-**Standing rule (iwo, memory `assistant-apply-navigates`).** The assistant never writes in the background. A Preview card shows the change. On **Apply**:
-1. The app opens `/people` through the existing change-highlight routing (`lib/change-highlight/plan.ts`, scope `staff-list`) and scrolls the Temporary cover section into view.
-2. The section opens its inline editor, prefilled from the command, with `origin: "assistant"`. The fields fill visibly in order: name, from-ward, groups, then slots. With `prefers-reduced-motion`, they fill at once.
-3. The app presses the editor's own Save. That is the same handler, validation and single `scenarioCommands.mutate` as a user Save, so there is one write path.
-4. The new row takes the change highlight. An `aria-live` message says "Added Haseena (Ward 3) as temporary cover for Night on 14 Oct."
-5. If validation fails (the scenario moved since the Preview), the editor stays open with the inline error and nothing is written. The assistant is told why.
+**Apply is visible (iwo rule).** On Apply:
+1. The app opens `/people` through the change-highlight routing (`lib/change-highlight/plan.ts`, scope `staff-list`).
+2. It opens the Temporary cover editor prefilled from the command (`origin: "assistant"`), and the fields fill in view. With `prefers-reduced-motion`, they fill at once.
+3. It presses the editor's own Save, so there is one write path.
+4. The new row takes the change highlight, and `aria-live` announces it.
 
-The seam is a small store the Apply path writes and the section reads: `{draft, origin, autoSave: true}`. It holds no DOM automation. A remove works the same way: the Apply opens the row and runs its Delete. A linked proposal walks its screens in the plan's `SCREEN_ORDER`. For example, step 3 opens Staff for the cover, then Requests for the asking nurse's leave.
+If validation fails, the editor stays open with the error and nothing is written. A linked proposal walks its screens in `SCREEN_ORDER`, for example Staff (cover) then Requests (the asking nurse's leave).
 
-**New commands** (`lib/proposal/commands.ts`, model-visible, locked-schema tests):
-- `add_temporary_cover {name, fromWard, groups, slots: [{date, shiftType}]}`
-- `remove_temporary_cover {name}`
+**Commands** (`lib/proposal/commands.ts`, locked schemas):
+- `add_temporary_cover {name, date, shiftType, groups}`
+- `remove_temporary_cover {name, date, shiftType}`
 
-Preview validation reuses the §2 rules. `diff.ts` renders "Adds Haseena (Ward 3) as temporary cover: Night 14 Oct". `add_person` / `edit_person` lose `temporary` (`commands.ts:259,265,753-775` and `operations.ts:1454,1500,1510`).
+`add_person` / `edit_person` lose `temporary` (`commands.ts:259,265,753-775`, `operations.ts:1454,1500,1510`).
 
-**Cover ladder step 3** (`prepare_borrowed_cover`, `components/ai/use-roster-tools.ts:688`). `borrowParameters` (`:123`) changes:
-- `source` becomes `fromWard: string` ("the ward, pool or agency lending the nurse, as the user said it").
-- `groups` stays, described as "existing staff groups the nurse joins, only as the user said".
-- Add `lenderConfirmed: z.boolean()` ("true ONLY after the user said in chat that <fromWard> confirmed <name> for <shift> on <date>").
-- Add `sameNurseForAll: z.boolean().optional()`.
+**Preview, diff and receipts.** `diff.ts` compares effective counts: `requiredOn` over `withCoverOverrides(before)` against `(after)`.
+- Add: "Adds temporary cover Haseena (Ward 3): Night, 14 Oct." with "N on 14 Oct: exactly 3 → 2 (All nurses)", plus any F1, F2 or F4 note.
+- Remove: the reverse line.
+- The Apply notice (`components/ai/linked-apply.ts:39`) says "Added temporary cover Haseena (Ward 3)."
+- The undo copy says "Undo removes the cover and puts Night on 14 Oct back to 3."
 
-The handler behaves as follows:
-- If `lenderConfirmed` is false, it refuses.
-- If `ladder.borrow.length > 1 && !sameNurseForAll`, it refuses with "One temporary nurse covers one shift. Ask for a nurse per shift, or whether one nurse covers them all."
-- It emits `add_temporary_cover` plus the asking nurse's leave or off request, as today. Slots come from `ladder.borrow`.
-- Her groups are the user's `groups`. The ladder can report a group that the short requirement names (code field `skillGroup`, `use-roster-tools.ts:723`). That group is added too. The card says which group was added and why.
-- It emits no `add_person`, no pins and no roster cells for her. Her row is derived (§4).
-- The `borrowed_staff_arranged` lookup (`:784`) and the 6yn `scenarioStaffGroupIds` guard go. Form validation (every group exists) replaces the guard.
-- Its return names `OPTIMIZE_RUN_TOOL` (`lib/ai/assistant/playbook.ts:65`) as the next step. 2vtv owns the confirmed run.
+**Cover ladder step 3** (`prepare_borrowed_cover`, `components/ai/use-roster-tools.ts:688`, `borrowParameters` `:123`):
+- `source` becomes the ward text inside `name` ("Haseena (Ward 3)"). The description asks the model to write the name as the user said it, with the lending ward in brackets.
+- Add `lenderConfirmed: z.boolean()`: true only after the user said in chat that the lending ward agreed. False refuses.
+- The handler emits one `add_temporary_cover` per `ladder.borrow` need. Its `groups` are the user's `groups`, plus the group the short rule names (olu `qualifiedGroup`, the code field `skillGroup`). It also emits the asking nurse's leave or off request, as today.
+- It emits no person, no pins and no roster cells.
+- Its return names `OPTIMIZE_RUN_TOOL` (`playbook.ts:65`) as the next step. 2vtv owns the run, after the user says yes.
+- `scenario-context.ts:125` says to ask in chat first whether the lending ward agreed.
 
-The authority statement (`scenario-context.ts:125`) says step 3 asks the lending ward's confirmation **in chat** first. The scenario context JSON shows `temporaryCover` in authored form.
+**Repair option `borrow_temporary_nurse`** (`repair-options.ts:583-695`):
+- It emits one `add_temporary_cover` per short (date, shift), repeated for the gap. The name is `"Borrowed nurse n (another ward)"`, and `groups` holds the short rule's named group.
+- It is not offered for a skill-mix shortfall (F1) or a cap-only shortfall.
+- `enforcedBy: "chat"`. `needsFromUser` asks for the name and the lending ward.
+- `isSafeOption` gets an `add_temporary_cover` arm: in period, a worked shift, known groups, and at least one card she counts in.
+- Removed: `narrowedCounts`, `pinnable`, the whole-period loan, and `temporary: true`.
 
-**Repair option `borrow_temporary_nurse`** (`lib/ai/assistant/repair-options.ts:583-695`):
-- It emits one `add_temporary_cover` per short (date, shift) slot, repeated for that slot's gap. The name placeholder is "Borrowed nurse n" (`placeholderNames`), and `fromWard` is "Another ward". `groups` holds the group the short requirement names. For a requirement open to everyone, it is empty.
-- The whole-period `cap_short` loan is dropped: with no shift-date, no borrow is offered.
-- Removed: `narrowedCounts`, `pinnable`, `shortShift`'s null case, and `temporary: true`. Compile makes all of them unnecessary.
-- `enforcedBy: "chat"`, with the same `confirmationQuestion`. `needsFromUser` asks for the name and the lending ward, and says which group she joins.
-- The `isSafeOption` `add_person` arm (`:1262-1269`) becomes an `add_temporary_cover` arm: slots in period, known worked shifts, one per date, known groups.
+**Removed from the proposal layer:** `borrowed_staff_arranged` and `borrowedStaff()` (`lib/proposal/assumptions.ts:33,45,~250-290`).
 
-**Removed from the proposal layer:** `borrowed_staff_arranged` and `borrowedStaff()` (`lib/proposal/assumptions.ts:33,45,~250-290`), plus the `staff` undo copy for "the added temporary nurse" (`components/ai/linked-apply.ts:39`).
+## 8. Removed and kept
 
-## 7. What is removed, kept and reshaped
-
-| Item | Fate |
+| Commit / item | Fate |
 |---|---|
-| The `temporary` flag in types and schemas (`schemas/import.ts:38`, `producer.ts:52`) | Removed. No accept-and-drop, no notes. |
-| The flag in projection (`canonical.ts:93`), import (`import-scenario.ts:252`) and persistence (`persistence.ts:277`) | Removed. |
-| `writeTemporary`, the Staff table switch and badge, `diff.ts:496`, help copy (`lib/capability/help-content.ts`) | Removed. |
-| g1p `borrowed` field, `RosterBorrowedRow`, `checkBorrowedRows`, `withBorrowedRows`, the overlay on the borrowed axis, `RosterContextPerson.temporary` (081e608) | Removed. `cover` + derived pending rows replace them. |
-| d2b3ff9 stale-row refusal, fd46b3b undo of borrowed rows, 9a767b3 group guard | Removed. Pending rows are derived, so nothing needs refusing or undoing. |
-| `rosterAxisContext`, `withBorrowedPeople`, the 1a1e95c ladder axis counting, the 6iw insert and CF shifting, olu `qualifiedGroup` | **Kept and renamed** to cover terms. The d582 plan's revert list is **not** executed as written. |
-| 46d01d2 `narrowedCounts` in `rule-check.ts` | Replaced by "the rule model skips cover rows". |
-| d582 plan §2 (roster-file/3, the v2 read, notes plumbing) | Dropped. `roster-file/2` is redefined (§4). |
-| `core/` | No change. Retiring upstream patch P1 (`Person.temporary`, `models.py:66`) is a follow-up bead. Nothing sends the field any more. |
+| `temporary` flag (e220807 and its users: `types.ts:143,419`, `schemas/import.ts:38`, `producer.ts:52`, `canonical.ts:93`, `import-scenario.ts:252`, `persistence.ts:277`, `people-descriptor.ts`, `people-table.tsx`, `diff.ts:496`, `help-content.ts`) | Removed, no migration. |
+| 081e608 g1p: the `borrowed` field, `RosterBorrowedRow`, `borrowed.ts` and its axis helpers | Removed. |
+| 081e608 g1p: `addPeople`, the grid badge and the viewer axis plumbing | Removed. |
+| 081e608 g1p: the borrowed paths in `change-request.ts` and `use-roster-editing.ts`, and `withBorrowedPeople` | Removed. |
+| 081e608: `upgradeStoredRosterDocument` / `validateStoredRosterDocument` and their callers | Kept, because v1 stored rosters still upgrade. |
+| 19515fa g1p (step-3 card writes a roster row) | Removed. Step 3 is rewritten (§7). |
+| d2b3ff9 g1p stale-row refusal and `peopleCount` | Removed. Its stored-older-version read tests are kept, restamped. |
+| fd46b3b 2rp (undo of borrowed rows) | Removed. |
+| 1a1e95c d88 (ladder reads the borrowed axis) | Removed. The ladder reads `wardNeed`. |
+| 46d01d2 d88 (`narrowedCounts` in `rule-check.ts`) | Removed. She is never a person. |
+| 9a767b3, f3b2d98 6yn (group guard) | Removed. Form validation checks that groups exist. |
+| 387f4e3, 01e7b69 6iw (`insertRow`, conditional-format shifting) | Removed, because rows are appended below (F6). `copyRowStyle` is kept. |
+| e930ac6 olu (`qualifiedGroup`) | Kept. It prefills her groups. |
+| `repair-options.ts` `narrowedCounts`, `pinnable`, the whole-period loan, and `assumptions.ts` `borrowed_staff_arranged` | Removed. |
+| `core/` | No change. Retiring upstream patch P1 (`Person.temporary`, `models.py:66`) is a follow-up bead. |
 
-## 8. Testing strategy
+## 9. Other tests
 
-All layers follow the repo's library-first rule: no parsers and no source reads in tests.
-
-- **Compile (Vitest, pure):**
-  - Table-driven per selector kind. `ALL` and a group with her become twins.
-  - Requirements and `skillMix` stay untouched. Nested affinity keeps its shape.
-  - Group membership: a requirement naming a group she is in counts her. A requirement naming another group does not.
-  - An id collision gets a suffix. Out-of-period slots are skipped.
-  - Property: no in-period cover means `toSolverDocument` deep-equals `toCanonicalScenarioDocument`.
-  - Property: every compiled document passes `validateScenario`.
-- **Solver truth (the real backend, existing assembled e2e pattern `e2e/roster-real-ward-assembled.spec.ts`):**
-  - A small ward is short one RN on Night 14 Oct. With Haseena in RN covering it, the solve is feasible.
-  - Her row has N on 14 Oct and blank cells elsewhere.
-  - A hard ward-wide `x >= 16` count rule does not bind her.
-  - The workbook row has only her shift and blank summary cells.
-- **Roster (Vitest):**
-  - validation of `cover`, including rejecting edits on her row and a mismatched solved row
-  - `1→2` adds `cover: []`, and a `/2` document with `borrowed` is rejected
-  - `pendingCoverRows` filtering
-  - grid: an empty cell (no `·`), the read-only tip, the `NOT OPTIMIZED YET` badge
-  - requirement and coverage counts including pending rows
-  - the rule model and tallies skipping cover
-- **Excel** (the existing ExcelJS suites, with the `DIFF_PYTHON` gate where it applies):
-  - Raw download: a plain run with no cover is byte-identical. A plain run with cover and a run that is anonymized with cover both get the relabel and blank summary cells.
-  - Edited export: a pending row is inserted with its style, and CF ranges shift. The label, blank days and blank summary cells hold on solved and pending cover rows.
-- **Scenario I/O:**
-  - Workspace round-trip with and without cover. With no cover, the file is byte-identical.
-  - Python `workspace.py` rejects a non-empty `temporaryCover` with a located issue (pytest).
-  - Cascades: rename and delete of a shift type or group.
-- **Staff UI** (Testing Library): each add, edit or delete is one undo step. Also test the inline validation messages, the group chips, the out-of-period badge, and the callout with a working roster present. A Playwright visual baseline for the new section follows the existing components baselines.
-- **Assistant:**
-  - the locked schemas for `add_temporary_cover` and `remove_temporary_cover` and the new `borrowParameters` keys
-  - `prepare_borrowed_cover` refusals (`lenderConfirmed` false, several needs without `sameNurseForAll`)
-  - the emitted commands
-  - Apply (Testing Library, then one Playwright flow): the route changes to `/people` and the editor opens prefilled. Save writes one undo entry, the row is highlighted, and the `aria-live` text is announced. A stale Preview leaves the editor open with the error and writes nothing. Reduced motion fills at once.
-  - repair-option cases: per-slot nurses, gap of 2, no cap-only loan, `isSafeOption`
-  - updating the existing `repair-eval.test.ts` expectations
+The foot-gun tests are named in §3. All tests follow the library-first rule.
+- **Real solver** (pytest plus the assembled e2e pattern `e2e/roster-real-ward-assembled.spec.ts`): a ward one short on N 14 Oct is INFEASIBLE, and FEASIBLE with one cover. Her display row shows N on 14 Oct only.
+- **Identity:** no cover means `withCoverOverrides(s) === s` and byte-identical YAML and XLSX.
+- **Scenario I/O:** Workspace round-trip with and without cover. Python `workspace.py` rejects a non-empty list with a located issue.
+- **Staff UI** (Testing Library): add, edit and delete are one undo step each. Also test the Effect column, the warning badges, and the callout.
+- **Assistant:** locked schemas, the `lenderConfirmed` refusal, and the Apply flow (route, prefilled editor, one undo entry, highlight, `aria-live`, a stale Preview writes nothing). Also the repair-option cases and the updated `repair-eval.test.ts` expectations.
 
 ---
 
 ## Unresolved questions
 
-None open. Every earlier question is answered in the d582 notes, or settled above: the Workspace version in §1, the submission format in §2, pending rows in §4.
+1. **Skill mix.** A cover in RN does not satisfy an RN skill-mix floor, because skill-mix entries have no per-date form (F1). Accept that, or add a follow-up for an additive per-date `skillMixOverrides` in core, on the same pattern as `requiredNumPeopleOverrides`?
 
 ## Assumptions
 
-- A cover nurse works at most one slot per date, and slots are worked shifts only (not LEAVE, OFF or ALL).
-- She counts in `export.extraRows` daily counts (staffing), but not in formatting rules or per-person summary columns.
-- Twin-group ids appearing in the submitted YAML and in roster rule messages are acceptable ("RN (ward staff)").
-- A pending row does not change `solvedBaselineId`, because it is not stored.
-- Hand edits are lost on re-run, as today. The existing Load confirmation covers it.
-- "Performs the edit in the form" means the app presses Save itself after filling the form. It does not wait for the user.
-- The form-driven Apply is built here for cover first. Retrofitting the other assistant op families to it belongs to the iwo follow-up, not this spec.
+- A cover name works at most one shift per date.
+- A preferred count (F2) staying as a soft target on her date is acceptable.
+- Her display rows sit below the count rows in Excel, not next to the staff rows. That is the price of never touching the restoration boundary.
+- Splitting a multi-selector card at submission is acceptable. It shows as separate rules in diagnostics for that run only.
