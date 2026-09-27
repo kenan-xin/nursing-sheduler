@@ -487,7 +487,9 @@ function countFields() {
       .describe(
         'How each person\'s count x relates to the target T: "x <= T" at most, "x >= T" at ' +
           'least, "x = T" exactly, "x < T" fewer than, "x > T" more than, "|x - T|^2" as ' +
-          'close to T as possible (needs a weight of 0 or less, never "infinity").',
+          'close to T as possible (needs a weight of 0 or less, never "infinity"). x is a ' +
+          "total over the dates, never days in a row: for at most 5 days in a row, any " +
+          'shift, use add_succession_rule with "ALL" 6 times at "-infinity".',
       ),
     target: z.number().describe("The target T, a whole number of zero or more, e.g. 5."),
     weight: countWeightSchema(),

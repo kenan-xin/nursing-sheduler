@@ -192,6 +192,31 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     expect(proposalTool().description).toContain(`${MAX_ASSISTANT_OPERATIONS} operations`);
   });
 
+  it("names the screen Apply will open, so the model never guesses one", async () => {
+    // bead 3ew: with no name to hand the model said "the Succession rules screen".
+    const { useModeStore } = await import("@/lib/mode/mode");
+    useModeStore.setState({ mode: "advanced", adoption: "ready" });
+    await mount(SCENARIOS.restRuleTooTight());
+    const off = {
+      summary: "You asked to turn off the no-day-after-night rule.",
+      operations: [
+        {
+          type: "set_rule_enabled",
+          ruleKind: "successions",
+          ruleId: "no-day-after-night",
+          enabled: false,
+        },
+      ],
+    };
+    expect(String(await proposalTool().handler(off, {}))).toContain(
+      'Apply opens the "Shift sequences" screen',
+    );
+    useModeStore.setState({ mode: "guided", adoption: "ready" });
+    expect(String(await proposalTool().handler(off, {}))).toContain(
+      'Apply opens the "Rules" screen',
+    );
+  });
+
   it("prepares turning off a rest rule, with the rest-practice warning on the Preview and in the reply", async () => {
     await mount(SCENARIOS.restRuleTooTight());
 
