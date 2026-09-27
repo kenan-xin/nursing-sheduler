@@ -447,7 +447,7 @@ describe("applyFrameToCache (exact backend-wire fixtures)", () => {
   const cached = () => client.getQueryData<JobResponse>(optimizeKeys.job("opt_1"));
   const runtimeIdentity = {
     service_name: "nurse-scheduling-api",
-    api_version: "alpha",
+    api_version: "0.2.0",
     app_version: "v-test",
     deployment_id: "deployment-test",
     instance_id: "instance-test",

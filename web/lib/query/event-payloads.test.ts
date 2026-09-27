@@ -15,7 +15,7 @@ import {
 describe("parseStateChangedPayload", () => {
   const runtimeIdentity = {
     service_name: "nurse-scheduling-api",
-    api_version: "alpha",
+    api_version: "0.2.0",
     app_version: "v-test",
     deployment_id: "deployment-test",
     instance_id: "instance-test",
@@ -134,6 +134,11 @@ describe("parseStateChangedPayload", () => {
     [
       "invalid runtime started_at",
       { ...stateFrames.running, runtime: { ...runtimeIdentity, started_at: "today" } },
+    ],
+    [
+      // API version 0.2.0 since v1 sync W2 (X8); the pre-sync "alpha" is no longer this backend.
+      "pre-sync runtime api_version",
+      { ...stateFrames.running, runtime: { ...runtimeIdentity, api_version: "alpha" } },
     ],
     [
       "invalid runtime service",

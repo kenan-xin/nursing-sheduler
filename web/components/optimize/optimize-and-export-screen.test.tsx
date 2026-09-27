@@ -206,7 +206,7 @@ function onlineInfo(extra: Record<string, unknown> = {}) {
         ...extra,
         status: "ready",
         service_name: "nurse",
-        api_version: "alpha",
+        api_version: "0.2.0",
         app_version: "1.0.0",
         deployment_id: "d",
         instance_id: "i",
