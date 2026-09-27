@@ -200,4 +200,20 @@ export const SINGAPORE_CASES: EvalCase[] = [
       judge: ["Leaves the choice of who gets the day off to the manager."],
     },
   },
+  {
+    id: "sg-extend-range-asks-holidays",
+    tags: ["sg"],
+    description:
+      "v1 dates-range-expand-singapore-*: extending the period asks about public holidays before preparing it.",
+    today: "2026-10-20",
+    route: "/dates",
+    seed: { build: sixNurses },
+    user: { turns: ["Extend the roster to 31 December."], onPreview: "ignore" },
+    expect: {
+      noProposal: true,
+      judge: [
+        "Before preparing the new period, asks whether to import the public holidays for the new dates.",
+      ],
+    },
+  },
 ];
