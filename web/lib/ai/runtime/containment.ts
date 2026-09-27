@@ -56,6 +56,9 @@ export const AI_ERROR_REQUEST_TOO_LARGE = "ai_request_too_large";
  * common model could accept at all.
  */
 export const MAX_RUN_REQUEST_BYTES = 4 * 1024 * 1024;
+
+/** t0c9: the stop ceiling. The client sends a stop with no body at all. */
+export const MAX_STOP_REQUEST_BYTES = 16 * 1024;
 export const AI_DETACH_REASON_INSTANCE_MISMATCH = "runtime_instance_mismatch";
 
 /**
