@@ -76,6 +76,19 @@ describe("planCompaction", () => {
     expect(planCompaction(more, summary)!.slice[0].seq).toBe(first.throughSeq + 1);
   });
 
+  it("does not re-summarise on the next send when only a little would be covered (hysteresis)", () => {
+    // Big recent turns keep the thread over the budget right after a compaction.
+    const records = turns(6, 8_000);
+    const first = planCompaction(records, null)!;
+    expect(first).not.toBeNull();
+    const summary = { text: "s", throughSeq: first.throughSeq, createdAt: "x" };
+    const next = [...records, ...turns(1, 8_000)];
+    expect(historyChars(next.filter((r) => r.seq > summary.throughSeq))).toBeGreaterThan(
+      COMPACT_AT_CHARS,
+    );
+    expect(planCompaction(next, summary)).toBeNull();
+  });
+
   it("omits exactly the covered messages", () => {
     const records = turns(10);
     const plan = planCompaction(records, null)!;

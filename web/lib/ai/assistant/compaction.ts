@@ -10,6 +10,12 @@ import type { AssistantMessageV1, ThreadSummaryV1 } from "./records";
 export { MAX_SUMMARY_INPUT_CHARS };
 export const COMPACT_AT_CHARS = 60_000;
 export const KEEP_RECENT_USER_TURNS = 4;
+/**
+ * Hysteresis: a compaction must take at least this much out of what is sent. Without it,
+ * a thread whose recent turns alone sit near the budget would call the summariser on
+ * every send, each time for one turn. With it, the next compaction needs this much growth.
+ */
+export const MIN_COMPACT_SLICE_CHARS = 20_000;
 const TOOL_RESULT_CHARS = 600;
 export const COMPACTION_NOTICE =
   "Earlier messages were summarised to keep this conversation going.";
@@ -43,6 +49,7 @@ export function planCompaction(
   if (users.length <= KEEP_RECENT_USER_TURNS) return null;
   const firstKept = users[users.length - KEEP_RECENT_USER_TURNS].seq;
   const slice = open.filter((r) => r.seq < firstKept);
+  if (historyChars(slice) < MIN_COMPACT_SLICE_CHARS) return null;
   return { throughSeq: slice[slice.length - 1].seq, slice };
 }
 

@@ -84,6 +84,26 @@ describe("compactHistory", () => {
     ).toEqual(kept);
   });
 
+  it("calls the summariser once across two consecutive sends past the threshold", async () => {
+    let stored: { text: string; throughSeq: number; createdAt: string } | null = null;
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true, summary: "S" })));
+    const deps = {
+      readThread: async () => ({ summary: stored }) as never,
+      readSettings: async () => ready,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      saveThreadSummary: async (_t: string, _s: string, summary: typeof stored) => {
+        stored = summary;
+        return "accepted" as const;
+      },
+    };
+    // 10 user turns of 16,000 characters each (user + assistant).
+    const history = big(20);
+    expect((await compactHistory(input(history), deps)).compactedNow).toBe(true);
+    const grown = [...history, ...big(22).slice(20)];
+    expect((await compactHistory(input(grown), deps)).compactedNow).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("does no request under the budget, or while the assistant is not ready", async () => {
     const fetchImpl = vi.fn();
     const deps = {
