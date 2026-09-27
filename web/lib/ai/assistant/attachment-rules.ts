@@ -8,6 +8,8 @@ export const MAX_ATTACHMENTS = 4;
  * Anthropic's per-image limit, the tightest among the catalog's image models.
  */
 export const MAX_IMAGE_BYTES = 3.75 * 1024 * 1024;
+/** An image as picked; the composer shrinks one over {@link MAX_IMAGE_BYTES} (j6dk). */
+export const MAX_IMAGE_SOURCE_BYTES = 20 * 1024 * 1024;
 export const MAX_TEXT_BYTES = 200 * 1024;
 /** An .xlsx as picked; what is sent is its text, which {@link MAX_TEXT_BYTES} bounds. */
 export const MAX_XLSX_BYTES = 10 * 1024 * 1024;
@@ -77,8 +79,8 @@ export function checkAttachment(
   }
   if (IMAGE_TYPES.includes(file.type)) {
     if (!imageInput) return { ok: false, message: NO_VISION };
-    return file.size > MAX_IMAGE_BYTES
-      ? { ok: false, message: `"${file.name}" is larger than 3.75 MB.` }
+    return file.size > MAX_IMAGE_SOURCE_BYTES
+      ? { ok: false, message: `"${file.name}" is larger than 20 MB.` }
       : { ok: true, kind: "image", mimeType: file.type };
   }
   return { ok: false, message: wrongTypeMessage(file.name) };

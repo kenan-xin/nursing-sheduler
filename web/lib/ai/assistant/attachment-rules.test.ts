@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_ATTACHMENTS,
   MAX_IMAGE_BYTES,
+  MAX_IMAGE_SOURCE_BYTES,
   MAX_TEXT_BYTES,
   MAX_XLSX_BYTES,
   acceptFor,
@@ -61,10 +62,15 @@ describe("attachment rules (2by.10)", () => {
       message: expect.stringMatching(/^"rota.pdf" cannot be attached\./),
     });
     expect(checkAttachment(file("noext", ""), true, 0)).toMatchObject({ ok: false });
+    // Over 3.75 MB the composer shrinks an image (j6dk); only the picked file is capped here.
     expect(checkAttachment(file("big.jpg", "image/jpeg", MAX_IMAGE_BYTES + 1), true, 0)).toEqual({
-      ok: false,
-      message: '"big.jpg" is larger than 3.75 MB.',
+      ok: true,
+      kind: "image",
+      mimeType: "image/jpeg",
     });
+    expect(
+      checkAttachment(file("huge.jpg", "image/jpeg", MAX_IMAGE_SOURCE_BYTES + 1), true, 0),
+    ).toEqual({ ok: false, message: '"huge.jpg" is larger than 20 MB.' });
     expect(checkAttachment(file("big.txt", "text/plain", MAX_TEXT_BYTES + 1), true, 0)).toEqual({
       ok: false,
       message: '"big.txt" is larger than 200 KB.',

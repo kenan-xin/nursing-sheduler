@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAttachments, type Attachment } from "@copilotkit/react-core/v2";
 import {
   MAX_IMAGE_BYTES,
+  MAX_IMAGE_SOURCE_BYTES,
   MAX_XLSX_BYTES,
   acceptFor,
   checkAttachment,
@@ -16,6 +17,7 @@ import {
   wrongTypeMessage,
 } from "@/lib/ai/assistant/attachment-rules";
 import type { AssistantAttachmentV1 } from "@/lib/ai/assistant/records";
+import { shrinkImage } from "@/lib/ai/assistant/shrink-image";
 import { xlsxToText } from "@/lib/ai/assistant/xlsx-text";
 
 function readBytes(file: File): Promise<Uint8Array> {
@@ -47,7 +49,7 @@ export function useComposerAttachments(imageInput: boolean) {
       enabled: true,
       accept: acceptFor(imageInput),
       // The largest file the app's own rules take; checkAttachment sets each type's cap.
-      maxSize: Math.max(MAX_IMAGE_BYTES, MAX_XLSX_BYTES),
+      maxSize: Math.max(MAX_IMAGE_SOURCE_BYTES, MAX_XLSX_BYTES),
       onUpload: async (file) => {
         const verdict = checkAttachment(file, imageInput, queued.current);
         if (!verdict.ok) throw new Error(verdict.message);
@@ -61,11 +63,25 @@ export function useComposerAttachments(imageInput: boolean) {
           }
           if (!contentMatches(verdict.mimeType, bytes))
             throw new Error(wrongTypeMessage(file.name));
+          let mimeType = verdict.mimeType;
+          // A photo over the cap is sent shrunk, as JPEG (j6dk).
+          if (verdict.kind === "image" && bytes.length > MAX_IMAGE_BYTES) {
+            const shrunk = await shrinkImage(file).catch(() => {
+              throw new Error(wrongTypeMessage(file.name));
+            });
+            if (!shrunk) {
+              throw new Error(
+                `"${file.name}" is still larger than 3.75 MB after shrinking. Crop it or save it smaller, and attach it again.`,
+              );
+            }
+            bytes = shrunk;
+            mimeType = "image/jpeg";
+          }
           setError(null);
           return {
             type: "data",
             value: toBase64(bytes),
-            mimeType: verdict.mimeType,
+            mimeType,
             metadata: { kind: verdict.kind },
           };
         } catch (failure) {
