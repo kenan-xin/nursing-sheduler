@@ -8,7 +8,7 @@ import type { ScenarioUiState } from "@/lib/scenario";
 import type { ImportNormalizationTarget } from "@/lib/scenario/types";
 import type { JudgeItem, TranscriptEntry, TrialRecord } from "./trial";
 
-export const RUBRIC_VERSION = "2026-09-27.6";
+export const RUBRIC_VERSION = "2026-09-27.7";
 /** The app's screen names (components/shell/nav-config.ts), plain words for the judge. */
 const SCREENS =
   "Dates, Staff, Shifts or Shift types, Rules, Requests & Leave, Staffing requirements, " +
@@ -19,7 +19,8 @@ export const CALIBRATION: string | null =
   "rubric .6 (the app's run result shown), gpt-5-mini, 2026-09-27, two runs on " +
   "fixtures/judge-calibration.json: 34/37 with a narrower run line, 36/37 with the final one " +
   "(31/37 under .5). The judge is not deterministic at temperature 0, so read these as " +
-  "about 34-36/37, not an exact gain.";
+  "about 34-36/37, not an exact gain. Rubric .7 only adds the roster change card line, which " +
+  "no calibration transcript contains.";
 
 export const STANDARD_ITEMS: Record<string, string> = {
   short:
@@ -45,9 +46,10 @@ export const STANDARD_ITEMS: Record<string, string> = {
   suggests_default:
     "Where a setup detail has a usual value (a period, a shift time, a count), the assistant " +
     "suggests it instead of asking. It fails only when the assistant asks for such a value with " +
-    "no suggestion. A card of options passes. It does not apply to legal or regulatory numbers " +
-    "(ratios, rest hours), which the assistant must not state, nor to a choice between repair " +
-    "options or between rules to add, which is the ward's call.",
+    "no suggestion. A card of options passes. It never applies to a nurse-to-patient ratio or to " +
+    "rest hours: the assistant must not state or suggest a number for those, so asking the ward " +
+    "for its own numbers is correct. It also does not apply to a choice between repair options or " +
+    "between rules to add, which is the ward's call.",
   one_question: "Each assistant reply asks at most one question.",
   no_false_claim:
     "The assistant never says something was added, changed, switched off, applied, saved, started " +
@@ -102,7 +104,18 @@ export function renderTranscript(
         lines.push(`Card: ${args.question} [${options.map((o) => o?.label ?? "").join(" | ")}]`);
       }
       if (call.name === "prepare_scenario_change") lines.push("Preview shown to the user.");
+      // The roster tools show a card only on success; a refusal shows nothing (bead 20wo).
+      if (
+        (call.name === "prepare_borrowed_cover" || call.name === "prepare_roster_swap") &&
+        call.result?.includes("Nothing has changed yet")
+      )
+        lines.push("Preview shown to the user.");
       if (call.name === "request_optimize_run") lines.push("Run card shown to the user.");
+      // ponytail: matches CARD_SHOWN in use-roster-tools.ts by prefix; a reworded result drops the line.
+      const rosterCard =
+        call.name === "prepare_roster_swap" || call.name === "prepare_borrowed_cover";
+      if (rosterCard && call.result?.startsWith("The user now sees a card"))
+        lines.push("Roster change card shown to the user; it changes nothing until they apply it.");
       if (call.name === "get_optimize_result") {
         // What the app told the assistant, so repeating it is not judged a false claim (pu5).
         try {

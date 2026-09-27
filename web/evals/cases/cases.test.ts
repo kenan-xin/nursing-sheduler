@@ -1,6 +1,9 @@
+import "fake-indexeddb/auto";
 import { describe, expect, it } from "vitest";
 import { ASSISTANT_COMMAND_TYPES } from "@/lib/proposal/commands";
 import { buildSeed } from "../lib/harness";
+import { seedSavedRoster } from "../lib/saved-roster";
+import type { ScenarioUiState } from "@/lib/scenario";
 import { ALL_CASES } from "./index";
 
 const KNOWN_TAGS = new Set(["smoke", "repair", "flow", "sg", "safety", "grounding", "regression"]);
@@ -43,8 +46,23 @@ describe("the eval case set", () => {
     expect(long?.expect.judge?.join(" ")).toMatch(/illegal/);
   });
 
+  it("asks a ratio question for the ward's own numbers on a card, never a default (7xw)", () => {
+    const c = ALL_CASES.find((x) => x.id === "sg-ratio");
+    expect(c?.expect.noProposal).toBe(true);
+    expect(c?.expect.toolsCalled).toContain("offer_choices");
+    const rubric = c?.expect.judge?.join(" ") ?? "";
+    expect(rubric).toMatch(/ward decides its own numbers/);
+    expect(rubric).toMatch(/Does not invent or give a default ratio number/);
+  });
+
   it("builds every seed", () => {
     for (const c of ALL_CASES) expect(() => buildSeed(c.seed), c.id).not.toThrow();
+  });
+
+  it("saves every case's roster through the app's capture path", async () => {
+    expect(ALL_CASES.find((c) => c.id === "sg-mc-cover")?.savedRoster).toBeDefined();
+    for (const c of ALL_CASES)
+      if (c.savedRoster) await seedSavedRoster(buildSeed(c.seed) as ScenarioUiState, c.savedRoster);
   });
 
   it("names only real operation types", () => {

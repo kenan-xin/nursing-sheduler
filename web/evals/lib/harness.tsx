@@ -6,6 +6,7 @@ import type { AbstractAgent } from "@ag-ui/client";
 import type { LanguageModel } from "ai";
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { ApplyNavigationNotice } from "@/components/ai/apply-navigation-notice";
+import { PeopleTable } from "@/components/people/people-table";
 import { describeAnswers } from "@/components/ai/choice-card";
 import { useAssistantFollowUps } from "@/components/ai/use-assistant-follow-ups";
 import {
@@ -46,6 +47,7 @@ import type { Ledger } from "./budget";
 import { recordingFetch } from "./budget";
 import type { EvalCase, Seed, UserPolicy } from "./case";
 import { renderTranscript } from "./judge";
+import { clearSavedRoster, seedSavedRoster } from "./saved-roster";
 import type {
   ChoiceRecord,
   ProposalRecord,
@@ -144,7 +146,15 @@ function Session({ threadId, handles }: { threadId: string; handles: Handles }) 
   handles.session = session;
   handles.controller = controller;
   handles.send = send;
-  return <ApplyNavigationNotice controller={controller} />;
+  // The Staff screen: a temporary cover's Apply opens it and its cover form saves (d582).
+  // Without it the hand-off found no anchor, nothing was written and no follow-up came (20wo).
+  // ponytail: always mounted, not only on /people; the navigation seam re-renders nothing.
+  return (
+    <>
+      <ApplyNavigationNotice controller={controller} />
+      <PeopleTable />
+    </>
+  );
 }
 
 /** Answers CopilotKit's runtime info request locally; everything else goes to `real`. */
@@ -299,6 +309,9 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
     const loaded = await loadScenario(target);
     if (!loaded.ok) throw new Error(`seed did not load: ${JSON.stringify(loaded)}`);
     seed = pickScenario(useScenarioStore.getState());
+    // No roster or run carries over from the last trial.
+    await clearSavedRoster();
+    if (evalCase.savedRoster) await seedSavedRoster(seed, evalCase.savedRoster);
     useModeStore.setState({ mode: "advanced", adoption: "ready" });
     window.history.replaceState({}, "", evalCase.route);
     await hydrateAssistant();

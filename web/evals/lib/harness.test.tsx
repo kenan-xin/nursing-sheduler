@@ -159,6 +159,35 @@ describe("runTrial", () => {
     expect(r.navigations.length).toBeGreaterThan(0);
   });
 
+  it("applies a temporary cover through the Staff form and hears the follow-up (bead 20wo)", async () => {
+    // A cover's Apply hands off to the Staff screen's form; with no form mounted the
+    // hand-off expired, nothing was written and no follow-up came.
+    const args = JSON.stringify({
+      summary: "Rina covers the night on the 5th.",
+      operations: [
+        {
+          type: "add_temporary_cover",
+          name: "Rina Lim (float pool)",
+          date: "2026-11-05",
+          shiftType: "N",
+          groups: [],
+        },
+      ],
+    });
+    const r = await runTrial(
+      input(
+        { ...base, user: { turns: ["Borrow Rina for the 5th."], onPreview: "apply" } },
+        { toolName: "prepare_scenario_change", args, text: "Check the Preview." },
+      ),
+    );
+    expect(r.error).toBeNull();
+    expect(r.proposals[0]?.status).toBe("applied");
+    expect(r.final.temporaryCover).toHaveLength(1);
+    expect(r.transcript.some((m) => m.role === "user" && m.text.startsWith("I applied it"))).toBe(
+      true,
+    );
+  }, 30_000);
+
   it("tells the next turn that an unapplied Preview has changed nothing (dt9)", async () => {
     const args = JSON.stringify({
       summary: "Shorten the roster.",
