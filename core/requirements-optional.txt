@@ -25,6 +25,15 @@ pyyaml
 pytest==9.1.1
 pytest-cov==7.1.0
 fakeredis>=2,<3
+# `starlette.testclient` (re-exported as `fastapi.testclient`) is built on
+# `httpx2`; when `httpx2` is missing it falls back to `httpx` and emits
+# `StarletteDeprecationWarning: Using \`httpx\` with \`starlette.testclient\` is
+# deprecated; install \`httpx2\` instead.` Neither `fastapi[standard]` nor
+# Starlette's base install pulls `httpx2` — it lives only in Starlette's `full`
+# extra — so declare the supported test-client backend explicitly. Test-only:
+# production imports `httpx` (the diagnostic runner), never `starlette.testclient`.
+# Fenced below 3 like `fakeredis`: a major bump must be deliberate.
+httpx2>=2,<3
 # Ruff is intentionally pinned: Ruff's *default* rule set expands between
 # releases (e.g. 0.15.x -> 0.16.x widened it materially). The explicit
 # `tool.ruff.lint.select` in pyproject.toml keeps the contract honest even if
