@@ -670,6 +670,7 @@ export const V2_STYLE_OWNER_FILES: Readonly<Record<V2Owner, readonly string[]>> 
     "components/entity-editor/transfer-list*.tsx",
     "components/icons.tsx",
     "components/app-version.tsx",
+    "components/app-version.stories.tsx",
   ]),
   R1: Object.freeze([
     "app/(app)/layout.tsx",
@@ -700,6 +701,7 @@ export const V2_STYLE_OWNER_FILES: Readonly<Record<V2Owner, readonly string[]>> 
     "components/shift-types/**/*.tsx",
     "components/entity-editor/working-time-fields.tsx",
     "components/entity-editor/working-time-fields.test.tsx",
+    "components/entity-editor/working-time-fields.stories.tsx",
   ]),
   R3: Object.freeze(["app/(app)/rules/page.tsx", "components/guided-rules/**/*.tsx"]),
   R4: Object.freeze([

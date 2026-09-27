@@ -44,7 +44,7 @@ function Row({
       className={`flex items-center gap-2.5 rounded-control px-2 py-[7px] pointer-coarse:min-h-touch ${
         option.disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-panel-alt"
       }`}
-      title={option.disabledReason}
+      title={option.disabledReason ?? option.label}
     >
       <input
         type="radio"
@@ -62,7 +62,10 @@ function Row({
         // is what the F4 target scan measures and what a thumb has to hit.
         className="size-3.5 accent-brand pointer-coarse:size-touch"
       />
-      <span className="truncate text-meta text-ink">{option.label}</span>
+      {/* An option label is arbitrary user input (bd memory
+          `long-user-text-no-overflow`): `min-w-0` lets the span actually shrink so
+          `truncate` can ellipsize it inside the row instead of pushing the box wide. */}
+      <span className="min-w-0 truncate text-meta text-ink">{option.label}</span>
     </label>
   );
 }

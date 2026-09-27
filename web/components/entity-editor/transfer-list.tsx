@@ -210,7 +210,7 @@ export function TransferList<V = string>({
             />
           ))}
           {availCount === 0 && (
-            <p className="px-2 py-[18px] text-center text-meta italic text-faint">
+            <p className="px-2 py-[18px] text-center text-meta italic text-ink3">
               {aq ? `Nothing matches “${availQ}”` : availableEmpty}
             </p>
           )}
@@ -271,7 +271,7 @@ export function TransferList<V = string>({
             />
           ))}
           {selTokens.length === 0 && (
-            <p className="px-2 py-[18px] text-center text-meta italic text-faint">
+            <p className="px-2 py-[18px] text-center text-meta italic text-ink3">
               {selected.length === 0 ? selectedEmpty : `Nothing matches “${selQ}”`}
             </p>
           )}

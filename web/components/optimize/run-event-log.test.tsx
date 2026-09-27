@@ -124,6 +124,19 @@ describe("RunEventLog", () => {
     expect(screen.getByTestId("optimize-event-detail").className).not.toContain("font-mono");
   });
 
+  // axe `scrollable-region-focusable` (nursing-sheduler-w0e.12). The log body is
+  // `max-h-80 overflow-y-auto`, so once it overflows a keyboard user can only read
+  // past the fold if the region itself is in the tab order. It is a landmark-shaped
+  // region with a name, not a bare div: a focusable div with no role announces
+  // nothing when it takes focus.
+  it("makes the scrollable log region keyboard-reachable and names it", () => {
+    render(<RunEventLog active log={[entry({ seq: 1, label: "a" })]} />);
+    const region = screen.getByTestId("optimize-event-log-scroll");
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region).toHaveRole("region");
+    expect(region).toHaveAccessibleName("Event log");
+  });
+
   it("auto-scrolls to the tail only when the viewer is already near the bottom", () => {
     const { rerender } = render(<RunEventLog active log={[entry({ seq: 1, label: "a" })]} />);
     const container = screen.getByTestId("optimize-event-log-scroll");

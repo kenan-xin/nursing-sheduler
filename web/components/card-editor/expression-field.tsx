@@ -87,7 +87,11 @@ export function ExpressionField({
               </span>
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="font-semibold text-ink">{op.title}</span>
-                <span className="text-meta text-ink3">{op.help}</span>
+                {/* --ink3 fails AA on the dark --brandtint (3.84:1); the selected
+                    row steps up to --ink2, which clears it for every accent. */}
+                <span className={`text-meta ${selected ? "text-ink2" : "text-ink3"}`}>
+                  {op.help}
+                </span>
               </span>
               {selected && <FaCircleCheck className="ml-auto size-4 flex-none text-brand" />}
             </button>
