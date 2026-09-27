@@ -14,7 +14,7 @@
 // per selector (one override applies to every equation of a card) and per date
 // (skill mix and `preferredNumPeople` have no per-date form).
 
-import { isValidIso } from "@/lib/dates/date-id";
+import { formatShortDate, isValidIso } from "@/lib/dates/date-id";
 import { expandShiftTypeRefs, flattenShiftTypeRefs } from "@/lib/rules/expansion";
 import { requiredOn, requirementDateIsos } from "@/lib/rules/requirement-dates";
 import {
@@ -159,7 +159,7 @@ function workedShiftIds(state: Pick<ScenarioUiState, "shifts">): Set<string> {
 }
 
 /** One target per top-level selector, mirroring `_compile_shift_requirement_groups`. */
-export function cardTargets(state: ScenarioUiState, card: RequirementCard): CoverTarget[] {
+export function cardTargets(state: CoverInput, card: RequirementCard): CoverTarget[] {
   const worked = workedShiftIds(state);
   const expand = (selector: ShiftTypeRef | ShiftTypeRef[]) => {
     const refs = flattenShiftTypeRefs(selector);
@@ -195,7 +195,7 @@ interface Prepared {
   cards: { card: RequirementCard; dates: Set<string>; targets: CoverTarget[] }[];
 }
 
-function prepare(state: ScenarioUiState): Prepared {
+function prepare(state: CoverInput): Prepared {
   const worked = workedShiftIds(state);
   const groupIds = new Set(state.staffGroups.map((group) => String(group.id)));
   const flags = state.temporaryCover.map((cover): CoverFlag | null => {
@@ -257,7 +257,7 @@ function lower(
 /** The need an authored card states on one date, with every working cover applied. `shiftId`
  *  picks the selector (equation); omitted = the first, a single-selector card's only one. */
 export function cardNeedOn(
-  state: ScenarioUiState,
+  state: CoverInput,
   card: RequirementCard,
   iso: string,
   shiftId?: string,
@@ -285,12 +285,14 @@ function withOverrides(card: RequirementCard, overrides: RequirementOverride[]):
   return overrides.length ? { ...rest, requiredNumPeopleOverrides: overrides } : rest;
 }
 
-/** One equation's card, lowered on every covered date; null when no number moves. */
+/** One equation's card, lowered on every covered date; null when no number moves. A `forced`
+ *  date is split off even with no credit (the solver-equivalence fixtures). */
 function lowerPart(
   card: RequirementCard,
   target: CoverTarget,
   dates: readonly string[],
   prepared: Prepared,
+  forced: ReadonlySet<string>,
 ): Part[] | null {
   const overrides: RequirementOverride[] = [...(card.requiredNumPeopleOverrides ?? [])];
   const marks: Mark[] = [];
@@ -298,13 +300,13 @@ function lowerPart(
   const split = new Set<string>();
   for (const iso of dates) {
     const n = lower(card, target, iso, prepared.working, prepared.closure);
-    if (n.credit === 0) continue;
+    if (n.credit === 0 && !forced.has(iso)) continue;
     const required = n.count - n.required;
     const preferred = (card.preferredNumPeople ?? 0) - (n.preferred ?? 0);
     const mix = (card.skillMix ?? [])
       .map((entry, k) => [k, entry.minNumPeople - n.mix[k]] as const)
       .filter(([, by]) => by > 0);
-    if (preferred > 0 || mix.length > 0) {
+    if (preferred > 0 || mix.length > 0 || forced.has(iso)) {
       split.add(iso);
       const {
         requiredNumPeopleOverrides: _moved,
@@ -359,9 +361,10 @@ function lowerCard(
   state: ScenarioUiState,
   card: RequirementCard,
   prepared: Prepared,
+  forced: ReadonlySet<string> | undefined,
 ): Part[] | null {
   const dates = requirementDateIsos(state, card);
-  if (!prepared.working.some((cover) => dates.includes(cover.date))) return null;
+  if (!forced && !prepared.working.some((cover) => dates.includes(cover.date))) return null;
   const selectors = selectorsOf(card);
   const targets = cardTargets(state, card);
   const parts =
@@ -371,10 +374,10 @@ function lowerCard(
           target: targets[i],
         }))
       : [{ card, target: targets[0] }];
-  let changed = false;
+  let changed = forced !== undefined;
   const out: Part[] = [];
   for (const part of parts) {
-    const lowered = lowerPart(part.card, part.target, dates, prepared);
+    const lowered = lowerPart(part.card, part.target, dates, prepared, forced ?? new Set());
     if (lowered) changed = true;
     out.push(...(lowered ?? [{ card: part.card, marks: [] }]));
   }
@@ -385,10 +388,33 @@ function lowerCard(
 export function applyCovers(state: ScenarioUiState): CoverApplication {
   const prepared = prepare(state);
   if (prepared.working.length === 0) return { state, decrements: [] };
+  return project(state, prepared, new Map());
+}
+
+/**
+ * The submission's splits with no credit: each `touched` card (by uid) is split per selector,
+ * and each listed ISO date is split off into its own copy. Numbers never move, so the result
+ * is solver-equivalent to `state`; the Task 6 fixtures prove it with the real solver.
+ */
+export function splitCardsForCover(
+  state: ScenarioUiState,
+  touched: ReadonlyMap<string, readonly string[]>,
+): ScenarioUiState {
+  return project(state, { ...prepare(state), working: [] }, touched).state;
+}
+
+function project(
+  state: ScenarioUiState,
+  prepared: Prepared,
+  touched: ReadonlyMap<string, readonly string[]>,
+): CoverApplication {
   let changed = false;
   const parts: Part[] = [];
   for (const card of state.cardsByKind.requirements) {
-    const lowered = card.disabled ? null : lowerCard(state, card, prepared);
+    const forced = touched.get(card.uid);
+    const lowered = card.disabled
+      ? null
+      : lowerCard(state, card, prepared, forced && new Set(forced));
     if (lowered) changed = true;
     parts.push(...(lowered ?? [{ card, marks: [] }]));
   }
@@ -415,10 +441,100 @@ export function withCoverOverrides(state: ScenarioUiState): ScenarioUiState {
   return applyCovers(state).state;
 }
 
+/** A refusal is one plain sentence for the form's error line and the host's reply. */
+export type CoverValidation = { ok: true } | { ok: false; message: string };
+
+/**
+ * The Staff form's validation, shared with the assistant host (d582 §6): a name, a
+ * date, a worked shift, groups that exist, and no second entry for the same name on
+ * the same date. `editingIndex` is the entry being re-saved (so it does not clash
+ * with itself). A date outside the period is NOT refused here — that is a drift
+ * flag (F3), not a form error.
+ */
+export function validateCover(
+  state: CoverInput,
+  entry: Pick<UiTemporaryCover, "name" | "date" | "shiftType" | "groups">,
+  editingIndex?: number,
+): CoverValidation {
+  const name = entry.name.trim();
+  if (!name) return { ok: false, message: "Enter the nurse's name." };
+  if (!isValidIso(entry.date)) return { ok: false, message: "Pick a date." };
+  const shift = String(entry.shiftType);
+  if (!workedShiftIds(state).has(shift)) return { ok: false, message: "Pick a shift she works." };
+  const groupIds = new Set(state.staffGroups.map((group) => String(group.id)));
+  if (entry.groups.some((group) => !groupIds.has(String(group))))
+    return { ok: false, message: "A selected group no longer exists." };
+  const clash = state.temporaryCover.findIndex(
+    (cover, i) => i !== editingIndex && cover.name.trim() === name && cover.date === entry.date,
+  );
+  if (clash !== -1) {
+    return {
+      ok: false,
+      message:
+        String(state.temporaryCover[clash].shiftType) === shift
+          ? `${name} already covers ${shift} on ${formatShortDate(entry.date)}.`
+          : `${name} can only cover one shift a day.`,
+    };
+  }
+  return { ok: true };
+}
+
 const cardLabel = (card: RequirementCard) =>
   card.description || flattenShiftTypeRefs(card.shiftType).join(", ");
 
-export function coverStatuses(state: ScenarioUiState): CoverStatus[] {
+/**
+ * Everything `coverStatuses` reads, and nothing else. A full `ScenarioUiState` is
+ * assignable to it, so existing callers are unaffected; a screen that wants to
+ * subscribe narrowly uses `coverSlicesOf` + `coverCardsOf` + `coverInputFrom`, which
+ * is how a store write to `meta` or to a card kind the arithmetic never walks stops
+ * re-rendering the cover UI.
+ */
+export type CoverInput = Pick<
+  ScenarioUiState,
+  | "staffGroups"
+  | "shifts"
+  | "shiftGroups"
+  | "rangeStart"
+  | "rangeEnd"
+  | "dateGroups"
+  | "temporaryCover"
+> & { cardsByKind: { requirements: RequirementCard[] } };
+
+/** The non-card slices of `CoverInput`, as one shallow subscription key. */
+export type CoverSlices = Pick<
+  ScenarioUiState,
+  | "staffGroups"
+  | "shifts"
+  | "shiftGroups"
+  | "rangeStart"
+  | "rangeEnd"
+  | "dateGroups"
+  | "temporaryCover"
+>;
+
+export function coverSlicesOf(state: ScenarioUiState): CoverSlices {
+  return {
+    staffGroups: state.staffGroups,
+    shifts: state.shifts,
+    shiftGroups: state.shiftGroups,
+    rangeStart: state.rangeStart,
+    rangeEnd: state.rangeEnd,
+    dateGroups: state.dateGroups,
+    temporaryCover: state.temporaryCover,
+  };
+}
+
+/** The only card kind the cover arithmetic walks, as its own subscription key. */
+export function coverCardsOf(state: ScenarioUiState): RequirementCard[] {
+  return state.cardsByKind.requirements;
+}
+
+/** `CoverInput` from the two subscription keys. */
+export function coverInputFrom(slices: CoverSlices, requirements: RequirementCard[]): CoverInput {
+  return { ...slices, cardsByKind: { requirements } };
+}
+
+export function coverStatuses(state: CoverInput): CoverStatus[] {
   const prepared = prepare(state);
   return state.temporaryCover.map((cover, index) => {
     const flag = prepared.flags[index];

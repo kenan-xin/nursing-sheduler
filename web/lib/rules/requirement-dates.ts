@@ -11,7 +11,7 @@ import {
   type DateRef,
   type RequirementCard,
   type ScenarioUiState,
-} from "@/lib/scenario";
+} from "@/lib/scenario/types";
 import { generateDateItems, getDateIdForRange, isValidIso } from "@/lib/dates/date-id";
 import { deriveDateGroups } from "@/lib/dates/derived-groups";
 import { expandDateRefs } from "./expansion";

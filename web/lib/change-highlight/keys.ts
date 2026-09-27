@@ -22,6 +22,9 @@ export const changeKeys = {
   shift: (id: unknown): string => `shift:${stableStringify(id)}`,
   shiftGroup: (id: string): string => `shiftgroup:${id}`,
   rule: (kind: keyof CardsByKind, uid: string): string => `rule:${kind}:${uid}`,
+  /** One temporary-cover row (d582): its staff-list scope and name|date|shift identity. */
+  cover: (name: string, date: string, shiftType: string): string =>
+    `cover:${name}|${date}|${shiftType}`,
   /** Every cell key of one matrix row starts with this. */
   cellRow,
   cell: (person: unknown, date: unknown): string => `${cellRow(person)}${stableStringify(date)}`,

@@ -25,7 +25,7 @@ import {
   type RequirementCard,
   type ScenarioUiState,
   type UiRequestCell,
-} from "@/lib/scenario";
+} from "@/lib/scenario/types";
 import { cardNeedOn } from "@/lib/scenario/temporary-cover";
 import { expandPersonRefs, expandShiftTypeRefs, flattenShiftTypeRefs } from "./expansion";
 import { makeDates, requiredOn, requirementDateIsos } from "./requirement-dates";
