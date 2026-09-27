@@ -32,6 +32,7 @@ import {
   scenarioCommands,
   useAuthorityStore,
   useHotStore,
+  useScenarioStore,
 } from "@/lib/store";
 import { resetScenarioForTest } from "@/lib/store/test-authority";
 import type { PrepareOptimizeSubmissionResult } from "@/lib/scenario";
@@ -47,6 +48,7 @@ import {
   type SessionTransactionStorage,
   type UseOptimizeServerInfoDeps,
 } from "@/lib/optimize";
+import { UNSUPPORTED_EXPRESSION_REASON } from "@/lib/optimize/optimize-readiness";
 import { OptimizeAndExportScreen } from "./optimize-and-export-screen";
 
 vi.mock("next/navigation", () => ({
@@ -269,6 +271,46 @@ describe("OptimizeAndExportScreen — gating", () => {
     expect(screen.getByTestId("optimize-readiness")).toBeInTheDocument();
     expect(screen.getByTestId("optimize-disabled-reason")).toHaveTextContent(
       "Complete the missing schedule configuration before optimising.",
+    );
+    expect(screen.getByTestId("optimize-submit")).toBeDisabled();
+  });
+
+  it("blocks submission with the reason when a shift count's expression is unsupported (wa46)", async () => {
+    await readyStore();
+    await scenarioCommands.mutate({
+      cardsByKind: {
+        ...useScenarioStore.getState().cardsByKind,
+        counts: [
+          {
+            uid: "bad",
+            person: "ALL",
+            countDates: "ALL",
+            countShiftTypes: "day",
+            expression: "x >= 0",
+            target: 1,
+            weight: 1,
+          },
+        ],
+      },
+    });
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
+      />,
+      { wrapper },
+    );
+    await waitFor(() => expect(screen.getByText("Online")).toBeInTheDocument());
+    expect(screen.getByTestId("optimize-readiness")).toHaveTextContent(
+      UNSUPPORTED_EXPRESSION_REASON,
+    );
+    expect(screen.getByTestId("optimize-disabled-reason")).toHaveTextContent(
+      UNSUPPORTED_EXPRESSION_REASON,
     );
     expect(screen.getByTestId("optimize-submit")).toBeDisabled();
   });

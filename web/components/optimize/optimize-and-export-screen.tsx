@@ -46,6 +46,7 @@ import {
   createAttemptRegistry,
   createOptimizeObservability,
   deriveOptimizeReadiness,
+  UNSUPPORTED_EXPRESSION_REASON,
   isActiveLifecycle,
   isSettledLifecycle,
   migrateLegacySession,
@@ -317,9 +318,10 @@ export function OptimizeAndExportScreen({
   const shiftGroups = useScenarioStore((state) => state.shiftGroups);
   const rangeStart = useScenarioStore((state) => state.rangeStart);
   const rangeEnd = useScenarioStore((state) => state.rangeEnd);
+  const counts = useScenarioStore((state) => state.cardsByKind.counts);
   const readiness = useMemo(
-    () => deriveOptimizeReadiness({ staff, shifts, shiftGroups, rangeStart, rangeEnd }),
-    [staff, shifts, shiftGroups, rangeStart, rangeEnd],
+    () => deriveOptimizeReadiness({ staff, shifts, shiftGroups, rangeStart, rangeEnd, counts }),
+    [staff, shifts, shiftGroups, rangeStart, rangeEnd, counts],
   );
 
   // B2-2 — the scenario stat grid (NURSES / DAYS / SHIFTS / RULES ON) rendered
@@ -610,8 +612,12 @@ export function OptimizeAndExportScreen({
   // RUN in progress but a REQUEST in flight. It exists so the settled promise, not
   // the wall clock, decides when a second gesture becomes a second attempt.
   const submitEnabled = readiness.ready && serverInfo.status === "online" && !submitInFlight;
+  // The unsupported-expression issue is pushed last, so it leads only when it is
+  // the sole reason; missing set-up keeps the generic sentence.
   const disabledReason = !readiness.ready
-    ? "Complete the missing schedule configuration before optimising."
+    ? readiness.issues[0].kind === "shift-counts"
+      ? UNSUPPORTED_EXPRESSION_REASON
+      : "Complete the missing schedule configuration before optimising."
     : serverInfo.status !== "online"
       ? "Backend unavailable. Check that the configured backend is running."
       : null;
