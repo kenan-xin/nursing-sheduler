@@ -31,8 +31,16 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+// Story files run concurrently in one origin, so other files' `storybook-*` databases
+// may exist at any moment: each check names the exact databases it is about.
+let seededDb: string | undefined;
+let freshDb: string | undefined;
+let overrideDb: string | undefined;
+const databaseNames = async () => (await indexedDB.databases()).map((db) => db.name);
+
 export const SeededScenario: Story = {
-  beforeEach: withScenarioStore(async () => {
+  beforeEach: withScenarioStore(async (harness) => {
+    seededDb = harness.databaseName;
     await scenarioCommands.mutate(pickScenario(makeValidUiState()));
   }),
   play: async ({ canvas }) => {
@@ -43,11 +51,14 @@ export const SeededScenario: Story = {
 // Declared AFTER the seeded story on purpose: it proves the previous story's scenario did
 // not leak AND that its database was deleted (only this story's own database remains).
 export const FreshScenario: Story = {
-  beforeEach: withScenarioStore(),
+  beforeEach: withScenarioStore(async (harness) => {
+    freshDb = harness.databaseName;
+  }),
   play: async ({ canvas }) => {
     await expect(await canvas.findByText("staff:0")).toBeVisible();
-    const ours = (await indexedDB.databases()).filter((db) => db.name?.startsWith("storybook-"));
-    await expect(ours).toHaveLength(1);
+    const names = await databaseNames();
+    await expect(names).toContain(freshDb);
+    await expect(names).not.toContain(seededDb);
   },
 };
 
@@ -63,13 +74,17 @@ export const ParameterSeed: Story = {
   },
 };
 
+// A function seed that runs no command: the "empty" install, plus its database name.
 export const ParameterOverride: Story = {
-  parameters: { scenario: "empty" },
+  parameters: {
+    scenario: (async (harness) => {
+      overrideDb = harness.databaseName;
+    }) satisfies ScenarioSeed,
+  },
   play: async ({ canvas }) => {
     await expect(await canvas.findByText("staff:0")).toBeVisible();
     await expect(useAuthorityStore.getState().canUndo).toBe(false);
-    const ours = (await indexedDB.databases()).filter((db) => db.name?.startsWith("storybook-"));
-    await expect(ours).toHaveLength(1);
+    await expect(await databaseNames()).toContain(overrideDb);
   },
 };
 
@@ -80,8 +95,7 @@ export const TornDown: Story = {
     await expect(await canvas.findByText("staff:0")).toBeVisible();
     await expect(useHotStore.getState().hydrationStatus).toBe("unhydrated");
     await expect(useAuthorityStore.getState().ownership).toBe("unknown");
-    const ours = (await indexedDB.databases()).filter((db) => db.name?.startsWith("storybook-"));
-    await expect(ours).toHaveLength(0);
+    await expect(await databaseNames()).not.toContain(overrideDb);
   },
 };
 
