@@ -563,16 +563,33 @@ export function CardListItem({
       {/* A field grid is a data surface: hairline seams, flush cells, and
           explicitly square corners (DESIGN.md §5 — don't round data structure). */}
       <div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-px rounded-none border border-line2 bg-line2">
-        {fields.map((f) => (
-          <div key={f.label} className="min-w-0 bg-surface px-[15px] py-3">
-            <div className="mb-[7px] text-label font-semibold uppercase tracking-[0.03em] text-ink3">
-              {f.label}
+        {fields.map((f) => {
+          // A STRING field is the ward's own text (a person/group ref, a shift
+          // code, an expression), so it truncates to one line with an ellipsis and
+          // exposes the whole value on hover — the shared `min-w-0 max-w-full
+          // truncate` + `title` recipe (bd memory `long-user-text-no-overflow`).
+          // A JSX field owns its own layout instead: the coefficient/pattern chips
+          // wrap, the count Expression already truncates with its own title, and
+          // the requirement Exceptions link must stay visible — a nowrap ancestor
+          // would ellipsis-clip them all, so it is deliberately not applied.
+          const valueText = typeof f.value === "string" ? f.value : undefined;
+          return (
+            <div key={f.label} className="min-w-0 bg-surface px-[15px] py-3">
+              <div className="mb-[7px] text-label font-semibold uppercase tracking-[0.03em] text-ink3">
+                {f.label}
+              </div>
+              <div
+                className={cn(
+                  "font-heading text-body font-bold leading-[1.25] tracking-[-0.005em]",
+                  valueText !== undefined && "min-w-0 max-w-full truncate",
+                )}
+                title={valueText || undefined}
+              >
+                {f.value}
+              </div>
             </div>
-            <div className="font-heading text-body font-bold leading-[1.25] tracking-[-0.005em]">
-              {f.value}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="mt-3.5 flex flex-wrap items-center gap-1.5">{actions}</div>
       {footer}
