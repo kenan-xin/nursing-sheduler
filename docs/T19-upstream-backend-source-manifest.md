@@ -177,7 +177,7 @@ Each change that upstream accepts moves its files from `patched` or `v2-only` to
 | Diagnostic path mode and idempotent cleanup (P14) | `diagnostic.py`, `tests/test_public_diagnostic.py` | Lets the diagnostic run through a BFF prefix. |
 | Fixture hash re-stamp (P0) | `tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json` | Upstream bug: the `scenarioSha256` is stale. Report it. |
 | Solver process residue audit (r6g) | `tests/real/solver_capabilities_residue.py` (v2-only) | Linux `/proc` check that no solver child outlives a cancelled job. |
-| `httpx2` for the Starlette test client (bead `qq0.27.5`) | `requirements-optional.txt` | Fixed on branch `fix/qq0.27.5-testclient-deprecation` (`7cb7e6b`), not yet on `develop`. When it merges, rebuild `W0-requirements.patch` with `--refresh-patches`, or the check fails. |
+| `httpx2` for the Starlette test client (bead `qq0.27.5`) | `requirements-optional.txt` | Merged into `develop` (PR #110). `W0-requirements.patch` carries it. Starlette prefers `httpx2`, and genie would see the same warning. |
 | SG 28-day compliance case | `tests/testcases/real/sg-28day-160h-compliance-14-nurses.yaml`, `tests/test_sg_compliance_roster.py` | Real ward case (lane 07 D19). |
 
 ### Origin table

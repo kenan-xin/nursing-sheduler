@@ -3,12 +3,13 @@
 # hunk: pulp moves to the optional file (X4)
 # hunk: packages only the AI package needs are left out (X5)
 # hunk: pyyaml for tests/catalogue_oracle.py, exact pytest and ruff pins, fakeredis<3 (v2 tooling)
+# hunk: httpx2 for the Starlette test client (qq0.27.5)
 
 diff --git a/core/requirements-optional.txt b/core/requirements-optional.txt
-index edfeae4..818d923 100644
+index edfeae4..270a243 100644
 --- a/core/requirements-optional.txt
 +++ b/core/requirements-optional.txt
-@@ -1,18 +1,32 @@
+@@ -1,18 +1,41 @@
 -# Optional dependencies for development, testing, and the experimental solver
 -# backends. Install with `uv pip install -r requirements-optional.txt`, which
 -# also pulls in requirements.txt.
@@ -51,6 +52,15 @@ index edfeae4..818d923 100644
 +pytest==9.1.1
 +pytest-cov==7.1.0
 +fakeredis>=2,<3
++# `starlette.testclient` (re-exported as `fastapi.testclient`) is built on
++# `httpx2`; when `httpx2` is missing it falls back to `httpx` and emits
++# `StarletteDeprecationWarning: Using \`httpx\` with \`starlette.testclient\` is
++# deprecated; install \`httpx2\` instead.` Neither `fastapi[standard]` nor
++# Starlette's base install pulls `httpx2` — it lives only in Starlette's `full`
++# extra — so declare the supported test-client backend explicitly. Test-only:
++# production imports `httpx` (the diagnostic runner), never `starlette.testclient`.
++# Fenced below 3 like `fakeredis`: a major bump must be deliberate.
++httpx2>=2,<3
 +# Ruff is intentionally pinned: Ruff's *default* rule set expands between
 +# releases (e.g. 0.15.x -> 0.16.x widened it materially). The explicit
 +# `tool.ruff.lint.select` in pyproject.toml keeps the contract honest even if
