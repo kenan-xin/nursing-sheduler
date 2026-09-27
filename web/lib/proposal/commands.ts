@@ -24,7 +24,7 @@
 // dates) and compile to its own fold (`foldPaintIntents`). Removing someone's leave is
 // an agreement with them; `assumptions.ts` asks about it from the document diff, so no
 // arm carries a confirmation flag the model could leave out.
-// The rule arms (`add_/edit_succession_rule`, and the count, requirement and remove
+// The rule arms (`add_/edit_shift_sequence_rule`, and the count, requirement and remove
 // arms after them) widen the set the same way: each one fills the rule editor's own
 // form draft and runs that editor's own validator and builder in `operations.ts`.
 //
@@ -161,11 +161,13 @@ export type AssistantCommandV1 =
       endDate: IsoDate;
     }
   /**
-   * Add one shift sequence rule -- the Shift sequences screen's Add form. `weight` is
+   * Add one shift sequence rule -- the Shift Successions screen's Add form. Named in
+   * plain words, not the engine's "succession", because the model repeats op names to
+   * the user (bead nj3q); the stored card kind stays `successions`. `weight` is
    * the text the Weight box would hold ("-infinity" = never, "-50" = discourage).
    */
   | {
-      type: "add_succession_rule";
+      type: "add_shift_sequence_rule";
       description: string;
       people: PersonRef[];
       pattern: string[];
@@ -174,7 +176,7 @@ export type AssistantCommandV1 =
     }
   /** Replace every field of one shift sequence rule -- that screen's Edit form. */
   | {
-      type: "edit_succession_rule";
+      type: "edit_shift_sequence_rule";
       ruleId: string;
       description: string;
       people: PersonRef[];
@@ -315,8 +317,8 @@ export const ASSISTANT_COMMAND_TYPES = [
   "set_off_request",
   "set_shift_request",
   "clear_requests",
-  "add_succession_rule",
-  "edit_succession_rule",
+  "add_shift_sequence_rule",
+  "edit_shift_sequence_rule",
   "add_count_rule",
   "edit_count_rule",
   "add_staffing_requirement",
@@ -489,7 +491,7 @@ function countFields() {
           'least, "x = T" exactly, "x < T" fewer than, "x > T" more than, "|x - T|^2" as ' +
           'close to T as possible (needs a weight of 0 or less, never "infinity"). x is a ' +
           "total over the dates, never days in a row: for at most 5 days in a row, any " +
-          'shift, use add_succession_rule with "ALL" 6 times at "-infinity".',
+          'shift, use add_shift_sequence_rule with "ALL" 6 times at "-infinity".',
       ),
     target: z.number().describe("The target T, a whole number of zero or more, e.g. 5."),
     weight: countWeightSchema(),
@@ -699,11 +701,11 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
         "propose this as that question, never as a decision.",
     ),
   z.strictObject({
-    type: z.enum(["add_succession_rule"]),
+    type: z.enum(["add_shift_sequence_rule"]),
     ...successionFields(),
   }),
   z.strictObject({
-    type: z.enum(["edit_succession_rule"]),
+    type: z.enum(["edit_shift_sequence_rule"]),
     ruleId: ruleIdSchema(),
     ...successionFields(),
   }),

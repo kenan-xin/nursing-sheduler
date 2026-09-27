@@ -662,7 +662,7 @@ describe("isSafeOption", () => {
       {
         operations: [
           {
-            type: "edit_succession_rule",
+            type: "edit_shift_sequence_rule",
             ruleId: "x",
             description: "",
             people: ["ALL"],
@@ -679,7 +679,7 @@ describe("isSafeOption", () => {
       {
         operations: [
           {
-            type: "add_succession_rule",
+            type: "add_shift_sequence_rule",
             description: "",
             people: ["rn1"],
             pattern: ["N", "D"],
@@ -997,7 +997,7 @@ describe("isSafeOption", () => {
         evidence: "hypothesis",
         operations: [
           {
-            type: "edit_succession_rule",
+            type: "edit_shift_sequence_rule",
             ruleId: "no-day-after-night",
             description: "No day shift straight after a night",
             people: ["Nurses"],
@@ -1440,7 +1440,7 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
     ...patch,
   });
   const restEdit = (patch: Record<string, unknown>) => ({
-    type: "edit_succession_rule",
+    type: "edit_shift_sequence_rule",
     ruleId: "no-double-night",
     description: "No two nights in a row",
     people: ["Nurses"],

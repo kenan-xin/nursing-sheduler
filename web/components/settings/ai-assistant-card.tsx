@@ -36,6 +36,7 @@ import { describeInterruptionPhase } from "@/lib/ai/assistant/lifecycle";
 import { maskCredential, type AssistantModelSource } from "@/lib/ai/assistant/records";
 import { isProbeOperationCurrent } from "@/lib/ai/assistant/probe-authority";
 import { assistantActions, selectReady, useAssistantStore } from "@/lib/ai/assistant/store";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -135,6 +136,15 @@ export function AiAssistantCard() {
   const selectedCatalogId = filtered.some((model) => model.id === preferredId)
     ? preferredId
     : (filtered[0]?.id ?? "");
+
+  // Whether the model the select is SHOWING reads images. `imageInput` is a tri-state
+  // in practice — true, false, or absent (a custom slug, or a row that never declared
+  // modalities) — and only a POSITIVE declaration earns the label. "We could not tell"
+  // must never read as "it cannot": a false negative here costs the user an image they
+  // could have attached (2by.12; `CatalogModel.imageInput`, from OpenRouter's
+  // `architecture.input_modalities`).
+  const selectedModel = filtered.find((model) => model.id === selectedCatalogId);
+  const selectedReadsImages = !useCustomSlug && selectedModel?.imageInput === true;
 
   const draftModelId = useCustomSlug ? customSlug.trim() : selectedCatalogId;
   const draftModelSource: AssistantModelSource = useCustomSlug ? "custom" : "catalog";
@@ -378,21 +388,37 @@ export function AiAssistantCard() {
                 disabled={useCustomSlug}
                 data-testid="ai-model-search"
               />
-              <Select
-                id="ai-model-select"
-                fullWidth
-                value={selectedCatalogId}
-                onChange={(event) => setCatalogModelId(event.target.value)}
-                disabled={useCustomSlug}
-                data-testid="ai-model-select"
-              >
-                {filtered.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.name}
-                    {model.id === catalog.data?.recommendedId ? " (recommended)" : ""}
-                  </option>
-                ))}
-              </Select>
+              {/* The chip sits BESIDE the control, not inside an option: a native
+                  select renders its options as plain text, so a per-row chip is not
+                  available to it. The option label carries the same marker for the
+                  list, and the chip restates it for the closed control — where the
+                  browser clips a long model name, and the marker can be clipped away
+                  with it. `title` on the select keeps the full name on hover. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  id="ai-model-select"
+                  fullWidth
+                  wrapperClassName="min-w-0 flex-1"
+                  value={selectedCatalogId}
+                  onChange={(event) => setCatalogModelId(event.target.value)}
+                  disabled={useCustomSlug}
+                  title={selectedModel?.name}
+                  data-testid="ai-model-select"
+                >
+                  {filtered.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                      {model.id === catalog.data?.recommendedId ? " (recommended)" : ""}
+                      {model.imageInput ? " · Reads images" : ""}
+                    </option>
+                  ))}
+                </Select>
+                {selectedReadsImages ? (
+                  <Badge variant="neutral" casing="normal" data-testid="ai-model-reads-images">
+                    Reads images
+                  </Badge>
+                ) : null}
+              </div>
               <p className="text-meta text-ink3">
                 Only models that OpenRouter reports as supporting tools are listed — the assistant
                 needs them to read your schedule.
