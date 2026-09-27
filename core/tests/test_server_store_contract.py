@@ -114,7 +114,7 @@ def test_store_exposes_nonempty_identity(store):
 def test_claim_next_records_worker_and_runtime_identity(store):
     runtime_identity = {
         "service_name": "nurse-scheduling-api",
-        "api_version": "alpha",
+        "api_version": "0.2.0",
         "app_version": "v-test",
         "deployment_id": "deployment-test",
         "instance_id": "instance-test",

@@ -24,14 +24,28 @@ const SEMANTIC_PROFILE_FIELDS = [
   "backend_capability_version",
 ] as const;
 
-const READY_KEYS = new Set<string>(["status", "semantic_profile", ...IDENTITY_FIELDS]);
+// Checked because core owns them (v1 sync X8). Not relayed: no v2 screen uses them.
+const CORE_ONLY_READY_FIELDS = ["jobs", "workers", "auth", "claimed_performance"] as const;
+const CORE_ONLY_UNAVAILABLE_FIELDS = ["auth", "claimed_performance"] as const;
+
+const READY_KEYS = new Set<string>([
+  "status",
+  "semantic_profile",
+  ...IDENTITY_FIELDS,
+  ...CORE_ONLY_READY_FIELDS,
+]);
 const UNAVAILABLE_KEYS = new Set<string>([
   "status",
   "reason",
   "semantic_profile",
   ...IDENTITY_FIELDS,
+  ...CORE_ONLY_UNAVAILABLE_FIELDS,
 ]);
 const SEMANTIC_PROFILE_KEYS = new Set<string>(SEMANTIC_PROFILE_FIELDS);
+const JOBS_KEYS = new Set<string>(["running", "queued", "cancelling"]);
+const WORKERS_KEYS = new Set<string>(["online"]);
+const AUTH_KEYS = new Set<string>(["required", "scheme"]);
+const CLAIMED_PERFORMANCE_KEYS = new Set<string>(["score", "app_version", "measured_at"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -57,6 +71,52 @@ function readSemanticProfile(value: unknown): InfoSemanticProfile | null {
   return profile;
 }
 
+function isCount(value: unknown): boolean {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isNonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value !== "";
+}
+
+function isCountObject(value: unknown, keys: ReadonlySet<string>): boolean {
+  return (
+    isPlainObject(value) &&
+    hasExactKeySet(value, keys) &&
+    [...keys].every((key) => isCount(value[key]))
+  );
+}
+
+function isAuthDescriptor(value: unknown): boolean {
+  return (
+    isPlainObject(value) &&
+    hasExactKeySet(value, AUTH_KEYS) &&
+    typeof value.required === "boolean" &&
+    isNonEmptyString(value.scheme)
+  );
+}
+
+function isClaimedPerformance(value: unknown): boolean {
+  if (value === null) return true;
+  return (
+    isPlainObject(value) &&
+    hasExactKeySet(value, CLAIMED_PERFORMANCE_KEYS) &&
+    typeof value.score === "number" &&
+    Number.isFinite(value.score) &&
+    value.score > 0 &&
+    isNonEmptyString(value.app_version) &&
+    isNonEmptyString(value.measured_at)
+  );
+}
+
+// Core-owned keys shared by both shapes; the ready shape adds jobs and workers.
+function hasValidCoreFields(body: Record<string, unknown>, ready: boolean): boolean {
+  if (!isAuthDescriptor(body.auth) || !isClaimedPerformance(body.claimed_performance)) return false;
+  return (
+    !ready || (isCountObject(body.jobs, JOBS_KEYS) && isCountObject(body.workers, WORKERS_KEYS))
+  );
+}
+
 function readIdentity(body: Record<string, unknown>): InfoIdentity | null {
   const identity = {} as Record<(typeof IDENTITY_FIELDS)[number], string>;
   for (const field of IDENTITY_FIELDS) {
@@ -80,6 +140,7 @@ export function parseInfoPayload(body: unknown, httpStatus: number): InfoRespons
   if (status === "ready") {
     if (httpStatus !== 200) return null;
     if (!hasExactKeySet(body, READY_KEYS)) return null;
+    if (!hasValidCoreFields(body, true)) return null;
     const identity = readIdentity(body);
     if (identity === null) return null;
     const semanticProfile = readSemanticProfile(body.semantic_profile);
@@ -89,6 +150,7 @@ export function parseInfoPayload(body: unknown, httpStatus: number): InfoRespons
 
   if (httpStatus !== 503) return null;
   if (!hasExactKeySet(body, UNAVAILABLE_KEYS)) return null;
+  if (!hasValidCoreFields(body, false)) return null;
   const identity = readIdentity(body);
   if (identity === null) return null;
   const semanticProfile = readSemanticProfile(body.semantic_profile);

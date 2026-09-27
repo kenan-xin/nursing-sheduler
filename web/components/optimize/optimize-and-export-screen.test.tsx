@@ -206,7 +206,7 @@ function onlineInfo(extra: Record<string, unknown> = {}) {
         ...extra,
         status: "ready",
         service_name: "nurse",
-        api_version: "alpha",
+        api_version: "0.2.0",
         app_version: "1.0.0",
         deployment_id: "d",
         instance_id: "i",
@@ -584,8 +584,12 @@ describe("OptimizeAndExportScreen — terminal release", () => {
   // that replaced them: the result is reported honestly, nothing is offered to
   // press, and the primary action is live.
   it.each([
-    ["process_timeout", () => processTimeoutJob, "timed out"],
-    ["worker_lost", () => workerLostJob, "Worker lost."],
+    ["process_timeout", () => processTimeoutJob, "did not finish within its time limit"],
+    [
+      "worker_lost",
+      () => workerLostJob,
+      "The optimisation worker stopped before the job completed.",
+    ],
   ])("row 3: a %s run reports honestly and leaves Optimize live", async (_label, job, message) => {
     await readyStore();
     routeTerminal(job());

@@ -30,10 +30,13 @@ from ...solver_interface import (
     serialize_schedule_phase_progress,
     serialize_solver_progress,
 )
-from ..errors import OptimizationExecutionError
-from ..roster_container import CONTAINER_MEDIA_TYPE, XLSX_MEDIA_TYPE, build_roster_container
-from .models import Job, OptimizationOutcome, OptimizationResult, StoredArtifact
-
+from ..roster_container import (
+    CONTAINER_MEDIA_TYPE,
+    XLSX_MEDIA_TYPE,
+    OptimizationExecutionError,
+    build_roster_container,
+)
+from .models import Job, JobFailure, OptimizationOutcome, OptimizationResult, StoredArtifact
 
 EventCallback = Callable[[str, dict[str, Any], int | None], None]
 StopCallback = Callable[[], bool]
@@ -74,6 +77,9 @@ class RunOutput:
     """Generated roster container artifact, absent when no schedule exists."""
 
 
+RunResult = RunOutput | JobFailure
+
+
 class OptimizationRunner:
     """Run the scheduling engine without knowing job persistence or HTTP."""
 
@@ -84,18 +90,13 @@ class OptimizationRunner:
         *,
         event_callback: EventCallback,
         should_stop: StopCallback | None,
-    ) -> RunOutput:
+    ) -> RunResult:
         """Run the scheduler, export the schedule, and build the roster container.
 
         Progress and phase changes are forwarded through `event_callback`. The
         single stored artifact is the deterministic roster container, which
         embeds the exported workbook bytes alongside the scheduler's structured
-        day-state handoff.
-
-        Raises:
-            OptimizationExecutionError: If the model is invalid, no normal result
-                is produced, no roster handoff arrives with a schedule, or the
-                output exceeds a frozen size cap.
+        day-state handoff. Expected failures are returned as `JobFailure`.
         """
         roster_payloads: list[dict[str, Any]] = []
 
@@ -107,27 +108,19 @@ class OptimizationRunner:
             data = serialize_solver_progress(payload, include_export_summary=True)
             event_callback("job.progressed", data, payload.currentBestScore)
 
-        # The server is CP-SAT only (spec X4). `job.request.solver` is not
-        # forwarded, so `schedule()` keeps its "ortools/cp-sat" default on
-        # purpose; `scheduling_input.parse_solver` is the gate any future
-        # forwarding must keep. `schedule()` returns a `ScheduleResult`
-        # NamedTuple, which still unpacks as the five fields below.
-        #
-        # `prettify` is optional on the request, and every scheduler/exporter use
-        # is a truthiness test, so an absent preference already behaved as False.
-        # Normalizing it here keeps the container's typed `prettify` honest
-        # without changing solve or export behavior.
-        dataframe, _solution, score, solver_status, cell_export_info = scheduler.schedule(
+        schedule_result = scheduler.schedule(
             file_content=input_bytes,
+            # An omitted preference must reach the roster handoff as a typed bool.
             prettify=bool(job.request.prettify),
             timeout=job.request.timeout_seconds,
+            solver=job.request.solver,
             progress_callback=publish_progress,
             should_stop=should_stop,
             on_roster=roster_payloads.append,
         )
         stop_requested_when_solver_returned = should_stop is not None and should_stop()
 
-        normalized_status = str(solver_status)
+        normalized_status = schedule_result.solver_status
         if normalized_status == "INFEASIBLE":
             return RunOutput(
                 result=OptimizationResult(
@@ -139,7 +132,7 @@ class OptimizationRunner:
                 artifact=None,
             )
         if normalized_status == "MODEL_INVALID":
-            raise OptimizationExecutionError("invalid_model", "The generated solver model is invalid")
+            return JobFailure(code="invalid_model", message="The generated solver model is invalid")
         if normalized_status not in {"OPTIMAL", "FEASIBLE"}:
             # The solver reached a terminal state without proving either side. That
             # is a NORMAL completion carrying "no proof", not an execution failure
@@ -151,59 +144,52 @@ class OptimizationRunner:
                     outcome=OptimizationOutcome.INCONCLUSIVE,
                     score=None,
                     solver_status=normalized_status,
-                    termination_reason=_inconclusive_reason(
-                        normalized_status,
-                        stop_requested_when_solver_returned,
-                    ),
+                    termination_reason=_inconclusive_reason(normalized_status, stop_requested_when_solver_returned),
                 ),
                 artifact=None,
             )
-        if dataframe is None:
-            # OPTIMAL/FEASIBLE promises a schedule. Its absence is a broken
-            # contract, not a no-proof outcome, so it stays a hard failure.
-            raise OptimizationExecutionError(
-                "no_solution_found",
-                f"No schedule was produced. Solver status: {normalized_status}",
+        if schedule_result.dataframe is None:
+            return JobFailure(
+                code="no_solution_found",
+                message=f"No schedule was produced. Solver status: {normalized_status}",
             )
-
         # The callback fires exactly once on the OPTIMAL/FEASIBLE path, so a
         # schedule without a handoff means the authoritative structured source
         # is missing; it is not silently reconstructed from the dataframe.
         if len(roster_payloads) != 1:
-            raise OptimizationExecutionError(
-                "roster_handoff_missing",
-                f"A schedule was produced with {len(roster_payloads)} roster handoffs instead of exactly one",
+            return JobFailure(
+                code="roster_handoff_missing",
+                message=f"A schedule was produced with {len(roster_payloads)} roster handoffs instead of exactly one",
             )
 
         output_buffer = BytesIO()
-        exporter.export_to_excel(dataframe, output_buffer, cell_export_info)
+        exporter.export_to_excel(schedule_result.dataframe, output_buffer, schedule_result.cell_export_info)
         created_at = job.created_at.astimezone(timezone.utc)
         output_filename = f"nurse-scheduling-{created_at:%Y%m%dT%H%M%SZ}.xlsx"
         outcome = OptimizationOutcome.OPTIMAL if normalized_status == "OPTIMAL" else OptimizationOutcome.FEASIBLE
-        # A feasible-but-not-optimal result is classified by why the solver
-        # stopped: a cooperative finish-now request (`user_requested`) or the
-        # native timeout expiring (`solver_timeout`).
         if outcome == OptimizationOutcome.OPTIMAL:
             termination_reason = "optimality_proven"
         elif stop_requested_when_solver_returned:
             termination_reason = "user_requested"
         else:
             termination_reason = "solver_timeout"
-        # Both size caps are enforced inside the builder, before `RunOutput`
-        # exists, so oversized output never crosses the child result pipe and no
-        # artifact is committed.
-        container_bytes = build_roster_container(
-            roster_payloads[0],
-            xlsx_bytes=output_buffer.getvalue(),
-            xlsx_name=output_filename,
-            xlsx_mime=XLSX_MEDIA_TYPE,
-            score=score,
-            solver_status=normalized_status,
-        )
+        try:
+            container_bytes = build_roster_container(
+                roster_payloads[0],
+                xlsx_bytes=output_buffer.getvalue(),
+                xlsx_name=output_filename,
+                xlsx_mime=XLSX_MEDIA_TYPE,
+                score=schedule_result.score,
+                solver_status=normalized_status,
+            )
+        except OptimizationExecutionError as error:
+            # The caps are enforced before RunOutput exists, so oversized output never
+            # crosses the child result pipe and no artifact is committed.
+            return JobFailure(code=error.code, message=str(error))
         return RunOutput(
             result=OptimizationResult(
                 outcome=outcome,
-                score=score,
+                score=schedule_result.score,
                 solver_status=normalized_status,
                 termination_reason=termination_reason,
             ),

@@ -31,9 +31,29 @@ either maps to the pinned upstream revision or has a documented adaptation.
 track v1 `feature/genie` and how: `verbatim` (byte-identical) or `patched` (with the
 named patch files in `core/upstream-patches/`). `core/scripts/check_upstream_sync.py`
 checks it, and the `core` CI job runs that check through pytest. W1 patches: P0 fixture
-hash re-stamp (upstream bug, report it), P1 `Person.temporary`, P2-P3 `skillMix` and
-per-date overrides, P4 `on_roster`. Located Workspace errors stay in the v2-only
+hash re-stamp (upstream bug, report it), P2-P3 `skillMix` and per-date overrides, P4
+`on_roster`. P1 `Person.temporary` was retired after W2 (bead `nursing-sheduler-pknr`).
+The web no longer writes it. Located Workspace errors stay in the v2-only
 `server/workspace.py` (spec X14).
+
+W2 adds the server layer. It adds 9 `verbatim` rows: `version.py`, `retry.py`,
+`process_tree.py`, `process_executor.py`, `request_limits.py`, `auth.py`,
+`solver_capabilities.py`, `solver_options.py` and `tests/test_retry.py`. It also adds 8
+`patched` rows. Each has one `W2-<file>.patch`. The patch header maps every hunk to a
+patch ID:
+
+- P5: Workspace boundary.
+- P6: event cursors.
+- P7: roster container.
+- P8: basis and INCONCLUSIVE.
+- P9: purpose queues.
+- P11: maintenance liveness.
+- P12: T19 fence bridge. W6 deletes it.
+- P13: `default_prettify=False`.
+- P14: diagnostic path mode and cleanup.
+
+`JOB_MAX_PENDING=8` and the diagnostic concurrency of 1 now live in `docker/compose.yml`
+and `scripts/dev.sh`. The web owns user-facing failure wording (`web/lib/bff/errors.ts`).
 
 ## Ported files (upstream → rebuild)
 

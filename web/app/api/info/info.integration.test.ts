@@ -37,7 +37,7 @@ const SEMANTIC_PROFILE = {
 const READY_IDENTITY = {
   status: "ready",
   service_name: "nurse-scheduling-api",
-  api_version: "alpha",
+  api_version: "0.2.0",
   app_version: "v1.2.3-int",
   deployment_id: "dep-int",
   instance_id: "inst-int",
@@ -51,7 +51,7 @@ const UNAVAILABLE_IDENTITY = {
   status: "unavailable",
   reason: "job_store_unavailable",
   service_name: "nurse-scheduling-api",
-  api_version: "alpha",
+  api_version: "0.2.0",
   app_version: "v1.2.3-int",
   deployment_id: "dep-int",
   instance_id: "inst-int",
@@ -59,6 +59,22 @@ const UNAVAILABLE_IDENTITY = {
   job_backend: "memory",
   job_store_id: "inst-int",
   semantic_profile: SEMANTIC_PROFILE,
+};
+
+// Core-owned `/info` keys (v1 sync X8). The BFF checks them strictly but never
+// relays them, so the browser body stays exactly READY_IDENTITY / UNAVAILABLE_IDENTITY.
+const CORE_AUTH = { required: false, scheme: "bearer" };
+const READY_UPSTREAM = {
+  ...READY_IDENTITY,
+  auth: CORE_AUTH,
+  claimed_performance: null,
+  jobs: { running: 0, queued: 1, cancelling: 0 },
+  workers: { online: 1 },
+};
+const UNAVAILABLE_UPSTREAM = {
+  ...UNAVAILABLE_IDENTITY,
+  auth: CORE_AUTH,
+  claimed_performance: null,
 };
 
 beforeAll(async () => {
@@ -72,7 +88,7 @@ beforeAll(async () => {
         return; // never respond ⇒ the bounded deadline must fire
       case "unavailable":
         res.writeHead(503, { "content-type": "application/json" });
-        res.end(JSON.stringify(UNAVAILABLE_IDENTITY));
+        res.end(JSON.stringify(UNAVAILABLE_UPSTREAM));
         return;
       case "not-json":
         res.writeHead(200, { "content-type": "application/json" });
@@ -86,31 +102,31 @@ beforeAll(async () => {
         // Hostile media type, but the bytes ARE the valid ready payload — must
         // still be accepted, with the outbound content-type forced to JSON.
         res.writeHead(200, { "content-type": "text/html" });
-        res.end(JSON.stringify(READY_IDENTITY));
+        res.end(JSON.stringify(READY_UPSTREAM));
         return;
       case "no-content-type":
         res.writeHead(200);
-        res.end(JSON.stringify(READY_IDENTITY));
+        res.end(JSON.stringify(READY_UPSTREAM));
         return;
       case "extra-field":
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ...READY_IDENTITY, backend_url: "http://backend:8000" }));
+        res.end(JSON.stringify({ ...READY_UPSTREAM, backend_url: "http://backend:8000" }));
         return;
       case "unknown-status":
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ...READY_IDENTITY, status: "warming" }));
+        res.end(JSON.stringify({ ...READY_UPSTREAM, status: "warming" }));
         return;
       case "mismatch-ready-503":
         res.writeHead(503, { "content-type": "application/json" });
-        res.end(JSON.stringify(READY_IDENTITY));
+        res.end(JSON.stringify(READY_UPSTREAM));
         return;
       case "mismatch-unavailable-200":
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify(UNAVAILABLE_IDENTITY));
+        res.end(JSON.stringify(UNAVAILABLE_UPSTREAM));
         return;
       case "valid-json-500":
         res.writeHead(500, { "content-type": "application/json" });
-        res.end(JSON.stringify(READY_IDENTITY));
+        res.end(JSON.stringify(READY_UPSTREAM));
         return;
       case "body-reset": {
         // Declare a body longer than what's actually sent, write a truncated
@@ -120,10 +136,10 @@ beforeAll(async () => {
         // declared content-length is never satisfied and the connection closes
         // mid-stream, so `fetch()` resolves but `response.text()` rejects
         // (proven directly against Undici before wiring this fixture).
-        const fragment = JSON.stringify(READY_IDENTITY).slice(0, 10);
+        const fragment = JSON.stringify(READY_UPSTREAM).slice(0, 10);
         res.writeHead(200, {
           "content-type": "application/json",
-          "content-length": String(JSON.stringify(READY_IDENTITY).length + 100),
+          "content-length": String(JSON.stringify(READY_UPSTREAM).length + 100),
         });
         res.write(fragment);
         res.flushHeaders?.();
@@ -132,7 +148,7 @@ beforeAll(async () => {
       }
       default:
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify(READY_IDENTITY));
+        res.end(JSON.stringify(READY_UPSTREAM));
     }
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

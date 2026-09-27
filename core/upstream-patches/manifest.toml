@@ -3,7 +3,7 @@
 upstream = "j3soon/nurse-scheduling feature/genie"
 upstream_commit = "1bf4b85"
 # Oldest first. The check reverse-applies them newest first.
-patch_order = ["P0-fixture-restamp.patch", "P1-person-temporary.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch"]
+patch_order = ["P0-fixture-restamp.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch", "W2-server-maintenance.patch", "W2-server-errors.patch", "W2-server-jobs-runner.patch", "W2-server-diagnostic.patch", "W2-server-config.patch", "W2-server-api-schemas.patch", "W2-server-api-optimize.patch", "W2-server-app.patch"]
 
 [[file]]
 path = "nurse_scheduling/cli.py"
@@ -44,7 +44,7 @@ upstream_blob = "77640eb47261f11a6501e11dddfafdb18de97d73"
 path = "nurse_scheduling/models.py"
 class = "patched"
 upstream_blob = "edcdab1503ea2ca11977d1693b259a53449d5245"
-patches = ["P1-person-temporary.patch", "P2-P3-skillmix-overrides.patch"]
+patches = ["P2-P3-skillmix-overrides.patch"]
 
 [[file]]
 path = "nurse_scheduling/preference_types.py"
@@ -263,3 +263,96 @@ upstream_blob = "be94ac4ce248247bc6ae498261a46768ed39a852"
 path = "tests/test_solver_pulp_python.py"
 class = "verbatim"
 upstream_blob = "9d25e7b5690fb8b7b64e045c104e37d83cc70438"
+
+[[file]]
+path = "nurse_scheduling/server/retry.py"
+class = "verbatim"
+upstream_blob = "89d82ba6bd2b8b4aeddfc777e80dbfaa57ae9314"
+
+[[file]]
+path = "tests/test_retry.py"
+class = "verbatim"
+upstream_blob = "724b206e00958bedf7d33877e50819a713ab55a6"
+
+[[file]]
+path = "nurse_scheduling/server/maintenance.py"
+class = "patched"
+upstream_blob = "2adb7af1de57ae88706e9a8aeba00ba640a0a324"
+patches = ["W2-server-maintenance.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/jobs/process_tree.py"
+class = "verbatim"
+upstream_blob = "8d5d3687550ea51aec412868da224e7d9c72ea0f"
+
+[[file]]
+path = "nurse_scheduling/server/jobs/process_executor.py"
+class = "verbatim"
+upstream_blob = "183712393bfc33af9a987cc9c33b233d8abe6884"
+
+[[file]]
+path = "nurse_scheduling/server/errors.py"
+class = "patched"
+upstream_blob = "a1c4eb810f1a66e8ad091decdd279a3b637136a7"
+patches = ["W2-server-errors.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/jobs/runner.py"
+class = "patched"
+upstream_blob = "0ebde2edb9c456f12757f7282a05e658b08f953c"
+patches = ["W2-server-jobs-runner.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/auth.py"
+class = "verbatim"
+upstream_blob = "f292e5c6cae46bb4c866a9178c6559cd0dd02854"
+
+[[file]]
+path = "nurse_scheduling/server/diagnostic.py"
+class = "patched"
+upstream_blob = "e09e2002eead50f3c4e46807a613063b0e4f191e"
+patches = ["W2-server-diagnostic.patch"]
+
+[[file]]
+path = "nurse_scheduling/version.py"
+class = "verbatim"
+upstream_blob = "8a848d24ced79048a6fde4ca6db2d4e64072feab"
+
+[[file]]
+path = "nurse_scheduling/server/request_limits.py"
+class = "verbatim"
+upstream_blob = "b258b13f6e80f99a0ad7a6e41065b6b88694f7f7"
+
+[[file]]
+path = "nurse_scheduling/server/solver_capabilities.py"
+class = "verbatim"
+upstream_blob = "f8c0f5f5c94d61cb41080aa2a95bcfc74406750c"
+
+[[file]]
+path = "nurse_scheduling/server/solver_options.py"
+class = "verbatim"
+upstream_blob = "6e098779587b910019f53a75627b11be524bee2b"
+
+[[file]]
+path = "nurse_scheduling/server/config.py"
+class = "patched"
+upstream_blob = "8f517ab71b5a2a9f86f5331f99a79c9f1c7ae59e"
+patches = ["W2-server-config.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/api/schemas.py"
+class = "patched"
+upstream_blob = "c0ed76c4fe7fa5ec5984ec9add9a077c02e0c2ab"
+patches = ["W2-server-api-schemas.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/api/optimize.py"
+class = "patched"
+upstream_blob = "5da18e2b4951e7acc93ac1ce4cdba97616f6c8fc"
+patches = ["W2-server-api-optimize.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/app.py"
+class = "patched"
+upstream_blob = "31e62ad1cfc5556db9e0400487dc44002af7ddcb"
+patches = ["W2-server-app.patch"]

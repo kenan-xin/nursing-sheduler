@@ -100,6 +100,10 @@ def test_semantic_profile_is_not_folded_into_runtime_identity(idle_client):
         "started_at",
         "job_backend",
         "job_store_id",
+        "auth",
+        "claimed_performance",
+        "jobs",
+        "workers",
         "semantic_profile",
     }
 

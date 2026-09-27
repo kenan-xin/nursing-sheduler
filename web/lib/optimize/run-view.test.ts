@@ -291,13 +291,13 @@ describe("reduceRunView — authoritative job snapshots", () => {
     expect(next.error?.code).toBe("worker_lost");
   });
 
-  it("process_timeout is a structured terminal failure", () => {
+  it("process_timeout is a structured terminal failure worded by the web", () => {
     const next = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
       type: "job-snapshot",
       job: terminalJob("failed", {
         error: {
           code: "process_timeout",
-          message: "The optimization exceeded its timeout and was force-terminated.",
+          message: "The optimization process did not return within the requested 60 seconds.",
         },
       }),
     });
@@ -305,7 +305,7 @@ describe("reduceRunView — authoritative job snapshots", () => {
     expect(next.error).toEqual({
       source: "job",
       code: "process_timeout",
-      message: "The optimization exceeded its timeout and was force-terminated.",
+      message: "The optimisation run did not finish within its time limit and was stopped.",
     });
   });
 

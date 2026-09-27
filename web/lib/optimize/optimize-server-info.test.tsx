@@ -5,7 +5,7 @@ import { classifyOptimizeServerInfo, useOptimizeServerInfo } from "./optimize-se
 
 const identity = {
   service_name: "nurse",
-  api_version: "alpha",
+  api_version: "0.2.0",
   app_version: "1.2.3",
   deployment_id: "d",
   instance_id: "i",
@@ -21,7 +21,7 @@ describe("classifyOptimizeServerInfo", () => {
     const result = classifyOptimizeServerInfo(200, { status: "ready", ...identity }, "1.2.3");
     expect(result).toMatchObject({
       status: "online",
-      apiVersion: "alpha",
+      apiVersion: "0.2.0",
       backendVersion: "1.2.3",
       versionTier: "identical",
       unavailableReason: null,

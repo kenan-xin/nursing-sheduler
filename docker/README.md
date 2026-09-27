@@ -98,8 +98,8 @@ the host via `git describe --tags --always --dirty` and fed to both images as th
 
 - **web**: `APP_VERSION` → `NEXT_PUBLIC_APP_VERSION` **before** `pnpm build`
   (compiled into the client bundle; a runtime env cannot change a built bundle).
-- **backend**: `APP_VERSION` → runtime `ENV`, read by `get_app_version()`
-  (replaces the retired `VERSION` file / `git describe`, DL11 D2).
+- **backend**: `APP_VERSION` → `/app/.app-version`, written at image build and read
+  by `get_app_version()` before any `git describe` (the genie version stamp).
 
 Result: `NEXT_PUBLIC_APP_VERSION` (client) and `/api/health.appVersion` (backend)
 are stamped from the **same** value, so the version mismatch check is meaningful.
@@ -359,9 +359,9 @@ so equal IDs are evidence, not proof, of sharing.
 - **No Git clone.** Upstream's diagnostic ran from an image that `git clone`d the
   `dev` branch. `Dockerfile.diagnostic` builds from **local vendored source** with a
   selective copy (app package + the single scenario asset), like `Dockerfile.backend`.
-  It is **version-stamped identically** to the backend — `APP_VERSION` build arg →
-  `ENV`, so `get_app_version()` reports the deployed version with no Git at build
-  or runtime. `make diagnostic-version-check` gates this.
+  It is **version-stamped identically** to the backend — the build writes the
+  `APP_VERSION` build arg to `/app/.app-version`, so `get_app_version()` reports the
+  deployed version with no Git at build or runtime. `make diagnostic-version-check` gates this.
 - **Base profile, not bundled public topology.** Upstream bundled the diagnostic with
   its public API + Cloudflare topology and defaulted the target to its public host.
   Here it is an opt-in profile on the private base, defaulting to the internal
@@ -384,8 +384,8 @@ The runtime image ships **only** the app package — `Dockerfile.backend` does a
 selective `COPY core/nurse_scheduling/ ./nurse_scheduling/`, so `core/tests/` and
 the vendored caches never enter the image (`ls /app/core` → `nurse_scheduling`,
 `requirements.txt`). The app runs from source via uvicorn (no `pip install .`), and
-`get_app_version()` reads its version from the `APP_VERSION` env var (not from
-`pyproject.toml`/metadata), so no test tree or project metadata is needed at
+`get_app_version()` reads its version from `/app/.app-version`, which the build
+writes from `APP_VERSION` (not from `pyproject.toml`/metadata), so no test tree or project metadata is needed at
 runtime. `deploy_gate_driver.py` therefore imports only `nurse_scheduling.server`.
 
 The backend gate (Ruff and pytest, with a real Redis service) runs in the `core`
