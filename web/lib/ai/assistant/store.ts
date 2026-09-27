@@ -228,7 +228,13 @@ export interface AssistantUiState {
    * `baseDocumentRevision` is the revision it was prepared on, so the next turn can tell
    * the model whether it is out of date without a read.
    */
-  activeProposal: { proposalId: string; turnEpoch: number; baseDocumentRevision?: number } | null;
+  activeProposal: {
+    proposalId: string;
+    turnEpoch: number;
+    /** The turn that showed it; never carried (see `activeRosterChange`). */
+    shownInEpoch: number;
+    baseDocumentRevision?: number;
+  } | null;
   /**
    * The live diagnostic search snapshot, stamped with the turn that authorised it
    * (T10). Same shape of authority as `activeProposal`, for the same reason: the
@@ -1123,7 +1129,7 @@ export const assistantActions = {
    */
   showProposal(proposalId: string, turnEpoch: number, baseDocumentRevision?: number): void {
     useAssistantStore.setState({
-      activeProposal: { proposalId, turnEpoch, baseDocumentRevision },
+      activeProposal: { proposalId, turnEpoch, shownInEpoch: turnEpoch, baseDocumentRevision },
     });
   },
 

@@ -68,6 +68,7 @@ function publishVisibleIfOwned(
   return true;
 }
 import { buildAssistantContext, pendingAtLaunch } from "@/lib/ai/assistant/scenario-context";
+import { offerYesNoCard } from "@/lib/ai/assistant/yes-no-card";
 import {
   authorizeLaunchAuthority,
   authorizeLaunchIdentity,
@@ -733,6 +734,8 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
        * the conversation above it has answers in it.
        */
       let producedAssistantText = false;
+      /** The last reply's text, for the app's own Yes/No card (09x8). */
+      let lastAssistantText = "";
       const subscriber: AgentSubscriber = {
         onEvent: ({ event, input: runInput }) => {
           if (!ownsRun(runInput?.runId)) return;
@@ -772,6 +775,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           // Whitespace is not an answer a nurse can read.
           if (textMessageBuffer.trim().length === 0) return;
           producedAssistantText = true;
+          lastAssistantText = textMessageBuffer;
         },
         onRunFailed: ({ input: runInput }) => {
           if (!ownsRun(runInput?.runId)) return;
@@ -878,6 +882,8 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           await setTurnState(plan.turn.turnId, { state: "detached", settlement: "run_failed" });
           assistantActions.endTurn("run_failed", plan.turn.turnId);
         } else {
+          // Before the await: authority was checked just above and nothing can move it here.
+          offerYesNoCard(lastAssistantText, turnEpochForSend);
           await setTurnState(plan.turn.turnId, { state: "terminal", settlement: "completed" });
           assistantActions.endTurn("completed", plan.turn.turnId);
         }
