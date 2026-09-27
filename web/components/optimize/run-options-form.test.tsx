@@ -12,6 +12,7 @@ function setup(over: Partial<RunOptionsFormProps> = {}) {
     prettify: true,
     anonymize: true,
     timeout: "300",
+    timeoutBounds: { default: 300, minimum: 1, maximum: 3600 },
     timeoutError: null,
     optionsDisabled: false,
     submitEnabled: true,
@@ -47,6 +48,15 @@ describe("RunOptionsForm", () => {
     const props = setup({ timeout: "" });
     await userEvent.type(screen.getByLabelText("Solver Timeout"), "5");
     expect(props.onTimeoutChange).toHaveBeenCalledWith("5");
+  });
+
+  it("bounds the timeout input by the backend's range and shows its default", () => {
+    setup({ timeout: "", timeoutBounds: { default: 120, minimum: 10, maximum: 600 } });
+    const input = screen.getByLabelText("Solver Timeout");
+    expect(input).toHaveAttribute("min", "10");
+    expect(input).toHaveAttribute("max", "600");
+    expect(input).toHaveAttribute("placeholder", "120");
+    expect(screen.getByText("Between 10 and 600 seconds.")).toBeInTheDocument();
   });
 
   it("shows the timeout validation error and marks the input invalid", () => {
