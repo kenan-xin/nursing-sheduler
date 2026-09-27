@@ -102,6 +102,12 @@ export function renderTranscript(
         lines.push(`Card: ${args.question} [${options.map((o) => o?.label ?? "").join(" | ")}]`);
       }
       if (call.name === "prepare_scenario_change") lines.push("Preview shown to the user.");
+      // The roster tools show a card only on success; a refusal shows nothing (bead 20wo).
+      if (
+        (call.name === "prepare_borrowed_cover" || call.name === "prepare_roster_swap") &&
+        call.result?.includes("Nothing has changed yet")
+      )
+        lines.push("Preview shown to the user.");
       if (call.name === "request_optimize_run") lines.push("Run card shown to the user.");
       if (call.name === "get_optimize_result") {
         // What the app told the assistant, so repeating it is not judged a false claim (pu5).
