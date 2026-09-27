@@ -100,8 +100,9 @@ Ready, the following may be sent through OpenRouter to the model you chose:
   .txt, .csv or .md up to 200 KB; at most 4 per message, always with some typed text).
   Images need a model that reads images; the panel says so when yours does not. An
   attachment is part of the conversation, so it is sent again with each later message
-  until older messages are summarised. The summary request names an attachment but does
-  not send it;
+  until older messages are summarised. Each request carries at most four images' worth;
+  older images, and every image when the model cannot read them, are sent as their file
+  name only. The summary request names an attachment but does not send it;
 - in a long conversation, the older messages once more, so the model can write a short
   summary of them. After that the summary is sent instead of those messages, and the panel
   says "Earlier messages were summarised to keep this conversation going." Your own copy of

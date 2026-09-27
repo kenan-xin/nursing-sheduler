@@ -241,10 +241,11 @@ export interface ProviderHopGuardDeps {
    */
   omitMessageIds?: ReadonlySet<string>;
   /**
-   * 2by.10: the selected model cannot read images, so each hop names them instead
-   * (`describeImages`). The agent's own list keeps them.
+   * 2by.10: the image base64 each hop may carry; older images beyond it are named
+   * (`describeImages`), and 0 names all of them (a model that cannot read images).
+   * Unset leaves the messages as they are. The agent's own list keeps every image.
    */
-  describeImages?: boolean;
+  imageBudgetChars?: number;
 }
 
 /**
@@ -321,8 +322,13 @@ export function createProviderHopGuard(agent: object, deps: ProviderHopGuardDeps
         const authorizedInput = {
           ...input,
           ...(deps.context ? { context: [...deps.context] } : {}),
-          ...(kept !== input.messages || deps.describeImages
-            ? { messages: deps.describeImages ? describeImages(kept) : kept }
+          ...(kept !== input.messages || deps.imageBudgetChars !== undefined
+            ? {
+                messages:
+                  deps.imageBudgetChars === undefined
+                    ? kept
+                    : describeImages(kept, deps.imageBudgetChars),
+              }
             : {}),
         };
         delegated = next.run(authorizedInput).subscribe(subscriber);

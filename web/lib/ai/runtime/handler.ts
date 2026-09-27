@@ -2,6 +2,7 @@ import {
   AI_DETACH_REASON_INSTANCE_MISMATCH,
   AI_ERROR_ATTACHMENT_REJECTED,
   AI_ERROR_CREDENTIALS_REQUIRED,
+  AI_ERROR_REQUEST_TOO_LARGE,
   AI_KEY_HEADER,
   COPILOT_RUNTIME_BASE_PATH,
   RUNTIME_INSTANCE_HEADER,
@@ -15,6 +16,8 @@ import {
   type CopilotRuntimeFetchHandler,
   type RouteInfo,
 } from "./copilotkit-runtime";
+
+import { MAX_RUN_REQUEST_BYTES } from "@/lib/ai/assistant/attachment-rules";
 
 import { AttachmentRejectedError, prepareAttachments } from "./attachments";
 import { assertSingleWebInstance } from "./deployment";
@@ -66,12 +69,14 @@ export function createSchedulerCopilotRuntime(
     mode: "multi-route",
     hooks: {
       onBeforeHandler: async ({ request, route }) => {
-        const rejection =
-          guardRoute(request, route, instanceId) ?? (await guardAttachments(request, route));
+        const rejection = guardRoute(request, route, instanceId);
         // A thrown Response is CopilotKit's documented short-circuit: it still runs
         // the onResponse hook, so these bodies get the same containment headers.
         if (rejection) throw rejection;
-        return request;
+        if (route.method !== "agent/run") return request;
+        const checked = await guardRunBody(request);
+        if (checked instanceof Response) throw checked;
+        return checked;
       },
       onResponse: ({ response, route }) => containResponse(response, route, instanceId),
     },
@@ -108,29 +113,71 @@ function guardRoute(request: Request, route: RouteInfo, instanceId: string): Res
 }
 
 /**
- * 2by.10: a run whose attachments fail the type, size, count or content check is
- * refused here, before a run starts or the provider is called. Reads a CLONE, so the
- * body CopilotKit parses is untouched. A body that is not JSON is CopilotKit's to
- * reject. The response carries the app code only, never the offending content.
+ * 2by.10: the run body, read ONCE through a byte ceiling, then checked.
+ *
+ * Over {@link MAX_RUN_REQUEST_BYTES} -- by its declared length, or by the bytes counted
+ * as they stream when no length is declared -- the run is refused before anything is
+ * buffered past the ceiling. Otherwise its attachments must pass `prepareAttachments`
+ * (type allowlist, size, count, content). CopilotKit then gets a new Request over the
+ * SAME bytes, so the body is held once rather than cloned. A body that is not JSON is
+ * CopilotKit's to reject. Responses carry the app code only, never content.
  */
-async function guardAttachments(request: Request, route: RouteInfo): Promise<Response | null> {
-  if (route.method !== "agent/run") return null;
+async function guardRunBody(request: Request): Promise<Request | Response> {
+  const tooLarge = () => jsonResponse({ error: AI_ERROR_REQUEST_TOO_LARGE }, 413);
+  if (Number(request.headers.get("content-length")) > MAX_RUN_REQUEST_BYTES) return tooLarge();
+  const bytes = await readCapped(request.body, MAX_RUN_REQUEST_BYTES);
+  if (bytes === null) return tooLarge();
+
   let messages: unknown;
   try {
-    messages = ((await request.clone().json()) as { messages?: unknown })?.messages;
+    messages = (JSON.parse(new TextDecoder().decode(bytes)) as { messages?: unknown })?.messages;
   } catch {
-    return null;
+    messages = null;
   }
-  if (!Array.isArray(messages)) return null;
-  try {
-    prepareAttachments(messages);
-    return null;
-  } catch (error) {
-    if (error instanceof AttachmentRejectedError) {
-      return jsonResponse({ error: AI_ERROR_ATTACHMENT_REJECTED }, 400);
+  if (Array.isArray(messages)) {
+    try {
+      prepareAttachments(messages);
+    } catch (error) {
+      if (error instanceof AttachmentRejectedError) {
+        return jsonResponse({ error: AI_ERROR_ATTACHMENT_REJECTED }, 400);
+      }
+      throw error;
     }
-    throw error;
   }
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: bytes,
+    signal: request.signal,
+  });
+}
+
+/** The whole stream, or null (and the stream cancelled) once it passes `limit` bytes. */
+async function readCapped(
+  body: ReadableStream<Uint8Array> | null,
+  limit: number,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!body) return new Uint8Array();
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
 }
 
 /**

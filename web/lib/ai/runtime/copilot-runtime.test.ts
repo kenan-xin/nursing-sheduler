@@ -4,12 +4,13 @@ import {
   AI_DETACH_REASON_INSTANCE_MISMATCH,
   AI_ERROR_ATTACHMENT_REJECTED,
   AI_ERROR_CREDENTIALS_REQUIRED,
+  AI_ERROR_REQUEST_TOO_LARGE,
   AI_KEY_HEADER,
   COPILOT_AGENT_ID,
   OPENROUTER_BASE_URL,
   RUNTIME_INSTANCE_HEADER,
 } from "./containment";
-import { MAX_IMAGE_BYTES } from "@/lib/ai/assistant/attachment-rules";
+import { MAX_IMAGE_BYTES, MAX_RUN_REQUEST_BYTES } from "@/lib/ai/assistant/attachment-rules";
 import { createSchedulerCopilotRuntime, type SchedulerCopilotRuntime } from "./handler";
 import {
   SENTINEL_KEY,
@@ -381,6 +382,44 @@ describe("run", () => {
     );
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: AI_ERROR_ATTACHMENT_REJECTED });
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("refuses a run whose declared size is over the ceiling, before reading it (2by.10)", async () => {
+    const { runtime, provider } = launch();
+    const response = await runtime.handler(
+      runRequest(
+        { threadId: "t-declared" },
+        credentialHeaders({ "content-length": String(MAX_RUN_REQUEST_BYTES + 1) }),
+      ),
+    );
+    expect(response.status).toBe(413);
+    assertContained(response);
+    expect(await response.json()).toEqual({ error: AI_ERROR_REQUEST_TOO_LARGE });
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("refuses an undeclared streamed run once it passes the ceiling (2by.10)", async () => {
+    const { runtime, provider } = launch();
+    const chunk = new Uint8Array(1024 * 1024).fill(0x20);
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent > MAX_RUN_REQUEST_BYTES) return controller.close();
+        sent += chunk.length;
+        controller.enqueue(chunk);
+      },
+    });
+    const response = await runtime.handler(
+      new Request(routeUrl(`/agent/${COPILOT_AGENT_ID}/run`), {
+        method: "POST",
+        headers: credentialHeaders(),
+        body,
+        duplex: "half",
+      } as RequestInit),
+    );
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: AI_ERROR_REQUEST_TOO_LARGE });
     expect(provider.calls).toHaveLength(0);
   });
 

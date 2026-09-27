@@ -39,6 +39,7 @@ import {
   toUserContent,
 } from "@/lib/ai/assistant/messages";
 import type { AssistantAttachmentV1 } from "@/lib/ai/assistant/records";
+import { IMAGE_REQUEST_BUDGET_CHARS } from "@/lib/ai/assistant/attachment-rules";
 import { readAssistantSettings } from "@/lib/ai/assistant/settings-repo";
 import { omittedMessageIds } from "@/lib/ai/assistant/compaction";
 import { compactHistory } from "./compact-history";
@@ -653,7 +654,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
             earlierSummary: compacted.summary?.text ?? null,
           }),
           omitMessageIds: omittedMessageIds(plan.history, compacted.summary),
-          describeImages: !imageInput.current,
+          imageBudgetChars: imageInput.current ? IMAGE_REQUEST_BUDGET_CHARS : 0,
         }),
       );
 

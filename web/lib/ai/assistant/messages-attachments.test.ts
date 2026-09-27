@@ -72,7 +72,7 @@ describe("attachments through the transport adapter (2by.10)", () => {
       { id: "m2", role: "assistant", content: "A roster." },
       { id: "m3", role: "user", content: "thanks" },
     ] as Message[];
-    expect(describeImages(history)).toEqual([
+    expect(describeImages(history, 0)).toEqual([
       {
         id: "m1",
         role: "user",
@@ -89,5 +89,16 @@ describe("attachments through the transport adapter (2by.10)", () => {
       history[1],
       history[2],
     ]);
+  });
+
+  it("keeps the newest images within a budget and names the older ones", () => {
+    const shot = (n: number) => ({ ...png, filename: `shot-${n}.png`, data: "A".repeat(10) });
+    const history = [1, 2, 3].map(
+      (n) => ({ id: `m${n}`, role: "user", content: toUserContent(`q${n}`, [shot(n)]) }) as Message,
+    );
+    const sent = describeImages(history, 20).map((m) => JSON.stringify(m.content));
+    expect(sent[0]).toContain("[image: shot-1.png]");
+    expect(sent[1]).toContain('"type":"image"');
+    expect(sent[2]).toContain('"type":"image"');
   });
 });

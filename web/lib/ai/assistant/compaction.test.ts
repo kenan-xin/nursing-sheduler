@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssistantMessageV1 } from "./records";
 import {
-  ATTACHMENT_CHARS,
   COMPACT_AT_CHARS,
   KEEP_RECENT_USER_TURNS,
   historyChars,
@@ -112,9 +111,9 @@ describe("attachments (2by.10)", () => {
   };
   const csv = { kind: "text" as const, filename: "leave.csv", mimeType: "text/csv", data: "QW5h" };
 
-  it("counts each attachment at a fixed size, not by its data", () => {
+  it("counts an image at its base64 size and a text file by its text", () => {
     expect(historyChars([row("user", "look", { attachments: [image, csv] })])).toBe(
-      "look".length + 2 * ATTACHMENT_CHARS,
+      "look".length + image.data.length + 3,
     );
   });
 

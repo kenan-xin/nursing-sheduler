@@ -85,23 +85,34 @@ export function toUserContent(
 }
 
 /**
- * For a model that cannot read images: each stored image becomes the line
- * `[image: <name>]`, so a thread with images still runs after a switch to a text-only
- * model. Provider input only; the stored record and the panel keep the image.
+ * Keep the newest images within `budgetChars` of base64 and replace each older one with
+ * the line `[image: <name>]`. A budget of 0 names every image: the model cannot read
+ * them, and a thread with images must still run after a switch to it. Provider input
+ * only; the stored record and the panel keep every image.
  */
-export function describeImages(messages: readonly Message[]): Message[] {
-  return messages.map((message) => {
-    if (message.role !== "user" || !Array.isArray(message.content)) return message;
-    if (!(message.content as Part[]).some((part) => part?.type === "image")) return message;
-    return {
-      ...message,
-      content: (message.content as Part[]).map((part) =>
-        part?.type === "image"
-          ? { type: "text", text: `[image: ${part.metadata?.filename ?? "attachment"}]` }
-          : part,
-      ),
-    } as Message;
-  });
+export function describeImages(messages: readonly Message[], budgetChars: number): Message[] {
+  let left = budgetChars;
+  return [...messages]
+    .reverse()
+    .map((message) => {
+      if (message.role !== "user" || !Array.isArray(message.content)) return message;
+      const parts = message.content as Part[];
+      if (!parts.some((part) => part?.type === "image")) return message;
+      const content = [...parts]
+        .reverse()
+        .map((part) => {
+          if (part?.type !== "image") return part;
+          const size = part.source?.value?.length ?? 0;
+          if (size <= left) {
+            left -= size;
+            return part;
+          }
+          return { type: "text", text: `[image: ${part.metadata?.filename ?? "attachment"}]` };
+        })
+        .reverse();
+      return { ...message, content } as Message;
+    })
+    .reverse();
 }
 
 function readToolCalls(message: Message): AssistantToolCallV1[] | null {

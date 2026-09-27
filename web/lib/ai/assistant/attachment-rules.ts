@@ -10,6 +10,20 @@ export const MAX_ATTACHMENTS = 4;
 export const MAX_IMAGE_BYTES = 3.75 * 1024 * 1024;
 export const MAX_TEXT_BYTES = 200 * 1024;
 
+/** Base64 characters one full-size image travels as. */
+const MAX_IMAGE_BASE64 = Math.ceil(MAX_IMAGE_BYTES / 3) * 4;
+/**
+ * The image base64 one run may carry: one message's worth of full-size images. Older
+ * images beyond it are named instead of re-sent, which is what keeps a thread's runs
+ * under {@link MAX_RUN_REQUEST_BYTES}.
+ */
+export const IMAGE_REQUEST_BUDGET_CHARS = MAX_ATTACHMENTS * MAX_IMAGE_BASE64;
+/**
+ * The largest run request the server reads: the image budget (~21 MB) plus room for
+ * the text history, the schedule context and the tool list.
+ */
+export const MAX_RUN_REQUEST_BYTES = 32 * 1024 * 1024;
+
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 /** By extension: browsers often give `.md` (and sometimes `.csv`) no usable type. */
 const TEXT_TYPES: Readonly<Record<string, string>> = {
