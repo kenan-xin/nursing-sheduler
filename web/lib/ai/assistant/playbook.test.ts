@@ -61,6 +61,16 @@ describe("setup steps", () => {
   });
 });
 
+describe("after a fix is applied (bead 2vtv)", () => {
+  it("offers a run through the card and reports whether the schedule can now be built", () => {
+    const line = FEASIBILITY_INSTRUCTIONS.find((l) => l.includes("request_optimize_run"));
+    expect(line).toMatch(/After the user applies a fix/);
+    expect(line).toMatch(/never say a run has started/);
+    expect(line).toMatch(/get_optimize_result/);
+    expect(line).toMatch(/whether the schedule can now be built/);
+  });
+});
+
 describe("repair catalogue", () => {
   it("adds a regular staff member only for a chronic shortage, as the manager's Apply", () => {
     const add = REPAIRS.find((repair) => repair.id === "add_staff_member")!;

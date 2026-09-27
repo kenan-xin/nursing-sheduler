@@ -79,7 +79,7 @@ function guidanceFor(
       case "optimal":
       case "feasible":
         return (
-          "A roster was produced. Its XLSX file downloads in the browser, as for any run; if " +
+          "The schedule can be built now: a roster was produced. Its XLSX file downloads in the browser, as for any run; if " +
           "it did not, the user can press Download again on the Optimise screen. " +
           (rosterSaved
             ? "It is also saved in the app: the user can open it with Open & adjust roster."

@@ -54,6 +54,14 @@ then an ordinary edit on the Roster screen: its Undo reverts the roster part, an
 includes it. A change that also touches the schedule (a leave move, the MC, a temporary nurse)
 has a second part: undo that from the change list.
 
+**(2026-09-27) Adding a nurse to staff.** When a schedule is short on many days of the
+period (more than three), the assistant can suggest adding a nurse to the staff list: a new
+starter, a transfer or a relief nurse on the roster for the whole period. It asks for her
+name first. Applying it opens the Staff screen and adds her there. The assistant then offers
+an Optimize run on a card. The run starts only when you press Run, and afterwards the
+assistant tells you whether the schedule can now be built. A nurse borrowed for a single
+shift is still a temporary cover, not a staff member.
+
 When nobody can take a shift, the assistant follows a four-step cover ladder and says
 which step it is on: (1) swap or cover within the ward; (2) ask a nurse who is off or on
 leave to come in, for overtime pay or off-in-lieu (the nurse must agree, and you tick

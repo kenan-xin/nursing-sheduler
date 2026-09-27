@@ -6,7 +6,7 @@ import { useHotStore } from "@/lib/store";
 import { INITIAL_OPTIMIZE_RUN_VIEW, type OptimizeRunView } from "@/lib/optimize/run-view";
 import { useRunRequestStore } from "@/lib/optimize/run-request";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
-import { useOptimizeTools } from "./use-optimize-tools";
+import { summarizeOptimizeRun, useOptimizeTools } from "./use-optimize-tools";
 import { bindTurnForTest, type TestTurnHandle } from "./turn-authority.test-support";
 
 // Tools are exercised through their REGISTERED definitions, as in use-help-tools.test:
@@ -135,6 +135,15 @@ describe("request_optimize_run", () => {
 });
 
 describe("get_optimize_result", () => {
+  it("says plainly that the schedule can be built when a run succeeds (2vtv)", () => {
+    const summary = summarizeOptimizeRun(
+      view({ lifecycle: "completed", outcome: "feasible", jobId: "opt_9" }),
+      true,
+      "started",
+    );
+    expect(summary.guidance).toMatch(/^The schedule can be built now: a roster was produced\./);
+  });
+
   it("reports an idle screen and how to get a run", async () => {
     const summary = (await tool("get_optimize_result").handler({}, {})) as {
       status: string;

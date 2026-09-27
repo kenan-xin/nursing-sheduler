@@ -386,5 +386,6 @@ export const FEASIBILITY_INSTRUCTIONS: readonly string[] = [
   "Ask every needsFromUser question before preparing an option. Never invent an answer.",
   "After an infeasible Optimize run, test the options' operations with test_feasibility_candidates before calling any option tested. Otherwise call it untested.",
   "Prepare only the option the user picks. The app then asks for the agreement it needs, and the user applies it and runs Optimize again.",
+  `After the user applies a fix, offer a run with ${OPTIMIZE_RUN_TOOL} and never say a run has started; once it finishes, read ${OPTIMIZE_RESULT_TOOL} and say in one sentence whether the schedule can now be built.`,
   "Never suggest anything in safetyFloor, even if the user asks.",
 ];
