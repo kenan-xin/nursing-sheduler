@@ -1,6 +1,9 @@
+import "fake-indexeddb/auto";
 import { describe, expect, it } from "vitest";
 import { ASSISTANT_COMMAND_TYPES } from "@/lib/proposal/commands";
 import { buildSeed } from "../lib/harness";
+import { seedSavedRoster } from "../lib/saved-roster";
+import type { ScenarioUiState } from "@/lib/scenario";
 import { ALL_CASES } from "./index";
 
 const KNOWN_TAGS = new Set(["smoke", "repair", "flow", "sg", "safety", "grounding", "regression"]);
@@ -54,6 +57,12 @@ describe("the eval case set", () => {
 
   it("builds every seed", () => {
     for (const c of ALL_CASES) expect(() => buildSeed(c.seed), c.id).not.toThrow();
+  });
+
+  it("saves every case's roster through the app's capture path", async () => {
+    expect(ALL_CASES.find((c) => c.id === "sg-mc-cover")?.savedRoster).toBeDefined();
+    for (const c of ALL_CASES)
+      if (c.savedRoster) await seedSavedRoster(buildSeed(c.seed) as ScenarioUiState, c.savedRoster);
   });
 
   it("names only real operation types", () => {

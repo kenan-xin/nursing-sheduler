@@ -195,3 +195,31 @@ describe("CountCardList — contracted-hours badge (bmw.3)", () => {
     expect(Array.from(badge.classList)).toContain("uppercase");
   });
 });
+
+describe("CountCardList — unsupported expression (wa46)", () => {
+  it("marks a count whose expression core does not support, with the full text on hover", () => {
+    const long = `x >= 0 ${"and more ".repeat(20)}`.trim();
+    render(
+      <CountCardList
+        {...NOOP_PROPS}
+        counts={[{ ...ordinaryCard, uid: "bad", expression: long }]}
+      />,
+    );
+    const card = screen.getByTestId("count-card-0");
+    expect(within(card).getByTestId("count-unsupported-badge-0")).toHaveTextContent(
+      "Unsupported expression",
+    );
+    expect(within(card).getByTestId("count-unsupported-note-0")).toHaveTextContent(
+      "This expression isn't supported. Edit this rule before optimising.",
+    );
+    const value = within(card).getByTestId("count-expression-0");
+    expect(value).toHaveClass("truncate");
+    expect(value).toHaveAttribute("title", long.replace(/T/g, "5"));
+  });
+
+  it("a supported expression carries no marker", () => {
+    render(<CountCardList {...NOOP_PROPS} counts={[ordinaryCard]} />);
+    expect(screen.queryByTestId("count-unsupported-badge-0")).toBeNull();
+    expect(screen.queryByTestId("count-unsupported-note-0")).toBeNull();
+  });
+});

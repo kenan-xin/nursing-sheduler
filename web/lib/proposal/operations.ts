@@ -404,7 +404,10 @@ function firstFormError(errors: object): string | undefined {
 
 // --- Shift sequences --------------------------------------------------------
 
-type SuccessionFields = Omit<Extract<AssistantCommandV1, { type: "add_succession_rule" }>, "type">;
+type SuccessionFields = Omit<
+  Extract<AssistantCommandV1, { type: "add_shift_sequence_rule" }>,
+  "type"
+>;
 
 const SUCCESSION_DATES: DateScopeBuilders = {
   auto: successionAutoScopes,
@@ -454,7 +457,7 @@ function successionRejection(
 
 function applyAddSuccessionRule(
   state: ScenarioUiState,
-  command: Extract<AssistantCommandV1, { type: "add_succession_rule" }>,
+  command: Extract<AssistantCommandV1, { type: "add_shift_sequence_rule" }>,
   index: number,
 ): OperationResult {
   const refused = successionRejection(
@@ -477,7 +480,7 @@ function applyAddSuccessionRule(
 
 function applyEditSuccessionRule(
   state: ScenarioUiState,
-  command: Extract<AssistantCommandV1, { type: "edit_succession_rule" }>,
+  command: Extract<AssistantCommandV1, { type: "edit_shift_sequence_rule" }>,
   index: number,
 ): OperationResult {
   const source = state.cardsByKind.successions.find((card) => card.uid === command.ruleId);
@@ -1722,9 +1725,9 @@ export function applyAssistantCommand(
     case "set_shift_request":
     case "clear_requests":
       return applyRequestPaint(state, command, index);
-    case "add_succession_rule":
+    case "add_shift_sequence_rule":
       return applyAddSuccessionRule(state, command, index);
-    case "edit_succession_rule":
+    case "edit_shift_sequence_rule":
       return applyEditSuccessionRule(state, command, index);
     case "add_count_rule":
       return applyAddCountRule(state, command, index);

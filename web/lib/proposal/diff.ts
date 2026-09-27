@@ -1020,7 +1020,7 @@ function directKeys(
         // Every painted date is asked-for, including a leave day a clear removes.
         for (const key of paintedCellKeys(command, after)) keys.add(key);
         break;
-      case "add_succession_rule":
+      case "add_shift_sequence_rule":
         created("successions");
         break;
       case "add_count_rule":
@@ -1029,7 +1029,7 @@ function directKeys(
       case "add_staffing_requirement":
         created("requirements");
         break;
-      case "edit_succession_rule":
+      case "edit_shift_sequence_rule":
         keys.add(`rule:successions:${command.ruleId}`);
         break;
       case "edit_count_rule":

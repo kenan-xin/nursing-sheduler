@@ -930,9 +930,9 @@ describe("leave and request arms", () => {
   });
 });
 
-describe("add_succession_rule / edit_succession_rule", () => {
+describe("add_shift_sequence_rule / edit_shift_sequence_rule", () => {
   const noDayAfterNight = {
-    type: "add_succession_rule" as const,
+    type: "add_shift_sequence_rule" as const,
     description: "No day shift straight after a night shift",
     people: ["ana", "ben", "cai"] as (string | number)[],
     pattern: ["Night", "Day"],
@@ -942,7 +942,7 @@ describe("add_succession_rule / edit_succession_rule", () => {
   // Defaults restate `suc-nd` exactly, so `edit()` with no overrides changes nothing.
   const edit = (overrides: Partial<Omit<typeof noDayAfterNight, "type">> = {}) => ({
     ...noDayAfterNight,
-    type: "edit_succession_rule" as const,
+    type: "edit_shift_sequence_rule" as const,
     ruleId: "suc-nd",
     description: "No day after night",
     people: ["ana", "ben"] as (string | number)[],
@@ -1527,7 +1527,7 @@ describe("remove_rule", () => {
 
   it("removes a rule the same change just added", () => {
     const add = {
-      type: "add_succession_rule" as const,
+      type: "add_shift_sequence_rule" as const,
       description: "Temp",
       people: ["ana"],
       pattern: ["Night", "Day"],

@@ -800,7 +800,7 @@ describe("succession arms are the Shift sequences form's Save", () => {
     for (const [i, row] of rows.entries()) {
       const draft = form(row, `row ${i}`);
       const assistant = applyAssistantCommand(state, {
-        type: "add_succession_rule",
+        type: "add_shift_sequence_rule",
         description: `row ${i}`,
         ...row,
       });
@@ -828,7 +828,7 @@ describe("succession arms are the Shift sequences form's Save", () => {
     for (const [i, row] of rows.entries()) {
       const draft = form(row, "No day after night");
       const assistant = applyAssistantCommand(state, {
-        type: "edit_succession_rule",
+        type: "edit_shift_sequence_rule",
         ruleId: "suc-nd",
         description: "No day after night",
         ...row,

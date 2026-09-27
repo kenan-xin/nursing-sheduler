@@ -4,6 +4,7 @@ import {
   listCapabilities,
   resolveCapability,
   resolveNavigationTarget,
+  resolveScreenName,
   type CapabilityContext,
 } from "./resolve";
 import {
@@ -149,6 +150,30 @@ describe("navigation targets", () => {
     if (result.status !== "ok") throw new Error("expected ok");
     expect(result.value.anchorId).toBeNull();
     expect(result.value.controlLabel).toBeNull();
+  });
+});
+
+describe("resolveScreenName", () => {
+  it("gives the sidebar's own name for the screen, never the Preview's scope word", () => {
+    // The Apply notice and the assistant's prepare result both call this; the Preview
+    // calls the same capability "Supervision", which is not a screen name.
+    expect(resolveScreenName("shift-type-coverings", context({ mode: "advanced" }))).toBe(
+      "Shift Type Coverings",
+    );
+    expect(resolveScreenName("shift-affinities", context({ mode: "advanced" }))).toBe("Affinities");
+    expect(resolveScreenName("shift-successions", context({ mode: "advanced" }))).toBe(
+      "Shift Successions",
+    );
+  });
+
+  it("folds a Guided rule to the Rules screen's name", () => {
+    expect(resolveScreenName("rule-library", context({ mode: "guided" }))).toBe("Rules");
+  });
+
+  it("is null when the screen cannot be opened, so a caller names nothing", () => {
+    expect(resolveScreenName("shift-successions", context({ mode: "guided" }))).toBeNull();
+    expect(resolveScreenName("hard-and-soft-rules", context())).toBeNull();
+    expect(resolveScreenName("roster-period", context({ modeResolved: false }))).toBeNull();
   });
 });
 
