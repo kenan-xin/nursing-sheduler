@@ -1271,22 +1271,27 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
               (real(op.personId) || ctx.groupIds.has(String(op.personId)))
           : op.weight === "must" && loan && added.has(String(op.personId));
       case "set_off_request":
-        // Pin off a nurse this loan adds, or soften a real nurse's own hard day off on
-        // that date. Anything else could paint over someone's leave.
+        // Pin off a nurse this loan adds, or soften a real nurse's own hard days off on
+        // every date of the range. Anything else could paint over someone's leave.
         if (op.weight === "must") return loan && added.has(String(op.personId));
-        return (
-          typeof op.weight === "number" &&
-          Number.isFinite(op.weight) &&
-          op.weight > 0 &&
-          op.startDate === op.endDate &&
-          ctx.state.reqData.some(
-            (c) =>
-              c.kind === "off" &&
-              c.weight === Infinity &&
-              String(c.person) === String(op.personId) &&
-              isoOf(ctx, toDateId(c.date, range(ctx))) === op.startDate,
-          )
-        );
+        if (typeof op.weight !== "number" || !Number.isFinite(op.weight) || op.weight <= 0)
+          return false;
+        {
+          const offs = new Set(
+            ctx.state.reqData
+              .filter(
+                (c) =>
+                  c.kind === "off" &&
+                  c.weight === Infinity &&
+                  String(c.person) === String(op.personId),
+              )
+              .map((c) => isoOf(ctx, toDateId(c.date, range(ctx)))),
+          );
+          const span = ctx.items.filter((i) => i.iso >= op.startDate && i.iso <= op.endDate);
+          return (
+            offs.has(op.startDate) && offs.has(op.endDate) && span.every((i) => offs.has(i.iso))
+          );
+        }
       case "clear_requests":
       case "move_leave":
         return nurseAsked && real(op.personId);

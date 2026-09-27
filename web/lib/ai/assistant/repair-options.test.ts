@@ -2267,6 +2267,40 @@ describe("unexplained-path guesses (bead nursing-sheduler-spdk, l3m fixtures)", 
     expect(soften && isSafeOption(state, soften)).toBe(true);
   });
 
+  it("softens a run of hard days off as one range, and only over her own hard days off", () => {
+    // l3m w8: SN-XinYi's two childcare days off.
+    const hardOff = (person: string, date: string) => ({
+      uid: `off-${person}-${date}`,
+      person,
+      date,
+      kind: "off" as const,
+      weight: Infinity,
+    });
+    const state = {
+      ...neverNightRest([]),
+      reqData: [hardOff("n1", "02"), hardOff("n1", "03"), leave("n1", "04")],
+    };
+    const soften = unexplained(state).find((o) => o.repairId === "soften_hard_request");
+    expect(soften?.operations).toEqual([
+      {
+        type: "set_off_request",
+        personId: "n1",
+        startDate: "2026-11-02",
+        endDate: "2026-11-03",
+        weight: 10,
+      },
+    ]);
+    expect(soften && isSafeOption(state, soften)).toBe(true);
+    // A range reaching her leave on the 4th would paint over it.
+    const over = option({
+      repairId: "soften_hard_request",
+      confirmation: "named_nurse",
+      enforcedBy: "chat",
+      operations: [{ ...soften!.operations[0], endDate: "2026-11-04" } as Op],
+    });
+    expect(isSafeOption(state, over)).toBe(false);
+  });
+
   it("stops the block at a gap or a different request", () => {
     const state = {
       ...neverNightRest(["02", "03", "05"]),
