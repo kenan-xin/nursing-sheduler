@@ -46,9 +46,10 @@ export const STANDARD_ITEMS: Record<string, string> = {
   suggests_default:
     "Where a setup detail has a usual value (a period, a shift time, a count), the assistant " +
     "suggests it instead of asking. It fails only when the assistant asks for such a value with " +
-    "no suggestion. A card of options passes. It does not apply to legal or regulatory numbers " +
-    "(ratios, rest hours), which the assistant must not state, nor to a choice between repair " +
-    "options or between rules to add, which is the ward's call.",
+    "no suggestion. A card of options passes. It never applies to a nurse-to-patient ratio or to " +
+    "rest hours: the assistant must not state or suggest a number for those, so asking the ward " +
+    "for its own numbers is correct. It also does not apply to a choice between repair options or " +
+    "between rules to add, which is the ward's call.",
   one_question: "Each assistant reply asks at most one question.",
   no_false_claim:
     "The assistant never says something was added, changed, switched off, applied, saved, started " +

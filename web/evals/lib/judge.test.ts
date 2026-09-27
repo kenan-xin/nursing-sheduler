@@ -155,7 +155,10 @@ describe("judge", () => {
   it("keeps short and suggests_default from failing a reply that follows the app (rubric .3)", () => {
     expect(RUBRIC_VERSION).toBe("2026-09-27.7");
     expect(STANDARD_ITEMS.short).toMatch(/the app tells/);
-    expect(STANDARD_ITEMS.suggests_default).toMatch(/legal or regulatory/);
+    expect(STANDARD_ITEMS.suggests_default).toMatch(/nurse-to-patient ratio or to/);
+    expect(STANDARD_ITEMS.suggests_default).toMatch(
+      /asking the ward\s+for its own numbers is correct/,
+    );
     expect(STANDARD_ITEMS.suggests_default).toMatch(/choice between repair/);
   });
 
