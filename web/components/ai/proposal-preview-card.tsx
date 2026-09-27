@@ -32,6 +32,7 @@ import { REST_PRACTICE_WARNING, relaxesRestRule } from "@/lib/ai/assistant/playb
 import type { AssistantProposalV1 } from "@/lib/store";
 import type { ProposalReadiness } from "@/lib/proposal";
 import type { AssistantProposalController } from "./use-assistant-proposals";
+import { screenNamesFor } from "./capability-context";
 import { DockCard } from "./dock-card";
 
 function ChangeRow({ entry }: { entry: ProposalDiffEntry }) {
@@ -181,11 +182,14 @@ export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPr
   if (!proposal || !readiness) return null;
 
   const stale = readiness.status === "stale";
+  // The affected screens, named as the sidebar names them. A capability with no
+  // reachable screen in this context is dropped rather than shown as a raw id.
+  const screenNames = screenNamesFor(proposal.diff.capabilityIds);
   const hasDetails =
     Boolean(proposal.rationale) ||
     proposal.evidence.length > 0 ||
     proposal.diff.needsReview.length > 0 ||
-    proposal.diff.capabilityIds.length > 0;
+    screenNames.length > 0;
 
   return (
     <DockCard
@@ -309,9 +313,9 @@ export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPr
                 {proposal.diff.needsReview.map((domain) => SETUP_DOMAIN_LABEL[domain]).join(", ")}.
               </p>
             ) : null}
-            {proposal.diff.capabilityIds.length > 0 ? (
+            {screenNames.length > 0 ? (
               <p className="text-meta text-ink3" data-testid="proposal-screens">
-                Affects: {proposal.diff.capabilityIds.join(", ")}
+                Affects: {screenNames.join(", ")}
               </p>
             ) : null}
           </div>

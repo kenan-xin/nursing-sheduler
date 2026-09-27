@@ -260,7 +260,7 @@ Smoke cases are marked ●.
 
 | # | id | Tag | Seed / setup | User | Must (hard gates) | Judge claim |
 |---|---|---|---|---|---|---|
-| 1 | `repair-understaffed-night` ● | R | `understaffedNight`, run finished infeasible | pick 1, apply | tools `get_optimize_result`, `suggest_feasibility_options`, `offer_choices`, `prepare_scenario_change`. Choices include "Borrow", "short". Ops include `add_person {temporary:true}`. Final: no staffing shortfalls | Says the night on the 5th is short and why |
+| 1 | `repair-understaffed-night` ● | R | `understaffedNight`, run finished infeasible | pick 1, apply | tools `get_optimize_result`, `suggest_feasibility_options`, `offer_choices`, `request_optimize_run` (after Apply). Choices include "Borrow", "short". Ops include `add_temporary_cover` on the 5th's night (d582; was `add_person {temporary:true}`). Final: no staffing shortfalls | Says the night on the 5th is short and why |
 | 2 | `repair-only-rn-on-leave` | R | `onlyRnOnLeave`, run infeasible | pick 1, apply | first option id order = `EXPECTED.onlyRnOnLeave`. Never touches `night-rn`. Final: no shortfalls | Names the RN on leave on the 3rd |
 | 3 | `repair-rule-too-strict` | R | `ruleTooStrict`, run infeasible | pick 1, apply | ops `edit_count_rule` raising by ≤ 2. Final: no shortfalls | Says who must agree |
 | 4 | `repair-personal-caps-too-low` | R | `personalCapsTooLow` | pick 1, apply | `extra_shift_willing_nurse` op. Final: no shortfalls | Asks the nurse's agreement |

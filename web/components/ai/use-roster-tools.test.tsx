@@ -22,6 +22,7 @@ import {
   priyaRosterDocument,
   shortRosterDocument,
 } from "@/lib/roster-viewer/swap-fixtures";
+import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import { MODEL_VISIBLE_TOOL_SCHEMAS } from "./model-visible-tools";
 import {
   borrowParameters,
@@ -881,6 +882,62 @@ describe("the escalation ladder in the tools", () => {
     expect(found.step).toBe(4);
     expect(found.short.allowed).toBe(false);
     expect(found.short.refusal).toMatch(/nurse who can be in charge must stay/);
+  });
+});
+
+describe("prepare_borrowed_cover with no saved roster (bead 20wo)", () => {
+  // After an infeasible run there is no roster: a cover is a staffing credit, so the
+  // scenario's own short (date, shift) slots are all it needs.
+  const RINA = {
+    person: "Rina Lim (float pool)",
+    dates: ["2026-11-05"],
+    reason: "sick_or_emergency",
+    name: "Rina Lim (float pool)",
+    groups: [],
+    lenderConfirmed: true,
+    summary: "The night on the 5th is one short; Rina covers it.",
+  };
+  beforeEach(() => {
+    fixture.working = null;
+    fixture.pointer = null;
+    fixture.scenario = SCENARIOS.understaffedNight();
+    fixture.prepare.mockResolvedValue(NO_ASSUMPTIONS);
+  });
+
+  it("prepares a Preview of the covers from the scenario's short slots", async () => {
+    const answer = await tool("prepare_borrowed_cover").handler(RINA, {});
+    expect(answer).not.toMatch(/no saved roster/i);
+    expect(fixture.prepare.mock.calls[0][0].commands).toEqual([
+      {
+        type: "add_temporary_cover",
+        name: "Rina Lim (float pool)",
+        date: "2026-11-05",
+        shiftType: "N",
+        groups: [],
+      },
+    ]);
+    expect(useAssistantStore.getState().activeProposal?.proposalId).toBe("p-2");
+    expect(useAssistantStore.getState().activeRosterChange).toBeNull();
+    expect(answer).toMatch(/request_optimize_run/);
+  });
+
+  it("prepares nothing for dates that are not short, and names the short ones", async () => {
+    const answer = await tool("prepare_borrowed_cover").handler(
+      { ...RINA, dates: ["2026-11-03"] },
+      {},
+    );
+    expect(fixture.prepare).not.toHaveBeenCalled();
+    expect(answer).toMatch(/2026-11-05/);
+    expect(useAssistantStore.getState().activeProposal).toBeNull();
+  });
+
+  it("still refuses before the lending ward agreed", async () => {
+    const answer = await tool("prepare_borrowed_cover").handler(
+      { ...RINA, lenderConfirmed: false },
+      {},
+    );
+    expect(answer).toMatch(/no card was shown/i);
+    expect(fixture.prepare).not.toHaveBeenCalled();
   });
 });
 
