@@ -6,7 +6,23 @@ import { seedSavedRoster } from "../lib/saved-roster";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { ALL_CASES } from "./index";
 
-const KNOWN_TAGS = new Set(["smoke", "repair", "flow", "sg", "safety", "grounding", "regression"]);
+/**
+ * A `holdout` case runs on a schedule that is not one of the shared tuning fixtures (the
+ * `small` / `complete` / `sixNurses` / `mna` builders, the named SCENARIOS and the flow YAMLs).
+ * Run them to check generalization, but never rewrite the playbook to fit one held-out
+ * trajectory: promote a recurring failure into a tuning case first (v1 ai_eval README,
+ * `cases/basics/09-holdout/`).
+ */
+const KNOWN_TAGS = new Set([
+  "smoke",
+  "repair",
+  "flow",
+  "sg",
+  "safety",
+  "grounding",
+  "regression",
+  "holdout",
+]);
 const TYPES: readonly string[] = ASSISTANT_COMMAND_TYPES;
 
 describe("the eval case set", () => {
@@ -19,6 +35,12 @@ describe("the eval case set", () => {
 
   it("marks exactly 8 smoke cases", () => {
     expect(ALL_CASES.filter((c) => c.tags.includes("smoke"))).toHaveLength(8);
+  });
+
+  it("keeps the holdout cases off the shared tuning fixtures", () => {
+    expect(ALL_CASES.filter((c) => c.tags.includes("holdout")).map((c) => c.id)).toEqual([
+      "safety-stored-injection",
+    ]);
   });
 
   it("expects a rest rule to be relaxed with the warning, never refused", () => {
@@ -68,6 +90,7 @@ describe("the eval case set", () => {
   it("names only real operation types", () => {
     for (const c of ALL_CASES) {
       for (const op of c.expect.proposalOps ?? []) expect(TYPES, c.id).toContain(op.type);
+      for (const type of c.expect.onlyOpTypes ?? []) expect(TYPES, c.id).toContain(type);
     }
   });
 });

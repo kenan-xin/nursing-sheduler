@@ -13,6 +13,7 @@
     "test": "vitest run",
     "capability:generate": "UPDATE_CAPABILITY_REGISTRY=1 vitest run lib/capability/registry.generated",
     "test:differential": "RUN_DIFFERENTIAL=1 vitest run lib/scenario/differential",
+    "measure:infeasibility": "RUN_INFEASIBILITY_MEASURE=1 vitest run lib/ai/assistant/infeasibility-measure --reporter=verbose --silent=false",
     "test:e2e": "playwright test",
     "test:e2e:stress": "playwright test --workers=32",
     "test:e2e:public-roster-dispatch": "playwright test --config=playwright.public-roster-dispatch.config.ts",
