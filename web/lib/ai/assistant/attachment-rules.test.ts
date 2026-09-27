@@ -4,6 +4,7 @@ import {
   MAX_ATTACHMENTS,
   MAX_IMAGE_BYTES,
   MAX_TEXT_BYTES,
+  MAX_XLSX_BYTES,
   acceptFor,
   checkAttachment,
   contentMatches,
@@ -32,11 +33,25 @@ describe("attachment rules (2by.10)", () => {
     });
   });
 
+  it("takes an .xlsx for any model, as text converted in the browser (6eli)", () => {
+    expect(checkAttachment(file("Ward.XLSX", ""), false, 0)).toEqual({
+      ok: true,
+      kind: "text",
+      mimeType: "text/csv",
+      from: "xlsx",
+    });
+    expect(checkAttachment(file("big.xlsx", "", MAX_XLSX_BYTES + 1), false, 0)).toEqual({
+      ok: false,
+      message: '"big.xlsx" is larger than 10 MB.',
+    });
+    expect(acceptFor(false)).toContain(".xlsx");
+  });
+
   it("refuses an image for a model that cannot read one, with the way out", () => {
     expect(checkAttachment(file("ward.png", "image/png"), false, 0)).toEqual({
       ok: false,
       message:
-        "This model cannot read images. Choose one that can in Settings → AI assistant, or attach a .txt, .csv or .md file.",
+        "This model cannot read images. Choose one that can in Settings → AI assistant, or attach a .txt, .csv, .md or .xlsx file.",
     });
   });
 

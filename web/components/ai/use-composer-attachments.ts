@@ -9,12 +9,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAttachments, type Attachment } from "@copilotkit/react-core/v2";
 import {
   MAX_IMAGE_BYTES,
+  MAX_XLSX_BYTES,
   acceptFor,
   checkAttachment,
   contentMatches,
   wrongTypeMessage,
 } from "@/lib/ai/assistant/attachment-rules";
 import type { AssistantAttachmentV1 } from "@/lib/ai/assistant/records";
+import { xlsxToText } from "@/lib/ai/assistant/xlsx-text";
 
 function readBytes(file: File): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
@@ -44,18 +46,21 @@ export function useComposerAttachments(imageInput: boolean) {
     config: {
       enabled: true,
       accept: acceptFor(imageInput),
-      maxSize: MAX_IMAGE_BYTES,
+      // The largest file the app's own rules take; checkAttachment sets each type's cap.
+      maxSize: Math.max(MAX_IMAGE_BYTES, MAX_XLSX_BYTES),
       onUpload: async (file) => {
         const verdict = checkAttachment(file, imageInput, queued.current);
         if (!verdict.ok) throw new Error(verdict.message);
         queued.current += 1;
         uploading.current += 1;
         try {
-          const bytes = await readBytes(file);
-          if (!contentMatches(verdict.mimeType, bytes)) {
-            queued.current -= 1;
-            throw new Error(wrongTypeMessage(file.name));
+          let bytes = await readBytes(file);
+          // An .xlsx travels as its CSV text (6eli), checked below like any text file.
+          if (verdict.from === "xlsx") {
+            bytes = new TextEncoder().encode(await xlsxToText(bytes, file.name));
           }
+          if (!contentMatches(verdict.mimeType, bytes))
+            throw new Error(wrongTypeMessage(file.name));
           setError(null);
           return {
             type: "data",
@@ -63,6 +68,9 @@ export function useComposerAttachments(imageInput: boolean) {
             mimeType: verdict.mimeType,
             metadata: { kind: verdict.kind },
           };
+        } catch (failure) {
+          queued.current -= 1;
+          throw failure;
         } finally {
           uploading.current -= 1;
         }

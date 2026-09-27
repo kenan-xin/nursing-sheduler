@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import ExcelJS from "exceljs";
 
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { useComposerAttachments } from "./use-composer-attachments";
@@ -76,6 +77,20 @@ describe("composer attachments (2by.10)", () => {
     await userEvent.click(screen.getByText("consume"));
     await upload([new File(["x".repeat(200 * 1024 + 1)], "big.txt", { type: "text/plain" })]);
     await waitFor(() => expect(error()).toBe('"big.txt" is larger than 200 KB.'));
+  });
+
+  it("queues an .xlsx as CSV text, and refuses one that is not a workbook (6eli)", async () => {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet("Leave").addRow(["Ana", 3]);
+    const xlsx = new Uint8Array(await wb.xlsx.writeBuffer());
+    render(<Probe imageInput={false} />);
+    await upload([new File([xlsx], "leave.xlsx", { type: "" })]);
+    await waitFor(() => expect(ready()).toBe(JSON.stringify([["text", "leave.xlsx", "text/csv"]])));
+    await upload([new File(["a,b"], "fake.xlsx", { type: "" })]);
+    await waitFor(() =>
+      expect(error()).toBe('"fake.xlsx" could not be read as an Excel workbook.'),
+    );
+    expect(JSON.parse(ready()!)).toHaveLength(1);
   });
 
   it("checks the bytes, not the name: a renamed file is refused", async () => {

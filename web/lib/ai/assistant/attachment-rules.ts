@@ -9,6 +9,8 @@ export const MAX_ATTACHMENTS = 4;
  */
 export const MAX_IMAGE_BYTES = 3.75 * 1024 * 1024;
 export const MAX_TEXT_BYTES = 200 * 1024;
+/** An .xlsx as picked; what is sent is its text, which {@link MAX_TEXT_BYTES} bounds. */
+export const MAX_XLSX_BYTES = 10 * 1024 * 1024;
 
 /** Base64 characters one full-size image travels as. */
 const MAX_IMAGE_BASE64 = Math.ceil(MAX_IMAGE_BYTES / 3) * 4;
@@ -31,23 +33,25 @@ const TEXT_TYPES: Readonly<Record<string, string>> = {
   ".csv": "text/csv",
   ".md": "text/markdown",
 };
+/** Converted to CSV text in the browser (xlsx-text.ts, bead 6eli). */
+const XLSX = ".xlsx";
 
 export const ATTACHMENT_PRIVACY_NOTE =
   "Attachments go to OpenRouter with your message and stay in this conversation until you clear it.";
 
 const NO_VISION =
-  "This model cannot read images. Choose one that can in Settings → AI assistant, or attach a .txt, .csv or .md file.";
+  "This model cannot read images. Choose one that can in Settings → AI assistant, or attach a .txt, .csv, .md or .xlsx file.";
 
 export type AttachmentVerdict =
-  | { ok: true; kind: "image" | "text"; mimeType: string }
+  | { ok: true; kind: "image" | "text"; mimeType: string; from?: "xlsx" }
   | { ok: false; message: string };
 
 export function acceptFor(imageInput: boolean): string {
-  return [...(imageInput ? IMAGE_TYPES : []), ...Object.keys(TEXT_TYPES)].join(",");
+  return [...(imageInput ? IMAGE_TYPES : []), ...Object.keys(TEXT_TYPES), XLSX].join(",");
 }
 
 export function wrongTypeMessage(name: string): string {
-  return `"${name}" cannot be attached. Attach a PNG, JPEG, WebP or GIF image, or a .txt, .csv or .md file.`;
+  return `"${name}" cannot be attached. Attach a PNG, JPEG, WebP or GIF image, or a .txt, .csv, .md or .xlsx file.`;
 }
 
 export function checkAttachment(
@@ -59,7 +63,13 @@ export function checkAttachment(
     return { ok: false, message: `You can attach up to ${MAX_ATTACHMENTS} files to one message.` };
   }
   const dot = file.name.lastIndexOf(".");
-  const text = dot < 0 ? undefined : TEXT_TYPES[file.name.slice(dot).toLowerCase()];
+  const extension = dot < 0 ? "" : file.name.slice(dot).toLowerCase();
+  if (extension === XLSX) {
+    return file.size > MAX_XLSX_BYTES
+      ? { ok: false, message: `"${file.name}" is larger than 10 MB.` }
+      : { ok: true, kind: "text", mimeType: TEXT_TYPES[".csv"], from: "xlsx" };
+  }
+  const text = TEXT_TYPES[extension];
   if (text) {
     return file.size > MAX_TEXT_BYTES
       ? { ok: false, message: `"${file.name}" is larger than 200 KB.` }
