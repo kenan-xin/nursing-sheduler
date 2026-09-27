@@ -134,6 +134,11 @@ class = "verbatim"
 upstream_blob = "b5c8445ce63c962006c7ee44e35b91e26495a1e2"
 
 [[file]]
+path = "tests/real/solver_capabilities.py"
+class = "verbatim"
+upstream_blob = "e713cdbaf7e3870fb04cead718cd5e5726ec83dc"
+
+[[file]]
 path = "tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json"
 class = "patched"
 upstream_blob = "4221af315e071497f8be6dc42c7c5f4d46bf9925"
@@ -173,6 +178,11 @@ upstream_blob = "7a3bc9fb4c3f84409d011fa5e46ff9bd1f0acf3d"
 path = "tests/test_preference_validation.py"
 class = "verbatim"
 upstream_blob = "8ab8e8de5fc81612b566c41c252ec3b203e30151"
+
+[[file]]
+path = "tests/test_real_solver_capabilities.py"
+class = "verbatim"
+upstream_blob = "dcd4f9c7272329d9af5ed4833d9e8b334ef607c2"
 
 [[file]]
 path = "tests/test_scheduler.py"
