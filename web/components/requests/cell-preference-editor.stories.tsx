@@ -52,7 +52,8 @@ export const Available: Story = {
 
 export const Off: Story = {
   play: async ({ args, userEvent }) => {
-    await userEvent.click(await screen.findByTestId("cell-editor-tab-off"));
+    await waitFor(() => expect(screen.getByTestId("cell-preference-editor")).toBeVisible());
+    await userEvent.click(screen.getByTestId("cell-editor-tab-off"));
     await expect(screen.getByTestId("cell-editor-off")).toBeVisible();
     await userEvent.click(screen.getByTestId("cell-editor-save"));
     await expect(args.onSave).toHaveBeenCalledWith({ kind: "off", weight: undefined });
@@ -61,7 +62,8 @@ export const Off: Story = {
 
 export const Leave: Story = {
   play: async ({ args, userEvent }) => {
-    await userEvent.click(await screen.findByTestId("cell-editor-tab-leave"));
+    await waitFor(() => expect(screen.getByTestId("cell-preference-editor")).toBeVisible());
+    await userEvent.click(screen.getByTestId("cell-editor-tab-leave"));
     await expect(screen.getByTestId("cell-editor-leave-note")).toBeVisible();
     await userEvent.click(screen.getByTestId("cell-editor-save"));
     await expect(args.onSave).toHaveBeenCalledWith({ kind: "leave" });
@@ -72,7 +74,8 @@ export const Leave: Story = {
 
 export const WithError: Story = {
   play: async ({ args, userEvent }) => {
-    const weight = await screen.findByTestId("cell-editor-weight-input-early1");
+    await waitFor(() => expect(screen.getByTestId("cell-preference-editor")).toBeVisible());
+    const weight = screen.getByTestId("cell-editor-weight-input-early1");
     await userEvent.clear(weight);
     await userEvent.type(weight, "not-a-number");
     await userEvent.click(screen.getByTestId("cell-editor-save"));
