@@ -931,33 +931,77 @@ describe("prepare_borrowed_cover with no saved roster (bead 20wo)", () => {
     expect(useAssistantStore.getState().activeProposal).toBeNull();
   });
 
-  it("proposes one cover per missing nurse on a slot short by two (bead v9lu)", async () => {
-    // Nights only, and the 5th needs 5 of the 3 staff: that one slot is two nurses short.
+  // Nights only, and the 5th needs 5 of the 3 staff: that one slot is two nurses short.
+  const twoShortNight = () => {
     const ward = SCENARIOS.understaffedNight();
     const requirements = ward.cardsByKind.requirements.flatMap((card) =>
       card.uid === "day"
         ? []
         : [card.uid === "night-05" ? { ...card, requiredNumPeople: 5 } : card],
     );
-    fixture.scenario = { ...ward, cardsByKind: { ...ward.cardsByKind, requirements } };
+    return { ...ward, cardsByKind: { ...ward.cardsByKind, requirements } };
+  };
+  const nightCover = (name: string) => ({
+    type: "add_temporary_cover",
+    name,
+    date: "2026-11-05",
+    shiftType: "N",
+    groups: [],
+  });
+
+  it("books one named nurse per missing nurse on a slot short by two (bead v9lu)", async () => {
+    fixture.scenario = twoShortNight();
+    const answer = await tool("prepare_borrowed_cover").handler(
+      { ...RINA, names: ["Sam Tan (float pool)"] },
+      {},
+    );
+    expect(fixture.prepare.mock.calls[0][0].commands).toEqual([
+      nightCover("Rina Lim (float pool)"),
+      nightCover("Sam Tan (float pool)"),
+    ]);
+    expect(answer).toMatch(/Rina Lim \(float pool\) on 5 Nov, N/);
+    expect(answer).toMatch(/Sam Tan \(float pool\) on 5 Nov, N/);
+    expect(answer).not.toMatch(/still missing/);
+  });
+
+  it("never books one name twice on a slot; says how many nurses are still missing (bead v9lu)", async () => {
+    fixture.scenario = twoShortNight();
     const answer = await tool("prepare_borrowed_cover").handler(RINA, {});
-    const cover = {
-      type: "add_temporary_cover",
-      name: "Rina Lim (float pool)",
-      date: "2026-11-05",
-      shiftType: "N",
-      groups: [],
+    expect(fixture.prepare.mock.calls[0][0].commands).toEqual([
+      nightCover("Rina Lim (float pool)"),
+    ]);
+    expect(answer).toMatch(/1 more nurse is still missing/);
+    expect(answer).toMatch(/ask the user for (the|their) names?/i);
+  });
+
+  it("records the sick nurse's leave even when no cover is needed (bead v9lu)", async () => {
+    const ward = SCENARIOS.understaffedNight();
+    fixture.scenario = {
+      ...ward,
+      cardsByKind: {
+        ...ward.cardsByKind,
+        requirements: ward.cardsByKind.requirements.filter((c) => c.uid !== "night-05"),
+      },
     };
-    expect(fixture.prepare.mock.calls[0][0].commands).toEqual([cover, cover]);
-    expect(answer).toMatch(/2 temporary covers/);
+    const answer = await tool("prepare_borrowed_cover").handler({ ...RINA, person: "ana" }, {});
+    expect(fixture.prepare.mock.calls[0][0].commands).toEqual([
+      { type: "add_leave", personId: "ana", startDate: "2026-11-05", endDate: "2026-11-05" },
+    ]);
+    expect(answer).toMatch(/no cover is needed/i);
+    expect(useAssistantStore.getState().activeProposal?.proposalId).toBe("p-2");
   });
 
   it("records the named sick nurse's leave in the same Preview, and covers her too (bead v9lu)", async () => {
-    await tool("prepare_borrowed_cover").handler({ ...RINA, person: "ana" }, {});
-    const commands = fixture.prepare.mock.calls[0][0].commands;
-    expect(commands.filter((c: { type: string }) => c.type === "add_temporary_cover")).toHaveLength(
-      2,
+    await tool("prepare_borrowed_cover").handler(
+      { ...RINA, person: "ana", names: ["Sam Tan (float pool)"] },
+      {},
     );
+    const commands = fixture.prepare.mock.calls[0][0].commands;
+    expect(
+      commands.flatMap((c: { type: string; name?: string }) =>
+        c.type === "add_temporary_cover" ? [c.name] : [],
+      ),
+    ).toEqual(["Rina Lim (float pool)", "Sam Tan (float pool)"]);
     expect(commands).toContainEqual({
       type: "add_leave",
       personId: "ana",

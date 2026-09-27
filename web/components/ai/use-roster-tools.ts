@@ -132,6 +132,14 @@ export const borrowParameters = z.object({
       "The nurse's name as the user said it, with the lending ward in brackets, for example " +
         "Haseena (Ward 3). Never invent one.",
     ),
+  names: z
+    .array(z.string().min(1))
+    .max(10)
+    .optional()
+    .describe(
+      "With no saved roster, when more than one nurse is missing: the other lent nurses' names, " +
+        "written like name. One cover is booked per name. Never invent one.",
+    ),
   groups: z
     .array(z.string())
     .max(5)
@@ -140,7 +148,7 @@ export const borrowParameters = z.object({
     .boolean()
     .describe(
       "true ONLY after the user said in chat that the lending ward or agency agreed to lend this " +
-        "nurse, or every nurse when more than one is missing.",
+        "nurse, or every nurse named in names.",
     ),
   summary: z.string().min(1).describe("Why, in one plain sentence. Shown as your reasoning."),
 });
@@ -285,14 +293,21 @@ function showCard(
 /**
  * With no saved roster (after an infeasible run) a cover is still just a staffing credit
  * (bead 20wo): the covers are the scenario's own short (date, shift) slots on these dates,
- * the same ones suggest_feasibility_options' borrow repair books, under the user's name:
- * one cover per missing nurse (bead v9lu). A sick nurse named in the scenario gets her leave
- * first (`add_leave`, as the Requests screen records it), so her own shifts are covered too.
+ * the same ones suggest_feasibility_options' borrow repair books. Each missing nurse the
+ * repair counts is one named cover, in its order (bead v9lu): the user's names go to them in
+ * turn, and the ones left unnamed are `missing`. The repair gives a nurse at most one slot a
+ * day, so no name lands twice on a date and shift. A sick nurse named in the scenario gets her
+ * leave first (`add_leave`, as the Requests screen records it), so her own shifts count too.
  */
 function scenarioCovers(
   args: Pick<z.infer<typeof borrowParameters>, "person" | "reason" | "groups" | "dates">,
-  name: string,
-): { commands: AssistantCommandV1[]; shortDates: string[] } {
+  names: readonly string[],
+): {
+  covers: Extract<AssistantCommandV1, { type: "add_temporary_cover" }>[];
+  missing: number;
+  leave: AssistantCommandV1[];
+  shortDates: string[];
+} {
   const live = pickScenario(useScenarioStore.getState());
   const personIdx =
     args.reason === "sick_or_emergency" ? findPersonIdx({ people: live.staff }, args.person) : -1;
@@ -306,15 +321,29 @@ function scenarioCovers(
   const slots = (borrow?.operations ?? []).flatMap((op) =>
     op.type === "add_temporary_cover" ? [op] : [],
   );
-  const covers = slots.flatMap((op): AssistantCommandV1[] =>
-    args.dates.includes(op.date)
-      ? [{ ...op, name, groups: [...new Set([...args.groups, ...op.groups])] }]
-      : [],
-  );
+  const onDates = slots.filter((op) => args.dates.includes(op.date));
+  // The repair names its nurses "Borrowed nurse 1", "Borrowed nurse 2"...: one per missing nurse.
+  const nurses = [...new Set(onDates.map((op) => op.name))];
+  const covers = onDates.flatMap((op) => {
+    const name = names[nurses.indexOf(op.name)];
+    return name === undefined
+      ? []
+      : [{ ...op, name, groups: [...new Set([...args.groups, ...op.groups])] }];
+  });
   return {
-    commands: covers.length ? [...covers, ...recorded] : [],
+    covers,
+    missing: Math.max(0, nurses.length - names.length),
+    leave: recorded,
     shortDates: [...new Set(slots.map((op) => op.date))],
   };
+}
+
+/** A cover's date and shift in the scenario's words, so the model names the shift it got. */
+function coverSlot(cover: { date: string; shiftType: string }): string {
+  const shift = pickScenario(useScenarioStore.getState()).shifts.find(
+    (s) => String(s.id) === cover.shiftType,
+  );
+  return `${plainDate(cover.date)}, ${shift?.description ?? cover.shiftType}`;
 }
 
 const NO_ROSTER =
@@ -783,7 +812,7 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         "Step 3 only, when find_swap_partners says step 3 and the user said in chat that the " +
         "lending ward agreed: prepare a temporary cover nurse from the relief pool, another " +
         "ward or an agency for the uncovered shifts. With no saved roster (after a run that " +
-        "could not build one), it covers every missing nurse on those dates, and a person on " +
+        "could not build one), it books one cover per name for the missing nurses on those dates, and a person on " +
         "sick_or_emergency leave gets that leave recorded in the same preview. The nurse is not added as staff: each cover " +
         "lowers that shift's staffing need by one. This does NOT change anything: the user " +
         "sees a card with an Apply button only they can press.",
@@ -802,9 +831,13 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         if (token === null) return SUPERSEDED;
         const name = args.name.trim();
         if (read.status === "none" && !read.newerRunWaiting) {
-          const { commands, shortDates } = scenarioCovers(args, name);
-          if (shortDates.length === 0) return noRoster();
+          const names = [...new Set([name, ...(args.names ?? []).map((n) => n.trim())])].filter(
+            Boolean,
+          );
+          const { covers, missing, leave, shortDates } = scenarioCovers(args, names);
+          const commands = [...covers, ...leave];
           if (commands.length === 0) {
+            if (shortDates.length === 0) return noRoster();
             return (
               `No shift on those dates is short, so nothing was prepared. The short dates are ` +
               `${shortDates.join(", ")}.`
@@ -825,20 +858,28 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
             token.turnEpoch,
             prepared.linked.baseDocumentRevision,
           );
-          const covers = commands.filter((c) => c.type === "add_temporary_cover").length;
-          const sickPerson = commands.find((c) => c.type === "add_leave")?.personId;
-          return (
-            `A preview of ${covers === 1 ? "the temporary cover" : `${covers} temporary covers, one per missing nurse,`} ` +
+          const sickPerson = leave.find((c) => c.type === "add_leave")?.personId;
+          const leaveWords =
+            sickPerson === undefined ? "" : `${sickPerson}'s leave on the Requests screen`;
+          const shown =
             "is now shown to the user. Nothing has changed yet; only the user can apply it. " +
-            'Say "I\'ve prepared ...; check it and press Apply" in one short sentence: Apply ' +
-            `books ${name} as temporary cover on the Staff screen` +
-            (sickPerson === undefined
-              ? ". "
-              : ` and records ${sickPerson}'s leave on the Requests screen. `) +
-            (covers === 1
-              ? ""
-              : `Each of the ${covers} nurses needs the lending ward's agreement: if the user ` +
-                "confirmed only one, ask whether the ward agreed to lend them all. ") +
+            'Say "I\'ve prepared ...; check it and press Apply" in one short sentence. ';
+          if (covers.length === 0) {
+            return (
+              `A preview of ${leaveWords} ${shown}No cover is needed: every shift on those ` +
+              "dates is still staffed with the leave. Then wait."
+            );
+          }
+          const booked = covers.map((c) => `${c.name} on ${coverSlot(c)}`).join("; ");
+          return (
+            `A preview ${shown}Apply books these temporary covers on the Staff screen: ` +
+            `${booked}. Name each shift as written here.` +
+            (leaveWords ? ` It also records ${leaveWords}.` : "") +
+            (missing === 0
+              ? " "
+              : ` ${missing} more ${missing === 1 ? "nurse is" : "nurses are"} still missing: ` +
+                "ask the user for their names and whether the lending ward agreed, then call " +
+                "prepare_borrowed_cover again with every name. ") +
             `Remind the user to let their ${ROSTER_OWNER} know. Once they have applied ` +
             `it, offer a run with ${OPTIMIZE_RUN_TOOL} so a roster can be built with the cover; ` +
             "it starts only when the user says yes. Then wait."
