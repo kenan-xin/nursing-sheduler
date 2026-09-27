@@ -11,10 +11,13 @@ import {
   setTurnState,
 } from "@/lib/ai/assistant/history-repo";
 import type { AssistantSettlement, InterruptionTrigger } from "@/lib/ai/assistant/lifecycle";
+import { toUserContent } from "@/lib/ai/assistant/messages";
+import type { AssistantAttachmentV1 } from "@/lib/ai/assistant/records";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { createAssistantHarness, type AssistantHarness } from "@/lib/ai/assistant/test-support";
 import { AssistantLiveConversation, LifecycleNotice } from "./assistant-conversation";
 import { useAssistantRetry } from "./use-assistant-retry";
+import type { AssistantSendOptions } from "./use-assistant-session";
 
 // The chat view and the turn session are stubbed exactly as in `choice-card.test.tsx`:
 // one wiring test renders the REAL live conversation, so the transport is noise but the
@@ -26,7 +29,10 @@ interface CapturedTool {
 }
 const captured = vi.hoisted(() => [] as CapturedTool[]);
 const sessionSend = vi.hoisted(() => vi.fn(async () => true));
-vi.mock("@copilotkit/react-core/v2", () => ({
+vi.mock("@copilotkit/react-core/v2", async (importOriginal) => ({
+  // 2by.10: the real attachment queue; it is plain React state and needs no provider.
+  useAttachments: (await importOriginal<typeof import("@copilotkit/react-core/v2")>())
+    .useAttachments,
   CopilotChatView: ({
     onSubmitMessage,
     input: Input,
@@ -93,6 +99,7 @@ async function seedSettledTurn(
   question: string | null,
   settlement: AssistantSettlement,
   trigger: InterruptionTrigger | null = null,
+  attachments: AssistantAttachmentV1[] = [],
 ) {
   const turn = await recordPreparingTurn(
     {
@@ -110,7 +117,7 @@ async function seedSettledTurn(
   if (!turn) throw new Error("expected a live thread to accept a preparing turn");
   if (question !== null) {
     await persistThreadMessages(
-      [{ id: "m-question", role: "user", content: question }],
+      [{ id: "m-question", role: "user", content: toUserContent(question, attachments) }],
       {
         threadId,
         scenarioId: "scenario-a",
@@ -131,7 +138,7 @@ function settle(settlement: AssistantSettlement, trigger: InterruptionTrigger | 
   useAssistantStore.setState({ lastSettlement: { trigger, settlement } });
 }
 
-type Send = (text: string, options?: { replaceTurnId?: string }) => Promise<boolean>;
+type Send = (text: string, options?: AssistantSendOptions) => Promise<boolean>;
 
 /**
  * The live conversation's two pieces: the retry controller, and the notice it feeds.
@@ -180,6 +187,26 @@ describe("the failed turn's Retry control", () => {
     // stops the gate asking the question twice.
     expect(send.mock.calls[0][0]).toBe("and the 16th?");
     expect(send.mock.calls[0][1]).toEqual({ replaceTurnId: expect.any(String) });
+  });
+
+  it("sends a failed question's attachments back with it (2by.10)", async () => {
+    const png = {
+      kind: "image" as const,
+      filename: "ward.png",
+      mimeType: "image/png",
+      data: "iVBORw0KGgo=",
+    };
+    const turn = await seedSettledTurn("what is this?", "run_failed", null, [png]);
+    settle("run_failed");
+    const send = vi.fn<Send>(async () => true);
+    render(<Host send={send} />);
+
+    await userEvent.click(await screen.findByTestId("assistant-retry"));
+
+    expect(send).toHaveBeenCalledWith("what is this?", {
+      replaceTurnId: turn.turnId,
+      attachments: [png],
+    });
   });
 
   it("offers Retry for a turn an interruption stopped, not only for a failure", async () => {

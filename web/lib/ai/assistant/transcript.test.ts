@@ -23,6 +23,23 @@ function base(overrides: Partial<Parameters<typeof buildTranscriptMarkdown>[0]> 
 }
 
 describe("buildTranscriptMarkdown", () => {
+  it("lists attachments by name and type, never their data (2by.10)", () => {
+    // A stored row carries the data; the builder must not print it.
+    const stored = {
+      kind: "image",
+      filename: "ward.png",
+      mimeType: "image/png",
+      data: "SECRETDATA",
+    };
+    const markdown = base({
+      messages: [
+        { role: "user", content: "look", toolCalls: null, createdAt: "t", attachments: [stored] },
+      ],
+    });
+    expect(markdown).toContain("Attached: ward.png (image/png)");
+    expect(markdown).not.toContain("SECRETDATA");
+  });
+
   it("names itself, and carries the build version and the export timestamp", () => {
     const markdown = base();
 

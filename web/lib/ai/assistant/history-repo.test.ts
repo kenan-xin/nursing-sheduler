@@ -153,6 +153,31 @@ describe("canonical message persistence", () => {
     ]);
   });
 
+  it("keeps attachments when a message is re-persisted as text only (2by.10)", async () => {
+    const harness = createAssistantHarness();
+    const thread = await selectActiveThread("scenario-a", harness.config);
+    const withImage = {
+      id: "m1",
+      role: "user",
+      content: [
+        { type: "text", text: "look" },
+        {
+          type: "image",
+          source: { type: "data", value: "iVBORw0KGgo=", mimeType: "image/png" },
+          metadata: { filename: "ward.png" },
+        },
+      ],
+    } as Message;
+    const ctx = context(harness, thread.threadId, "scenario-a");
+    await persistThreadMessages([withImage], ctx, harness.config);
+    // A later boundary re-publishes the same message as text only; the attachment survives.
+    await persistThreadMessages([userMessage("m1", "look")], ctx, harness.config);
+    const [row] = await readThreadMessages(thread.threadId, harness.config);
+    expect(row.attachments).toEqual([
+      { kind: "image", filename: "ward.png", mimeType: "image/png", data: "iVBORw0KGgo=" },
+    ]);
+  });
+
   it("keeps a growing message in its original slot rather than reordering it", async () => {
     const harness = createAssistantHarness();
     const thread = await selectActiveThread("scenario-a", harness.config);

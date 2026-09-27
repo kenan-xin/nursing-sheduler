@@ -243,12 +243,16 @@ let agent: ScriptedAgent;
 const session: { current: AssistantSession | null } = { current: null };
 const unhandled: unknown[] = [];
 
+/** Whether the selected model reads images, as the panel would tell the session. */
+let hostImageInput = true;
+
 function Host() {
   session.current = useAssistantSession({
     threadId,
     routePath: "/shift-requests",
     routeLabel: "Requests",
     historical: false,
+    imageInput: hostImageInput,
   });
   return (
     <>
@@ -638,6 +642,82 @@ describe("revocation INSIDE the real repository transaction", () => {
 describe("the success twins a silent turn is judged against", () => {
   // NON-VACUITY FOR THE WHOLE RULE. A turn is `completed` only when it produced new
   // assistant text, so these two are what stop that rule from simply failing everything.
+
+  it("sends and stores a message's attachments (2by.10)", async () => {
+    const png = {
+      kind: "image" as const,
+      filename: "ward.png",
+      mimeType: "image/png",
+      data: "iVBORw0KGgo=",
+    };
+    agent.shape = "answer";
+    agent.answer = "a picture of a roster";
+
+    await act(async () => {
+      await session.current!.send("what is this?", { attachments: [png] });
+    });
+    await settle();
+
+    const hop = agent.clones.at(-1)!.hopInputs[0]!;
+    const user = hop.messages.find(
+      (m) => m.role === "user" && JSON.stringify(m).includes("what is this?"),
+    )!;
+    expect(JSON.stringify(user.content)).toContain('"type":"image"');
+    const rows = await harness.db.assistantMessages.where("threadId").equals(threadId).toArray();
+    expect(rows.find((r) => r.role === "user")?.attachments).toEqual([png]);
+  });
+
+  it("describes images by name to a model that cannot read them, and keeps them stored (2by.10)", async () => {
+    const png = {
+      kind: "image" as const,
+      filename: "ward.png",
+      mimeType: "image/png",
+      data: "iVBORw0KGgo=",
+    };
+    hostImageInput = false;
+    try {
+      cleanup();
+      render(<Host />);
+      agent.shape = "answer";
+      agent.answer = "noted";
+
+      await act(async () => {
+        await session.current!.send("what is this?", { attachments: [png] });
+      });
+      await settle();
+
+      const hop = agent.clones.at(-1)!.hopInputs[0]!;
+      const user = hop.messages.find(
+        (m) => m.role === "user" && JSON.stringify(m).includes("what is this?"),
+      )!;
+      expect(JSON.stringify(user.content)).not.toContain('"type":"image"');
+      expect(JSON.stringify(user.content)).toContain("[image: ward.png]");
+      const rows = await harness.db.assistantMessages.where("threadId").equals(threadId).toArray();
+      expect(rows.find((r) => r.role === "user")?.attachments).toEqual([png]);
+    } finally {
+      hostImageInput = true;
+    }
+  });
+
+  it("neither sends nor stores attachments when AI is not ready (2by.10)", async () => {
+    const png = {
+      kind: "image" as const,
+      filename: "ward.png",
+      mimeType: "image/png",
+      data: "iVBORw0KGgo=",
+    };
+    await act(async () => {
+      await assistantActions.setEnabled(false);
+    });
+    await act(async () => {
+      await session.current!.send("what is this?", { attachments: [png] });
+    });
+    await settle();
+
+    expect(useAssistantStore.getState().lastRefusal).toBe("not_ready");
+    expect(agent.clones.flatMap((clone) => clone.hopInputs)).toHaveLength(0);
+    expect(await harness.db.assistantMessages.count()).toBe(0);
+  });
 
   it("a direct text answer completes", async () => {
     agent.shape = "answer";

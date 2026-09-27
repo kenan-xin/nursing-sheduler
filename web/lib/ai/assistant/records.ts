@@ -192,6 +192,15 @@ export interface AssistantToolCallV1 {
 
 export type AssistantMessageRole = "user" | "assistant" | "tool" | "reasoning";
 
+/** 2by.10: one image or text file attached to a user message. */
+export interface AssistantAttachmentV1 {
+  kind: "image" | "text";
+  filename: string;
+  mimeType: string;
+  /** Base64 without a data-URL prefix. */
+  data: string;
+}
+
 /**
  * A canonical conversation message. This -- not a CopilotKit instance -- is what
  * survives a reload, and `./messages` is the only place that knows how to turn it
@@ -213,6 +222,8 @@ export interface AssistantMessageV1 extends AssistantGenerationPair {
   modelId: string | null;
   turnId: string | null;
   createdAt: string;
+  /** 2by.10: a user message's images and text files. Absent on older rows. */
+  attachments?: AssistantAttachmentV1[] | null;
 }
 
 /** The generation pair an interruptible assistant write captures. */

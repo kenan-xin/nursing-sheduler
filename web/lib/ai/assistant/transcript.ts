@@ -23,6 +23,8 @@ export interface TranscriptMessage {
   content: string;
   toolCalls: readonly AssistantToolCallV1[] | null;
   createdAt: string;
+  /** 2by.10: listed by name and type only; the data never goes into the file. */
+  attachments?: readonly { filename: string; mimeType: string }[] | null;
 }
 
 /** The receipt fields a transcript renders. `AssistantReceiptV1` is assignable. */
@@ -89,6 +91,9 @@ export function buildTranscriptMarkdown(input: TranscriptInput): string {
     // read as Markdown.
     if (message.content) {
       lines.push(message.role === "tool" ? fenced(message.content, "text") : message.content);
+    }
+    for (const a of message.attachments ?? []) {
+      lines.push("", `Attached: ${a.filename} (${a.mimeType})`);
     }
     // A tool call is a sub-section of the assistant turn that made it.
     for (const call of message.toolCalls ?? []) {

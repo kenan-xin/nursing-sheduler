@@ -15,6 +15,7 @@ import { useHotStore } from "@/lib/store";
 import type { OptimizeRunView, RunLifecycle } from "@/lib/optimize/run-view";
 import { useRunRequestStore } from "@/lib/optimize/run-request";
 import type { ApplyOutcomeView } from "./use-assistant-proposals";
+import type { AssistantSendOptions } from "./use-assistant-session";
 
 const FINISHED: ReadonlySet<RunLifecycle> = new Set(["completed", "cancelled", "failed"]);
 
@@ -91,8 +92,8 @@ const join = (current: Waiting | null, text: string): Waiting =>
 export function useAssistantFollowUps(
   running: boolean,
   outcome: ApplyOutcomeView | null,
-  send: (text: string) => Promise<boolean>,
-): (text: string) => Promise<boolean> {
+  send: (text: string, options?: AssistantSendOptions) => Promise<boolean>,
+): (text: string, options?: AssistantSendOptions) => Promise<boolean> {
   // The one waiting follow-up. `refused`: a send was refused as busy, so it waits for
   // the session's next busy-to-idle report (`sawBusy` marks the busy half).
   const [waiting, setWaiting] = useState<Waiting | null>(null);
@@ -150,9 +151,10 @@ export function useAssistantFollowUps(
     });
   }, [waiting, running, send]);
 
-  return (text: string) => {
+  return (text: string, options?: AssistantSendOptions) => {
     userSends.current += 1;
     setWaiting(null);
-    return send(text);
+    // Text alone unless the composer attached files: cards and follow-ups carry none.
+    return options ? send(text, options) : send(text);
   };
 }

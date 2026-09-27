@@ -43,7 +43,10 @@ import {
 // Preview -- and a real transport would add a provider, a core and a network seam to a
 // question that has nothing to do with any of them. Every other suite in this file drives
 // the real repository, the real adapter and the real cards, untouched.
-vi.mock("@copilotkit/react-core/v2", () => ({
+vi.mock("@copilotkit/react-core/v2", async (importOriginal) => ({
+  // 2by.10: the real attachment queue; it is plain React state and needs no provider.
+  useAttachments: (await importOriginal<typeof import("@copilotkit/react-core/v2")>())
+    .useAttachments,
   // The view renders its `input` slot, which is where the live rendering docks its cards.
   CopilotChatView: ({ input: Input }: { input?: ComponentType }) => (
     <div data-testid="chat-view-stub">{Input ? <Input /> : null}</div>
