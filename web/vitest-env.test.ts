@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-// Bead w0e.2. The storybook project's framework (`@storybook/nextjs-vite`) loads next.config
-// while Vitest resolves projects, writing NODE_ENV=development and `__NEXT_*` vars into the
-// shared main process. vitest.config.ts undoes that; this pins it for every unit worker.
-describe("the unit project's process env", () => {
-  it("is not polluted by the storybook project's next.config load", () => {
+// Bead w0e.2. `@storybook/nextjs-vite` loads next.config while Vitest resolves a config that
+// uses the storybook plugin, writing NODE_ENV=development and `__NEXT_*` vars into the main
+// process that every worker inherits (8 unit tests failed when stories were a `test.projects`
+// entry). So stories live in vitest.storybook.config.ts and this unit suite must never see
+// Storybook's env.
+describe("the unit suite's process env", () => {
+  it("is not polluted by Storybook or its next.config load", () => {
     expect(process.env.NODE_ENV).toBe("test");
-    expect(Object.keys(process.env).filter((key) => key.startsWith("__NEXT_"))).toEqual([]);
+    expect(Object.keys(process.env).filter((key) => /^(__NEXT_|__STORYBOOK_)/.test(key))).toEqual(
+      [],
+    );
   });
 });
