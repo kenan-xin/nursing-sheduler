@@ -7,8 +7,14 @@
 // a Coefficients cell when the card has any, and an Exceptions cell when it has
 // per-date overrides), and the labelled Edit · Duplicate ·
 // Delete action row.
+//
+// The Exceptions cell also lists the cover effects on THIS card, read-only and
+// apart from the hand-written per-date overrides (d582, spec §6): a temporary
+// cover lowers the need on her date, so the cell says so
+// (`14 Oct: 2 · Haseena (Ward 3) covering`) and links to Staff, where covers live.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Badge } from "@/components/ui/badge";
 import { FaPowerOff, FaPen, FaCopy, FaTrash } from "@/components/icons";
 import { WeightPill } from "@/components/card-editor/weight-field";
@@ -21,6 +27,14 @@ import {
   type DropPosition,
 } from "@/components/card-editor/card-editor-shell";
 import { formatShortDate } from "@/lib/dates/date-id";
+import { useScenarioStore } from "@/lib/store";
+import { GuardedLink } from "@/components/shell/guarded-link";
+import {
+  coverCardsOf,
+  coverInputFrom,
+  coverSlicesOf,
+  coverStatuses,
+} from "@/lib/scenario/temporary-cover";
 import { summarizeRefs } from "./requirements-model";
 
 interface RequirementCardListProps {
@@ -62,10 +76,35 @@ export function RequirementCardList({
   const [dragUid, setDragUid] = useState<string | null>(null);
   const [overUid, setOverUid] = useState<string | null>(null);
 
+  // The cover effects that land on a card are read-only here — covers are managed on
+  // Staff — but they change what this card's need IS, so the cell reports them. Two
+  // narrow subscriptions, so a card kind the cover maths never reads cannot re-render.
+  const coverSlices = useScenarioStore(useShallow(coverSlicesOf));
+  const coverRequirements = useScenarioStore(coverCardsOf);
+  const coverLines = useMemo(() => {
+    const coverState = coverInputFrom(coverSlices, coverRequirements);
+    const lines = new Map<string, string[]>();
+    for (const status of coverStatuses(coverState)) {
+      const name = coverState.temporaryCover[status.index]?.name ?? "";
+      for (const effect of status.effects) {
+        const list = lines.get(effect.cardUid) ?? [];
+        list.push(`${formatShortDate(effect.iso)}: ${effect.after} · ${name} covering`);
+        lines.set(effect.cardUid, list);
+      }
+    }
+    return lines;
+  }, [coverSlices, coverRequirements]);
+
   return (
     <ul className="flex flex-col gap-3" data-testid="requirements-list">
       {requirements.map((card, index) => {
         const coefficients = card.shiftTypeCoefficients ?? [];
+        const exceptions = [
+          ...(card.requiredNumPeopleOverrides ?? []).map(
+            ([iso, n]) => `${formatShortDate(iso)}: ${n}`,
+          ),
+          ...(coverLines.get(card.uid) ?? []),
+        ];
         // FR-PR-29: the weight pill is shown ONLY when a distinct preferred value
         // makes the weight meaningful (mirrors the form's conditional dial).
         const showWeight =
@@ -117,13 +156,22 @@ export function RequirementCardList({
                   ? `${card.requiredNumPeople} · at least ${card.skillMix.map((e) => `${e.minNumPeople} ${e.people}`).join(", ")}`
                   : `${card.requiredNumPeople}`,
               },
-              ...(card.requiredNumPeopleOverrides?.length
+              ...(exceptions.length > 0
                 ? [
                     {
                       label: "Exceptions",
-                      value: card.requiredNumPeopleOverrides
-                        .map(([iso, n]) => `${formatShortDate(iso)}: ${n}`)
-                        .join(" · "),
+                      value: (
+                        <span data-testid={`requirement-exceptions-${card.uid}`}>
+                          {exceptions.join(" · ")}
+                          {" · "}
+                          <GuardedLink
+                            href="/people"
+                            className="text-brandink underline-offset-4 hover:underline"
+                          >
+                            Temporary cover on Staff
+                          </GuardedLink>
+                        </span>
+                      ),
                     },
                   ]
                 : []),

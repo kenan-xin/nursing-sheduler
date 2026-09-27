@@ -22,6 +22,7 @@ import {
   validateScenario,
   type ScenarioValidationIssue,
 } from "./serialize";
+import { withCoverOverrides } from "./temporary-cover";
 import type { CanonicalScenarioDocument, PersonRef, ScenarioUiState } from "./types";
 
 /** The result of a validated export attempt: the dumped YAML, or the blocking issues. */
@@ -102,7 +103,8 @@ export function prepareAnonymizedExport(
   state: ScenarioUiState,
   opts: PrepareAnonymizedExportOptions,
 ): PrepareExportResult {
-  const projected = toCanonicalScenarioDocument(state);
+  // Solver input: covers are applied as lowered counts (d582); the authored state is untouched.
+  const projected = toCanonicalScenarioDocument(withCoverOverrides(state));
   const sourceValidation = validateScenario(projected);
   if (!sourceValidation.ok) return { ok: false, issues: sourceValidation.issues };
 
