@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { prepareAnonymizedExport, prepareExport } from "./prepare-export";
-import { makeValidUiState } from "./test-fixtures";
+import { serializeScenario } from "./serialize";
+import { makeTemporaryCover, makeValidUiState } from "./test-fixtures";
 import type { PersonRef, ScenarioUiState } from "./types";
 
 const APP_VERSION_ENV = "NEXT_PUBLIC_APP_VERSION";
@@ -88,6 +89,48 @@ describe("prepareAnonymizedExport — independent people/group toggles", () => {
     const people = parsed.people as { items: { id: string }[]; groups: { id: string }[] };
     expect(people.items.map((p) => p.id)).toEqual(["P1", "P2"]);
     expect(people.groups[0].id).toBe("G1");
+  });
+});
+
+describe("prepareAnonymizedExport — temporary cover (d582)", () => {
+  const plain = { people: false, groups: false, scatter: false };
+
+  it("strict export carries the decremented count", () => {
+    const state = { ...makeValidUiState(), temporaryCover: [makeTemporaryCover()] };
+    const result = prepareAnonymizedExport(state, plain);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const preferences = (parse(result.yaml) as { preferences: Record<string, unknown>[] })
+      .preferences;
+    const day = preferences.find((p) => p.type === "shift type requirement");
+    expect(day).toMatchObject({
+      requiredNumPeople: 1,
+      requiredNumPeopleOverrides: [["2026-05-14", 0]],
+    });
+  });
+
+  it("a split submission's YAML has no anchor or alias", () => {
+    const state = makeValidUiState();
+    Object.assign(state.cardsByKind.requirements[0], {
+      shiftType: ["D"],
+      qualifiedPeople: ["ALL"],
+      preferredNumPeople: 2,
+    });
+    state.temporaryCover = [makeTemporaryCover()];
+    const result = prepareAnonymizedExport(state, plain);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The date split really happened: two cards share one shiftType/qualifiedPeople ref.
+    const preferences = (parse(result.yaml) as { preferences: { type: string }[] }).preferences;
+    expect(preferences.filter((p) => p.type === "shift type requirement")).toHaveLength(2);
+    expect(result.yaml).not.toMatch(/[&*]a\d/);
+  });
+
+  it("no cover gives byte-identical YAML", () => {
+    vi.stubEnv(APP_VERSION_ENV, "9.9.9");
+    const state = makeValidUiState();
+    const result = prepareAnonymizedExport(state, plain);
+    expect(result).toEqual({ ok: true, yaml: serializeScenario(state) });
   });
 });
 
