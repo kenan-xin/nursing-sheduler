@@ -35,6 +35,7 @@ import { Surface } from "@/components/ui/surface";
 import { SCOPE_LABEL } from "@/lib/proposal";
 import type { AssistantReceiptV1, ReceiptStanding } from "@/lib/store";
 import type { AssistantProposalController } from "./use-assistant-proposals";
+import { screenNamesFor } from "./capability-context";
 
 export interface AssistantReceiptsProps {
   controller: AssistantProposalController;
@@ -68,6 +69,9 @@ function ReceiptDetail({
   controller: AssistantProposalController;
 }) {
   const { receipt, undo, reason } = standing;
+  // The affected screens, named as the sidebar names them -- never a raw capability
+  // id, and a capability with no reachable screen here is dropped.
+  const screenNames = screenNamesFor(receipt.capabilityIds);
   return (
     <Surface
       level="well"
@@ -98,8 +102,8 @@ function ReceiptDetail({
         ) : null}
       </ul>
 
-      {receipt.capabilityIds.length > 0 ? (
-        <p className="text-meta text-ink3">Affects: {receipt.capabilityIds.join(", ")}</p>
+      {screenNames.length > 0 ? (
+        <p className="text-meta text-ink3">Affects: {screenNames.join(", ")}</p>
       ) : null}
 
       {undo === "available" ? (

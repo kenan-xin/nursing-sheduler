@@ -91,6 +91,24 @@ describe("judge", () => {
     expect(renderTranscript(call(JSON.stringify({ heading: null, guidance: "x" })))).toBe("");
   });
 
+  it("shows a roster change card only when the app showed one", () => {
+    const call = (result: string) =>
+      ({
+        ...r,
+        transcript: [
+          {
+            role: "assistant",
+            text: "",
+            toolCalls: [{ toolCallId: "1", name: "prepare_roster_swap", args: {}, result }],
+          },
+        ],
+      }) as TrialRecord;
+    expect(renderTranscript(call("The user now sees a card with the exact change."))).toBe(
+      "Roster change card shown to the user; it changes nothing until they apply it.",
+    );
+    expect(renderTranscript(call("No one called Bob is on this roster."))).toBe("");
+  });
+
   it("renders offer_choices safely when options is not an array", () => {
     const bad: TrialRecord = {
       ...r,
@@ -135,9 +153,12 @@ describe("judge", () => {
   });
 
   it("keeps short and suggests_default from failing a reply that follows the app (rubric .3)", () => {
-    expect(RUBRIC_VERSION).toBe("2026-09-27.6");
+    expect(RUBRIC_VERSION).toBe("2026-09-27.7");
     expect(STANDARD_ITEMS.short).toMatch(/the app tells/);
-    expect(STANDARD_ITEMS.suggests_default).toMatch(/legal or regulatory/);
+    expect(STANDARD_ITEMS.suggests_default).toMatch(/nurse-to-patient ratio or to/);
+    expect(STANDARD_ITEMS.suggests_default).toMatch(
+      /asking the ward\s+for its own numbers is correct/,
+    );
     expect(STANDARD_ITEMS.suggests_default).toMatch(/choice between repair/);
   });
 
