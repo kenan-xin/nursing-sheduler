@@ -59,6 +59,13 @@ export function isSupportedExpression(expression: string): boolean {
   return SUPPORTED_EXPRESSIONS.includes(expression);
 }
 
+/** Whether any of a count's expression(s) is outside the supported set — core's
+ *  `SUPPORTED_SHIFT_COUNT_EXPRESSIONS` rejects it at Optimize time (wa46). */
+export function hasUnsupportedExpression(expression: string | readonly string[]): boolean {
+  const expressions = typeof expression === "string" ? [expression] : expression;
+  return expressions.some((value) => !isSupportedExpression(value));
+}
+
 /** Whether `expression` is the squared "close to target" form — the one requiring
  *  a non-positive weight (spec 05 FR-PR-626/AC-PR-12). */
 export function isSquaredExpression(expression: string): boolean {

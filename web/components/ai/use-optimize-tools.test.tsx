@@ -5,6 +5,7 @@ import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario
 import { useAuthorityStore, useHotStore } from "@/lib/store";
 import { INITIAL_OPTIMIZE_RUN_VIEW, type OptimizeRunView } from "@/lib/optimize/run-view";
 import { useRunRequestStore } from "@/lib/optimize/run-request";
+import { UNSUPPORTED_EXPRESSION_REASON } from "@/lib/optimize/optimize-readiness";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { summarizeOptimizeRun, useOptimizeTools } from "./use-optimize-tools";
 import { bindTurnForTest, type TestTurnHandle } from "./turn-authority.test-support";
@@ -116,6 +117,29 @@ describe("request_optimize_run", () => {
     fixture.scenario = readyScenario({ staff: [] });
     const answer = await tool("request_optimize_run").handler({}, {});
     expect(answer).toMatch(/Staff/);
+    expect(useAssistantStore.getState().activeRunRequest).toBeNull();
+  });
+
+  it("refuses with the reason when a shift count's expression is unsupported (wa46)", async () => {
+    const ready = readyScenario();
+    fixture.scenario = readyScenario({
+      cardsByKind: {
+        ...ready.cardsByKind,
+        counts: [
+          {
+            uid: "bad",
+            person: "ALL",
+            countDates: "ALL",
+            countShiftTypes: "ALL",
+            expression: "x >= 0",
+            target: 1,
+            weight: 1,
+          },
+        ],
+      },
+    });
+    const answer = await tool("request_optimize_run").handler({}, {});
+    expect(answer).toContain(UNSUPPORTED_EXPRESSION_REASON);
     expect(useAssistantStore.getState().activeRunRequest).toBeNull();
   });
 

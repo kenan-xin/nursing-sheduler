@@ -25,6 +25,7 @@ describe("ReadinessBanner", () => {
       staff: [],
       shifts: [],
       shiftGroups: [],
+      counts: [],
     });
     render(<ReadinessBanner issues={issues} />);
     const banner = screen.getByTestId("optimize-readiness");
