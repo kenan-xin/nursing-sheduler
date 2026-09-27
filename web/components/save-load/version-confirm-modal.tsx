@@ -7,7 +7,9 @@
 // the exact FR-SL-19 version text), so this component only renders the already
 // combined `title`/`description`. Cancel is a plain `onOpenChange(false)` — no
 // `onConfirm` runs, so the caller's staged import is simply discarded (no-op,
-// current state intact); Continue runs `onContinue` then closes.
+// current state intact); Continue runs `onContinue` and holds the dialog busy
+// ("Loading scenario…") until the load has committed, then closes -- so the
+// dialog closing means the import is durable (nursing-sheduler-iks).
 
 import { ConfirmDialog } from "@/components/shell/confirm-dialog";
 
@@ -20,7 +22,8 @@ export interface VersionConfirmModalProps {
   description: string;
   /** File/current version pair for the mono detail box (`loadConfirmCopy`). */
   detail?: string;
-  onContinue: () => void;
+  /** Settles once the load has committed (or been refused); the dialog stays busy until then. */
+  onContinue: () => Promise<void>;
 }
 
 export function VersionConfirmModal({
@@ -40,6 +43,7 @@ export function VersionConfirmModal({
       detail={detail}
       confirmLabel="Continue"
       cancelLabel="Cancel"
+      busyLabel="Loading scenario…"
       onConfirm={onContinue}
     />
   );
