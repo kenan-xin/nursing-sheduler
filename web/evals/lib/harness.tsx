@@ -46,6 +46,7 @@ import type { Ledger } from "./budget";
 import { recordingFetch } from "./budget";
 import type { EvalCase, Seed, UserPolicy } from "./case";
 import { renderTranscript } from "./judge";
+import { clearSavedRoster, seedSavedRoster } from "./saved-roster";
 import type {
   ChoiceRecord,
   ProposalRecord,
@@ -299,6 +300,9 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
     const loaded = await loadScenario(target);
     if (!loaded.ok) throw new Error(`seed did not load: ${JSON.stringify(loaded)}`);
     seed = pickScenario(useScenarioStore.getState());
+    // No roster or run carries over from the last trial.
+    await clearSavedRoster();
+    if (evalCase.savedRoster) await seedSavedRoster(seed, evalCase.savedRoster);
     useModeStore.setState({ mode: "advanced", adoption: "ready" });
     window.history.replaceState({}, "", evalCase.route);
     await hydrateAssistant();

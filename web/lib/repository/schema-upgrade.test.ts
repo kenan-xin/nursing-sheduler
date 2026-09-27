@@ -129,9 +129,12 @@ describe("Dexie 2 -> current upgrade from a really-shipped version 2 database", 
         key: "legacy-key",
         value: "legacy-value",
       });
-      expect(await db.table("scenarioEnvelopes").get(LEGACY_ENVELOPE_ROW.scenarioId)).toEqual(
-        LEGACY_ENVELOPE_ROW,
-      );
+      // The stored row is untouched; only the read defaults the pre-d582
+      // `temporaryCover` slice (jyz2, `NurseSchedulerDb`'s reading hook).
+      expect(await db.table("scenarioEnvelopes").get(LEGACY_ENVELOPE_ROW.scenarioId)).toEqual({
+        ...LEGACY_ENVELOPE_ROW,
+        scenario: { ...LEGACY_ENVELOPE_ROW.scenario, temporaryCover: [] },
+      });
 
       // The v2 indexes still resolve, so the reaper's `expiresAt` scan and the
       // compound identity lookup are not silently gone.

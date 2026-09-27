@@ -564,7 +564,7 @@ export function CardListItem({
           explicitly square corners (DESIGN.md §5 — don't round data structure). */}
       <div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-px rounded-none border border-line2 bg-line2">
         {fields.map((f) => (
-          <div key={f.label} className="bg-surface px-[15px] py-3">
+          <div key={f.label} className="min-w-0 bg-surface px-[15px] py-3">
             <div className="mb-[7px] text-label font-semibold uppercase tracking-[0.03em] text-ink3">
               {f.label}
             </div>

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { deriveOptimizeReadiness, type OptimizeReadinessSource } from "./optimize-readiness";
+import {
+  deriveOptimizeReadiness,
+  UNSUPPORTED_EXPRESSION_REASON,
+  type OptimizeReadinessSource,
+} from "./optimize-readiness";
 
 const ready: OptimizeReadinessSource = {
   rangeStart: "2026-07-01",
@@ -7,6 +11,7 @@ const ready: OptimizeReadinessSource = {
   staff: [{ id: "p1" }],
   shifts: [{ id: "day" }],
   shiftGroups: [],
+  counts: [{ expression: "x >= T" }, { expression: ["x >= T", "x <= T"] }],
 };
 
 describe("deriveOptimizeReadiness", () => {
@@ -39,6 +44,7 @@ describe("deriveOptimizeReadiness", () => {
       staff: [],
       shifts: [],
       shiftGroups: [],
+      counts: [],
     });
     expect(result.ready).toBe(false);
     expect(result.issues.map((i) => i.kind)).toEqual(["people", "shift-types"]);
@@ -51,6 +57,22 @@ describe("deriveOptimizeReadiness", () => {
     expect(result.issues[1]).toMatchObject({ linkLabel: "Shifts", href: "/shift-types" });
   });
 
+  it("blocks an enabled shift count whose expression core does not support (wa46)", () => {
+    for (const expression of ["x >= 0", ["x >= T", "x != T"]]) {
+      const result = deriveOptimizeReadiness({ ...ready, counts: [{ expression }] });
+      expect(result.ready).toBe(false);
+      expect(result.issues).toHaveLength(1);
+      const [issue] = result.issues;
+      expect(issue).toMatchObject({ kind: "shift-counts", href: "/shift-counts" });
+      expect(`${issue.before}${issue.linkLabel}${issue.after}`).toBe(UNSUPPORTED_EXPRESSION_REASON);
+    }
+  });
+
+  it("ignores an unsupported expression on a disabled count (it is never sent)", () => {
+    const counts = [{ expression: "x >= 0", disabled: true }];
+    expect(deriveOptimizeReadiness({ ...ready, counts }).ready).toBe(true);
+  });
+
   it("returns issues in priority order dates → people → shift types", () => {
     const result = deriveOptimizeReadiness({
       rangeStart: "",
@@ -58,6 +80,7 @@ describe("deriveOptimizeReadiness", () => {
       staff: [],
       shifts: [],
       shiftGroups: [],
+      counts: [],
     });
     expect(result.issues.map((i) => i.kind)).toEqual(["dates", "people", "shift-types"]);
   });

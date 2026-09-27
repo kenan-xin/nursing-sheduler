@@ -25,6 +25,10 @@ import {
   type ScenarioValidationIssue,
   type VersionConfirmStatus,
 } from "@/lib/scenario";
+import {
+  hasBlockingUnsupportedExpression,
+  UNSUPPORTED_EXPRESSION_REASON,
+} from "@/lib/optimize/optimize-readiness";
 import { isScenarioSliceEmpty, loadScenario, useScenarioStore } from "@/lib/store";
 import { loadConfirmCopy } from "./load-controls-core";
 
@@ -108,7 +112,12 @@ function mergeImportWarnings(
 
   const merged: string[] = [];
   const seen = new Set<string>();
-  for (const warning of [...baseWarnings, ...guardWarnings]) {
+  // wa46: an unsupported count expression still loads; say now that Optimize will
+  // stay blocked until it is edited, in the same words the Optimize screen uses.
+  const expressionWarnings = hasBlockingUnsupportedExpression(target.cardsByKind.counts)
+    ? [UNSUPPORTED_EXPRESSION_REASON]
+    : [];
+  for (const warning of [...baseWarnings, ...guardWarnings, ...expressionWarnings]) {
     if (seen.has(warning)) continue;
     seen.add(warning);
     merged.push(warning);
