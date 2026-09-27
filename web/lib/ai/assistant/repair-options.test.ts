@@ -379,8 +379,13 @@ describe("rankRepairOptions", () => {
     const without = rank(base).find((o) => o.repairId === "run_one_short");
     expect(without?.title).toContain("with 2 instead of 3");
     expect(without?.operations).toEqual([onDate("night", "2026-11-05", 2)]);
-    // One cover puts the ward need at 2, so one short is 1 ward nurse plus the cover.
-    const covered = { ...base, temporaryCover: [cover("Haseena (Ward 3)", "2026-11-05", "N")] };
+    // A cover puts the ward need at 2, but Ben is on leave too: the night is still one short
+    // of its ward nurses, and the option reads that need rather than the authored 3.
+    const covered = {
+      ...base,
+      reqData: [leave("cara", "05"), leave("ben", "05")],
+      temporaryCover: [cover("Haseena (Ward 3)", "2026-11-05", "N")],
+    };
     expect(cardNeedOn(covered, covered.cardsByKind.requirements[0], "2026-11-05").required).toBe(2);
     const short = rank(covered).find((o) => o.repairId === "run_one_short");
     // The title counts ward nurses; the operation writes the rule's own number.
@@ -393,10 +398,11 @@ describe("rankRepairOptions", () => {
   });
 
   it("run one short on a covered single-date rule, from the ward need", () => {
-    // Night on the 5th needs 3 on the ward, Cara is on leave (2 free): one short.
+    // Night on the 5th needs 3 on the ward; Cara and Ben are on leave (1 free), so the night is
+    // still one short once the cover has lowered the ward need to 2.
     const base = ward({
       staff: people("ana", "ben", "cara"),
-      reqData: [leave("cara", "05")],
+      reqData: [leave("cara", "05"), leave("ben", "05")],
       cardsByKind: cards({
         requirements: [requirement("night", "N", 3, { date: ["2026-11-05"] })],
       }),
