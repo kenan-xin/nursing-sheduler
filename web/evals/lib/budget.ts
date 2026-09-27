@@ -49,6 +49,18 @@ export const FALLBACK_TRIAL_USD = 0.3;
 
 type Planned = Pick<EvalCase, "id" | "tags" | "trials">;
 
+/** EVAL_CASES as trimmed ids, or null when unset. A typo fails loudly, before any spend. */
+export function parseCaseIds(raw: string | undefined, all: Planned[]): string[] | null {
+  if (!raw) return null;
+  const ids = raw
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const unknown = ids.filter((id) => !all.some((c) => c.id === id));
+  if (unknown.length > 0) throw new Error(`EVAL_CASES names no case: ${unknown.join(", ")}`);
+  return ids;
+}
+
 export const selectCases = <C extends Planned>(
   cases: C[],
   tags: string[] | null,

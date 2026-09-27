@@ -110,13 +110,17 @@ const PREVIEW_TOOLS = new Set([
   "prepare_roster_swap",
   "prepare_borrowed_cover",
 ]);
-/** The follow-up the app sends after Apply (use-assistant-follow-ups.ts). */
-const APPLIED_FOLLOW_UP = /^I applied it\b/;
+/**
+ * The follow-up the app sends after Apply (use-assistant-follow-ups.ts). Follow-ups join, so
+ * a finished-run line can come first.
+ */
+const APPLIED_FOLLOW_UP = /(?:^|\.\s+)I applied it\b/;
 /** A yes/no offer or a pick-one opener, at the start of the question or after a clause break. */
 const PICK_ONE =
-  /(?:^|[,;:—–]\s*|\s-\s)(?:(?:so|ok(?:ay)?|great|sure|also|and)[,!]?\s+)?(?:want\b|would you like|do you want|shall i|should i|can i|may i|ready to|would it help|is that ok|does that (?:work|sound)|sounds? good|which\b|did you mean)/i;
+  /(?:^|[,;:—–]\s*|\s-\s)(?:(?:so|ok(?:ay)?|great|sure|also|and)[,!]?\s+)?(?:want\b|would you like|do you want|shall i|should i|can i|may i|ready to|would it help|is that ok|does that (?:work|sound)|sounds? good|which (?:one|of)\b|did you mean)/i;
+/** Present-perfect and present-state claims only: a plain past tense can be true history. */
 const APPLIED_CLAIM =
-  /\bI(?:'ve| have)?\s+(?:now\s+)?(?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created|scheduled)\b|\b(?:has|have) been (?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created)\b|\bis now (?:set|in place|active|applied)\b|\b(?:it's|that's|it is|that is) (?:now )?(?:in place|active|live)\b/i;
+  /\bI(?:'ve| have)\s+(?:now\s+|just\s+)?(?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created|scheduled)\b|\b(?:has|have) been (?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created)\b|\bis now (?:set|in place|active|applied)\b|\b(?:it's|that's|it is|that is) (?:now )?(?:in place|active|live)\b/i;
 const JARGON =
   /\bsolver\b|\bsuccession rules?\b|\binfeasib\w*|\bconstraints?\b|\bpenalt(?:y|ies)\b|\bchecker\b|\bweights?\s+(?:of\s+)?-?\d/i;
 
@@ -130,7 +134,9 @@ const JARGON =
  * ponytail: sentence regexes; a pick-one question worded outside these openers, or a claim
  * in other words, still reaches only the judge.
  */
-function wordingFailures(r: TrialRecord): string[] {
+function wordingFailures(c: EvalCase, r: TrialRecord): string[] {
+  // The harness discards an open Preview before sending the next scripted message.
+  const discards = !("simulated" in c.user) && c.user.onPreview === "reject";
   const failures: string[] = [];
   const turns: TrialRecord["transcript"][] = [];
   for (const m of r.transcript) {
@@ -141,7 +147,7 @@ function wordingFailures(r: TrialRecord): string[] {
   for (const turn of turns) {
     const card = turn.some((m) => m.toolCalls.some((c) => CARD_TOOLS.has(c.name)));
     for (const m of turn) {
-      if (m.role === "user" && APPLIED_FOLLOW_UP.test(m.text)) waiting = false;
+      if (m.role === "user" && (discards || APPLIED_FOLLOW_UP.test(m.text))) waiting = false;
       if (m.role !== "assistant") continue;
       // The text streams before the entry's calls, so it is read against the state before them.
       const questions = m.text
@@ -272,7 +278,7 @@ export function gradeDeterministic(c: EvalCase, r: TrialRecord): GateResult[] {
     result("reply", reply),
     result("grounding", grounding),
     result("guidance", guidance),
-    result("wording", wordingFailures(r)),
+    result("wording", wordingFailures(c, r)),
   ];
   if (r.error) gates.push({ gate: "error", pass: false, detail: r.error });
   return gates;

@@ -353,6 +353,8 @@ describe("gradeDeterministic", () => {
       expect(wording(turn("Want me to take you there?", [call("offer_choices")]))?.pass).toBe(true);
       expect(wording(turn("What should the new shift be called?"))?.pass).toBe(true);
       expect(wording(turn("Does anyone have leave or a fixed day off?"))?.pass).toBe(true);
+      expect(wording(turn("Which day should the change start?"))?.pass).toBe(true);
+      expect(wording(turn("Which one should get Friday off?"))?.pass).toBe(false);
       expect(wording(turn("It's on the Shifts screen."))?.pass).toBe(true);
     });
 
@@ -374,6 +376,46 @@ describe("gradeDeterministic", () => {
         ],
       });
       expect(wording(inPlace)?.pass).toBe(false);
+      const earlier = record({
+        transcript: [
+          ...claimed.transcript.slice(0, 2),
+          { role: "assistant", text: "I changed the roster period earlier.", toolCalls: [] },
+        ],
+      });
+      expect(wording(earlier)?.pass).toBe(true);
+    });
+
+    it("ends the wait on an Apply follow-up joined after a finished run", () => {
+      const preview = call("prepare_scenario_change", "A preview of this change is now shown");
+      const r = record({
+        transcript: [
+          { role: "user", text: "Add a night shift.", toolCalls: [] },
+          { role: "assistant", text: "", toolCalls: [preview] },
+          {
+            role: "user",
+            text: "The optimiser run finished: a roster was made. I applied it: N.",
+            toolCalls: [],
+          },
+          { role: "assistant", text: "The night shift has been added.", toolCalls: [] },
+        ],
+        appliedByHarness: 1,
+      });
+      expect(wording(r)?.pass).toBe(true);
+    });
+
+    it("ends the wait when the harness discarded the Preview before the next message", () => {
+      const preview = call("prepare_scenario_change", "A preview of this change is now shown");
+      const r = record({
+        transcript: [
+          { role: "user", text: "Add a night shift.", toolCalls: [] },
+          { role: "assistant", text: "", toolCalls: [preview] },
+          { role: "user", text: "Actually add the early shift instead.", toolCalls: [] },
+          { role: "assistant", text: "I've removed the night shift idea.", toolCalls: [] },
+        ],
+      });
+      const c = { ...evalCase({}), user: { turns: [], onPreview: "reject" as const } };
+      expect(gate(gradeDeterministic(c, r), "wording")?.pass).toBe(true);
+      expect(wording(r)?.pass).toBe(false);
       const prepared = record({
         transcript: [
           { role: "user", text: "Add a night shift.", toolCalls: [] },

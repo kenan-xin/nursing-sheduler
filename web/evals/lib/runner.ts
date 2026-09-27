@@ -3,7 +3,15 @@
 import { describe, expect, test } from "vitest";
 import baselineJson from "../baseline.json";
 import { ALL_CASES } from "../cases";
-import { cutByBudget, Ledger, plannedUsd, plus, recordingFetch, selectCases } from "./budget";
+import {
+  cutByBudget,
+  Ledger,
+  parseCaseIds,
+  plannedUsd,
+  plus,
+  recordingFetch,
+  selectCases,
+} from "./budget";
 import type { EvalCase } from "./case";
 import { gradeDeterministic } from "./graders";
 import { runTrial, type Seams } from "./harness";
@@ -33,7 +41,7 @@ const env = () => ({
   user: process.env.EVAL_USER_MODEL ?? "anthropic/claude-haiku-4.5",
   trials: positive("EVAL_TRIALS", 3),
   tags: process.env.EVAL_TAGS ? process.env.EVAL_TAGS.split(",") : null,
-  ids: process.env.EVAL_CASES ? process.env.EVAL_CASES.split(",") : null,
+  ids: parseCaseIds(process.env.EVAL_CASES, ALL_CASES),
   maxUsd: positive("EVAL_MAX_USD", DEFAULT_MAX_USD),
 });
 
