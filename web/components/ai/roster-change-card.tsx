@@ -245,8 +245,14 @@ function RosterChangeBody({
       ) : (
         <>
           {/* Scrolls inside the card, so a long change never pushes the rows or the
-              composer off the panel. */}
-          <div className="flex max-h-60 min-h-0 flex-col gap-3 overflow-y-auto px-1">
+              composer off the panel. Text and a table only, so the scroller itself
+              takes focus for keyboard scrolling. */}
+          <div
+            role="region"
+            aria-label="Change details"
+            tabIndex={0}
+            className="flex max-h-60 min-h-0 flex-col gap-3 overflow-y-auto px-1 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand"
+          >
             {view.summary ? (
               <p className="text-meta text-ink2" data-testid="roster-change-summary">
                 <span className="font-semibold text-ink3">Assistant&apos;s reasoning: </span>

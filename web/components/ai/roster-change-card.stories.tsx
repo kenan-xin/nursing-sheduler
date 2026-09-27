@@ -49,8 +49,6 @@ const meta = {
   component: RosterChangeCard,
   parameters: {
     nextjs: { appDirectory: true, navigation: { pathname: "/roster" } },
-    // a11y violation tracked in nursing-sheduler-w0e.33; restore "error" when fixed
-    a11y: { test: "todo" },
   },
   decorators: [
     (Story) => (

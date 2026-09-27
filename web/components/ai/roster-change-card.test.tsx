@@ -98,6 +98,14 @@ describe("RosterChangeCard", () => {
     expect(screen.getByText("Step 1 · Swap or cover within the ward")).toBeInTheDocument();
   });
 
+  it("makes the scrolling body a named, keyboard-focusable region", () => {
+    assistantActions.showRosterChange(CHANGE, TURN);
+    renderCard();
+    const body = screen.getByRole("region", { name: "Change details" });
+    expect(body).toContainElement(screen.getByRole("table"));
+    expect(body).toHaveAttribute("tabindex", "0");
+  });
+
   it("applies an unlinked change through the same path and goes away", async () => {
     applyLinked.mockResolvedValue({ ok: true });
     assistantActions.showRosterChange(CHANGE, TURN);
