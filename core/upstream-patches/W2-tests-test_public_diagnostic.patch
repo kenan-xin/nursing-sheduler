@@ -1,0 +1,368 @@
+# W2 patch for core/tests/test_public_diagnostic.py against genie 1bf4b85.
+# hunk: api_path_mode and idempotent cleanup tests (P14)
+
+diff --git a/core/tests/test_public_diagnostic.py b/core/tests/test_public_diagnostic.py
+index b45cadd..713c2b8 100644
+--- a/core/tests/test_public_diagnostic.py
++++ b/core/tests/test_public_diagnostic.py
+@@ -23,6 +23,7 @@ import json
+ import logging
+ import threading
+ import time
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ from pathlib import Path
+ from unittest.mock import Mock
+ 
+@@ -1114,6 +1115,352 @@ def test_cleanup_run_and_cli_paths_report_errors(tmp_path, monkeypatch, capsys,
+     print_report.assert_called_once_with(report, None)
+ 
+ 
++def test_path_builder_prefixes_every_segment_without_ambiguity(tmp_path):
++    backend = _diagnostic(tmp_path)
++    bff = _diagnostic(tmp_path, api_path_mode="bff")
++
++    # Backend mode is unprefixed; BFF mode routes the identical logical paths under
++    # the single normalized `/api` prefix. Stray leading/trailing slashes on a
++    # segment never yield a double slash or drop the prefix.
++    for diagnostic, prefix in ((backend, ""), (bff, "/api")):
++        assert diagnostic._path("info") == f"{prefix}/info"
++        assert diagnostic._path("optimize") == f"{prefix}/optimize"
++        assert diagnostic._path("optimize", "job-1") == f"{prefix}/optimize/job-1"
++        assert diagnostic._path("optimize", "job-1", "events") == f"{prefix}/optimize/job-1/events"
++        assert diagnostic._path("optimize", "job-1", "cancel") == f"{prefix}/optimize/job-1/cancel"
++        assert diagnostic._path("optimize", "job-1", "finish-now") == f"{prefix}/optimize/job-1/finish-now"
++        assert diagnostic._path("/optimize/", "/job-1/") == f"{prefix}/optimize/job-1"
++
++
++def test_diagnostic_config_rejects_unknown_api_path_mode(tmp_path):
++    scenario = tmp_path / "scenario.yaml"
++    scenario.write_text("apiVersion: alpha\n", encoding="utf-8")
++
++    with pytest.raises(ValueError, match="DIAGNOSTIC_API_PATH_MODE"):
++        _config(scenario, tmp_path, api_path_mode="frontend")
++
++
++def test_diagnostic_config_reads_api_path_mode_from_env(tmp_path, monkeypatch):
++    scenario = tmp_path / "scenario.yaml"
++    scenario.write_text("apiVersion: alpha\n", encoding="utf-8")
++
++    assert DiagnosticConfig.from_env(scenario_path=scenario, report_dir=tmp_path).api_path_mode == "backend"
++
++    monkeypatch.setenv("DIAGNOSTIC_API_PATH_MODE", "  BFF  ")
++    config = DiagnosticConfig.from_env(scenario_path=scenario, report_dir=tmp_path)
++    assert config.api_path_mode == "bff"
++    assert config.api_prefix == "/api"
++
++    # An explicit argument (CLI) still overrides the environment.
++    override = DiagnosticConfig.from_env(scenario_path=scenario, report_dir=tmp_path, api_path_mode="backend")
++    assert override.api_path_mode == "backend"
++    assert override.api_prefix == ""
++
++
++@pytest.mark.parametrize(("mode", "prefix"), [("backend", ""), ("bff", "/api")])
++def test_every_endpoint_request_uses_the_configured_prefix(tmp_path, mode, prefix):
++    recorded: list[tuple[str, str]] = []
++    identity = QueueApi._identity(1)
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        recorded.append((request.method, request.url.path))
++        path = request.url.path
++        if path.endswith("/info"):
++            return httpx.Response(200, headers={"Cache-Control": "no-store"}, json={"status": "ready", **identity})
++        if request.method == "POST" and path.endswith("/optimize"):
++            return httpx.Response(202, json={"id": "job-1", "state": "queued"})
++        if request.method == "GET" and path.endswith("/events"):
++            return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, text="")
++        if request.method == "DELETE":
++            return httpx.Response(204)
++        if request.method == "POST":
++            return httpx.Response(202, json={"id": "job-1", "state": "cancelled"})
++        return httpx.Response(200, json={"id": "job-1", "state": "completed"})
++
++    diagnostic = _diagnostic(tmp_path, handler, api_path_mode=mode, parallel_requests=1)
++
++    diagnostic._sample_info()
++    job = diagnostic._create_job(1)
++    assert job is not None
++    diagnostic._get_job("job-1")
++    diagnostic._replay_job_events("job-1", stop_on_score=False, read_seconds=0.1)
++    diagnostic._post_control("job-1", "cancel")
++    diagnostic._post_control("job-1", "finish-now")
++    diagnostic._cleanup_one_attempt(job, time.monotonic() + 1)
++
++    assert recorded == [
++        ("GET", f"{prefix}/info"),
++        ("POST", f"{prefix}/optimize"),
++        ("GET", f"{prefix}/optimize/job-1"),
++        ("GET", f"{prefix}/optimize/job-1/events"),
++        ("POST", f"{prefix}/optimize/job-1/cancel"),
++        ("POST", f"{prefix}/optimize/job-1/finish-now"),
++        ("GET", f"{prefix}/optimize/job-1"),
++        ("DELETE", f"{prefix}/optimize/job-1"),
++    ]
++
++
++class _BffShapedHandler(BaseHTTPRequestHandler):
++    """Serve ONLY the same-origin `/api/*` BFF surface over real sockets.
++
++    Any backend-shaped path (unprefixed `/info`, `/optimize/**`) is rejected with a
++    404 before it can reach the state machine, exactly like the deployed Next origin
++    that has no such routes. Prefixed requests are stripped to the private contract
++    and delegated to a shared `QueueApi`, so the full identity/queue/cleanup workflow
++    runs against a real HTTP server rather than an in-process transport.
++    """
++
++    protocol_version = "HTTP/1.1"
++
++    def log_message(self, *args: object) -> None:  # noqa: D401 - silence test server noise
++        """Suppress the default stderr request logging."""
++
++    def _dispatch(self) -> None:
++        raw_path = self.path.split("?", 1)[0]
++        self.server.observed_paths.append((self.command, raw_path))  # type: ignore[attr-defined]
++        if not (self.path == "/api" or self.path.startswith("/api/")):
++            self.send_response(404)
++            self.send_header("Content-Length", "0")
++            self.send_header("Connection", "close")
++            self.end_headers()
++            return
++        backend_path = self.path[len("/api") :] or "/"
++        length = int(self.headers.get("Content-Length") or 0)
++        body = self.rfile.read(length) if length else b""
++        request = httpx.Request(
++            self.command,
++            "http://bff" + backend_path,
++            headers={"content-type": self.headers.get("Content-Type", "")},
++            content=body,
++        )
++        with self.server.api_lock:  # type: ignore[attr-defined]
++            response = self.server.api(request)  # type: ignore[attr-defined]
++        content = response.content
++        self.send_response(response.status_code)
++        content_type = response.headers.get("content-type")
++        if content_type:
++            self.send_header("Content-Type", content_type)
++        cache_control = response.headers.get("cache-control")
++        if cache_control:
++            self.send_header("Cache-Control", cache_control)
++        self.send_header("Content-Length", str(len(content)))
++        self.send_header("Connection", "close")
++        self.end_headers()
++        if content:
++            self.wfile.write(content)
++
++    do_GET = _dispatch
++    do_POST = _dispatch
++    do_DELETE = _dispatch
++
++
++def test_bff_shaped_public_origin_completes_full_workflow_and_cleanup(tmp_path):
++    scenario = tmp_path / "scenario.yaml"
++    scenario.write_text("apiVersion: alpha\n", encoding="utf-8")
++
++    server = ThreadingHTTPServer(("127.0.0.1", 0), _BffShapedHandler)
++    server.api = QueueApi(concurrency=1)  # type: ignore[attr-defined]
++    server.api_lock = threading.Lock()  # type: ignore[attr-defined]
++    server.observed_paths = []  # type: ignore[attr-defined]
++    thread = threading.Thread(target=server.serve_forever, daemon=True)
++    thread.start()
++    port = server.server_address[1]
++    target = f"http://127.0.0.1:{port}"
++
++    try:
++        # Backend-shaped paths must fail against this public surface; only `/api/*`
++        # answers. These probes do not mutate the queue state (non-`/api` requests
++        # are rejected before delegation).
++        with httpx.Client(base_url=target, timeout=5.0) as probe:
++            assert probe.get("/info").status_code == 404
++            assert probe.get("/optimize").status_code == 404
++            assert probe.get("/api/info").status_code == 200
++        server.observed_paths.clear()  # type: ignore[attr-defined]
++
++        report = PublicDiagnostic(
++            _config(
++                scenario,
++                tmp_path,
++                target_url=target,
++                api_path_mode="bff",
++                info_samples=1,
++                expected_concurrency=1,
++                request_timeout_seconds=5.0,
++                startup_timeout_seconds=5.0,
++                workflow_timeout_seconds=30.0,
++                incumbent_timeout_seconds=3.0,
++                cleanup_timeout_seconds=5.0,
++                queue_stable_seconds=0.05,
++                poll_seconds=0.02,
++                submit_interval_seconds=0.01,
++            ),
++        ).run()
++    finally:
++        server.shutdown()
++        server.server_close()
++        thread.join(timeout=5)
++
++    assert report["summary"]["outcome"] == "pass"
++    assert report["summary"]["maxRunning"] == 1
++    assert report["summary"]["queueTransition"] == "pass"
++    assert report["summary"]["cleanup"] == "pass"
++    assert report["details"]["apiPathMode"] == "bff"
++    assert report["details"]["submittedJobs"] == 6
++    assert report["details"]["batchSizes"] == [1, 1, 1, 1, 1]
++    assert server.api.jobs == {}  # type: ignore[attr-defined]
++    assert all(job["deleted"] for job in report["details"]["jobs"])
++
++    observed = server.observed_paths  # type: ignore[attr-defined]
++    assert observed, "the diagnostic issued no requests"
++    # Every request the diagnostic made went through the `/api` prefix.
++    assert all(path == "/api" or path.startswith("/api/") for _method, path in observed)
++    observed_set = {(method, path) for method, path in observed}
++    assert ("GET", "/api/info") in observed_set
++    assert ("POST", "/api/optimize") in observed_set
++    assert any(m == "GET" and p.startswith("/api/optimize/") and p.endswith("/events") for m, p in observed_set)
++    assert any(m == "POST" and p.endswith("/cancel") for m, p in observed_set)
++    assert any(m == "POST" and p.endswith("/finish-now") for m, p in observed_set)
++    assert any(m == "DELETE" and p.startswith("/api/optimize/") for m, p in observed_set)
++
++
++@pytest.mark.parametrize(("mode", "prefix"), [("backend", ""), ("bff", "/api")])
++def test_cleanup_confirmed_absence_marks_deleted_and_passes(tmp_path, mode, prefix):
++    # Exact review reproducer, generalized to both path modes: a cleanup GET that
++    # returns 404 (initially absent job, retention/operator removal, or a committed
++    # DELETE whose 204 was lost) is authoritative absence. It must record successful
++    # deletion instead of retrying until the deadline and reporting a false partial.
++    recorded: list[tuple[str, str]] = []
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        recorded.append((request.method, request.url.path))
++        return httpx.Response(404, json={"error": {"code": "job_not_found"}})
++
++    diagnostic = _diagnostic(tmp_path, handler, api_path_mode=mode, cleanup_timeout_seconds=0.01, poll_seconds=0.001)
++    diagnostic.jobs = [DiagnosticJob(id="gone", input_name="scenario.yaml", transitions=["completed"])]
++    # Disable the initial cancellation pass to isolate the deletion loop, matching
++    # the review's exact reproduction.
++    diagnostic._request_cleanup_cancellations = Mock()
++
++    diagnostic._cleanup_jobs()
++
++    assert diagnostic.jobs[0].deleted is True
++    assert diagnostic.cleanup == "pass"
++    assert "cleanup_incomplete" not in {finding.code for finding in diagnostic.findings}
++    # The cleanup GET honored the configured path mode rather than a hardcoded path.
++    assert ("GET", f"{prefix}/optimize/gone") in recorded
++
++
++@pytest.mark.parametrize(("mode", "prefix"), [("backend", ""), ("bff", "/api")])
++def test_cleanup_recovers_when_delete_acknowledgement_is_lost(tmp_path, mode, prefix):
++    # DELETE is not an atomic request/ack exchange: the backend can commit the
++    # deletion and the connection can fail before the 204 arrives. The next GET then
++    # proves absence (404) and the bounded loop records success.
++    gets = {"count": 0}
++    deletes: list[str] = []
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        if request.method == "DELETE":
++            deletes.append(request.url.path)
++            raise httpx.ReadTimeout("delete acknowledgement lost", request=request)
++        if request.method == "GET":
++            gets["count"] += 1
++            if gets["count"] == 1:
++                return httpx.Response(200, json={"id": "job", "state": "completed"})
++            return httpx.Response(404)
++        return httpx.Response(202, json={"state": "completed"})
++
++    diagnostic = _diagnostic(
++        tmp_path,
++        handler,
++        api_path_mode=mode,
++        cleanup_timeout_seconds=0.5,
++        poll_seconds=0.001,
++        parallel_requests=1,
++    )
++    diagnostic.jobs = [DiagnosticJob(id="job", input_name="scenario.yaml", transitions=["completed"])]
++    diagnostic._request_cleanup_cancellations = Mock()
++
++    diagnostic._cleanup_jobs()
++
++    assert diagnostic.jobs[0].deleted is True
++    assert diagnostic.cleanup == "pass"
++    assert "cleanup_incomplete" not in {finding.code for finding in diagnostic.findings}
++    # It genuinely attempted the DELETE (under the mode prefix) and then re-confirmed
++    # absence with a follow-up GET.
++    assert deletes == [f"{prefix}/optimize/job"]
++    assert gets["count"] >= 2
++    # Even though the follow-up GET 404 makes cleanup pass, the transport failure that
++    # lost the DELETE acknowledgement must be RETAINED in the diagnostic evidence — a
++    # silently-swallowed reset would hide a real cleanup hazard. The DELETE throw is
++    # caught by the outer cleanup handler, so production records it verbatim as
++    # "cleanup {job_id}: {httpx message}" (the generic cleanup label + the transport
++    # message; this path carries no separate method/path/exception-category prefix),
++    # deduplicated once, and surfaces unchanged in the report's details.requestErrors.
++    assert diagnostic.request_errors == ["cleanup job: delete acknowledgement lost"]
++    assert diagnostic.build_report()["details"]["requestErrors"] == [
++        "cleanup job: delete acknowledgement lost",
++    ]
++
++
++def test_cleanup_delete_404_race_counts_as_deleted(tmp_path):
++    # A job can vanish between the cleanup GET (200 terminal) and the DELETE
++    # (retention/operator or a racing delete). A 404 from our own DELETE is the same
++    # confirmed absence, so it is success — not a recorded error, not residue.
++    def handler(request: httpx.Request) -> httpx.Response:
++        if request.method == "GET":
++            return httpx.Response(200, json={"id": "job", "state": "completed"})
++        if request.method == "DELETE":
++            return httpx.Response(404)
++        return httpx.Response(202)
++
++    diagnostic = _diagnostic(tmp_path, handler, cleanup_timeout_seconds=0.5, poll_seconds=0.001, parallel_requests=1)
++    diagnostic.jobs = [DiagnosticJob(id="job", input_name="scenario.yaml", transitions=["completed"])]
++    diagnostic._request_cleanup_cancellations = Mock()
++
++    diagnostic._cleanup_jobs()
++
++    assert diagnostic.jobs[0].deleted is True
++    assert diagnostic.cleanup == "pass"
++    assert not any("cleanup delete" in error for error in diagnostic.request_errors)
++
++
++def test_cleanup_retains_partial_for_ambiguous_errors_and_present_residue(tmp_path):
++    # Idempotent-absence handling must NOT weaken the bounded retry/partial contract:
++    # an ambiguous (non-404) failure is not proof of absence, so the job stays
++    # residue and cleanup remains partial with the truthful cleanup_incomplete finding.
++    ambiguous = _diagnostic(
++        tmp_path,
++        lambda _request: httpx.Response(500),
++        cleanup_timeout_seconds=0.02,
++        poll_seconds=0.001,
++    )
++    ambiguous.jobs = [DiagnosticJob(id="stuck", input_name="scenario.yaml", transitions=["completed"])]
++    ambiguous._request_cleanup_cancellations = Mock()
++
++    ambiguous._cleanup_jobs()
++
++    assert ambiguous.jobs[0].deleted is False
++    assert ambiguous.cleanup == "partial"
++    assert ambiguous.findings[-1].code == "cleanup_incomplete"
++
++    # A job that stays present (terminal) while DELETE keeps failing non-404 is real
++    # residue: still bounded, still partial.
++    def present(request: httpx.Request) -> httpx.Response:
++        if request.method == "GET":
++            return httpx.Response(200, json={"state": "completed"})
++        return httpx.Response(500)
++
++    residue = _diagnostic(tmp_path, present, cleanup_timeout_seconds=0.02, poll_seconds=0.001)
++    residue.jobs = [DiagnosticJob(id="present", input_name="scenario.yaml", transitions=["completed"])]
++    residue._request_cleanup_cancellations = Mock()
++
++    residue._cleanup_jobs()
++
++    assert residue.jobs[0].deleted is False
++    assert residue.cleanup == "partial"
++    assert residue.findings[-1].code == "cleanup_incomplete"
++
++
+ def test_diagnostic_sends_the_configured_shared_token(tmp_path):
+     seen_headers: list[str | None] = []
+ 

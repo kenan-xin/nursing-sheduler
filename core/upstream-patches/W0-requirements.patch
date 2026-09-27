@@ -1,0 +1,97 @@
+# W0 patch for core/requirements.txt and core/requirements-optional.txt against genie 1bf4b85.
+# hunk: ruamel.yaml and pydantic pinned, because canonical YAML bytes depend on them (P5)
+# hunk: pulp moves to the optional file (X4)
+# hunk: packages only the AI package needs are left out (X5)
+# hunk: pyyaml for tests/catalogue_oracle.py, exact pytest and ruff pins, fakeredis<3 (v2 tooling)
+
+diff --git a/core/requirements-optional.txt b/core/requirements-optional.txt
+index edfeae4..818d923 100644
+--- a/core/requirements-optional.txt
++++ b/core/requirements-optional.txt
+@@ -1,18 +1,32 @@
+-# Optional dependencies for development, testing, and the experimental solver
+-# backends. Install with `uv pip install -r requirements-optional.txt`, which
+-# also pulls in requirements.txt.
++# Optional dependencies for development, testing, and the extra solver backends.
++# Install with `pip install -r core/requirements-optional.txt`, which also pulls
++# in requirements.txt. The production images never install this file.
++# The PuLP/GLPK tests also need the `glpsol` binary: `glpk-utils` on
++# Debian/Ubuntu, `glpk` on Arch/CachyOS.
+ -r requirements.txt
+-# For more solvers support, on top of the OR-Tools and PuLP backends that the
+-# minimal set already provides.
+-# Keep this aligned with the HiGHS ABI bundled by OR-Tools 9.15.
++# Solver backends beyond OR-Tools CP-SAT. The product uses CP-SAT only; these
++# keep the upstream multi-solver library and its tests runnable (spec X4).
++# Keep highspy aligned with the HiGHS ABI bundled by OR-Tools 9.15.
++pulp==3.3.2
+ highspy==1.12.0
+ pyscipopt==6.2.1
+-# For the sandbox attachment tools, which run inside the E2B image and are
+-# exercised by the core tests. The server itself never imports them.
+-pypdf==6.19.0 # For PDF text and embedded-image inspection
+-pypdfium2==5.13.0 # For bounded PDF page rendering in the sandbox
+-# For CI
+-pytest
+-pytest-cov
+-fakeredis
+-ruff
++# Direct import in `tests/catalogue_oracle.py` (`yaml.safe_dump`). It resolves
++# today only through `fastapi[standard]` -> `uvicorn[standard]`, so declare it
++# here: the oracle must not rely on a transitive that an upstream extras change
++# could drop. Left unpinned on purpose — the oracle asserts only
++# predicted-infeasible => INFEASIBLE, which is insensitive to which equivalent
++# YAML `safe_dump` emits.
++pyyaml
++# For CI. Exact pins keep the fresh-venv install and CI toolchain
++# reproducible. `fakeredis` is fenced below 3 instead of pinned exactly:
++# the store tests run the production `stores/redis.py` WATCH/MULTI path on
++# fakeredis, so a major bump must be a deliberate change, while 2.x fixes
++# keep flowing. The currently resolving version is 2.38.0.
++pytest==9.1.1
++pytest-cov==7.1.0
++fakeredis>=2,<3
++# Ruff is intentionally pinned: Ruff's *default* rule set expands between
++# releases (e.g. 0.15.x -> 0.16.x widened it materially). The explicit
++# `tool.ruff.lint.select` in pyproject.toml keeps the contract honest even if
++# this pin is later bumped.
++ruff==0.15.22
+diff --git a/core/requirements.txt b/core/requirements.txt
+index 8d39f8b..0e1ee78 100644
+--- a/core/requirements.txt
++++ b/core/requirements.txt
+@@ -1,20 +1,22 @@
+-# Runtime dependencies for the CLI, the backend, and the AI service.
+-# Deployment images install only this file. Optional solvers and development
+-# tooling live in requirements-optional.txt.
++# Runtime dependencies for the CLI and the backend. The Docker images install
++# only this file. Tests, tooling and the optional solver backends live in
++# requirements-optional.txt: for local tests run
++#   pip install -r core/requirements-optional.txt
++# Upstream genie keeps pulp in this file; v2 moves it to the optional file
++# because the product runs CP-SAT only (spec decision X4).
+ ortools==9.15.6755
+ pandas
+-ruamel.yaml
+-pydantic
+-openpyxl # For XLSX input and output support
+-defusedxml # For parsing untrusted XLSX XML safely
+-Pillow # For Pi-compatible image reads
++# Pinned canonical-boundary dependencies: these exact versions define the golden
++# canonical YAML bytes, validation locations, and 422 fixtures (T19 / tech-plan §1).
++# Upstream leaves them unpinned; this pin is a recorded v2 difference.
++ruamel.yaml==0.19.1
++pydantic==2.13.4
++openpyxl # For XLSX output support
+ jinja2 # For prettifying output
+-# PuLP is pure Python with a bundled CBC binary, so it stays in the minimal set.
+-pulp==3.3.2
+ # For web backend
+ fastapi[standard]
++# Diagnostic HTTP client for the public production diagnostic runner (U30a).
+ httpx
+ python-multipart
++# Redis job store (memory mode never imports redis eagerly)
+ redis
+-psycopg[binary]==3.3.5 # For durable AI chat history
+-e2b==2.46.0 # For isolated AI sandbox execution and template builds
