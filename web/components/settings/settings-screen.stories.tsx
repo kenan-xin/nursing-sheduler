@@ -12,8 +12,6 @@ const meta = {
   parameters: {
     layout: "fullscreen",
     nextjs: { appDirectory: true, navigation: { pathname: "/settings" } },
-    // a11y violation tracked in nursing-sheduler-w0e.35; restore "error" when fixed
-    a11y: { test: "todo" },
   },
   beforeEach: [withAssistant({ ready: false }), withFetchRoutes([])],
 } satisfies Meta<typeof SettingsScreen>;

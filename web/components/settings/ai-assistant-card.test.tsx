@@ -151,6 +151,11 @@ describe("disabled (the default)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("titles the card as an h2 so Settings headings run h1 > h2 > h3", () => {
+    renderCard();
+    expect(screen.getByRole("heading", { level: 2, name: "AI assistant" })).toBeInTheDocument();
+  });
+
   it("never claims the browser store is encrypted or secure", async () => {
     await assistantActions.setEnabled(true);
     renderCard();
