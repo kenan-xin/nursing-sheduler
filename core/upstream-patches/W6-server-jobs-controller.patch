@@ -1,0 +1,68 @@
+# W6 patch for core/nurse_scheduling/server/jobs/controller.py against genie 1bf4b85.
+# hunk: prepare_event_replay (P6)
+# hunk: basis and expires_at at create (P8)
+# hunk: purpose at create, repair_queue_residue (P9)
+
+diff --git a/core/nurse_scheduling/server/jobs/controller.py b/core/nurse_scheduling/server/jobs/controller.py
+index a18fb0b..04d9df5 100644
+--- a/core/nurse_scheduling/server/jobs/controller.py
++++ b/core/nurse_scheduling/server/jobs/controller.py
+@@ -31,13 +31,16 @@ from ..errors import (
+     JobOperationNotAllowedError,
+     StoreWriteConflictError,
+ )
++from ..basis_admission import VerifiedBasis
+ from ..job_store import JobStore
+ from ..retry import retry_with_backoff
+ from ..solver_capabilities import solver_supports_finish_now
+ from .models import (
++    EventReplayWindow,
+     Job,
+     JobEvent,
+     JobFailure,
++    JobPurpose,
+     JobRequest,
+     JobState,
+     OptimizationResult,
+@@ -104,6 +107,8 @@ class JobController:
+         timeout_seconds: int,
+         input_bytes: bytes,
+         auth_credential_id: str | None = None,
++        basis: VerifiedBasis | None = None,
++        purpose: JobPurpose = JobPurpose.ORDINARY,
+     ) -> Job:
+         """Create and enqueue a job with its submitted input.
+ 
+@@ -126,8 +131,14 @@ class JobController:
+                     solver=solver,
+                     prettify=prettify,
+                     timeout_seconds=timeout_seconds,
++                    purpose=purpose,
++                    basis=basis.basis if basis is not None else None,
++                    basis_id=basis.basis_id if basis is not None else None,
++                    parent_basis_id=basis.parent_basis_id if basis is not None else None,
++                    transform_digest=basis.transform_digest if basis is not None else None,
+                 ),
+                 created_at=now,
++                expires_at=now + timedelta(seconds=self._retention_seconds),
+             )
+             initial_event = self._state_event(job, now)
+             if self._runtime_identity is not None:
+@@ -481,6 +492,17 @@ class JobController:
+         """
+         return self._store.stream_events(job_id, after_id, keepalive_seconds)
+ 
++    def prepare_event_replay(self, job_id: str, requested_cursor: str | None) -> EventReplayWindow:
++        """v2 P6: validate a public cursor and snapshot the initial replay batch atomically."""
++        return self._store.prepare_event_replay(job_id, requested_cursor)
++
++    def repair_queue_residue(self) -> list[str]:
++        """v2 P9: remove queue index entries no job record justifies (T09)."""
++        repaired = self._store.repair_queue_residue(self._clock())
++        for kind in repaired:
++            server_logger.warning("[server:job] queue-residue-removed kind=%s", kind)
++        return repaired
++
+     def delete_job(self, job_id: str) -> None:
+         """Delete a terminal job and all associated data.
+ 

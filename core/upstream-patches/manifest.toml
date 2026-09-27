@@ -3,7 +3,7 @@
 upstream = "j3soon/nurse-scheduling feature/genie"
 upstream_commit = "1bf4b85"
 # Oldest first. The check reverse-applies them newest first.
-patch_order = ["P0-fixture-restamp.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch", "W2-server-maintenance.patch", "W2-server-errors.patch", "W2-server-jobs-runner.patch", "W2-server-diagnostic.patch", "W2-server-config.patch", "W2-server-api-schemas.patch", "W2-server-api-optimize.patch", "W2-server-app.patch"]
+patch_order = ["P0-fixture-restamp.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch", "W2-server-maintenance.patch", "W2-server-errors.patch", "W2-server-jobs-runner.patch", "W2-server-diagnostic.patch", "W2-server-config.patch", "W2-server-api-schemas.patch", "W2-server-api-optimize.patch", "W2-server-app.patch", "W6-server-job_store.patch", "W6-server-jobs-models.patch", "W6-server-jobs-controller.patch", "W6-server-jobs-worker.patch", "W6-server-stores-memory.patch", "W6-server-stores-redis.patch"]
 
 [[file]]
 path = "nurse_scheduling/cli.py"
@@ -366,3 +366,49 @@ path = "nurse_scheduling/server/app.py"
 class = "patched"
 upstream_blob = "31e62ad1cfc5556db9e0400487dc44002af7ddcb"
 patches = ["W2-server-app.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/usage_metrics.py"
+class = "verbatim"
+upstream_blob = "9dcd9e84c6d36b7b3ddea5d6dbbdd74511d201f0"
+
+[[file]]
+path = "tests/test_optimize_job_backends.py"
+class = "verbatim"
+upstream_blob = "c6586bafd54abe1c9424d1fa771c6936c3a44f71"
+
+[[file]]
+path = "nurse_scheduling/server/job_store.py"
+class = "patched"
+upstream_blob = "fb656a30e27b8cf78d411d1cb10125ffdc921845"
+patches = ["W6-server-job_store.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/jobs/models.py"
+class = "patched"
+upstream_blob = "1b358ba153420a1181df70e57a6f070cd75eca74"
+patches = ["W6-server-jobs-models.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/jobs/controller.py"
+class = "patched"
+upstream_blob = "a18fb0bd1a343e87f79a104dcfce2ad13f0558a0"
+patches = ["W6-server-jobs-controller.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/jobs/worker.py"
+class = "patched"
+upstream_blob = "ff808a06deffe8c600dd2fc963dd9bcb11c5095e"
+patches = ["W6-server-jobs-worker.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/stores/memory.py"
+class = "patched"
+upstream_blob = "076668c1005f16920a3abbb805ccc17db0a6857d"
+patches = ["W6-server-stores-memory.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/stores/redis.py"
+class = "patched"
+upstream_blob = "a5892b30866808521a06a556218f9606b73ae414"
+patches = ["W6-server-stores-redis.patch"]

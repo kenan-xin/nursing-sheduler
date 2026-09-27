@@ -1,0 +1,101 @@
+# W6 patch for core/nurse_scheduling/server/jobs/worker.py against genie 1bf4b85.
+# hunk: shutdown write gate and settling an observed cancellation (P10)
+
+diff --git a/core/nurse_scheduling/server/jobs/worker.py b/core/nurse_scheduling/server/jobs/worker.py
+index ff808a0..b6552ba 100644
+--- a/core/nurse_scheduling/server/jobs/worker.py
++++ b/core/nurse_scheduling/server/jobs/worker.py
+@@ -90,6 +90,8 @@ class JobWorker:
+         """Whether this worker currently holds a live registered lease."""
+         self._executing = threading.Event()
+         """Whether the claim loop is still winding down an owned job."""
++        self._shutdown_lock = threading.Lock()
++        """v2 P10: serializes shutdown with each worker write, so no write lands after `stop()`."""
+         self._lock = threading.Lock()
+         """Lock guarding the current lease and worker-thread state."""
+         self._lease: WorkerLease | None = None
+@@ -123,7 +125,8 @@ class JobWorker:
+ 
+     def stop(self) -> None:
+         """Request shutdown and wait briefly for the worker thread to exit."""
+-        self._stop.set()
++        with self._shutdown_lock:  # v2 P10
++            self._stop.set()
+         with self._lock:
+             thread = self._thread
+             heartbeat_thread = self._heartbeat_thread
+@@ -363,15 +366,23 @@ class JobWorker:
+         cancellation_requested = threading.Event()
+ 
+         control_thread: threading.Thread | None = None
++
++        def shutting_down() -> bool:
++            """v2 P10: whether shutdown or a monitor abort forbids any worker write."""
++            return self._stop.is_set() or monitor_stop.is_set()
++
+         try:
+             content = self._controller.get_input(job.id)
+ 
+             def publish(event_type: str, data: dict, score: int | None) -> None:
+                 """Persist one runner event and its score when available."""
+-                if score is None:
+-                    self._controller.record_event(job.id, event_type, data, lease=lease)
+-                else:
+-                    self._controller.record_score_and_event(job.id, score, data, lease=lease)
++                with self._shutdown_lock:  # v2 P10
++                    if shutting_down():
++                        return
++                    if score is None:
++                        self._controller.record_event(job.id, event_type, data, lease=lease)
++                    else:
++                        self._controller.record_score_and_event(job.id, score, data, lease=lease)
+ 
+             def watch_controls() -> None:
+                 """Poll cancellation, finish-now, and ownership controls."""
+@@ -439,16 +450,20 @@ class JobWorker:
+             if process_result.status is ProcessStatus.COMPLETED:
+                 if process_result.output is None:
+                     raise RuntimeError("Completed optimization process has no output")
+-                self._controller.complete_job(
+-                    job.id,
+-                    process_result.output.result,
+-                    process_result.output.artifact,
+-                    lease=lease,
+-                )
++                with self._shutdown_lock:  # v2 P10
++                    if not shutting_down():
++                        self._controller.complete_job(
++                            job.id,
++                            process_result.output.result,
++                            process_result.output.artifact,
++                            lease=lease,
++                        )
+             elif process_result.status is ProcessStatus.FAILED:
+                 if process_result.failure is None:
+                     raise RuntimeError("Failed optimization process has no failure")
+-                self._controller.fail_job(job.id, process_result.failure, lease=lease)
++                with self._shutdown_lock:  # v2 P10
++                    if not shutting_down():
++                        self._controller.fail_job(job.id, process_result.failure, lease=lease)
+             elif process_result.status is ProcessStatus.CANCELLED:
+                 self._controller.complete_cancellation(job.id, lease)
+             elif process_result.status is ProcessStatus.ABORTED:
+@@ -462,11 +477,15 @@ class JobWorker:
+         except JobNotFoundError:
+             server_logger.warning("[server:worker] job disappeared while running job_id=%s", job.id)
+         except Exception as error:
++            # v2 P10: a cancellation observed under a live lease still settles after shutdown.
++            if cancellation_requested.is_set() and not monitor_stop.is_set():
++                self._controller.complete_cancellation(job.id, lease)
++                return
+             failure = JobFailure(code="optimization_failed", message=self._unexpected_error_formatter(error))
+-            try:
++            with self._shutdown_lock:  # v2 P10
++                if shutting_down():
++                    return
+                 failed = self._controller.fail_job(job.id, failure, lease=lease)
+-            except Exception:
+-                raise
+             if failed.state == JobState.CANCELLED:
+                 server_logger.info(
+                     "[server:worker] cancelled-after-exception job_id=%s exception_type=%s error=%s worker_id=%s",

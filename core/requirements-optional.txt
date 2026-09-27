@@ -19,8 +19,8 @@ pyscipopt==6.2.1
 pyyaml
 # For CI. Exact pins keep the fresh-venv install and CI toolchain
 # reproducible. `fakeredis` is fenced below 3 instead of pinned exactly:
-# `stores/redis.py` branches on the fakeredis client class for its Lua-less
-# test path, so a major bump must be a deliberate change, while 2.x fixes
+# the store tests run the production `stores/redis.py` WATCH/MULTI path on
+# fakeredis, so a major bump must be a deliberate change, while 2.x fixes
 # keep flowing. The currently resolving version is 2.38.0.
 pytest==9.1.1
 pytest-cov==7.1.0
