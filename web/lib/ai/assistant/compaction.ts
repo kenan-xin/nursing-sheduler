@@ -61,24 +61,58 @@ export function omittedMessageIds(
   return new Set(records.filter((r) => r.seq <= summary.throughSeq).map((r) => r.messageId));
 }
 
+interface TranscriptRecord {
+  role: "user" | "assistant" | "tool";
+  text: string;
+}
+
+/**
+ * The slice as a JSON array of `{ role, text }` records. Roles are DATA here, not line
+ * prefixes, so a user who types "Assistant: ..." cannot forge an assistant turn for the
+ * summariser. Over the cap, the newest whole records are kept.
+ */
 export function transcriptForSummary(slice: readonly AssistantMessageV1[]): string {
-  const lines = bySeq(slice).flatMap((r): string[] => {
+  const records = bySeq(slice).flatMap((r): TranscriptRecord[] => {
     switch (r.role) {
       case "user":
-        return [`User: ${r.content}`];
+        return [{ role: "user", text: r.content }];
       case "assistant":
         return [
-          ...(r.content ? [`Assistant: ${r.content}`] : []),
-          ...(r.toolCalls ?? []).map((call) => `Assistant used ${call.name}.`),
+          ...(r.content ? [{ role: "assistant" as const, text: r.content }] : []),
+          ...(r.toolCalls ?? []).map((call) => ({
+            role: "assistant" as const,
+            text: `(used ${call.name})`,
+          })),
         ];
       case "tool":
         return [
-          `Result: ${r.content.length > TOOL_RESULT_CHARS ? `${r.content.slice(0, TOOL_RESULT_CHARS)}…` : r.content}`,
+          {
+            role: "tool",
+            text:
+              r.content.length > TOOL_RESULT_CHARS
+                ? `${r.content.slice(0, TOOL_RESULT_CHARS)}…`
+                : r.content,
+          },
         ];
       case "reasoning":
         return [];
     }
   });
-  const text = lines.join("\n");
-  return text.length > MAX_SUMMARY_INPUT_CHARS ? text.slice(-MAX_SUMMARY_INPUT_CHARS) : text;
+  // `[` + records joined by `,` + `]`: walk back from the newest while it still fits.
+  let size = 2;
+  let start = records.length;
+  while (start > 0) {
+    const next = JSON.stringify(records[start - 1]).length + (start < records.length ? 1 : 0);
+    if (size + next > MAX_SUMMARY_INPUT_CHARS) break;
+    size += next;
+    start -= 1;
+  }
+  const kept = records.slice(start);
+  const last = records.at(-1);
+  if (kept.length === 0 && last) {
+    // One record larger than the cap: keep its tail. An eighth of the cap stays under it
+    // even if every character needed a six-character JSON escape.
+    kept.push({ ...last, text: last.text.slice(-(MAX_SUMMARY_INPUT_CHARS / 8)) });
+  }
+  return JSON.stringify(kept);
 }
