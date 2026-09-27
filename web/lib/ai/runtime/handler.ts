@@ -1,8 +1,12 @@
 import {
   AI_DETACH_REASON_INSTANCE_MISMATCH,
   AI_ERROR_CREDENTIALS_REQUIRED,
+  AI_ERROR_MESSAGE_PART_REJECTED,
+  AI_ERROR_REQUEST_TOO_LARGE,
   AI_KEY_HEADER,
   COPILOT_RUNTIME_BASE_PATH,
+  MAX_RUN_REQUEST_BYTES,
+  MAX_STOP_REQUEST_BYTES,
   RUNTIME_INSTANCE_HEADER,
 } from "./containment";
 
@@ -19,6 +23,7 @@ import { assertSingleWebInstance } from "./deployment";
 import { getRuntimeInstanceId } from "./instance-identity";
 import {
   createAgentsFactory,
+  hasOnlyTextParts,
   readAiCredentials,
   type OpenRouterAgentOptions,
 } from "./openrouter-agent";
@@ -63,12 +68,16 @@ export function createSchedulerCopilotRuntime(
     basePath: COPILOT_RUNTIME_BASE_PATH,
     mode: "multi-route",
     hooks: {
-      onBeforeHandler: ({ request, route }) => {
+      onBeforeHandler: async ({ request, route }) => {
         const rejection = guardRoute(request, route, instanceId);
         // A thrown Response is CopilotKit's documented short-circuit: it still runs
         // the onResponse hook, so these bodies get the same containment headers.
         if (rejection) throw rejection;
-        return request;
+        const limit = BODY_CEILINGS[route.method];
+        if (limit === undefined || request.body === null) return request;
+        const checked = await guardBody(request, limit, route.method === "agent/run");
+        if (checked instanceof Response) throw checked;
+        return checked;
       },
       onResponse: ({ response, route }) => containResponse(response, route, instanceId),
     },
@@ -77,7 +86,31 @@ export function createSchedulerCopilotRuntime(
   return { handler, runner, instanceId };
 }
 
+/**
+ * t0c9: the only CopilotKit routes the app's client calls. Every other one (suggest runs
+ * the agent with any key and an unbounded body; transcribe, threads, and whatever a
+ * future CopilotKit adds) answers 404.
+ */
+const ALLOWED_ROUTES: ReadonlySet<string> = new Set([
+  "info",
+  "agent/run",
+  "agent/connect",
+  "agent/stop",
+]);
+
+/**
+ * t0c9: per-route body ceilings. connect carries the whole run input (the client resends
+ * the thread on reconnect), so it shares the run ceiling; stop is sent with no body.
+ */
+const BODY_CEILINGS: Readonly<Record<string, number>> = {
+  "agent/run": MAX_RUN_REQUEST_BYTES,
+  "agent/connect": MAX_RUN_REQUEST_BYTES,
+  "agent/stop": MAX_STOP_REQUEST_BYTES,
+};
+
 function guardRoute(request: Request, route: RouteInfo, instanceId: string): Response | null {
+  if (!ALLOWED_ROUTES.has(route.method)) return jsonResponse({ error: "Not found" }, 404);
+
   if (route.method === "agent/run") {
     // The run route requires a validated key AND model. info/connect/stop do not.
     if (!readAiCredentials(request)) {
@@ -102,6 +135,73 @@ function guardRoute(request: Request, route: RouteInfo, instanceId: string): Res
   // A mismatched `connect` is handled inside the runner, which answers it with the
   // same empty non-leaking stream as an unknown thread.
   return null;
+}
+
+/**
+ * t0c9: a body, read ONCE through a byte ceiling; for a run, its message parts checked.
+ *
+ * Over `limit` -- by declared length, or by bytes counted as they stream when none is
+ * declared -- the request is refused before anything past the ceiling is buffered. A
+ * run's message part other than text is refused with a 400 (the agent factory checks
+ * again on the converted input). CopilotKit then gets a new Request over the same
+ * bytes. A body that is not JSON is CopilotKit's to reject. Responses carry codes only.
+ */
+async function guardBody(
+  request: Request,
+  limit: number,
+  checkParts: boolean,
+): Promise<Request | Response> {
+  const tooLarge = () => jsonResponse({ error: AI_ERROR_REQUEST_TOO_LARGE }, 413);
+  if (Number(request.headers.get("content-length")) > limit) return tooLarge();
+  const bytes = await readCapped(request.body, limit);
+  if (bytes === null) return tooLarge();
+  if (checkParts && !runHasOnlyTextParts(bytes)) {
+    return jsonResponse({ error: AI_ERROR_MESSAGE_PART_REJECTED }, 400);
+  }
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: bytes,
+    signal: request.signal,
+  });
+}
+
+function runHasOnlyTextParts(bytes: Uint8Array): boolean {
+  let messages: unknown;
+  try {
+    messages = (JSON.parse(new TextDecoder().decode(bytes)) as { messages?: unknown })?.messages;
+  } catch {
+    messages = null;
+  }
+  return !Array.isArray(messages) || hasOnlyTextParts(messages);
+}
+
+/** The whole stream, or null (and the stream cancelled) once it passes `limit` bytes. */
+async function readCapped(
+  body: ReadableStream<Uint8Array> | null,
+  limit: number,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!body) return new Uint8Array();
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
 }
 
 /**
