@@ -18,6 +18,8 @@ import {
   type LeaveMove,
 } from "./rule-check";
 
+import { borrowContext, borrowDocument, borrowGrid } from "./swap-fixtures";
+
 const DATES = ["2026-10-07", "2026-10-08", "2026-10-09"];
 const s = (id: string): RosterDayState => ({ kind: "shift", shiftId: id });
 const OFF: RosterDayState = { kind: "off" };
@@ -337,6 +339,61 @@ describe("leave that moves with a trade", () => {
     );
     expect(result.hard.map((issue) => issue.message)).toEqual([
       "Ana must have leave on 9 Oct (moved from 7 Oct).",
+    ]);
+  });
+});
+
+// d582: a temporary cover is not a person. The model counts her through the ward need.
+describe("temporary cover", () => {
+  const haseena = {
+    name: "Haseena (Ward 3)",
+    date: "2026-10-08",
+    shiftType: "N",
+    groups: ["Nights"],
+  };
+  const priyaOff = () => [[OFF, OFF, OFF], borrowGrid()[1]];
+
+  it("checkRosterChange counts a temporary cover", () => {
+    const document = borrowDocument();
+    const scope = { people: [0], dates: [1] };
+    const bare = checkRosterChange(
+      buildRuleModel(document),
+      borrowContext(),
+      borrowGrid(),
+      priyaOff(),
+      scope,
+    );
+    expect(bare.hard.map((issue) => issue.message)).toEqual([
+      "8 Oct: “One night nurse” has 0 of the 1 needed.",
+    ]);
+    const covered = checkRosterChange(
+      buildRuleModel(document, { decrements: [], live: [haseena] }),
+      borrowContext(),
+      borrowGrid(),
+      priyaOff(),
+      scope,
+    );
+    expect(covered.hard).toEqual([]);
+  });
+
+  it("says the cover alongside a need the ward still falls short of", () => {
+    const document = {
+      ...borrowDocument(),
+      preferences: borrowDocument().preferences.map((preference) =>
+        preference.type === PREFERENCE_TYPE.shiftTypeRequirement
+          ? { ...preference, requiredNumPeople: 2 }
+          : preference,
+      ),
+    } as CanonicalScenarioDocument;
+    const result = checkRosterChange(
+      buildRuleModel(document, { decrements: [], live: [haseena] }),
+      borrowContext(),
+      borrowGrid(),
+      priyaOff(),
+      { people: [0], dates: [1] },
+    );
+    expect(result.hard.map((issue) => issue.message)).toEqual([
+      "8 Oct: “One night nurse” has 0 of the 1 needed from the ward (+1 cover).",
     ]);
   });
 });

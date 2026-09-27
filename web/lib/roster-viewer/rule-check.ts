@@ -42,6 +42,7 @@ import {
   buildAssignmentIndex,
   buildEquations,
   evaluateRequirementCell,
+  type RequirementCover,
   type RequirementEquation,
 } from "./requirements";
 
@@ -158,8 +159,15 @@ export function dayCode(day: RosterDayState): string {
   return day.kind === "off" ? "OFF" : "LEAVE";
 }
 
-/** Build the rule model from the canonical document the roster was solved from. */
-export function buildRuleModel(document: CanonicalScenarioDocument): RuleModel {
+/**
+ * Build the rule model from the canonical document the roster was solved from. With a
+ * `cover` (d582), staffing is checked against the ward need, exactly as the Coverage
+ * lens reads it (`buildEquations`); the model carries it to every check built on it.
+ */
+export function buildRuleModel(
+  document: CanonicalScenarioDocument,
+  cover?: RequirementCover,
+): RuleModel {
   const items = document.shiftTypes.items;
   const resolver = buildScenarioResolutionContext({
     staff: document.people.items,
@@ -177,7 +185,7 @@ export function buildRuleModel(document: CanonicalScenarioDocument): RuleModel {
   const shifts = (selector: unknown) =>
     resolver.resolveShiftTypes(selector as ShiftTypeGroupMember | readonly ShiftTypeGroupMember[]);
 
-  const equations = buildEquations(document);
+  const equations = buildEquations(document, cover);
   const unchecked: string[] = equations
     .filter((equation) => equation.unavailable !== null)
     .map((equation) => equation.description ?? `${equation.scopeLabel} staffing`);
@@ -305,9 +313,10 @@ export function buildRuleModel(document: CanonicalScenarioDocument): RuleModel {
 /** The rule model of a roster's own submission, or null when it cannot be read. */
 export function deriveRuleModel(
   submission: Pick<RosterSubmission, "canonicalYaml">,
+  cover?: RequirementCover,
 ): RuleModel | null {
   const parsed = parseSubmissionDocument(submission.canonicalYaml);
-  return parsed.ok ? buildRuleModel(parsed.document) : null;
+  return parsed.ok ? buildRuleModel(parsed.document, cover) : null;
 }
 
 function cellIndex(model: RuleModel, day: RosterDayState): number {
@@ -573,11 +582,13 @@ export function listIssues(
         });
       }
       if (cell.short > 0) {
+        const covers = equation.coverByDate.get(d) ?? 0;
+        const needed = covers > 0 ? `needed from the ward (+${covers} cover)` : "needed";
         issues.push({
           key: `${equation.key}:d${d}:short`,
           hard: true,
           severity: cell.short,
-          message: `${day(d)}: “${label}” has ${cell.units} of the ${cell.required} needed.`,
+          message: `${day(d)}: “${label}” has ${cell.units} of the ${cell.required} ${needed}.`,
           staffing: meta("short"),
         });
       }
