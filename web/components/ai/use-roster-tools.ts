@@ -277,21 +277,24 @@ function showCard(
 
 const NO_ROSTER =
   "There is no saved roster yet. If the user wants one, offer a run with request_optimize_run.";
-// bead pu5: NO_ROSTER's "offer a run" sent an MC cover on a run's roster to a new run.
-const DOWNLOAD_ONLY =
-  "The last optimiser run made a roster, but the app did not keep a copy: the user has only " +
-  "the downloaded XLSX, so you cannot see who works when; never guess it. For one change to " +
-  "that roster, such as a nurse on MC, do not offer a new run. Start your reply with both facts " +
-  "in plain words: you cannot see the roster in the app, and running the optimiser again can " +
-  "change everyone's shifts. Then give the cover steps in plain words, and end on one open " +
-  "question at most, such as who is free that day; never two in one sentence.";
 
-/** Why there is no roster to read: a run's roster the app did not keep, or none at all. */
+/**
+ * Why there is no roster to read. After a run that made one (bead pu5), "offer a run" is the
+ * wrong steer for a change to a roster staff may already work from. Says only what is known:
+ * the XLSX only when the download is recorded.
+ */
 function noRoster(): string {
   const view = useHotStore.getState().runView;
   const made =
     view.lifecycle === "completed" && (view.outcome === "optimal" || view.outcome === "feasible");
-  return made && !isRosterSaved(view) ? DOWNLOAD_ONLY : NO_ROSTER;
+  if (!made || isRosterSaved(view)) return NO_ROSTER;
+  return (
+    "The last optimiser run made a roster, but no copy of it is saved in the app, so you cannot " +
+    "see who works when; say so, and never guess it. " +
+    (view.download.status === "downloaded" ? "The user downloaded it as an XLSX file. " : "") +
+    "A new run can change everyone's shifts: for a change to a roster staff already work from, " +
+    "such as a swap or someone off sick, say so and use the cover steps instead of offering a run."
+  );
 }
 const UNREADABLE =
   "The saved roster cannot be read in this browser right now, and nothing was changed. Tell the " +

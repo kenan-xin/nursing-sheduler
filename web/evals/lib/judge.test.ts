@@ -87,6 +87,8 @@ describe("judge", () => {
       "App run result: Optimal roster found. Its XLSX file downloads in the browser. No copy was saved to open in the app.",
     );
     expect(renderTranscript(call("not json"))).toBe("");
+    // A run still going (or never started) has no heading: nothing to show.
+    expect(renderTranscript(call(JSON.stringify({ heading: null, guidance: "x" })))).toBe("");
   });
 
   it("renders offer_choices safely when options is not an array", () => {

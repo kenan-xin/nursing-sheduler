@@ -135,9 +135,7 @@ describe("the attached turn context", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(
       /finished and made a roster, call get_optimize_result.*as its guidance says; ask nothing/,
     );
-    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/before anything else.*may not have kept/);
-    // bead hnd: 'Make it fair' got a Prepare it / Not now card instead of a Preview.
-    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/prepare it straight away.*asking whether to/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).not.toMatch(/may not have kept/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/open_app_screen/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Never claim .*applied/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/opens the screen that holds the change/);
@@ -310,9 +308,10 @@ describe("what the assistant knows about the ward and the solver", () => {
   it("sends a one-off roster change through the whole cover ladder, not only swaps", () => {
     expect(KNOWLEDGE_LINES.join(" ")).toMatch(/cover steps above/);
   });
-  it("answers a ratio question in one line and offers the ward's own numbers on a card", () => {
+  it("puts an offer to set the ward's own numbers on a card, and still allows a plain answer", () => {
     // bead 7xw: 'If you'd like, I can help set that up. Would that be helpful?' in text.
-    expect(KNOWLEDGE_LINES[0]).toMatch(/in one sentence.*offer_choices.*ask nothing in text/);
+    expect(KNOWLEDGE_LINES[0]).toMatch(/To offer .* use offer_choices/);
+    expect(KNOWLEDGE_LINES[0]).not.toMatch(/ask nothing in text/);
   });
   it("does not repeat the rest-number ban in the no-law line", () => {
     expect(KNOWLEDGE_LINES[0]).not.toMatch(/rest/);
@@ -417,9 +416,14 @@ describe("pick-one questions go on a card (dt9)", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/open_app_screen instead of asking/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/request_optimize_run instead of asking/);
   });
-  it("offers a supported change on a card when asked whether the app can do it", () => {
-    // 3 of 3 eval trials answered "Can the app stop ...?" with "Would you like me to ...?" in text.
-    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/asks whether the app can do something/);
+  it("has one rule for a request (prepare it) against a can-it question (answer, offer a card)", () => {
+    // 3 of 3 eval trials answered "Can the app stop ...?" with "Would you like me to ...?" in
+    // text; bead hnd's "Make it fair" got the card instead of a Preview. One sentence, once.
+    const sentences = ASSISTANT_AUTHORITY_STATEMENT.split(/(?<=\.)\s/);
+    const rule = sentences.filter((s) => /Prepare it \/ Not now/.test(s));
+    expect(rule).toHaveLength(1);
+    expect(rule[0]).toMatch(/asks for a change .* prepare it .*; when they only ask whether/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT.match(/whether the app can/g)).toHaveLength(1);
   });
   it("ends a reply on a question only when it is open or a card holds it", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/End a reply on a question only when/);

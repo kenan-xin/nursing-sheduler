@@ -221,21 +221,33 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     // bead 3ew: with no name to hand the model said "the Succession rules screen".
     const { useModeStore } = await import("@/lib/mode/mode");
     useModeStore.setState({ mode: "advanced", adoption: "ready" });
-    await mount(SCENARIOS.restRuleTooTight());
+    // The sidebar's own name (nav-config), not the Preview's scope label ("Supervision").
+    const ward = SCENARIOS.restRuleTooTight();
+    await mount({
+      ...ward,
+      cardsByKind: {
+        ...ward.cardsByKind,
+        coverings: [
+          {
+            uid: "preceptor",
+            description: "Ana supervises Ben",
+            preceptors: ["ana"],
+            preceptees: ["ben"],
+            shiftTypes: ["N"],
+            weight: -Infinity,
+          } as unknown as (typeof ward.cardsByKind.coverings)[number],
+        ],
+      },
+    });
     const off = {
-      summary: "You asked to turn off the no-day-after-night rule.",
+      summary: "You asked to turn off the supervision rule.",
       operations: [
-        {
-          type: "set_rule_enabled",
-          ruleKind: "successions",
-          ruleId: "no-day-after-night",
-          enabled: false,
-        },
+        { type: "set_rule_enabled", ruleKind: "coverings", ruleId: "preceptor", enabled: false },
       ],
     };
-    expect(String(await proposalTool().handler(off, {}))).toContain(
-      'Apply opens the "Shift sequences" screen',
-    );
+    const advanced = String(await proposalTool().handler(off, {}));
+    expect(advanced).toContain('Apply opens the "Shift Type Coverings" screen');
+    expect(advanced).not.toContain("Supervision");
     useModeStore.setState({ mode: "guided", adoption: "ready" });
     expect(String(await proposalTool().handler(off, {}))).toContain(
       'Apply opens the "Rules" screen',

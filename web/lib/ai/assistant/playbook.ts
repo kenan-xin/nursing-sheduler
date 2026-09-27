@@ -48,7 +48,12 @@ export const REST_PRACTICE_WARNING =
 export const BALANCE_RULE_NOTE =
   "A fairness rule gives the optimiser more to weigh up: the run can take longer, and it may stop at its time limit with a usable roster that is not proven the best.";
 
-/** True when a change adds or sets a count rule of the balance kind (bead hnd). */
+/**
+ * True when a change adds or sets a count rule of the balance kind (bead hnd). Only
+ * `|x - T|^2` counts: it is the one expression the solver scores as a squared gap per
+ * person, which is what slows a run. The other five (`x <= T`, `x = T`, ...) are a single
+ * yes/no per person, the same cost as any cap, whether or not the ward calls it fair.
+ */
 export function setsBalanceRule(commands: readonly AssistantCommandV1[]): boolean {
   return commands.some(
     (c) =>

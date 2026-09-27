@@ -209,7 +209,8 @@ describe("rest rules are guidance, not law", () => {
       }) as unknown as AssistantCommandV1;
     expect(setsBalanceRule([count("|x - T|^2")])).toBe(true);
     expect(setsBalanceRule([count("|x - T|^2", "edit_count_rule")])).toBe(true);
-    expect(setsBalanceRule([count("x <= T")])).toBe(false);
+    for (const linear of ["x <= T", "x >= T", "x = T", "x < T", "x > T"])
+      expect(setsBalanceRule([count(linear)]), linear).toBe(false);
     expect(BALANCE_RULE_NOTE).toMatch(/take longer/);
     expect(BALANCE_RULE_NOTE).toMatch(/not proven the best/);
   });

@@ -16,8 +16,10 @@ const SCREENS =
   "Roster, Save & Load";
 /** Judge agreement with hand labels, filled after the first calibration (spec §6.3). */
 export const CALIBRATION: string | null =
-  "36/37 on fixtures/judge-calibration.json, rubric .6 (the app's run result shown), " +
-  "gpt-5-mini, 2026-09-27 (31/37 under .5); the miss is sg-ph-in-lieu:2, passed.";
+  "rubric .6 (the app's run result shown), gpt-5-mini, 2026-09-27, two runs on " +
+  "fixtures/judge-calibration.json: 34/37 with a narrower run line, 36/37 with the final one " +
+  "(31/37 under .5). The judge is not deterministic at temperature 0, so read these as " +
+  "about 34-36/37, not an exact gain.";
 
 export const STANDARD_ITEMS: Record<string, string> = {
   short:
@@ -104,8 +106,11 @@ export function renderTranscript(
       if (call.name === "get_optimize_result") {
         // What the app told the assistant, so repeating it is not judged a false claim (pu5).
         try {
-          const run = JSON.parse(call.result ?? "") as { heading?: string; guidance?: string };
-          lines.push(`App run result: ${run.heading}. ${run.guidance}`);
+          const run = JSON.parse(call.result ?? "") as {
+            heading?: string | null;
+            guidance?: string;
+          };
+          if (run.heading) lines.push(`App run result: ${run.heading}. ${run.guidance ?? ""}`);
         } catch {
           // A refusal or other plain text carries no run facts.
         }
