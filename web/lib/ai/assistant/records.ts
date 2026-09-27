@@ -125,6 +125,8 @@ export interface AssistantThreadV1 {
   scenarioGeneration: number;
   createdAt: string;
   updatedAt: string;
+  /** bead ypo: the rolling summary of older messages, or absent. Deleted with the thread. */
+  summary?: ThreadSummaryV1 | null;
 }
 
 /** bead ypo: the rolling summary of a thread's older messages. */
