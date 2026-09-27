@@ -9,11 +9,14 @@
 // (`lib/roster/change-request.ts`): one undo step, one autosave, the same export.
 // No handler writes a roster or a scenario. The ladder tools prepare a pending LINKED
 // proposal (leave move, MC leave, temporary cover) that applies only with the roster cells.
+// With no saved roster, `prepare_borrowed_cover` shows a plain Preview of the covers instead.
 
 import { z } from "zod";
 import { useModelVisibleTool } from "./register-model-visible-tool";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { OPTIMIZE_RUN_TOOL } from "@/lib/ai/assistant/playbook";
+import { rankRepairOptions } from "@/lib/ai/assistant/repair-options";
+import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
 import {
   buildBorrowView,
   buildOvertimeView,
@@ -145,6 +148,7 @@ const PLAIN_WORDS =
 
 type Linked = {
   proposalId: string;
+  baseDocumentRevision?: number;
   assumptionIds: string[];
   assumptions: { type: string; question: string }[];
 };
@@ -173,6 +177,7 @@ async function prepareLinked(
       ok: true,
       linked: {
         proposalId: outcome.proposal.proposalId,
+        baseDocumentRevision: outcome.proposal.baseDocumentRevision,
         assumptionIds: outcome.proposal.assumptions.map((a) => a.assumptionId),
         assumptions: outcome.proposal.assumptions.map((a) => ({
           type: a.type,
@@ -273,6 +278,34 @@ function showCard(
   }
   if (change.linked) void assistantProposalCommands.cancel(change.linked.proposalId);
   return false;
+}
+
+/**
+ * With no saved roster (after an infeasible run) a cover is still just a staffing credit
+ * (bead 20wo): the covers are the scenario's own short (date, shift) slots on these dates,
+ * the same ones suggest_feasibility_options' borrow repair books, under the user's name.
+ * ponytail: one cover per short slot, however many nurses it is short by.
+ */
+function scenarioCovers(
+  name: string,
+  groups: readonly string[],
+  dates: readonly string[],
+): { commands: AssistantCommandV1[]; shortDates: string[] } {
+  const state = pickScenario(useScenarioStore.getState());
+  const borrow = rankRepairOptions(state, findStaffingShortfalls(state), {
+    runInfeasible: true,
+  }).find((option) => option.repairId === "borrow_temporary_nurse");
+  const slots = (borrow?.operations ?? []).flatMap((op) =>
+    op.type === "add_temporary_cover" ? [op] : [],
+  );
+  const seen = new Set<string>();
+  const commands = slots.flatMap((op): AssistantCommandV1[] => {
+    const key = `${op.date}|${op.shiftType}`;
+    if (!dates.includes(op.date) || seen.has(key)) return [];
+    seen.add(key);
+    return [{ ...op, name, groups: [...new Set([...groups, ...op.groups])] }];
+  });
+  return { commands, shortDates: [...new Set(slots.map((op) => op.date))] };
 }
 
 const NO_ROSTER =
@@ -740,7 +773,9 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
       description:
         "Step 3 only, when find_swap_partners says step 3 and the user said in chat that the " +
         "lending ward agreed: prepare a temporary cover nurse from the relief pool, another " +
-        "ward or an agency for the uncovered shifts. The nurse is not added as staff: each cover " +
+        "ward or an agency for the uncovered shifts. With no saved roster (after a run that " +
+        "could not build one), it covers the short shifts on those dates and person and reason " +
+        "are not used. The nurse is not added as staff: each cover " +
         "lowers that shift's staffing need by one. This does NOT change anything: the user " +
         "sees a card with an Apply button only they can press.",
       parameters: borrowParameters,
@@ -756,6 +791,40 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         const late = assertTurnAuthority(token, signal);
         if (late) return late;
         if (token === null) return SUPERSEDED;
+        const name = args.name.trim();
+        if (read.status === "none" && !read.newerRunWaiting) {
+          const { commands, shortDates } = scenarioCovers(name, args.groups, args.dates);
+          if (shortDates.length === 0) return noRoster();
+          if (commands.length === 0) {
+            return (
+              `No shift on those dates is short, so nothing was prepared. The short dates are ` +
+              `${shortDates.join(", ")}.`
+            );
+          }
+          const prepared = await prepareLinked(commands, args.summary);
+          const lateAgain = assertTurnAuthority(token, signal);
+          if (lateAgain) {
+            if (prepared.ok) void assistantProposalCommands.cancel(prepared.linked.proposalId);
+            return lateAgain;
+          }
+          if (!prepared.ok) return prepared.message;
+          // A Preview it replaces goes with it, so none is left applicable.
+          const replaced = useAssistantStore.getState().activeProposal;
+          if (replaced) void assistantProposalCommands.cancel(replaced.proposalId);
+          assistantActions.showProposal(
+            prepared.linked.proposalId,
+            token.turnEpoch,
+            prepared.linked.baseDocumentRevision,
+          );
+          return (
+            "A preview of the temporary cover is now shown to the user. Nothing has changed " +
+            "yet; only the user can apply it. Say \"I've prepared ...; check it and press " +
+            `Apply" in one short sentence: Apply books ${name} as temporary cover on the Staff ` +
+            `screen. Remind the user to let their ${ROSTER_OWNER} know. Once they have applied ` +
+            `it, offer a run with ${OPTIMIZE_RUN_TOOL} so a roster can be built with the cover; ` +
+            "it starts only when the user says yes. Then wait."
+          );
+        }
         const resolved = resolveSwap(read, args.person, args.dates);
         if (!resolved.ok) return resolved.message;
         const { ctx, personIdx, dateIdxs } = resolved;
@@ -765,7 +834,6 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         if (ladder.step !== 3) {
           return `${stillHasOptions(ctx, ladder)} No temporary nurse should be asked for yet. Call find_swap_partners and offer those first.`;
         }
-        const name = args.name.trim();
         const sick = args.reason === "sick_or_emergency";
         const personId = ctx.context.people[personIdx].id;
         const personIsos = dateIdxs.map((d) => ctx.context.calendar[d].iso);
