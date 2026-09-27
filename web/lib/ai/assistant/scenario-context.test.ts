@@ -6,6 +6,8 @@ import {
   KNOWLEDGE_LINES,
   buildAssistantContext,
   describeToday,
+  pendingAtLaunch,
+  type Pending,
   stringifyScenario,
   summarizeScenario,
 } from "./scenario-context";
@@ -76,8 +78,8 @@ describe("the attached turn context", () => {
     now: new Date(2026, 8, 24, 9, 30),
   });
 
-  it("is exactly the authority statement, the document, the current screen and today", () => {
-    expect(context).toHaveLength(4);
+  it("is exactly the authority statement, the document, the current screen, today and what waits on Apply", () => {
+    expect(context).toHaveLength(5);
     expect(context[0].description).toBe(ASSISTANT_AUTHORITY_STATEMENT);
   });
 
@@ -281,6 +283,56 @@ describe("a prepared change is spoken of as prepared, never done", () => {
   });
 });
 
+describe("what still waits on the user's Apply (dt9)", () => {
+  // Asked "so that's in place now?" a turn after a Preview, the model could not tell
+  // whether the user had pressed Apply, and said yes 3 times in 3.
+  const waiting = (pending?: Pending) =>
+    buildAssistantContext({
+      scenario: wardScenario(),
+      scenarioId: "scenario-a",
+      documentRevision: 12,
+      routePath: "/rules",
+      routeLabel: "Rules",
+      now: new Date(2026, 8, 24, 9, 30),
+      pending,
+    })[4];
+
+  it("reads a card stamped before this turn as stopped: the rule the Preview and roster cards use", () => {
+    // Stop moves the epoch (closeGate), and the send claims the next one before the
+    // context is built, so a Preview from turn 3 is stopped at launch of turn 5.
+    const card = { turnEpoch: 3 };
+    expect(pendingAtLaunch({ activeProposal: card, activeRosterChange: null }, 5)).toEqual({
+      preview: "stopped",
+      rosterChange: null,
+    });
+    expect(pendingAtLaunch({ activeProposal: null, activeRosterChange: card }, 3)).toEqual({
+      preview: null,
+      rosterChange: "open",
+    });
+  });
+
+  it("after Stop, says the Preview cannot be applied any more and never points at Apply", () => {
+    const entry = waiting({ preview: "stopped", rosterChange: null });
+    expect(entry.value).toMatch(/Preview.*stopped/);
+    expect(entry.value).toMatch(/nothing in it changed/);
+    expect(entry.value).toMatch(/NOT in place/);
+    expect(entry.value).toMatch(/prepare it again/);
+    expect(entry.value).not.toMatch(/press Apply/);
+  });
+
+  it("an open card is not in place either, and promises no Apply button", () => {
+    const entry = waiting({ preview: null, rosterChange: "open" });
+    expect(entry.value).toMatch(/roster change card.*not applied/);
+    expect(entry.value).toMatch(/NOT in place/);
+    expect(entry.value).not.toMatch(/press Apply/);
+  });
+
+  it("says nothing waits when nothing does, by default too", () => {
+    expect(waiting({ preview: null, rosterChange: null }).value).toBe("Nothing.");
+    expect(waiting().value).toBe("Nothing.");
+  });
+});
+
 describe("pick-one questions go on a card (dt9)", () => {
   it("treats a yes/no offer as a pick-one question", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/yes\/no offer/);
@@ -291,11 +343,15 @@ describe("pick-one questions go on a card (dt9)", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/open_app_screen instead of asking/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/request_optimize_run instead of asking/);
   });
+  it("offers a supported change on a card when asked whether the app can do it", () => {
+    // 3 of 3 eval trials answered "Can the app stop ...?" with "Would you like me to ...?" in text.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/asks whether the app can do something/);
+  });
   it("ends a reply on a question only when it is open or a card holds it", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/End a reply on a question only when/);
   });
   it("names the jargon that leaked in the 2026-09-24 evals", () => {
-    for (const word of ["solver", "checker", "weight", "infeasible"])
+    for (const word of ["solver", "checker", "weight", "infeasible", "succession rule"])
       expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(new RegExp(`never say [^.]*${word}`));
   });
 });

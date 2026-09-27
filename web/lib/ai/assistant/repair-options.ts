@@ -353,7 +353,7 @@ const softenHardRequest: Builder = (ctx, findings, situation) => {
       : `Ask ${who} whether their "${request} can become a strong preference`,
     why: hit
       ? `${who} is a nurse the ${hit.f.shiftTypes.join("/")} shift could use that day, but the ${dayOff ? "day off" : "request"} forbids it.`
-      : "A hard request can make a schedule impossible. As a strong preference the solver breaks it only if it must.",
+      : "A hard request can make a schedule impossible. As a strong preference the optimiser breaks it only if it must.",
     operations: [
       dayOff
         ? {

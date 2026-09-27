@@ -4,6 +4,7 @@ import {
   cutByBudget,
   FALLBACK_TRIAL_USD,
   Ledger,
+  parseCaseIds,
   plannedUsd,
   recordingFetch,
   selectCases,
@@ -111,6 +112,17 @@ describe("budget plan", () => {
   it("selects by tag, or everything with no tags", () => {
     expect(selectCases(cases, ["smoke"]).map((c) => c.id)).toEqual(["cheap", "unmeasured"]);
     expect(selectCases(cases, null)).toHaveLength(3);
+  });
+
+  it("reads EVAL_CASES trimmed, and refuses an id no case has", () => {
+    expect(parseCaseIds(undefined, cases)).toBeNull();
+    expect(parseCaseIds(" cheap , costly ", cases)).toEqual(["cheap", "costly"]);
+    expect(() => parseCaseIds("cheap,cheep", cases)).toThrow(/cheep/);
+  });
+
+  it("narrows to named case ids as well", () => {
+    expect(selectCases(cases, null, ["cheap"]).map((c) => c.id)).toEqual(["cheap"]);
+    expect(selectCases(cases, ["smoke"], ["costly"])).toEqual([]);
   });
 });
 
