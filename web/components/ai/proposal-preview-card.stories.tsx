@@ -130,8 +130,6 @@ export const Assumption: Story = {
 
 // An open editor draft blocks Apply, and the card names it.
 export const Blocked: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.32; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   beforeEach: [
     prepared(SHRINK),
     () => {
