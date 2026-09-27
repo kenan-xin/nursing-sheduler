@@ -1,7 +1,7 @@
 import type { Preview } from "@storybook/nextjs-vite";
 import { fontClassName } from "../app/fonts";
 import "../app/globals.css";
-import { withQueryClient, withTheme } from "./harness";
+import { withQueryClient, withResetTransientStores, withTheme } from "./harness";
 
 // Same <html> classes as app/layout.tsx: globals.css resolves --ff-* from them at :root.
 document.documentElement.classList.add(...fontClassName.split(" "), "antialiased");
@@ -24,6 +24,7 @@ const preview: Preview = {
   },
   initialGlobals: { theme: "light", accent: "teal" },
   decorators: [withQueryClient, withTheme],
+  beforeEach: withResetTransientStores,
 };
 
 export default preview;
