@@ -1,8 +1,8 @@
 diff --git a/core/nurse_scheduling/models.py b/core/nurse_scheduling/models.py
-index f6f0f83..114e1ab 100644
+index edcdab1..ba040c1 100644
 --- a/core/nurse_scheduling/models.py
 +++ b/core/nurse_scheduling/models.py
-@@ -342,6 +342,14 @@ class MaxOneShiftPerDayPreference(BasePreference):
+@@ -338,6 +338,14 @@ class MaxOneShiftPerDayPreference(BasePreference):
      description: str | None = None
  
  
@@ -17,7 +17,7 @@ index f6f0f83..114e1ab 100644
  class ShiftTypeRequirementsPreference(BasePreference):
      model_config = ConfigDict(extra="forbid")
      type: Annotated[str, Field(pattern=f"^{SHIFT_TYPE_REQUIREMENT}$")] = SHIFT_TYPE_REQUIREMENT
-@@ -355,6 +363,12 @@ class ShiftTypeRequirementsPreference(BasePreference):
+@@ -351,6 +359,12 @@ class ShiftTypeRequirementsPreference(BasePreference):
      # intentionally normalizes implicit all-people values to explicit "ALL".
      qualifiedPeople: (int | str) | list[int | str] | None = None
      preferredNumPeople: int | None = None  # Preferred number of people for each shift type
@@ -30,7 +30,7 @@ index f6f0f83..114e1ab 100644
      # None and the reserved "ALL" selector both mean all dates. The frontend
      # intentionally normalizes implicit all-date values to explicit "ALL".
      date: (int | str | datetime.date) | list[int | str | datetime.date] | None = None  # Single date or list of dates
-@@ -365,6 +379,56 @@ class ShiftTypeRequirementsPreference(BasePreference):
+@@ -361,6 +375,56 @@ class ShiftTypeRequirementsPreference(BasePreference):
      def validate_weight_field(cls, v):
          return validate_weight(v)
  
@@ -87,7 +87,7 @@ index f6f0f83..114e1ab 100644
  
  class HoursContractMetadata(BaseModel):
      # Authoring-only marker: its presence marks a shift count as a fixed
-@@ -530,6 +594,8 @@ class CompiledShiftTypeRequirements:
+@@ -526,6 +590,8 @@ class CompiledShiftTypeRequirements:
      shift_type_groups: tuple[tuple[int, ...], ...]
      coefficients: tuple[tuple[int, int], ...]
      qualified_people: tuple[int, ...] | None
@@ -96,7 +96,7 @@ index f6f0f83..114e1ab 100644
  
  
  @dataclass(frozen=True)
-@@ -968,11 +1034,23 @@ def _compile_preference(data, preference, people_map, shift_map, date_map, dates
+@@ -964,11 +1030,23 @@ def _compile_preference(data, preference, people_map, shift_map, date_map, dates
              if preference.date is not None
              else all_dates
          )

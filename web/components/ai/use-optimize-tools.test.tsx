@@ -75,6 +75,9 @@ function tool(name: string): CapturedTool {
   return found;
 }
 
+/** The model-facing text of a tool result; every handler answers with an object (bead 3eve). */
+const text = (answer: unknown) => (answer as { guidance: string }).guidance;
+
 beforeEach(() => {
   captured.length = 0;
   fixture.scenario = readyScenario();
@@ -106,9 +109,9 @@ describe("the optimiser tools", () => {
 describe("request_optimize_run", () => {
   it("shows a card stamped with the turn and starts nothing", async () => {
     const answer = await tool("request_optimize_run").handler({}, {});
-    expect(answer).toMatch(/Nothing has started/);
+    expect(text(answer)).toMatch(/Nothing has started/);
     // dt9: "I've set up the run card" read as a claim of work done.
-    expect(answer).toMatch(/never that you set it up/);
+    expect(text(answer)).toMatch(/never that you set it up/);
     expect(useAssistantStore.getState().activeRunRequest).toEqual({ turnEpoch: TURN });
     expect(useRunRequestStore.getState().pending).toBeNull();
   });
@@ -116,7 +119,7 @@ describe("request_optimize_run", () => {
   it("refuses and names what is missing when set-up is incomplete", async () => {
     fixture.scenario = readyScenario({ staff: [] });
     const answer = await tool("request_optimize_run").handler({}, {});
-    expect(answer).toMatch(/Staff/);
+    expect(text(answer)).toMatch(/Staff/);
     expect(useAssistantStore.getState().activeRunRequest).toBeNull();
   });
 
@@ -139,21 +142,21 @@ describe("request_optimize_run", () => {
       },
     });
     const answer = await tool("request_optimize_run").handler({}, {});
-    expect(answer).toContain(UNSUPPORTED_EXPRESSION_REASON);
+    expect(text(answer)).toContain(UNSUPPORTED_EXPRESSION_REASON);
     expect(useAssistantStore.getState().activeRunRequest).toBeNull();
   });
 
   it("refuses in a tab that does not hold the schedule", async () => {
     fixture.isOwner = false;
     const answer = await tool("request_optimize_run").handler({}, {});
-    expect(answer).toMatch(/another tab/);
+    expect(text(answer)).toMatch(/another tab/);
     expect(useAssistantStore.getState().activeRunRequest).toBeNull();
   });
 
   it("refuses a second run while one is live", async () => {
     useHotStore.getState().setRunView(view({ lifecycle: "running", jobId: "opt_1" }));
     const answer = await tool("request_optimize_run").handler({}, {});
-    expect(answer).toMatch(/already going/);
+    expect(text(answer)).toMatch(/already going/);
     expect(useAssistantStore.getState().activeRunRequest).toBeNull();
   });
 });
