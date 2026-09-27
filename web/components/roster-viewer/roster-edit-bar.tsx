@@ -20,7 +20,7 @@
 // unchanged; this is one control swap inside the existing edit state machine,
 // not a second one.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { FaXmark } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,6 +65,24 @@ export function RosterEditBar({
   onSetCell,
   onCancel,
 }: RosterEditBarProps) {
+  // Base UI hides everything outside the picker's input from assistive tech while
+  // its popup is open — `aria-hidden` lands on this bar's own OFF / LV and Cancel
+  // controls (nursing-sheduler-w0e.13). But the popup is NOT modal (`modal` is the
+  // Combobox default, false), and Base UI leaves focus untrapped, so those controls
+  // stay in sequential focus navigation: Tab lands on content a screen reader user
+  // cannot perceive. That is axe `aria-hidden-focus`.
+  //
+  // They are taken out of the tab order for that window. NOT `inert`: this popup is
+  // non-modal, and `inert` would also kill the pointer interaction the non-modal
+  // contract keeps — upstream says so in its own triage of this exact defect
+  // (mui/base-ui#5528, "[combobox] Non-modal popup aria-hides outside content but
+  // leaves it tabbable"), and the mechanism it proposes there is exactly this one:
+  // hide from AT, remove from sequential focus navigation, keep the pointer. Escape
+  // (or picking a shift) closes the popup and the controls return.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  /** `-1` only while the popup holds the interaction; the default tab stop otherwise. */
+  const hiddenTabIndex = pickerOpen ? -1 : 0;
+
   const person = context.people[selected.personIdx];
   const day = context.calendar[selected.dateIdx];
   const personLabel = person ? String(person.id) : "—";
@@ -116,14 +134,24 @@ export function RosterEditBar({
       </span>
 
       <div className="flex flex-wrap gap-1.5">
-        <EditOption label="OFF" onClick={() => onSetCell(selected, { kind: "off" })} />
-        <EditOption label="LV" onClick={() => onSetCell(selected, { kind: "leave" })} />
+        <EditOption
+          label="OFF"
+          tabIndex={hiddenTabIndex}
+          onClick={() => onSetCell(selected, { kind: "off" })}
+        />
+        <EditOption
+          label="LV"
+          tabIndex={hiddenTabIndex}
+          onClick={() => onSetCell(selected, { kind: "leave" })}
+        />
       </div>
 
       <div className="min-w-[220px] flex-1">
         <Combobox
           items={options}
           value={null}
+          open={pickerOpen}
+          onOpenChange={(open) => setPickerOpen(open)}
           itemToStringLabel={(option: ShiftOption) => option.label}
           onValueChange={(option: ShiftOption | null) => {
             if (option === null) return;
@@ -165,6 +193,7 @@ export function RosterEditBar({
         size="sm"
         variant="ghost"
         className="ml-auto"
+        tabIndex={hiddenTabIndex}
         onClick={onCancel}
         data-testid="roster-edit-bar-cancel"
       >
@@ -174,11 +203,21 @@ export function RosterEditBar({
   );
 }
 
-function EditOption({ label, onClick }: { label: string; onClick: () => void }) {
+function EditOption({
+  label,
+  onClick,
+  tabIndex,
+}: {
+  label: string;
+  onClick: () => void;
+  /** Out of the tab order while the shift picker's popup owns the interaction. */
+  tabIndex: number;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
+      tabIndex={tabIndex}
       data-testid={`roster-edit-option-${label}`}
       aria-label={`Set ${label}`}
       className={cn(
