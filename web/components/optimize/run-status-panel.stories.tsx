@@ -257,8 +257,9 @@ export const LongText: Story = {
   args: { ...SuccessDownloaded.args, downloadAgainFilename: LONG_TOKEN },
   play: async ({ canvas }) => {
     await expect(canvas.getByTestId("optimize-download-again")).toHaveTextContent(LONG_TOKEN);
-    // KNOWN OVERFLOW nursing-sheduler-w0e.24: restore
-    // `await expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame"))` when fixed
+    // The full filename stays reachable through the slot's title even though it paints truncated.
+    await expect(canvas.getByTitle(LONG_TOKEN)).toBeVisible();
+    await expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame"));
   },
 };
 
