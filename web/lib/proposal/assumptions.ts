@@ -17,7 +17,7 @@
 // from an older revision is then simply not one of this proposal's confirmations. It
 // is never "cleared" by anybody remembering to clear it.
 
-import { dateIdToIso, generateDateItems, isoToUtcMs } from "@/lib/dates/date-id";
+import { dateIdToIso, isoToUtcMs } from "@/lib/dates/date-id";
 import { expandPersonRefs } from "@/lib/rules/expansion";
 import { capOf } from "@/lib/rules/shortfalls";
 import type { ScenarioUiState, UiRequestCell } from "@/lib/scenario";
@@ -29,8 +29,6 @@ export type AssumptionType =
   | "leave_moved"
   /** A leave pin is being destroyed — by a range change that drops its date. */
   | "leave_cancelled"
-  /** A nurse from another ward or agency is added for a bounded run of days. */
-  | "borrowed_staff_arranged"
   /** One named nurse's own hard limit goes up. */
   | "extra_shifts_agreed";
 
@@ -42,7 +40,7 @@ export interface OperationalAssumption {
   person: string;
   /** The date the agreement is currently about. */
   date: string;
-  /** `leave_moved`: where it moves to. `leave_cancelled` / `borrowed_staff_arranged`: the run's last date (null for one day). */
+  /** `leave_moved`: where it moves to. `leave_cancelled`: the run's last date (null for one day). */
   toDate: string | null;
   /** The question the host asks, verbatim. */
   question: string;
@@ -182,7 +180,7 @@ export function deriveAssumptions(
   }
   assumptions.push(...cancelledLeave(before, lost));
 
-  assumptions.push(...borrowedStaff(after, commands), ...extraShifts(before, after, commands));
+  assumptions.push(...extraShifts(before, after, commands));
 
   // Stable order, so the same change always renders the same list of questions.
   return assumptions.sort((a, b) => a.assumptionId.localeCompare(b.assumptionId));
@@ -239,58 +237,6 @@ function cancelledLeave(before: ScenarioUiState, lost: readonly UiRequestCell[])
     }
   }
   return assumptions;
-}
-
-/**
- * A borrowed nurse, read from validated targets, never from model prose: an
- * `add_person` with a hard `set_off_request` ("must") in the same change (the loan
- * shape `repair-options.ts` builds). The loan is read from the AFTER document: the
- * days she is NOT hard-off. An ordinary hire (no hard days off) is not asked about.
- */
-function borrowedStaff(
-  after: ScenarioUiState,
-  commands: readonly AssistantCommandV1[],
-): OperationalAssumption[] {
-  const loaned = new Set(
-    commands.flatMap((command) =>
-      command.type === "set_off_request" && command.weight === "must"
-        ? [ref(command.personId)]
-        : [],
-    ),
-  );
-  const items = generateDateItems({ start: after.rangeStart, end: after.rangeEnd });
-  return commands.flatMap((command) => {
-    if (command.type !== "add_person") return [];
-    if (!loaned.has(command.name)) return [];
-    const off = new Set(
-      after.reqData
-        .filter(
-          (cell) =>
-            cell.kind === "off" && cell.weight === Infinity && ref(cell.person) === command.name,
-        )
-        .map((cell) => ref(cell.date)),
-    );
-    const loan = items.filter((item) => !off.has(item.id) && !off.has(item.iso));
-    if (loan.length === 0) return [];
-    const first = loan[0].iso;
-    const last = loan[loan.length - 1].iso;
-    // Natural ward English: name the skill group when there is one, otherwise ask
-    // the plain question rather than an awkward "qualified as no staff group".
-    const qualifiedAs =
-      command.groups.length > 0 ? `, qualified as ${command.groups.join(", ")}` : "";
-    return [
-      {
-        assumptionId: assumptionId("borrowed_staff_arranged", command.name, first, last),
-        type: "borrowed_staff_arranged",
-        person: command.name,
-        date: first,
-        toDate: last,
-        question: `Has the lending ward or agency confirmed ${command.name} for ${calendarSpan(first, last)}${qualifiedAs}?`,
-        detail:
-          "Applying this adds a nurse the ward does not employ. The app cannot check the loan or her qualifications with anyone.",
-      },
-    ];
-  });
 }
 
 /** Raising ONE named nurse's own hard limit is an agreement with that nurse. */

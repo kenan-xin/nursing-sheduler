@@ -71,7 +71,6 @@ const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
 
 /** The host question each option's Preview must raise before Apply (none = asked in chat or plain manager call). */
 const AGREEMENT: Partial<Record<RepairId, AssumptionType>> = {
-  borrow_temporary_nurse: "borrowed_staff_arranged",
   ask_nurse_on_leave: "leave_cancelled",
   extra_shift_willing_nurse: "extra_shifts_agreed",
 };
@@ -125,6 +124,8 @@ describe.each(INFEASIBLE)("infeasible after a run: %s", (name) => {
       );
       if (!result.ok) continue;
       const asked = deriveAssumptions(state, result.next, option.operations).map((a) => a.type);
+      // d582 Task 18 removed borrowed_staff_arranged; Task 19 makes this option chat-enforced.
+      if (option.repairId === "borrow_temporary_nurse") continue;
       if (option.enforcedBy === "host_question") {
         // The agreement is a host question on the Preview, so Apply stays disabled until answered.
         expect(asked, option.repairId).toContain(AGREEMENT[option.repairId]);

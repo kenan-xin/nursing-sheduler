@@ -403,37 +403,33 @@ export function buildShortView(
   };
 }
 
-export const BORROW_SOURCE = {
-  relief_pool: "relief pool",
-  other_ward: "another ward",
-  agency: "agency",
-} as const;
-
-/** Step 3, C1: the schedule change only. `question` is the proposal's lending-ward question. */
+/**
+ * Step 3 (d582): book a temporary cover, a display row that lowers each shift's need by
+ * one. The lending ward already agreed in chat (`lenderConfirmed`), so no tick is asked.
+ */
 export function buildBorrowView(
   name: string,
-  source: keyof typeof BORROW_SOURCE,
   groups: readonly string[],
   needs: readonly { date: string; shift: string }[],
-  question: string | null,
   summary: string,
 ): RosterChangeView {
-  const from = BORROW_SOURCE[source];
-  const qualified = groups.length > 0 ? `, and qualified as ${groups.join(", ")}` : "";
+  const shifts = needs.map((n) => `${n.shift} on ${n.date}`).join(", ");
+  const counts = groups.length > 0 ? `, and the cover counts as ${groups.join(", ")}` : "";
+  const fewer = needs.length === 1 ? "on that shift" : "on each of those shifts";
   return {
-    heading: "Ask for a temporary nurse?",
+    heading: "Book a temporary cover?",
     stepLabel: STEP_LABEL[3],
-    title: `${name} (${from}): ${needs.map((n) => `${n.shift} on ${n.date}`).join(", ")}`,
+    title: `${name}: ${shifts}`,
     summary,
     rows: [],
     leaveRows: [],
     worthKnowing: [],
     notChecked: [],
     notes: [
-      `Adds ${name} (${from}) as temporary staff, off on every other date${qualified}.`,
-      `${name}'s roster row appears after the next run.`,
+      `Adds temporary cover ${name}: ${shifts}. The ward needs one fewer nurse ${fewer}${counts}.`,
+      "Run Optimize afterwards so the roster fits the cover.",
       `Please let your ${ROSTER_OWNER} know.`,
     ],
-    agreement: question,
+    agreement: null,
   };
 }

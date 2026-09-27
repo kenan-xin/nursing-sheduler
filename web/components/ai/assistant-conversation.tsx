@@ -134,7 +134,7 @@ export const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
   get_roster: "Reading the roster…",
   find_swap_partners: "Looking for who can swap…",
   prepare_roster_swap: "Preparing a swap…",
-  prepare_borrowed_cover: "Preparing a temporary nurse…",
+  prepare_borrowed_cover: "Preparing a temporary cover…",
 };
 
 /**

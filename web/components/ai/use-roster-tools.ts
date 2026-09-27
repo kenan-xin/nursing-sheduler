@@ -8,13 +8,13 @@
 // user's Apply click changes the roster, through the Roster screen's own edit session
 // (`lib/roster/change-request.ts`): one undo step, one autosave, the same export.
 // No handler writes a roster or a scenario. The ladder tools prepare a pending LINKED
-// proposal (leave move, MC leave, temporary nurse) that applies only with the roster cells.
+// proposal (leave move, MC leave, temporary cover) that applies only with the roster cells.
 
 import { z } from "zod";
 import { useModelVisibleTool } from "./register-model-visible-tool";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
+import { OPTIMIZE_RUN_TOOL } from "@/lib/ai/assistant/playbook";
 import {
-  BORROW_SOURCE,
   buildBorrowView,
   buildOvertimeView,
   buildRosterChangeView,
@@ -118,16 +118,19 @@ export const borrowParameters = z.object({
   name: z
     .string()
     .min(1)
-    .describe("The temporary nurse's name, exactly as the user gave it. Never invent one."),
-  source: z
-    .enum(["relief_pool", "other_ward", "agency"])
     .describe(
-      "Where the temporary nurse comes from. Ask the nursing supervisor for the relief pool first.",
+      "The nurse's name as the user said it, with the lending ward in brackets, for example " +
+        "Haseena (Ward 3). Never invent one.",
     ),
   groups: z
     .array(z.string())
     .max(5)
     .describe("Staff groups the nurse belongs to. The app adds the skill group the shift needs."),
+  lenderConfirmed: z
+    .boolean()
+    .describe(
+      "true ONLY after the user said in chat that the lending ward or agency agreed to lend this nurse.",
+    ),
   summary: z.string().min(1).describe("Why, in one plain sentence. Shown as your reasoning."),
 });
 
@@ -236,6 +239,14 @@ const CARD_SHOWN =
   "Nothing has changed yet; only the user can apply it, on the card. Do not say the roster " +
   'has changed: say "I\'ve prepared ...", and never use the past tense until the user ' +
   "presses Apply. In one short sentence, say which step this is and who does what. Then wait.";
+
+/** Step 4 with no shortfall: the ward need is met without the person (a cover may fill it). */
+const nothingToCover = (ladder: CoverLadder): boolean =>
+  ladder.step === 4 && ladder.short?.ok === true && ladder.short.shortfalls.length === 0;
+
+const NOTHING_TO_COVER =
+  "Nothing to cover: the ward still has enough staff on these shifts without this nurse " +
+  "(a temporary cover may already fill it).";
 
 const ROSTER_BUSY =
   "The user is applying the last roster change right now, so no new card was shown and " +
@@ -469,16 +480,31 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
             ...common,
             candidates: [],
             trades: [],
-            temporary: { needs, skillGroups, sources: ["relief_pool", "other_ward", "agency"] },
+            temporary: { needs, skillGroups },
             guidance:
               "Step 3: ask the nursing supervisor for a nurse from the relief pool first; if none, " +
               `another ward or an agency. Tell the user to let their ${ROSTER_OWNER} know. Ask for ` +
-              "the nurse's name and where the nurse comes from, then call prepare_borrowed_cover. " +
-              "Never make up a name. If they have nobody, call find_swap_partners again with " +
-              "noTemporaryNurse true." +
+              "the nurse's name and the lending ward, and ask in chat whether the lending ward " +
+              "agreed; only once the user says yes, call prepare_borrowed_cover with " +
+              "lenderConfirmed true. Never make up a name. If they have nobody, call " +
+              "find_swap_partners again with noTemporaryNurse true." +
               (args.reason === "sick_or_emergency"
                 ? " If they only want the absence recorded, call prepare_roster_swap without a partner."
                 : " For a swap, say it takes effect after the next optimiser run.") +
+              PLAIN_WORDS,
+          };
+        }
+        if (nothingToCover(ladder)) {
+          return {
+            ...common,
+            candidates: [],
+            trades: [],
+            nothingToCover: true,
+            guidance:
+              `${NOTHING_TO_COVER} Say so plainly; do not offer to run it short. ` +
+              (args.reason === "sick_or_emergency"
+                ? "To record the absence, call prepare_roster_swap without a partner."
+                : "The user can give the nurse these shifts off by hand on the Roster screen.") +
               PLAIN_WORDS,
           };
         }
@@ -577,7 +603,8 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
 
         // No partner: run one short (step 4 only), or record the MC alone.
         if (partnerIdx === null) {
-          const short = ladder.step === 4 ? ladder.short : null;
+          const empty = nothingToCover(ladder);
+          const short = ladder.step === 4 && !empty ? ladder.short : null;
           if (short?.ok) {
             return show(
               short.cells,
@@ -605,6 +632,7 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
               sickLeave,
             );
           }
+          if (empty) return `${NOTHING_TO_COVER} No card was shown.`;
           // The refusal already says to talk to the roster owner or the nursing supervisor.
           if (short) return short.reasons[0];
           return (
@@ -685,19 +713,27 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
       name: "prepare_borrowed_cover",
       agentId,
       description:
-        "Step 3 only, when find_swap_partners says step 3: prepare adding a temporary nurse " +
-        "from the relief pool, another ward or an agency to cover the uncovered shifts. Use the " +
-        "name the user gave. This does NOT change anything: the user sees a card with the " +
-        "lending-ward question and an Apply button only they can press.",
+        "Step 3 only, when find_swap_partners says step 3 and the user said in chat that the " +
+        "lending ward agreed: prepare a temporary cover nurse from the relief pool, another " +
+        "ward or an agency for the uncovered shifts. The nurse is not added as staff: each cover " +
+        "lowers that shift's staffing need by one. This does NOT change anything: the user " +
+        "sees a card with an Apply button only they can press.",
       parameters: borrowParameters,
       handler: async (args, { token, signal }) => {
+        if (!args.lenderConfirmed) {
+          return (
+            "Ask the user in chat whether the lending ward or agency agreed to lend this nurse, " +
+            "and call prepare_borrowed_cover with lenderConfirmed true only after they say yes. " +
+            "No card was shown and nothing was altered."
+          );
+        }
         const read = await readRosterForAssistant();
         const late = assertTurnAuthority(token, signal);
         if (late) return late;
         if (token === null) return SUPERSEDED;
         const resolved = resolveSwap(read, args.person, args.dates);
         if (!resolved.ok) return resolved.message;
-        const { ctx, personIdx, dateIdxs, baselineId } = resolved;
+        const { ctx, personIdx, dateIdxs } = resolved;
         const giving = givingProblem(ctx, personIdx, dateIdxs);
         if (giving !== null) return `${giving} Ask the user which dates they mean.`;
         const ladder = findCoverLadder(ctx, personIdx, dateIdxs, args.reason);
@@ -708,36 +744,19 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         const sick = args.reason === "sick_or_emergency";
         const personId = ctx.context.people[personIdx].id;
         const personIsos = dateIdxs.map((d) => ctx.context.calendar[d].iso);
-        const skill = ladder.borrow.flatMap((n) => (n.skillGroup ? [n.skillGroup] : []));
-        const groups = [...new Set([...args.groups, ...skill])];
         const isos = ctx.context.calendar.map((day) => day.iso);
-        const needDates = new Set(ladder.borrow.map((n) => isos[n.dateIdx]));
         const commands: AssistantCommandV1[] = [
-          { type: "add_person", name, groups },
-          // ponytail: one "must be off" per other date; merge into runs if proposals get long.
-          ...isos
-            .filter((iso) => !needDates.has(iso))
-            .map(
-              (iso): AssistantCommandV1 => ({
-                type: "set_off_request",
-                personId: name,
-                startDate: iso,
-                endDate: iso,
-                weight: "must",
-              }),
-            ),
+          // One cover per need: it lowers that shift's need on that date (d582).
           ...ladder.borrow.map(
             (n): AssistantCommandV1 => ({
-              type: "set_shift_request",
-              personId: name,
+              type: "add_temporary_cover",
+              name,
+              date: isos[n.dateIdx],
               shiftType: n.shift,
-              startDate: isos[n.dateIdx],
-              endDate: isos[n.dateIdx],
-              weight: "must",
+              groups: [...new Set([...args.groups, ...(n.skillGroup ? [n.skillGroup] : [])])],
             }),
           ),
-          // A swap: the borrowed nurse cannot sit on this roster yet (C2, bead g1p), so
-          // the asking nurse's off request is what frees them at the next run.
+          // The asking nurse's leave (MC) or off request frees them at the next run.
           ...(sick
             ? addLeave(personId, personIsos)
             : personIsos.map(
@@ -750,42 +769,26 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
                 }),
               )),
         ];
-        const prepared = await prepareLinked(
-          commands,
-          `${args.summary} (${BORROW_SOURCE[args.source]})`,
-        );
+        const prepared = await prepareLinked(commands, args.summary);
         const lateAgain = assertTurnAuthority(token, signal);
         if (lateAgain) {
           if (prepared.ok) void assistantProposalCommands.cancel(prepared.linked.proposalId);
           return lateAgain;
         }
         if (!prepared.ok) return prepared.message;
-        const question = prepared.linked.assumptions.find(
-          (a) => a.type === "borrowed_staff_arranged",
-        )?.question;
-        if (question === undefined) {
-          return "The app did not ask the lending ward to confirm this nurse, so no card was shown and nothing was altered.";
-        }
-        // C1: the roster only records the absence (sick reason). The nurse's row needs
-        // roster-file/2 (Task 12), so it appears after the next run.
-        const cells: RosterCellChange[] = sick
-          ? dateIdxs.map((d) => ({
-              personIdx,
-              dateIdx: d,
-              before: ctx.days[personIdx][d],
-              after: { kind: "leave" },
-            }))
-          : [];
         const needs = ladder.borrow.map((n) => ({
           date: plainDate(isos[n.dateIdx]),
           shift: shiftName(ctx.context, n.shift),
         }));
-        const view = buildBorrowView(name, args.source, groups, needs, question, args.summary);
+        const groups = [
+          ...new Set([...args.groups, ...ladder.borrow.flatMap((n) => n.skillGroup ?? [])]),
+        ];
+        const view = buildBorrowView(name, groups, needs, args.summary);
         const person = personName(ctx.context, personIdx);
         const swapNote = `The swap takes effect after the next run: ${person} keeps these shifts until then.`;
         const shown = showCard(
           {
-            request: cells.length > 0 ? { solvedBaselineId: baselineId, cells } : null,
+            request: null,
             view: sick ? view : { ...view, notes: [...view.notes, swapNote] },
             linked: {
               proposalId: prepared.linked.proposalId,
@@ -797,12 +800,13 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         );
         if (!shown) return ROSTER_BUSY;
         return (
-          `${CARD_SHOWN} Tell the user ${name}'s roster row appears after the next optimiser run, ` +
+          `${CARD_SHOWN} Tell the user Apply books ${name} as temporary cover on the Staff screen, ` +
           (sick
             ? ""
-            : `and the swap takes effect after the next optimiser run (${person} keeps these shifts until then), `) +
-          `and to let their ${ROSTER_OWNER} know about the temporary nurse. Offer ` +
-          "request_optimize_run once they have applied it."
+            : `the swap takes effect after the next optimiser run (${person} keeps these shifts until then), `) +
+          `and to let their ${ROSTER_OWNER} know about the temporary nurse. Once they have ` +
+          `applied it, offer a run with ${OPTIMIZE_RUN_TOOL} so the roster fits the cover; it ` +
+          "starts only when the user says yes."
         );
       },
     },
