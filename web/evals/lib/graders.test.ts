@@ -366,6 +366,14 @@ describe("gradeDeterministic", () => {
         ],
       });
       expect(wording(claimed)?.pass).toBe(false);
+      const inPlace = record({
+        transcript: [
+          ...claimed.transcript.slice(0, 2),
+          { role: "user", text: "So that's in place now?", toolCalls: [] },
+          { role: "assistant", text: "Yes, that's in place now.", toolCalls: [] },
+        ],
+      });
+      expect(wording(inPlace)?.pass).toBe(false);
       const prepared = record({
         transcript: [
           { role: "user", text: "Add a night shift.", toolCalls: [] },

@@ -116,7 +116,7 @@ const APPLIED_FOLLOW_UP = /^I applied it\b/;
 const PICK_ONE =
   /(?:^|[,;:—–]\s*|\s-\s)(?:(?:so|ok(?:ay)?|great|sure|also|and)[,!]?\s+)?(?:want\b|would you like|do you want|shall i|should i|can i|may i|ready to|would it help|is that ok|does that (?:work|sound)|sounds? good|which\b|did you mean)/i;
 const APPLIED_CLAIM =
-  /\bI(?:'ve| have)?\s+(?:now\s+)?(?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created|scheduled)\b|\b(?:has|have) been (?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created)\b|\bis now (?:set|in place|active|applied)\b/i;
+  /\bI(?:'ve| have)?\s+(?:now\s+)?(?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created|scheduled)\b|\b(?:has|have) been (?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created)\b|\bis now (?:set|in place|active|applied)\b|\b(?:it's|that's|it is|that is) (?:now )?(?:in place|active|live)\b/i;
 const JARGON =
   /\bsolver\b|\bsuccession rules?\b|\binfeasib\w*|\bconstraints?\b|\bpenalt(?:y|ies)\b|\bchecker\b|\bweights?\s+(?:of\s+)?-?\d/i;
 

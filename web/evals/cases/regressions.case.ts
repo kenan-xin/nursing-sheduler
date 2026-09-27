@@ -67,9 +67,7 @@ export const REGRESSION_CASES: EvalCase[] = [
       onPreview: "ignore",
     },
     expect: {
-      judge: [
-        "Says yes, and either prepares that rule or offers it on a card; it never ends on a yes/no question in text.",
-      ],
+      judge: ["Says yes, and either prepares that rule or offers it on a card."],
     },
   },
   {

@@ -32,10 +32,20 @@ vi.mock("@copilotkit/react-core/v2", async (importOriginal) => ({
 class ScriptedAgent extends AbstractAgent {
   private hop = 0;
   private active: { complete(): void } | null = null;
-  constructor(readonly script: { toolName?: string; args?: string; text: string; hang?: boolean }) {
+  constructor(
+    readonly script: {
+      toolName?: string;
+      args?: string;
+      text: string;
+      hang?: boolean;
+      /** Each run's context, in order. Shared by every clone. */
+      contexts?: RunAgentInput["context"][];
+    },
+  ) {
     super({ agentId: "eval", threadId: "t" });
   }
   run(input: RunAgentInput): Observable<BaseEvent> {
+    this.script.contexts?.push(input.context);
     const nth = (this.hop += 1);
     const { toolName, args, text, hang } = this.script;
     return new Observable<BaseEvent>((sub) => {
@@ -148,6 +158,34 @@ describe("runTrial", () => {
     expect(r.final.rangeEnd).toBe("2026-11-03");
     expect(r.navigations.length).toBeGreaterThan(0);
   });
+
+  it("tells the next turn that an unapplied Preview has changed nothing (dt9)", async () => {
+    const args = JSON.stringify({
+      summary: "Shorten the roster.",
+      operations: [
+        {
+          type: "set_roster_range",
+          start: "2026-11-01",
+          end: "2026-11-03",
+          importPublicHolidays: false,
+        },
+      ],
+    });
+    const contexts: RunAgentInput["context"][] = [];
+    const r = await runTrial(
+      input(
+        {
+          ...base,
+          user: { turns: ["Shorten the roster.", "So that's done now?"], onPreview: "ignore" },
+        },
+        { toolName: "prepare_scenario_change", args, text: "Check the Preview.", contexts },
+      ),
+    );
+    expect(r.error).toBeNull();
+    const pending = (c: RunAgentInput["context"]) => c.at(-1)?.value ?? "";
+    expect(pending(contexts[0]!)).toBe("Nothing.");
+    expect(pending(contexts.at(-1)!)).toMatch(/Preview, not applied/);
+  }, 20_000);
 
   it("finishes a screen the harness never mounts: its bounded waits ignore the pinned day", async () => {
     // The harness pins Date; open_app_screen's anchor poll read Date.now() and spun until

@@ -299,6 +299,8 @@ describe("what still waits on the user's Apply (dt9)", () => {
     const entry = waiting({ preview: true, rosterChange: false });
     expect(entry.value).toMatch(/Preview.*not applied/);
     expect(entry.value).toMatch(/nothing in it has changed/);
+    expect(entry.value).toMatch(/say not yet/);
+    expect(entry.value).toContain("'I applied it'");
   });
 
   it("says the same of a roster change card", () => {

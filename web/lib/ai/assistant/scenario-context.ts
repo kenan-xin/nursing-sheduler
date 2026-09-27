@@ -184,7 +184,9 @@ export function describePending(pending: BuildContextInput["pending"]): string {
   if (cards.length === 0) return "Nothing.";
   return (
     `The user sees ${cards.join(" and ")}, not applied: nothing in it has changed yet. ` +
-    "Until they press Apply, say it is prepared and waiting for Apply, never that it is done or in place."
+    "The user has NOT pressed Apply, so that change is NOT in place; when they do, the app " +
+    "sends you a message starting 'I applied it'. If they ask whether it is done or in " +
+    "place, say not yet: it is ready and changes when they press Apply."
   );
 }
 
