@@ -4,14 +4,15 @@
 // knows a model exists. A DiffScope is already a capability id (diff.ts pins that), so
 // the only mapping is the Guided fold: the five rule screens are Advanced-only, and in
 // Guided every rule is a row on the Rules screen (`rule-library`).
+//
+// IT DOES NOT NAME THE SCREEN. A screen's one user-facing name is the sidebar's, and
+// `resolveScreenName` (lib/capability/resolve) is the one place that derives it. A
+// `ChangeScreen` carries the capability id to open; naming it from the Preview's own
+// scope vocabulary here is what once made the Apply notice say "Supervision" for the
+// "Shift Type Coverings" screen.
 
 import type { AppMode } from "@/lib/mode/mode";
-import {
-  SCOPE_LABEL,
-  type DiffScope,
-  type ProposalDiff,
-  type ProposalDiffEntry,
-} from "@/lib/proposal/diff";
+import type { DiffScope, ProposalDiff, ProposalDiffEntry } from "@/lib/proposal/diff";
 
 const RULE_SCOPES: ReadonlySet<DiffScope> = new Set<DiffScope>([
   "staffing-requirements",
@@ -34,8 +35,6 @@ const SCREEN_ORDER: readonly string[] = [
   "shift-type-coverings",
   "leave-and-requests",
 ];
-
-const SCREEN_LABEL: Readonly<Record<string, string>> = { ...SCOPE_LABEL, "rule-library": "Rules" };
 
 /** [key prefix, singular, plural]. `available:` is absent: it restates an added person. */
 const NOUNS: readonly (readonly [string, string, string])[] = [
@@ -114,13 +113,11 @@ function announce(entries: readonly ProposalDiffEntry[]): string {
 export interface ChangeScreen {
   /** Capability id to open through the host navigation. */
   capabilityId: string;
-  /** Screen name for buttons and the announcement. */
-  label: string;
   /** Entries the user asked for on this screen; picks the primary screen. */
   directCount: number;
   /** Keys to outline here, deduplicated. Removed things have none. */
   keys: string[];
-  /** The aria-live text, e.g. "3 shift types added". */
+  /** The aria-live text, e.g. "3 shift types added". Names what changed, never the screen. */
   announcement: string;
 }
 
@@ -150,7 +147,6 @@ export function planChangeHighlight(
     .map(
       ([capabilityId, slot]): ChangeScreen => ({
         capabilityId,
-        label: SCREEN_LABEL[capabilityId] ?? capabilityId,
         directCount: slot.direct,
         keys: [
           ...new Set(slot.entries.map(targetKeyFor).filter((key): key is string => key !== null)),

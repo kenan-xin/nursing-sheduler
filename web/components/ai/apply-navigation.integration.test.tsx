@@ -73,7 +73,7 @@ afterEach(() => {
 });
 
 describe("Apply → navigate → highlight", () => {
-  it("opens Shift types, outlines the new card, announces it, and leaves focus alone", async () => {
+  it("opens Shifts, outlines the new card, announces it, and leaves focus alone", async () => {
     const user = userEvent.setup();
     const prepared = await assistantProposalCommands.prepare({
       proposalId: crypto.randomUUID(),
@@ -118,7 +118,7 @@ describe("Apply → navigate → highlight", () => {
       "data-change-highlight",
     );
     expect(screen.getByTestId("apply-navigation-status")).toHaveTextContent(
-      "Opened Shift types. 1 shift type added.",
+      "Opened Shifts. 1 shift type added.",
     );
     // Apply does not move focus onto the Shifts screen's Add button.
     expect(document.activeElement?.getAttribute(CAPABILITY_ANCHOR_ATTRIBUTE)).not.toBe(
