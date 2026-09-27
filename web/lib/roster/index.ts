@@ -154,6 +154,16 @@ export {
 } from "./promote";
 
 export {
+  applyCoverSheet,
+  buildCoverSheetPlan,
+  PROVENANCE_SHEET_NAME,
+  type CoverSheetCountCredit,
+  type CoverSheetLayout,
+  type CoverSheetPlan,
+  type CoverSheetRow,
+} from "./cover-sheet";
+
+export {
   buildEditedCellPatches,
   EditedXlsxError,
   patchFrozenXlsxWithEdits,

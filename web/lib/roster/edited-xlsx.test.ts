@@ -19,6 +19,8 @@ import { fileURLToPath } from "node:url";
 import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 
+import { parseSubmissionDocument } from "./context";
+import { buildCoverSheetPlan, type CoverSheetPlan } from "./cover-sheet";
 import {
   buildEditedCellPatches,
   EditedXlsxError,
@@ -92,6 +94,58 @@ function fixtureProvenance() {
     solvedBaselineId: "abc123def456",
     appBuild: "0.0.0-test",
   };
+}
+
+/**
+ * The generator's scenario, as a submitted document: the C5 goldens were produced
+ * from exactly this shape (3 dates 2023-08-18..20, shifts D/E/N, people P1..P3),
+ * so the cover plan's date indices line up with the fixture's date columns.
+ */
+const COVER_SCENARIO = `apiVersion: alpha
+dates:
+  range:
+    startDate: 2023-08-18
+    endDate: 2023-08-20
+people:
+  items:
+    - id: P1
+    - id: P2
+    - id: P3
+shiftTypes:
+  items:
+    - id: D
+    - id: E
+    - id: N
+preferences:
+  - type: at most one shift per day
+`;
+
+/** Haseena covers N on the last date, in "Ward 3". */
+function coverPlan(): CoverSheetPlan {
+  const parsed = parseSubmissionDocument(COVER_SCENARIO);
+  if (!parsed.ok) throw new Error(parsed.reason);
+  const plan = buildCoverSheetPlan(parsed.document, [
+    { name: "Haseena (Ward 3)", iso: "2023-08-20", shiftId: "N", groups: ["Ward 3"] },
+  ]);
+  if (plan === null) throw new Error("expected a cover plan");
+  return plan;
+}
+
+/**
+ * The plain golden enriched with the one thing it lacks: an `export.extraRows`
+ * summary column (the exporter puts it one column right of the last date). Real
+ * C5 structure, constructed input — the same pattern the Notes matrix uses.
+ */
+async function withExtraSummaryColumn(file: string): Promise<Blob> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(fixtureBytes(file) as unknown as ArrayBuffer);
+  const sheet = workbook.worksheets[0];
+  sheet.getCell(1, 5).value = "Total";
+  for (let row = 3; row <= 5; row++) sheet.getCell(row, 5).value = 3;
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new Blob([buffer as BlobPart], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
 }
 
 // --- Optional independent openpyxl semantic diff --------------------------------
@@ -174,18 +228,111 @@ describe("buildEditedCellPatches", () => {
 });
 
 describe("patchFrozenXlsxWithEdits — no edits", () => {
-  it("returns the frozen bytes unchanged without an ExcelJS round-trip", async () => {
+  it("no cover and no edit returns the frozen bytes unchanged without an ExcelJS round-trip", async () => {
     const blob = fixtureBlob("c5-prettify-history.xlsx");
     const result = await patchFrozenXlsxWithEdits({
       frozenXlsx: blob,
       edits: [],
       coordinateMap: fixtureCoordinateMap(MANIFEST["prettify-history"]),
       provenance: fixtureProvenance(),
+      cover: null,
     });
     // Same byte content: no re-serialization occurred.
     expect(new Uint8Array(await result.arrayBuffer())).toEqual(
       fixtureBytes("c5-prettify-history.xlsx"),
     );
+  });
+});
+
+// ------------------------------------------------------------------------------
+// Temporary cover (d582, F6): her rows are inserted under the staff window and
+// her credit is written into the count rows, on the edited export.
+// ------------------------------------------------------------------------------
+
+describe("patchFrozenXlsxWithEdits — temporary cover", () => {
+  const meta = MANIFEST["prettify-history"];
+  const coordinateMap = fixtureCoordinateMap(meta);
+
+  it("a cover with no edits still takes the ExcelJS path and writes her rows", async () => {
+    const patched = await patchFrozenXlsxWithEdits({
+      frozenXlsx: fixtureBlob(meta.file),
+      edits: [],
+      coordinateMap,
+      provenance: fixtureProvenance(),
+      cover: coverPlan(),
+    });
+    // Any cover forces the round-trip: the frozen bytes cannot carry her row.
+    expect(new Uint8Array(await patched.arrayBuffer())).not.toEqual(fixtureBytes(meta.file));
+  });
+
+  it("cover rows sit under the staff rows and Score/Status move down", async () => {
+    const patched = await patchFrozenXlsxWithEdits({
+      frozenXlsx: fixtureBlob(meta.file),
+      edits: [],
+      coordinateMap,
+      provenance: fixtureProvenance(),
+      cover: coverPlan(),
+    });
+    const sheet = (await reRead(patched)).worksheets[0];
+    // Prettify: A name, B history, C/D/E dates. She is the new last staff row.
+    expect(sheet.getCell(6, 1).value).toBe("Haseena (Ward 3)");
+    expect(sheet.getCell(6, 3).value).toBe("");
+    expect(sheet.getCell(6, 4).value).toBe("");
+    expect(sheet.getCell(6, 5).value).toBe("N");
+    expect(sheet.getCell(7, 1).value).toBe("Score");
+    expect(sheet.getCell(7, 3).value).toBe(9);
+    expect(sheet.getCell(8, 1).value).toBe("Status");
+    expect(sheet.getCell(8, 3).value).toBe("OPTIMAL");
+  });
+
+  it("her summary cells are blank", async () => {
+    // The plain golden plus one export extra column (E, right of the last date).
+    const patched = await patchFrozenXlsxWithEdits({
+      frozenXlsx: await withExtraSummaryColumn(MANIFEST["plain-3people"].file),
+      edits: [],
+      coordinateMap: fixtureCoordinateMap(MANIFEST["plain-3people"]),
+      provenance: fixtureProvenance(),
+      cover: coverPlan(),
+    });
+    const sheet = (await reRead(patched)).worksheets[0];
+    expect(sheet.getCell(6, 1).value).toBe("Haseena (Ward 3)");
+    expect(sheet.getCell(6, 5).value).toBe(""); // the staff tally never carries over
+  });
+
+  it("edits are patched by coordinateMap before the insert", async () => {
+    const patched = await patchFrozenXlsxWithEdits({
+      frozenXlsx: fixtureBlob(meta.file),
+      edits: [{ personIdx: 0, dateIdx: 0, day: { kind: "shift", shiftId: "E" } }],
+      coordinateMap,
+      provenance: fixtureProvenance(),
+      cover: coverPlan(),
+    });
+    const sheet = (await reRead(patched)).worksheets[0];
+    // The edit landed at its FROZEN coordinate (row 3, first date column), and the
+    // cover row was inserted below the staff window without moving it.
+    expect(sheet.getCell(3, 3).value).toBe("E");
+    expect(sheet.getCell(6, 1).value).toBe("Haseena (Ward 3)");
+    expect(sheet.getCell(7, 1).value).toBe("Score");
+  });
+
+  it("provenance lists name, ISO date, shift id and groups JSON", async () => {
+    const patched = await patchFrozenXlsxWithEdits({
+      frozenXlsx: fixtureBlob(meta.file),
+      edits: [],
+      coordinateMap,
+      provenance: fixtureProvenance(),
+      cover: coverPlan(),
+    });
+    const provenance = (await reRead(patched)).worksheets.find(
+      (ws) => ws.name === "Roster provenance",
+    );
+    expect(provenance).toBeDefined();
+    const rows = readSheetRows(provenance!);
+    // The "as solved" block and the cover table live on the same sheet.
+    expect(rows.find((r) => r[0] === "Solver status (as solved)")?.[1]).toBe("OPTIMAL");
+    expect(rows).toContainEqual(["Temporary cover", null, null, null]);
+    expect(rows).toContainEqual(["Name", "Date", "Shift type", "Groups"]);
+    expect(rows).toContainEqual(["Haseena (Ward 3)", "2023-08-20", "N", '["Ward 3"]']);
   });
 });
 
