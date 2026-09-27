@@ -17,6 +17,7 @@ const meta = {
       shiftGroups: [],
       rangeStart: "",
       rangeEnd: "",
+      counts: [],
     }).issues,
   },
 } satisfies Meta<typeof ReadinessBanner>;
