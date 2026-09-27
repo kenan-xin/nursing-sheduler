@@ -62,11 +62,14 @@ import type {
   CanonicalPreference,
   CanonicalScenarioDocument,
   CanonicalShiftTypesContainer,
+  GroupId,
   ImportCardsByKind,
   ImportNormalizationTarget,
   IsoDate,
   ScenarioUiState,
+  ShiftTypeRef,
   UiRequestCell,
+  UiTemporaryCover,
 } from "./types";
 import {
   producerAffinity,
@@ -81,7 +84,7 @@ import {
   producerShiftTypesContainer,
   producerSuccessions,
 } from "./schemas/producer";
-import { zIsoDate, zWeight } from "./schemas/primitives";
+import { zIsoDate, zRef, zWeight } from "./schemas/primitives";
 
 /** The only Workspace document version this build understands. */
 export const WORKSPACE_VERSION = 1 as const;
@@ -95,6 +98,15 @@ export const WORKSPACE_VERSION = 1 as const;
  */
 export const MAX_ONE_SHIFT_PER_DAY_WORKSPACE_ID = "max-one-shift-per-day";
 
+/**
+ * The `temporaryCover` conversion failure (d582). Covers are applied by the web app
+ * before it submits (spec §1/§2), so a Workspace carrying a non-empty list is not a
+ * convertible solver document. Mirrors Python
+ * `MESSAGE_TEMPORARY_COVER_REQUIRES_WEB_APPLICATION` (core/.../workspace.py).
+ */
+export const TEMPORARY_COVER_MESSAGE =
+  "Temporary cover is applied by the web app. Submit the strict document it produces.";
+
 // ---------------------------------------------------------------------------
 // Emitted document shape
 // ---------------------------------------------------------------------------
@@ -104,6 +116,18 @@ export type WorkspacePreferenceRecord = {
   workspaceId: string;
   enabled: boolean;
 } & Record<string, unknown>;
+
+/**
+ * One Workspace temporary-cover entry (d582) — the authored fields only (never the
+ * F2 `_k`). `shiftType`/`groups` accept a numeric id like every other Workspace
+ * reference. The web app applies these before solving; the solver never sees one.
+ */
+export interface WorkspaceTemporaryCover {
+  name: string;
+  date: IsoDate;
+  shiftType: string | number;
+  groups?: Array<string | number>;
+}
 
 /**
  * The flat Workspace V1 document the frontend emits for backup/sharing. Field
@@ -122,6 +146,8 @@ export interface WorkspaceDocumentV1 {
   shiftTypes: CanonicalShiftTypesContainer;
   preferences: WorkspacePreferenceRecord[];
   export?: CanonicalExportConfig;
+  /** Emitted only when non-empty, so every cover-free file stays byte-identical. */
+  temporaryCover?: WorkspaceTemporaryCover[];
   appVersion?: string;
 }
 
@@ -163,6 +189,17 @@ const zWorkspaceDates = z.strictObject({
   groups: z.array(producerDateGroup).optional(),
 });
 
+// A temporary cover (d582) is a Workspace-only authoring record the web app applies
+// before solving: structurally accepted (so a backup carrying covers still LOADS)
+// but refused by the conversion below. `shiftType`/`groups` reuse the shared
+// reference type (id or numeric id), matching the Python `str | int` fields.
+const zWorkspaceTemporaryCover = z.strictObject({
+  name: z.string(),
+  date: zIsoDate,
+  shiftType: zRef,
+  groups: z.array(zRef).optional(),
+});
+
 /**
  * The strict Workspace V1 root schema. Every known boundary — entities,
  * containers, groups, export, and preference bodies — is validated with the exact
@@ -180,6 +217,7 @@ export const workspaceRootSchema = z.strictObject({
   people: producerPeopleContainer,
   shiftTypes: producerShiftTypesContainer,
   preferences: z.array(zWorkspacePreference).default([]),
+  temporaryCover: z.array(zWorkspaceTemporaryCover).optional(),
   export: producerExportConfig.optional(),
   appVersion: z.string().optional(),
 });
@@ -543,6 +581,19 @@ export function convertWorkspaceForOptimize(text: string): WorkspaceConversionRe
   if (!structural.success) return { status: "invalid", issues: zodIssues(structural.error) };
   const workspace = structural.data;
 
+  // A non-empty temporary cover is a web-applied credit (d582), not a solver person:
+  // refuse it, located at its own field, before readiness — mirroring Python's
+  // `convert_workspace_to_strict`. (The guard lives here rather than in
+  // `projectWorkspaceToStrict`, whose signature returns a document, not issues.)
+  if (workspace.temporaryCover && workspace.temporaryCover.length > 0) {
+    return {
+      status: "invalid",
+      issues: [
+        { path: ["temporaryCover"], code: "invalid_value", message: TEMPORARY_COVER_MESSAGE },
+      ],
+    };
+  }
+
   const readiness = checkWorkspaceReadiness(workspace);
   if (readiness.length > 0) return { status: "not_ready", issues: readiness };
 
@@ -631,9 +682,17 @@ export function buildWorkspaceDocument(state: ScenarioUiState): WorkspaceDocumen
     shiftTypes: canonical.shiftTypes,
     preferences,
     ...(canonical.export ? { export: canonical.export } : {}),
+    ...(state.temporaryCover.length > 0
+      ? { temporaryCover: state.temporaryCover.map(toWorkspaceTemporaryCover) }
+      : {}),
     appVersion: currentAppVersion(),
   };
   return document;
+}
+
+/** Project a durable UI cover onto its Workspace record, dropping the F2 `_k`. */
+function toWorkspaceTemporaryCover(cover: UiTemporaryCover): WorkspaceTemporaryCover {
+  return { name: cover.name, date: cover.date, shiftType: cover.shiftType, groups: cover.groups };
 }
 
 /**
@@ -819,12 +878,22 @@ export function normalizeWorkspaceToImportTarget(
         []) as unknown as ImportNormalizationTarget["exportLayout"]["extraRows"],
     },
     cardsByKind,
-    // Workspace V1 gains an optional `temporaryCover` field in a later step (d582);
-    // the slice is required on the durable state, so default it here meanwhile.
-    temporaryCover: [],
+    // A Workspace backup may carry temporary covers (d582) the web app applied when
+    // it was saved; restore them into authoring state exactly as written.
+    temporaryCover: (workspace.temporaryCover ?? []).map(normalizeWorkspaceCover),
   };
   if (maxOneShiftPerDay !== undefined) target.maxOneShiftPerDay = maxOneShiftPerDay;
   return target;
+}
+
+/** Restore a Workspace cover into a durable UI cover (a fresh `_k` is assigned later). */
+function normalizeWorkspaceCover(cover: WorkspaceTemporaryCover): UiTemporaryCover {
+  return {
+    name: cover.name,
+    date: normalizeIsoDate(cover.date),
+    shiftType: cover.shiftType as ShiftTypeRef,
+    groups: (cover.groups ?? []) as GroupId[],
+  };
 }
 
 /** Attach a card body's restored `uid`/`disabled` (both omitted when absent/false). */
