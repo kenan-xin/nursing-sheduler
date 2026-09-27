@@ -130,7 +130,7 @@ export const FLOW_CASES: EvalCase[] = [
     expect: {
       proposalOps: [
         {
-          type: "add_succession_rule",
+          type: "add_shift_sequence_rule",
           pattern: ["ALL", "ALL", "ALL", "ALL", "ALL", "ALL"],
           weight: "-infinity",
         },
@@ -167,9 +167,9 @@ export const FLOW_CASES: EvalCase[] = [
       onPreview: "ignore",
     },
     expect: {
-      proposalOps: [{ type: "add_succession_rule", pattern: ["N", "D"], weight: "-infinity" }],
+      proposalOps: [{ type: "add_shift_sequence_rule", pattern: ["N", "D"], weight: "-infinity" }],
       proposalCheck: (ops) =>
-        ops.some((op) => op.type === "add_succession_rule" && op.weight === "infinity")
+        ops.some((op) => op.type === "add_shift_sequence_rule" && op.weight === "infinity")
           ? "a succession is a hard must-follow"
           : null,
       judge: ["Makes the day off after nights a preference, not a must."],

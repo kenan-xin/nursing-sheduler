@@ -448,7 +448,7 @@ describe("gradeDeterministic", () => {
         {
           proposalId: "p",
           status: "preview_ready",
-          ops: [{ type: "add_succession_rule", weight: "infinity" } as never],
+          ops: [{ type: "add_shift_sequence_rule", weight: "infinity" } as never],
         },
       ],
     });
