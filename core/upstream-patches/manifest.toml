@@ -3,7 +3,7 @@
 upstream = "j3soon/nurse-scheduling feature/genie"
 upstream_commit = "1bf4b85"
 # Oldest first. The check reverse-applies them newest first.
-patch_order = ["P0-fixture-restamp.patch", "P1-person-temporary.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch", "W2-server-maintenance.patch", "W2-server-errors.patch", "W2-server-jobs-runner.patch", "W2-server-diagnostic.patch", "W2-server-config.patch", "W2-server-api-schemas.patch", "W2-server-api-optimize.patch", "W2-server-app.patch"]
+patch_order = ["P0-fixture-restamp.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch", "W2-server-maintenance.patch", "W2-server-errors.patch", "W2-server-jobs-runner.patch", "W2-server-diagnostic.patch", "W2-server-config.patch", "W2-server-api-schemas.patch", "W2-server-api-optimize.patch", "W2-server-app.patch"]
 
 [[file]]
 path = "nurse_scheduling/cli.py"
@@ -44,7 +44,7 @@ upstream_blob = "77640eb47261f11a6501e11dddfafdb18de97d73"
 path = "nurse_scheduling/models.py"
 class = "patched"
 upstream_blob = "edcdab1503ea2ca11977d1693b259a53449d5245"
-patches = ["P1-person-temporary.patch", "P2-P3-skillmix-overrides.patch"]
+patches = ["P2-P3-skillmix-overrides.patch"]
 
 [[file]]
 path = "nurse_scheduling/preference_types.py"
