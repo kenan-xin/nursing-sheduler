@@ -99,6 +99,28 @@ describe("the rule arms' text states what the solver enforces", () => {
     }
   });
 
+  it("a pairing rule's weight: soft numbers, -infinity keeps apart, +infinity refused", () => {
+    // core shift_affinity: the weight rewards both groups being on the shifts that date.
+    for (const type of ["add_pairing_rule", "edit_pairing_rule"]) {
+      const weight = arm(type).weight.description ?? "";
+      expect(weight).toContain('"-infinity" = keep apart always');
+      expect(weight).toContain("apart");
+      expect(weight).toContain("together");
+      // "+infinity" makes both work those shifts on every date: refused, not suggested.
+      expect(weight).toContain('"+infinity" is refused');
+      expect(weight).toContain("every date");
+    }
+  });
+
+  it("a supervision rule has no weight and an empty date list means every date", () => {
+    for (const type of ["add_supervision_rule", "edit_supervision_rule"]) {
+      const shape = arm(type);
+      expect(shape.weight).toBeUndefined();
+      expect(shape.dates.description).toContain("[] = every date");
+      expect(shape.shiftTypes.description).toContain("OFF and LEAVE are not allowed");
+    }
+  });
+
   it("a count's weight rewards the expression holding", () => {
     const weight = arm("add_count_rule").weight.description ?? "";
     expect(weight).toContain("works against");

@@ -1372,6 +1372,28 @@ test.describe("F5 roster editing — the universal edit path", () => {
     await expect(page.getByTestId("roster-save-saved")).toBeVisible();
   });
 
+  // w0e.23 / mui/base-ui#5528: an open Combobox aria-hides everything outside it
+  // but used to leave that content tabbable (axe aria-hidden-focus, WCAG 4.1.2).
+  test("an open shift picker leaves nothing aria-hidden yet tabbable, and restores the tab order", async ({
+    page,
+  }) => {
+    await seedWorkingRoster(page);
+    const cell = editableCells(page).first();
+    await cell.click();
+    const picker = page.getByTestId("roster-shift-picker");
+    await picker.click();
+    await picker.fill("zzz");
+
+    const { AxeBuilder } = await import("@axe-core/playwright");
+    const open = await new AxeBuilder({ page }).withRules(["aria-hidden-focus"]).analyze();
+    expect(open.violations.flatMap((v) => v.nodes.map((n) => n.target.join(" ")))).toEqual([]);
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("roster-edit-bar")).toBeVisible();
+    await expect(page.locator('[aria-hidden="true"] td[role="button"]')).toHaveCount(0);
+    await expect(editableCells(page).nth(1)).not.toHaveAttribute("tabindex", "-1");
+  });
+
   test("every day-state option meets the 44px coarse-pointer floor, measured", async ({ page }) => {
     await seedWorkingRoster(page);
     await editableCells(page).first().click();

@@ -263,6 +263,17 @@ describe("the command arms the provider is actually shown", () => {
     }
   });
 
+  it("names pairing and supervision ops in plain words, not the engine's (bead 31og)", () => {
+    // The screens are Affinities and Shift Type Coverings; the fields are preceptors and
+    // people1/people2. None of that is what the model should repeat to a ward manager.
+    for (const name of ASSISTANT_COMMAND_TYPES) {
+      expect(name).not.toMatch(/affinit|covering|precept/i);
+    }
+    const parameters = child(wire.get("prepare_scenario_change"), "parameters");
+    const operations = JSON.stringify(child(child(parameters, "properties"), "operations"));
+    expect(operations).not.toMatch(/"people[12]"|"preceptors"|"preceptees"/);
+  });
+
   it("names every command arm in test_feasibility_candidates' candidates", () => {
     // One level deeper -- `candidates[].operations` -- which is why it gets its own case
     // rather than being inferred from the tool above.
@@ -453,6 +464,42 @@ describe("the command arms the provider is actually shown", () => {
         name: "Haseena (Ward 3)",
         date: "2026-10-14",
         shiftType: "N",
+      },
+      add_pairing_rule: {
+        type: "add_pairing_rule",
+        description: "Keep Ana and Ben apart on nights",
+        people: ["ana"],
+        withPeople: ["ben"],
+        shiftTypes: ["N"],
+        dates: ["ALL"],
+        weight: "-infinity",
+      },
+      edit_pairing_rule: {
+        type: "edit_pairing_rule",
+        ruleId: "a1",
+        description: "Ana and Ben apart on nights",
+        people: ["ana"],
+        withPeople: ["ben"],
+        shiftTypes: ["N"],
+        dates: ["ALL"],
+        weight: "-10",
+      },
+      add_supervision_rule: {
+        type: "add_supervision_rule",
+        description: "A senior whenever Ana works",
+        supervisors: ["Seniors"],
+        supervisedPeople: ["ana"],
+        shiftTypes: ["D", "N"],
+        dates: [],
+      },
+      edit_supervision_rule: {
+        type: "edit_supervision_rule",
+        ruleId: "v1",
+        description: "A senior whenever Ana works",
+        supervisors: ["Seniors"],
+        supervisedPeople: ["ana"],
+        shiftTypes: ["N"],
+        dates: ["WEEKEND"],
       },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());

@@ -272,6 +272,20 @@ async function callTool(toolName: string, rawArguments: string): Promise<string>
 }
 
 /**
+ * The model-facing text inside the recorded tool result.
+ *
+ * Results are JSON-encoded objects (bead 3eve), so a `guidance` field is what the model
+ * reads. The raw content stays available where the test inspects the wire bytes itself.
+ */
+function toolText(result: string): string {
+  const parsed: unknown = JSON.parse(result);
+  if (typeof parsed === "object" && parsed !== null && "guidance" in parsed) {
+    return String((parsed as { guidance: unknown }).guidance);
+  }
+  return result;
+}
+
+/**
  * The failed ordinary Optimize run the diagnostic tool is allowed to diagnose.
  *
  * Seeded as a real durable row rather than mocked: `readDiagnosticParent` deliberately
@@ -698,7 +712,7 @@ describe("valid controls still work, so none of the above passes by refusing eve
   it("names the expected form and invites one corrected call, still echoing nothing", async () => {
     const result = await callTool("get_schedule_section", '{"domain":"payroll"}');
     expectBoundedRefusal(result, ["payroll"]);
-    expect(result).toContain(
+    expect(toolText(result)).toContain(
       'domain: must be one of "dates", "staff", "shifts", "rules", "requests"',
     );
     expect(result).toContain("call this tool again once");
