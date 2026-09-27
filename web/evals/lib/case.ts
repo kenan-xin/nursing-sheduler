@@ -27,6 +27,12 @@ export interface Expect {
   choicesInclude?: string[];
   choicesFromStaff?: boolean;
   proposalOps?: Array<{ type: string } & Record<string, unknown>>;
+  /**
+   * Every op in the last proposal must be one of these types. v1's `changes` guard, for a
+   * case that allows one shape of change and nothing else; prefer this over a proposalCheck
+   * closure that re-tests op types by hand.
+   */
+  onlyOpTypes?: string[];
   /** A reason the last proposal's ops are wrong, or null. */
   proposalCheck?: (ops: AssistantCommandV1[]) => string | null;
   noProposal?: boolean;

@@ -27,6 +27,25 @@ vi.mock("./undo-redo-controls", () => ({ UndoRedoControls: () => null }));
 vi.mock("./persistence-status", () => ({ PersistenceStatus: () => null }));
 vi.mock("./mobile-nav", () => ({ MobileNav: () => null }));
 
+// The scenario-context slot renders whatever name the projection holds. Pin one
+// long enough to exceed the slot's `max-w-[36ch]` so the truncation contract is
+// testable without a scenario database (see the file header).
+const LONG_SCENARIO_NAME = vi.hoisted(
+  () =>
+    "Ward 8 East extended weekend night cover rotation, winter pressures escalation, east annex",
+);
+
+vi.mock("@/lib/store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/store")>();
+  return {
+    ...actual,
+    useScenarioStore: ((selector: (state: { meta: { description: string } }) => unknown) =>
+      selector({
+        meta: { description: LONG_SCENARIO_NAME },
+      })) as unknown as typeof actual.useScenarioStore,
+  };
+});
+
 function renderTopBar() {
   return render(
     <ThemeProvider>
@@ -60,5 +79,17 @@ describe("TopBar — always-visible theme control (D2)", () => {
     await user.click(screen.getByRole("button", { name: /switch to dark theme/i }));
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(screen.getByRole("button", { name: /switch to light theme/i })).toBeInTheDocument();
+  });
+});
+
+describe("TopBar — long scenario name (w0e.25)", () => {
+  // The slot is `max-w-[36ch] truncate`, so any realistic ward name is clipped.
+  // Without a `title` the clipped text is unrecoverable — the full value has to
+  // ride on the element, per bd memory `long-user-text-no-overflow`.
+  it("exposes the full scenario name as the context's title", () => {
+    renderTopBar();
+    const context = screen.getByTestId("scenario-context");
+    expect(context).toHaveTextContent(LONG_SCENARIO_NAME);
+    expect(context).toHaveAttribute("title", LONG_SCENARIO_NAME);
   });
 });

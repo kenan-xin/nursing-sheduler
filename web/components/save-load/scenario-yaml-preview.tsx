@@ -22,6 +22,7 @@
 // table names textareas under `--r-ctl` and its Inputs section names `--surface`,
 // and a DESIGN.md rule outranks a prototype example.
 
+import { useId } from "react";
 import type { PrepareExportResult, ScenarioValidationIssue } from "@/lib/scenario";
 import { AppVersion } from "@/components/app-version";
 import { PersistenceBadge } from "@/components/shell/persistence-status";
@@ -56,6 +57,11 @@ export function ScenarioYamlPreview({
   onApply,
   onCancel,
 }: ScenarioYamlPreviewProps) {
+  // The heading is the editor's only visible name, so the textarea borrows it via
+  // `aria-labelledby` (axe `label`). `useId` keeps the pairing unique per instance
+  // rather than hard-coding an id two mounted previews could collide on.
+  const headingId = useId();
+
   return (
     <section
       className={cn(
@@ -66,7 +72,10 @@ export function ScenarioYamlPreview({
     >
       {/* Head band — a single bottom edge, so it stays square inside the rounded card. */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line2 px-5 py-4">
-        <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
+        <h2
+          id={headingId}
+          className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink"
+        >
           {editing ? "Edit YAML Configuration" : "Current state · YAML"}
         </h2>
         {!editing ? <PersistenceBadge /> : null}
@@ -76,6 +85,7 @@ export function ScenarioYamlPreview({
         <div className="flex flex-col gap-3 px-5 py-4" data-testid="scenario-yaml-editor">
           <textarea
             data-testid="scenario-yaml-textarea"
+            aria-labelledby={headingId}
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             spellCheck={false}
