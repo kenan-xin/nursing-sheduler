@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from nurse_scheduling.server.errors import OptimizationExecutionError
-from nurse_scheduling.server.jobs.models import Job, JobRequest, JobState, OptimizationOutcome
+from nurse_scheduling.scheduler import ScheduleResult
+from nurse_scheduling.server.jobs.models import Job, JobFailure, JobRequest, JobState, OptimizationOutcome
 from nurse_scheduling.server.jobs.runner import (
     INCONCLUSIVE_NO_PROOF,
     INCONCLUSIVE_SOLVER_TIMEOUT,
@@ -38,7 +38,7 @@ def _mock_scheduler(monkeypatch, *, solver_status, dataframe=None):
     """Replace the scheduler with one returning a fixed status and dataframe."""
 
     def fake_schedule(**_kwargs):
-        return dataframe, None, None, solver_status, None
+        return ScheduleResult(dataframe, None, None, solver_status, None)
 
     monkeypatch.setattr("nurse_scheduling.server.jobs.runner.scheduler.schedule", fake_schedule)
 
@@ -80,17 +80,17 @@ def test_an_unrecognized_terminal_status_fails_closed_to_solver_unknown(monkeypa
 
 def test_model_invalid_remains_a_hard_failure(monkeypatch):
     """A broken model is an execution failure, not an absence of proof."""
-    with pytest.raises(OptimizationExecutionError) as error:
-        _run(monkeypatch, solver_status="MODEL_INVALID")
-    assert error.value.code == "invalid_model"
+    failure = _run(monkeypatch, solver_status="MODEL_INVALID")
+    assert isinstance(failure, JobFailure)
+    assert failure.code == "invalid_model"
 
 
 @pytest.mark.parametrize("solver_status", ["OPTIMAL", "FEASIBLE"])
 def test_a_claimed_schedule_that_is_missing_remains_a_hard_failure(monkeypatch, solver_status):
     """OPTIMAL/FEASIBLE promises a schedule; its absence is a broken contract."""
-    with pytest.raises(OptimizationExecutionError) as error:
-        _run(monkeypatch, solver_status=solver_status, dataframe=None)
-    assert error.value.code == "no_solution_found"
+    failure = _run(monkeypatch, solver_status=solver_status, dataframe=None)
+    assert isinstance(failure, JobFailure)
+    assert failure.code == "no_solution_found"
 
 
 def test_every_reason_the_runner_can_emit_is_in_the_closed_set(monkeypatch):

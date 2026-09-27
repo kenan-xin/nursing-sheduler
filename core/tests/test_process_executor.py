@@ -32,7 +32,6 @@ from pathlib import Path
 
 import pytest
 
-from nurse_scheduling.server.errors import OptimizationExecutionError
 from nurse_scheduling.server.jobs import process_tree
 from nurse_scheduling.server.jobs.models import (
     Job,
@@ -435,7 +434,7 @@ def _run_process_cleanup_probe(name: str) -> dict:
     return json.loads(completed.stdout.strip().splitlines()[-1])
 
 
-def test_cleanup_reaps_exited_child_before_signaling_process_group(monkeypatch):
+def test_cleanup_retries_group_signal_after_child_becomes_reapable(monkeypatch):
     calls = []
 
     class ExitedProcess:
@@ -444,7 +443,8 @@ def test_cleanup_reaps_exited_child_before_signaling_process_group(monkeypatch):
 
         def join(self, timeout):
             calls.append(("join", timeout))
-            self.reaped = True
+            if timeout:
+                self.reaped = True
 
         def is_alive(self):
             return False
@@ -455,9 +455,9 @@ def test_cleanup_reaps_exited_child_before_signaling_process_group(monkeypatch):
     process = ExitedProcess()
 
     def kill_process_group(process_id):
+        calls.append(("kill_process_group", process_id))
         if not process.reaped:
             raise PermissionError("Darwin rejects signaling a zombie-only group")
-        calls.append(("kill_process_group", process_id))
 
     monkeypatch.setattr(process_tree, "_kill_process_tree_by_pid", kill_process_group)
 
@@ -466,6 +466,44 @@ def test_cleanup_reaps_exited_child_before_signaling_process_group(monkeypatch):
     assert calls == [
         ("join", 0),
         ("kill_process_group", 123),
+        ("join", 1),
+        ("kill_process_group", 123),
+        ("join", 1),
+    ]
+
+
+def test_cleanup_kills_direct_child_before_raising_persistent_group_error(monkeypatch):
+    calls = []
+
+    class RunningProcess:
+        pid = 123
+        alive = True
+
+        def join(self, timeout):
+            calls.append(("join", timeout))
+
+        def is_alive(self):
+            return self.alive
+
+        def kill(self):
+            calls.append(("kill",))
+            self.alive = False
+
+    def reject_process_group_kill(process_id):
+        calls.append(("kill_process_group", process_id))
+        raise PermissionError("Process-group kill remains denied")
+
+    monkeypatch.setattr(process_tree, "_kill_process_tree_by_pid", reject_process_group_kill)
+
+    with pytest.raises(PermissionError, match="Process-group kill remains denied"):
+        process_tree.kill_process_tree(RunningProcess())
+
+    assert calls == [
+        ("join", 0),
+        ("kill_process_group", 123),
+        ("join", 1),
+        ("kill_process_group", 123),
+        ("kill",),
         ("join", 1),
     ]
 
@@ -638,9 +676,9 @@ class ReturnedFailureRunner:
         )
 
 
-class RaisedExecutionErrorRunner:
+class InvalidModelFailureRunner:
     def run(self, job, input_bytes, *, event_callback, should_stop):
-        raise OptimizationExecutionError("invalid_model", "The generated solver model is invalid")
+        return JobFailure("invalid_model", "The generated solver model is invalid")
 
 
 class UnexpectedErrorRunner:
@@ -664,7 +702,7 @@ def test_watchdog_terminates_process_after_timeout_grace():
     assert result.failure.code == "process_timeout"
     # The message is surfaced verbatim to the user, so its UK-English prose is
     # part of the contract, not incidental wording.
-    assert result.failure.message.startswith("The optimisation process did not return")
+    assert result.failure.message.startswith("The optimization process did not return")
     assert "1-second timeout" in result.failure.message
     assert "0.1-second timeout grace period" in result.failure.message
 
@@ -731,7 +769,7 @@ def test_executor_reports_abrupt_child_exit_without_waiting_for_timeout():
             hard_timeout_seconds=61,
             finish_now_enabled=False,
         )
-    assert "Optimisation process closed its result channel" in str(raised.value)
+    assert "Optimization process closed its result channel" in str(raised.value)
 
 
 @pytest.mark.parametrize(
@@ -821,10 +859,10 @@ def test_returned_failure_becomes_a_structured_failed_result():
     )
 
 
-def test_raised_execution_error_becomes_a_structured_failed_result():
+def test_returned_invalid_model_failure_becomes_a_structured_failed_result():
     result = run_optimization_process(
-        RaisedExecutionErrorRunner(),
-        _control_job("job_raised_execution_error"),
+        InvalidModelFailureRunner(),
+        _control_job("job_invalid_model_failure"),
         b"apiVersion: alpha\n",
         event_callback=lambda *_args: None,
         control=lambda: None,

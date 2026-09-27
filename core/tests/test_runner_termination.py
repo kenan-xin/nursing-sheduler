@@ -25,11 +25,10 @@ import base64
 import json
 from datetime import datetime, timezone
 
-import pytest
 
 from nurse_scheduling.server import roster_container
-from nurse_scheduling.server.errors import OptimizationExecutionError
-from nurse_scheduling.server.jobs.models import Job, JobRequest, JobState, OptimizationOutcome
+from nurse_scheduling.scheduler import ScheduleResult
+from nurse_scheduling.server.jobs.models import Job, JobFailure, JobRequest, JobState, OptimizationOutcome
 from nurse_scheduling.server.jobs.runner import OptimizationRunner
 
 # A minimal but structurally valid `on_roster` handoff: two people, two dates,
@@ -79,7 +78,7 @@ def _mock_scheduler(monkeypatch, *, score, solver_status, xlsx_bytes=b"fake xlsx
     def fake_schedule(**kwargs):
         if emit_roster:
             kwargs["on_roster"](ROSTER_PAYLOAD)
-        return dataframe, None, score, solver_status, cell_export_info
+        return ScheduleResult(dataframe, None, score, solver_status, cell_export_info)
 
     def fake_export(passed_dataframe, buffer, passed_cell_export_info):
         assert passed_dataframe is dataframe
@@ -179,7 +178,7 @@ def test_an_absent_prettify_preference_reaches_the_scheduler_as_false(monkeypatc
     def fake_schedule(**kwargs):
         seen["prettify"] = kwargs["prettify"]
         kwargs["on_roster"](ROSTER_PAYLOAD)
-        return object(), None, 3, "OPTIMAL", object()
+        return ScheduleResult(object(), None, 3, "OPTIMAL", object())
 
     monkeypatch.setattr("nurse_scheduling.scheduler.schedule", fake_schedule)
     monkeypatch.setattr(
@@ -211,10 +210,10 @@ def test_container_bytes_are_deterministic_across_runs(monkeypatch):
 def test_a_schedule_without_a_roster_handoff_fails_with_a_stable_code(monkeypatch):
     _mock_scheduler(monkeypatch, score=3, solver_status="OPTIMAL", emit_roster=False)
 
-    with pytest.raises(OptimizationExecutionError) as raised:
-        _run(should_stop=None)
+    failure = _run(should_stop=None)
 
-    assert raised.value.code == "roster_handoff_missing"
+    assert isinstance(failure, JobFailure)
+    assert failure.code == "roster_handoff_missing"
 
 
 def test_raw_workbook_at_the_frozen_limit_is_accepted(monkeypatch):
@@ -234,11 +233,11 @@ def test_raw_workbook_one_byte_over_the_frozen_limit_is_rejected(monkeypatch):
     monkeypatch.setattr(roster_container, "MAX_RAW_XLSX_BYTES", 1024)
     _mock_scheduler(monkeypatch, score=3, solver_status="OPTIMAL", xlsx_bytes=b"x" * 1025)
 
-    with pytest.raises(OptimizationExecutionError) as raised:
-        _run(should_stop=None)
+    failure = _run(should_stop=None)
 
-    assert raised.value.code == "roster_output_too_large"
-    assert "1025 bytes" in str(raised.value)
+    assert isinstance(failure, JobFailure)
+    assert failure.code == "roster_output_too_large"
+    assert "1025 bytes" in failure.message
 
 
 def test_encoded_container_over_the_frozen_limit_is_rejected(monkeypatch):
@@ -247,8 +246,8 @@ def test_encoded_container_over_the_frozen_limit_is_rejected(monkeypatch):
     monkeypatch.setattr(roster_container, "MAX_ROSTER_CONTAINER_BYTES", 512)
     _mock_scheduler(monkeypatch, score=3, solver_status="OPTIMAL", xlsx_bytes=b"x" * 1024)
 
-    with pytest.raises(OptimizationExecutionError) as raised:
-        _run(should_stop=None)
+    failure = _run(should_stop=None)
 
-    assert raised.value.code == "roster_output_too_large"
-    assert "roster container is" in str(raised.value)
+    assert isinstance(failure, JobFailure)
+    assert failure.code == "roster_output_too_large"
+    assert "roster container is" in failure.message

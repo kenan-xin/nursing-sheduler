@@ -75,6 +75,7 @@ const CODE_TO_KIND: Record<string, OptimizeErrorKind> = {
   job_artifact_not_found: "no-artifact",
   job_artifact_not_ready: "no-artifact",
   job_capacity_exceeded: "queue-full",
+  request_too_large: "too-large",
   // T09's reserved-ordinary refusal is a capacity rejection too, so it classifies as
   // a definite rejection rather than falling through to `unknown`. The distinct CODE
   // survives on `OptimizeErrorInfo.code`, which is what T10 keys its truthful
@@ -92,6 +93,20 @@ const CODE_TO_KIND: Record<string, OptimizeErrorKind> = {
   backend_route_unsupported: "backend-route-unsupported",
   backend_unready: "backend-unready",
 };
+
+// Web-owned wording for job failure codes. The backend text follows upstream
+// (US spelling, v1 sync X10); a code this map does not know keeps the backend text.
+const JOB_FAILURE_MESSAGES: Record<string, string> = {
+  cancelled: "Optimisation cancelled.",
+  worker_lost: "The optimisation worker stopped before the job completed.",
+  process_timeout: "The optimisation run did not finish within its time limit and was stopped.",
+  invalid_model: "The generated solver model is invalid.",
+  no_solution_found: "No schedule was produced.",
+};
+
+export function jobFailureMessage(code: string | null, backendMessage: string): string {
+  return (code !== null && JOB_FAILURE_MESSAGES[code]) || backendMessage;
+}
 
 // Pull a code-first `{ error: { code, message, ... } }` envelope out of a parsed
 // body. Returns null unless `error.code` is a non-empty string.

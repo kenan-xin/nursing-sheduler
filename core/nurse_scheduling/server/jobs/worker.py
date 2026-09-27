@@ -25,7 +25,8 @@ from collections.abc import Callable
 from ..config import DEFAULT_TIMEOUT_GRACE_SECONDS
 from ..errors import JobNotFoundError
 from .controller import JobController
-from .models import Job, JobFailure, JobState, solver_supports_stop
+from ..solver_capabilities import solver_supports_finish_now
+from .models import Job, JobFailure, JobState
 from .process_executor import ProcessControl, ProcessStatus, run_optimization_process
 from .runner import OptimizationRunner
 
@@ -116,6 +117,10 @@ class JobWorker:
         """Return whether the worker thread is currently running."""
         with self._lock:
             return self._thread is not None and self._thread.is_alive()
+
+    def is_ready(self) -> bool:
+        """Genie readiness name; the v2 worker is ready while its thread runs."""
+        return self.is_alive()
 
     def _run(self) -> None:
         """Claim and execute jobs until shutdown is requested.
@@ -268,7 +273,7 @@ class JobWorker:
                 daemon=True,
             )
             control_thread.start()
-            finish_now_supported = solver_supports_stop(job.request.solver)
+            finish_now_supported = solver_supports_finish_now(job.request.solver)
 
             def process_control() -> ProcessControl | None:
                 """Return the highest-priority control for the optimization child.

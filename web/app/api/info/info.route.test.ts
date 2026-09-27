@@ -31,7 +31,7 @@ const SEMANTIC_PROFILE = {
 const READY_IDENTITY = {
   status: "ready",
   service_name: "nurse-scheduling-api",
-  api_version: "alpha",
+  api_version: "0.2.0",
   app_version: "v1.2.3",
   deployment_id: "dep-1",
   instance_id: "inst-1",
@@ -45,7 +45,7 @@ const UNAVAILABLE_IDENTITY = {
   status: "unavailable",
   reason: "job_store_unavailable",
   service_name: "nurse-scheduling-api",
-  api_version: "alpha",
+  api_version: "0.2.0",
   app_version: "v1.2.3",
   deployment_id: "dep-1",
   instance_id: "inst-1",
@@ -53,6 +53,22 @@ const UNAVAILABLE_IDENTITY = {
   job_backend: "memory",
   job_store_id: "inst-1",
   semantic_profile: SEMANTIC_PROFILE,
+};
+
+// Core-owned `/info` keys (v1 sync X8). The BFF checks them strictly but never
+// relays them, so the browser body stays exactly READY_IDENTITY / UNAVAILABLE_IDENTITY.
+const CORE_AUTH = { required: false, scheme: "bearer" };
+const READY_UPSTREAM = {
+  ...READY_IDENTITY,
+  auth: CORE_AUTH,
+  claimed_performance: null,
+  jobs: { running: 0, queued: 1, cancelling: 0 },
+  workers: { online: 1 },
+};
+const UNAVAILABLE_UPSTREAM = {
+  ...UNAVAILABLE_IDENTITY,
+  auth: CORE_AUTH,
+  claimed_performance: null,
 };
 
 async function expectRejectedAsInvalidUpstream(response: Response) {
@@ -69,7 +85,7 @@ describe("GET /api/info — valid contract variants", () => {
   it("accepts the complete ready identity payload at HTTP 200", async () => {
     mockFetch((url) => {
       expect(url).toBe("http://backend:8000/info");
-      return new Response(JSON.stringify(READY_IDENTITY), {
+      return new Response(JSON.stringify(READY_UPSTREAM), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
@@ -86,7 +102,7 @@ describe("GET /api/info — valid contract variants", () => {
   it("accepts the complete unavailable identity payload with a string reason at HTTP 503", async () => {
     mockFetch(
       () =>
-        new Response(JSON.stringify(UNAVAILABLE_IDENTITY), {
+        new Response(JSON.stringify(UNAVAILABLE_UPSTREAM), {
           status: 503,
           headers: { "content-type": "application/json" },
         }),
@@ -100,8 +116,32 @@ describe("GET /api/info — valid contract variants", () => {
     expect(response.headers.get("content-type")).toBe("application/json");
   });
 
+  it("checks but never relays the core-owned activity, auth and benchmark keys", async () => {
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ...READY_UPSTREAM,
+            claimed_performance: {
+              score: 41.5,
+              app_version: "v0.2.0-66-g959adc4",
+              measured_at: "2026-08-28T19:12:54+00:00",
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+
+    const body = await (await GET()).json();
+
+    expect(body).toEqual(READY_IDENTITY);
+    for (const key of ["jobs", "workers", "auth", "claimed_performance"]) {
+      expect(body).not.toHaveProperty(key);
+    }
+  });
+
   it("reconstructs the body — no camelCase translation, every key stays snake_case", async () => {
-    mockFetch(() => new Response(JSON.stringify(READY_IDENTITY), { status: 200 }));
+    mockFetch(() => new Response(JSON.stringify(READY_UPSTREAM), { status: 200 }));
 
     const response = await GET();
     const body = await response.json();
@@ -114,7 +154,7 @@ describe("GET /api/info — valid contract variants", () => {
   it("forces application/json regardless of a hostile upstream content type", async () => {
     mockFetch(
       () =>
-        new Response(JSON.stringify(READY_IDENTITY), {
+        new Response(JSON.stringify(READY_UPSTREAM), {
           status: 200,
           headers: { "content-type": "text/html" },
         }),
@@ -128,7 +168,7 @@ describe("GET /api/info — valid contract variants", () => {
   });
 
   it("forces application/json when the upstream response has no content-type header at all", async () => {
-    mockFetch(() => new Response(JSON.stringify(READY_IDENTITY), { status: 200 }));
+    mockFetch(() => new Response(JSON.stringify(READY_UPSTREAM), { status: 200 }));
 
     const response = await GET();
 
@@ -139,7 +179,7 @@ describe("GET /api/info — valid contract variants", () => {
   it("does not leak arbitrary upstream headers (explicit allowlist — content-type/cache-control only)", async () => {
     mockFetch(
       () =>
-        new Response(JSON.stringify(READY_IDENTITY), {
+        new Response(JSON.stringify(READY_UPSTREAM), {
           status: 200,
           headers: {
             "content-type": "application/json",
@@ -248,13 +288,13 @@ describe("GET /api/info — closed-contract rejections (502 invalid_upstream_res
 
   it("rejects an unknown status value", async () => {
     mockFetch(
-      () => new Response(JSON.stringify({ ...READY_IDENTITY, status: "warming" }), { status: 200 }),
+      () => new Response(JSON.stringify({ ...READY_UPSTREAM, status: "warming" }), { status: 200 }),
     );
     await expectRejectedAsInvalidUpstream(await GET());
   });
 
   it("rejects a ready body missing a required identity field", async () => {
-    const { job_store_id: _omit, ...incomplete } = READY_IDENTITY;
+    const { job_store_id: _omit, ...incomplete } = READY_UPSTREAM;
     mockFetch(() => new Response(JSON.stringify(incomplete), { status: 200 }));
     await expectRejectedAsInvalidUpstream(await GET());
   });
@@ -262,7 +302,7 @@ describe("GET /api/info — closed-contract rejections (502 invalid_upstream_res
   it("rejects a ready body with a mistyped identity field", async () => {
     mockFetch(
       () =>
-        new Response(JSON.stringify({ ...READY_IDENTITY, instance_id: 12345 }), { status: 200 }),
+        new Response(JSON.stringify({ ...READY_UPSTREAM, instance_id: 12345 }), { status: 200 }),
     );
     await expectRejectedAsInvalidUpstream(await GET());
   });
@@ -270,45 +310,85 @@ describe("GET /api/info — closed-contract rejections (502 invalid_upstream_res
   it("rejects a ready body carrying an extra/private field (e.g. a leaked backend_url)", async () => {
     mockFetch(
       () =>
-        new Response(JSON.stringify({ ...READY_IDENTITY, backend_url: "http://backend:8000" }), {
+        new Response(JSON.stringify({ ...READY_UPSTREAM, backend_url: "http://backend:8000" }), {
           status: 200,
         }),
     );
     await expectRejectedAsInvalidUpstream(await GET());
   });
 
+  it("rejects a ready body without the core-owned jobs object", async () => {
+    const { jobs: _omit, ...withoutJobs } = READY_UPSTREAM;
+    mockFetch(() => new Response(JSON.stringify(withoutJobs), { status: 200 }));
+    await expectRejectedAsInvalidUpstream(await GET());
+  });
+
+  it("rejects a ready body whose worker count is not an integer", async () => {
+    mockFetch(
+      () =>
+        new Response(JSON.stringify({ ...READY_UPSTREAM, workers: { online: "1" } }), {
+          status: 200,
+        }),
+    );
+    await expectRejectedAsInvalidUpstream(await GET());
+  });
+
+  it("rejects a claimed performance that is not a complete, positive benchmark", async () => {
+    mockFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ...READY_UPSTREAM,
+            claimed_performance: {
+              score: 0,
+              app_version: "v1",
+              measured_at: "2026-08-28T19:12:54+00:00",
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    await expectRejectedAsInvalidUpstream(await GET());
+  });
+
+  it("rejects an unavailable body without the core-owned auth descriptor", async () => {
+    const { auth: _omit, ...withoutAuth } = UNAVAILABLE_UPSTREAM;
+    mockFetch(() => new Response(JSON.stringify(withoutAuth), { status: 503 }));
+    await expectRejectedAsInvalidUpstream(await GET());
+  });
+
   it("rejects an unavailable body missing the required string reason", async () => {
-    const { reason: _omit, ...withoutReason } = UNAVAILABLE_IDENTITY;
+    const { reason: _omit, ...withoutReason } = UNAVAILABLE_UPSTREAM;
     mockFetch(() => new Response(JSON.stringify(withoutReason), { status: 503 }));
     await expectRejectedAsInvalidUpstream(await GET());
   });
 
   it("rejects an unavailable body with a mistyped reason", async () => {
     mockFetch(
-      () => new Response(JSON.stringify({ ...UNAVAILABLE_IDENTITY, reason: 503 }), { status: 503 }),
+      () => new Response(JSON.stringify({ ...UNAVAILABLE_UPSTREAM, reason: 503 }), { status: 503 }),
     );
     await expectRejectedAsInvalidUpstream(await GET());
   });
 
   it("rejects status:ready paired with HTTP 503 (status/body mismatch)", async () => {
-    mockFetch(() => new Response(JSON.stringify(READY_IDENTITY), { status: 503 }));
+    mockFetch(() => new Response(JSON.stringify(READY_UPSTREAM), { status: 503 }));
     await expectRejectedAsInvalidUpstream(await GET());
   });
 
   it("rejects status:unavailable paired with HTTP 200 (status/body mismatch)", async () => {
-    mockFetch(() => new Response(JSON.stringify(UNAVAILABLE_IDENTITY), { status: 200 }));
+    mockFetch(() => new Response(JSON.stringify(UNAVAILABLE_UPSTREAM), { status: 200 }));
     await expectRejectedAsInvalidUpstream(await GET());
   });
 
   it("rejects a valid-looking ready body wrapped in an unexpected HTTP 500", async () => {
-    mockFetch(() => new Response(JSON.stringify(READY_IDENTITY), { status: 500 }));
+    mockFetch(() => new Response(JSON.stringify(READY_UPSTREAM), { status: 500 }));
     await expectRejectedAsInvalidUpstream(await GET());
   });
 
   it("rejects a reason field present on an otherwise-ready (status:ready) body", async () => {
     mockFetch(
       () =>
-        new Response(JSON.stringify({ ...READY_IDENTITY, reason: "job_store_unavailable" }), {
+        new Response(JSON.stringify({ ...READY_UPSTREAM, reason: "job_store_unavailable" }), {
           status: 200,
         }),
     );

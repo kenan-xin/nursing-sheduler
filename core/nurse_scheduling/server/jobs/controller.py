@@ -34,6 +34,7 @@ from ..errors import (
 from ..basis_admission import VerifiedBasis
 from ..job_store import JobStore
 from ..retry import retry_with_backoff
+from ..solver_capabilities import solver_supports_finish_now
 from .models import (
     EventReplayWindow,
     Job,
@@ -44,8 +45,8 @@ from .models import (
     JobState,
     OptimizationResult,
     StoredArtifact,
+    ServerActivity,
     StoreLimits,
-    solver_supports_stop,
 )
 
 
@@ -107,6 +108,7 @@ class JobController:
         input_bytes: bytes,
         basis: VerifiedBasis | None = None,
         purpose: JobPurpose = JobPurpose.ORDINARY,
+        auth_credential_id: str | None = None,
     ) -> Job:
         """Create and enqueue a job with its submitted input.
 
@@ -125,6 +127,8 @@ class JobController:
             JobCapacityError: If pending or retained capacity is exhausted.
             DiagnosticCapacityError: If only the reserved ordinary slots remain.
             JobOperationContentionError: If a unique job ID cannot be allocated.
+
+        `auth_credential_id` is the genie keyword; it is accepted and unused until W6.
         """
         now = self._clock()
 
@@ -172,6 +176,21 @@ class JobController:
             created.request.client_id,
         )
         return created
+
+    def get_activity(self) -> ServerActivity:
+        """Return aggregate job activity from one atomic queue snapshot.
+
+        v2 bridge until W6: worker presence is not in the T19 store, so
+        `online_workers` is always 0 here and `/info` reads the process worker.
+        """
+        snapshot = self._store.describe_queue_state()
+        states = [facts.state for facts in snapshot.jobs.values()]
+        return ServerActivity(
+            queued_jobs=states.count(JobState.QUEUED),
+            running_jobs=states.count(JobState.RUNNING),
+            cancelling_jobs=states.count(JobState.CANCELLING),
+            online_workers=0,
+        )
 
     def get_job(self, job_id: str) -> Job:
         """Return the current job snapshot.
@@ -417,7 +436,7 @@ class JobController:
                     queue_position=None,
                 )
                 return cancelled, [self._state_event(cancelled, now)], None
-            if not solver_supports_stop(job.request.solver):
+            if not solver_supports_finish_now(job.request.solver):
                 raise JobOperationNotAllowedError("This solver does not support cancellation")
             cancelling = replace(job, state=JobState.CANCELLING, cancel_requested=True)
             return cancelling, [self._state_event(cancelling, now)], None
@@ -485,7 +504,7 @@ class JobController:
                 return job, [], None
             if job.state != JobState.RUNNING:
                 raise JobOperationNotAllowedError("Early completion is only available while a job is running")
-            if not solver_supports_stop(job.request.solver):
+            if not solver_supports_finish_now(job.request.solver):
                 raise JobOperationNotAllowedError("This solver does not support early completion")
             updated = replace(job, early_completion_requested=True)
             event = JobEvent(
