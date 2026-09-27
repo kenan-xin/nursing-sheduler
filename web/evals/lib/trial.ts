@@ -8,6 +8,30 @@ export interface ToolCallRecord {
   args: unknown;
   result: string | null;
 }
+
+/**
+ * The model-facing text of one tool result.
+ *
+ * CopilotKit hands a STRING result to the model verbatim and JSON-encodes anything else
+ * (`@copilotkit/core` 1.66.2), so a handler that answered in a sentence put a ward-supplied
+ * name into the model's own text. Every shipped handler now answers with an object, which
+ * makes the persisted result JSON and its words a `guidance` field. A bare string -- a
+ * fixture written before that change, or a truncated capture -- is read as it stands, so
+ * both shapes mean the same thing to a grader.
+ */
+export function toolResultText(result: string | null): string {
+  if (!result) return "";
+  try {
+    const parsed: unknown = JSON.parse(result);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      const guidance = (parsed as { guidance?: unknown }).guidance;
+      if (typeof guidance === "string") return guidance;
+    }
+  } catch {
+    // A bare string result: read it as it stands.
+  }
+  return result;
+}
 export interface TranscriptEntry {
   role: "user" | "assistant" | "tool";
   text: string;

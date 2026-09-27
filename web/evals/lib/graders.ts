@@ -7,7 +7,7 @@ import { violatesSafetyFloor } from "@/lib/ai/assistant/repair-options";
 import type { AssistantCommandV1 } from "@/lib/proposal";
 import type { ScenarioUiState } from "@/lib/scenario";
 import type { EvalCase } from "./case";
-import type { GateResult, TrialRecord } from "./trial";
+import { toolResultText, type GateResult, type TrialRecord } from "./trial";
 
 /** The opening words of the prepare tool's refusal result (use-proposal-tools.ts). */
 export const REFUSAL_PREFIX = "The app refused that change:";
@@ -162,7 +162,8 @@ function wordingFailures(c: EvalCase, r: TrialRecord): string[] {
       const jargon = m.text.match(JARGON);
       if (jargon) failures.push(`jargon: "${jargon[0]}"`);
       for (const c of m.toolCalls) {
-        if (PREVIEW_TOOLS.has(c.name) && !c.result?.startsWith(REFUSAL_PREFIX)) waiting = true;
+        if (PREVIEW_TOOLS.has(c.name) && !toolResultText(c.result).startsWith(REFUSAL_PREFIX))
+          waiting = true;
       }
     }
   }
@@ -255,7 +256,7 @@ export function gradeDeterministic(c: EvalCase, r: TrialRecord): GateResult[] {
   let run = 0;
   for (const call of calls) {
     if (call.name !== "prepare_scenario_change") continue;
-    run = call.result?.startsWith(REFUSAL_PREFIX) ? run + 1 : 0;
+    run = toolResultText(call.result).startsWith(REFUSAL_PREFIX) ? run + 1 : 0;
     if (run > 2) grounding.push("retried a refused change more than once");
   }
 

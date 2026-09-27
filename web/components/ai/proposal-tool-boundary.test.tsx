@@ -134,6 +134,9 @@ function proposalTool(): CapturedTool {
   return found;
 }
 
+/** The model-facing text of a tool result; every handler answers with an object (bead 3eve). */
+const text = (answer: unknown) => (answer as { guidance: string }).guidance;
+
 /** Mount the shipped registration and bind a turn that is authorised in every respect. */
 async function mount(scenario = createEmptyScenarioUiState()) {
   assistantActions.resetForTest();
@@ -212,9 +215,9 @@ describe("the model's arguments, at the shipped tool boundary", () => {
       },
       {},
     );
-    expect(String(answer)).toContain("preview of this change is now shown");
-    expect(String(answer)).toContain(BALANCE_RULE_NOTE);
-    expect(String(answer)).not.toContain(REST_PRACTICE_WARNING);
+    expect(text(answer)).toContain("preview of this change is now shown");
+    expect(text(answer)).toContain(BALANCE_RULE_NOTE);
+    expect(text(answer)).not.toContain(REST_PRACTICE_WARNING);
   });
 
   it("names the screen Apply will open, so the model never guesses one", async () => {
@@ -245,13 +248,11 @@ describe("the model's arguments, at the shipped tool boundary", () => {
         { type: "set_rule_enabled", ruleKind: "coverings", ruleId: "preceptor", enabled: false },
       ],
     };
-    const advanced = String(await proposalTool().handler(off, {}));
+    const advanced = text(await proposalTool().handler(off, {}));
     expect(advanced).toContain('Apply opens the "Shift Type Coverings" screen');
     expect(advanced).not.toContain("Supervision");
     useModeStore.setState({ mode: "guided", adoption: "ready" });
-    expect(String(await proposalTool().handler(off, {}))).toContain(
-      'Apply opens the "Rules" screen',
-    );
+    expect(text(await proposalTool().handler(off, {}))).toContain('Apply opens the "Rules" screen');
   });
 
   it("prepares turning off a rest rule, with the rest-practice warning on the Preview and in the reply", async () => {
@@ -272,8 +273,8 @@ describe("the model's arguments, at the shipped tool boundary", () => {
       {},
     );
 
-    expect(String(answer)).toContain("preview of this change is now shown");
-    expect(String(answer)).toContain(REST_PRACTICE_WARNING);
+    expect(text(answer)).toContain("preview of this change is now shown");
+    expect(text(answer)).toContain(REST_PRACTICE_WARNING);
     expect(await screen.findByTestId("proposal-rest-guidance")).toHaveTextContent(
       REST_PRACTICE_WARNING,
     );
@@ -287,11 +288,11 @@ describe("the model's arguments, at the shipped tool boundary", () => {
 
     const answer = await proposalTool().handler(LIVE_ARGS, {});
 
-    expect(String(answer)).toContain("preview of this change is now shown");
+    expect(text(answer)).toContain("preview of this change is now shown");
     // Spoken of as prepared, never as done (live eval baseline: "I've added X" on a Preview).
-    expect(String(answer)).toContain("I've prepared");
-    expect(String(answer)).toContain("check it and press Apply");
-    expect(String(answer)).toMatch(/never .*past tense/);
+    expect(text(answer)).toContain("I've prepared");
+    expect(text(answer)).toContain("check it and press Apply");
+    expect(text(answer)).toMatch(/never .*past tense/);
     // One durable proposal, and a Preview published for the user.
     const proposals = await harness.db.assistantProposals.toArray();
     expect(proposals).toHaveLength(1);
@@ -299,7 +300,7 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     // The operation survived the boundary byte-for-byte, including the explicit choice.
     expect(proposals[0].commands).toEqual(LIVE_ARGS.operations);
     // No rest rule is touched, so no rest-practice warning.
-    expect(String(answer)).not.toContain(REST_PRACTICE_WARNING);
+    expect(text(answer)).not.toContain(REST_PRACTICE_WARNING);
     expect(screen.queryByTestId("proposal-rest-guidance")).toBeNull();
     // Preparing is not applying: the blank range is untouched.
     expect(useScenarioStore.getState().rangeStart).toBe("");
@@ -348,8 +349,8 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     // THE SHARED REFUSAL CLASS (see `./tool-payload`), not this tool's own wording. F1z
     // moved every parameterized handler onto one bounded, non-echoing answer, which is
     // also what keeps it distinguishable from the domain rejection asserted below.
-    expect(String(answer)).toContain("not a valid call to this tool");
-    expect(String(answer)).not.toContain("replace_everything");
+    expect(text(answer)).toContain("not a valid call to this tool");
+    expect(text(answer)).not.toContain("replace_everything");
     expect(await harness.db.assistantProposals.toArray()).toHaveLength(0);
     expect(useAssistantStore.getState().activeProposal).toBeNull();
     // Nothing was altered.
@@ -366,7 +367,7 @@ describe("the model's arguments, at the shipped tool boundary", () => {
   it("hands an unknown id back with the valid choices, and allows one corrected retry", async () => {
     await mount(proposalScenario());
 
-    const answer = String(
+    const answer = text(
       await proposalTool().handler(
         { summary: "Remove Zed.", operations: [{ type: "remove_person", personId: "Zed" }] },
         {},
@@ -406,10 +407,10 @@ describe("the model's arguments, at the shipped tool boundary", () => {
       {},
     );
 
-    expect(String(answer)).toContain("The app refused that change:");
-    expect(String(answer)).toContain("already those dates");
+    expect(text(answer)).toContain("The app refused that change:");
+    expect(text(answer)).toContain("already those dates");
     // A DIFFERENT THING FROM A MALFORMED PAYLOAD, and the model must be able to tell.
-    expect(String(answer)).not.toContain("not a valid call to this tool");
+    expect(text(answer)).not.toContain("not a valid call to this tool");
     expect(await harness.db.assistantProposals.toArray()).toHaveLength(0);
   });
 });
