@@ -62,8 +62,6 @@ export const WithGroups: Story = {
 };
 
 export const DisabledItem: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.28; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   args: {
     items: [
       ...PEOPLE,

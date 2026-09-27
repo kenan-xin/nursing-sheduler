@@ -218,6 +218,9 @@ describe("TransferList — groups and disabled options", () => {
     const row = screen.getByTitle("has OFF");
     expect(row).toHaveTextContent("TAINTED");
     expect(classesOf(row)).toContain("cursor-not-allowed");
+    // A real disabled control, so assistive tech (and axe's contrast rule) read it as disabled.
+    expect(row).toBe(screen.getByRole("button", { name: "TAINTED" }));
+    expect(row).toBeDisabled();
   });
 
   it("excludes a disabled option from add-all", () => {
