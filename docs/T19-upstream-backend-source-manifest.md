@@ -35,6 +35,25 @@ hash re-stamp (upstream bug, report it), P1 `Person.temporary`, P2-P3 `skillMix`
 per-date overrides, P4 `on_roster`. Located Workspace errors stay in the v2-only
 `server/workspace.py` (spec X14).
 
+W2 adds the server layer. It adds 9 `verbatim` rows: `version.py`, `retry.py`,
+`process_tree.py`, `process_executor.py`, `request_limits.py`, `auth.py`,
+`solver_capabilities.py`, `solver_options.py` and `tests/test_retry.py`. It also adds 8
+`patched` rows. Each has one `W2-<file>.patch`. The patch header maps every hunk to a
+patch ID:
+
+- P5: Workspace boundary.
+- P6: event cursors.
+- P7: roster container.
+- P8: basis and INCONCLUSIVE.
+- P9: purpose queues.
+- P11: maintenance liveness.
+- P12: T19 fence bridge. W6 deletes it.
+- P13: `default_prettify=False`.
+- P14: diagnostic path mode and cleanup.
+
+`JOB_MAX_PENDING=8` and the diagnostic concurrency of 1 now live in `docker/compose.yml`
+and `scripts/dev.sh`. The web owns user-facing failure wording (`web/lib/bff/errors.ts`).
+
 ## Ported files (upstream → rebuild)
 
 All paths below are relative to `core/nurse_scheduling/`. Files were vendored from
