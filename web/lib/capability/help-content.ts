@@ -59,10 +59,13 @@ export const CAPABILITY_ENTRIES = [
     nurseFacingSummary:
       "List the nurses being rostered and put them into groups — for example seniors, or a " +
       "team — so a rule can be written about the group instead of naming every person. A nurse " +
-      "borrowed from another ward for a few days is added like anyone else and marked off on " +
-      "the days they are not here. Borrowed for nights? Also mark them Must work the night " +
-      "shift on those dates (a shift request at weight must), or the solver may put them on " +
-      "day shifts. The assistant can prepare these changes for you to review " +
+      "from another ward is not added here unless she is staying for several days: a " +
+      "temporary cover for one shift on one date goes in the Temporary cover section on this " +
+      "same page, where it lowers that shift's staffing need by one without becoming one of " +
+      "your nurses. A borrowed nurse who IS here for several days is added like anyone else " +
+      "and marked off on the days she is not here; borrowed for nights, also mark her Must " +
+      "work the night shift on those dates (a shift request at weight must), or the solver " +
+      "may put her on day shifts. The assistant can prepare these changes for you to review " +
       "and apply.",
     concepts: [
       "staff",
@@ -79,6 +82,30 @@ export const CAPABILITY_ENTRIES = [
     featureGates: [],
     routeId: "people",
     controlAnchor: "people.add-person",
+    toolAccess: BASE_TOOLS,
+    supportedCommands: ["patch_scenario"],
+  },
+  {
+    id: "temporary-cover",
+    title: "Temporary cover",
+    nurseFacingSummary:
+      "Record a nurse from another ward who covers one shift on one date. She is not added to " +
+      "your staff list and the solver never plans her: each cover simply lowers that shift's " +
+      "staffing need by one on her date, so the ward needs one fewer of its own nurses there. " +
+      "Add her on the Staff page with a name, the date and the shift she will work, and say " +
+      "which of your groups she counts as — a cover only counts towards a rule open to " +
+      "everyone, or a rule for a group she is in. A card's Exceptions field on the Staffing " +
+      "requirements page shows the covers that change it.",
+    concepts: [
+      "temporary cover",
+      "cover",
+      "nurse from another ward",
+      "cover a shift",
+      "extra pair of hands",
+    ],
+    modes: BOTH_MODES,
+    featureGates: [],
+    routeId: "people",
     toolAccess: BASE_TOOLS,
     supportedCommands: ["patch_scenario"],
   },

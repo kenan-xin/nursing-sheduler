@@ -24,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
+import { useScenarioStore } from "@/lib/store";
 import {
   deriveCurrentDays,
   deriveEditedSinceSolve,
@@ -38,6 +39,7 @@ import {
   computeCoverage,
   computeRequirementGrid,
   computeTallies,
+  coverBandRows,
   deriveRequirementModel,
   readViewPreference,
   resolveFocusedDay,
@@ -101,8 +103,26 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
   );
   // The ephemeral staffing-equation projection. Keyed on the IMMUTABLE
   // submission, so it survives every edit without being recomputed, and nothing
-  // about it is ever written back into the persisted document.
-  const model = useMemo(() => deriveRequirementModel(document.submission), [document.submission]);
+  // about it is ever written back into the persisted document. Covers apply on
+  // read (d582, spec §4): the solve's ledger rebuilds the authored need and the
+  // scenario's covers right now lower it, so adding or removing a cover after the
+  // solve changes coverage at once.
+  const liveCover = useScenarioStore((state) => state.temporaryCover);
+  const model = useMemo(
+    () =>
+      deriveRequirementModel(document.submission, {
+        decrements: document.cover.decrements,
+        live: liveCover,
+      }),
+    [document.submission, document.cover.decrements, liveCover],
+  );
+  // The band below the staff rows: what the solve counted (the roster file's
+  // entries) unioned with the scenario's covers right now, so the display states
+  // the same disagreement the coverage numbers do (d582, spec §4).
+  const coverRows = useMemo(
+    () => coverBandRows(document.cover.entries, liveCover, document.context.calendar),
+    [document.cover.entries, liveCover, document.context.calendar],
+  );
   const assignments = useMemo(
     () => buildAssignmentIndex(document.context, currentDays),
     [document.context, currentDays],
@@ -237,6 +257,7 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
           ramp={ramp}
           coverage={coverage}
           tallies={tallies}
+          coverRows={coverRows}
           editing={gridEditing}
         />
       ) : null}

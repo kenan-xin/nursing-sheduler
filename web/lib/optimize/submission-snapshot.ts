@@ -24,6 +24,7 @@
 
 import type { PeopleReverseMap } from "@/lib/scenario";
 import type { RosterSubmission } from "@/lib/roster";
+import type { RosterCover } from "@/lib/roster/types";
 import { rosterStorage, type RosterStorage, type SnapshotDeletionOutcome } from "@/lib/store";
 import type { SessionCaptureState } from "./session-transaction";
 
@@ -53,6 +54,12 @@ export interface StagedSubmissionSnapshot {
   ownerId: string;
   submissionOrdinal: number;
   payload: StagedSubmission;
+  /**
+   * The temporary cover staged beside the submission (d582). A row with none — a
+   * run with no cover, or one staged by an older build — reads as empty. Like the
+   * envelope version, it is F3's to judge: the assembler validates it.
+   */
+  cover: RosterCover;
 }
 
 /**
@@ -115,6 +122,8 @@ export function buildStagedSubmission(input: {
 export async function stageSubmissionSnapshot(input: {
   ownerId: string;
   payload: StagedSubmission;
+  /** Written into the same row, beside the envelope (d582). */
+  cover?: RosterCover;
   store?: SubmissionSnapshotStore;
 }): Promise<SessionCaptureState> {
   const store = input.store ?? rosterStorage;
@@ -122,7 +131,7 @@ export async function stageSubmissionSnapshot(input: {
     const expectedClearEpoch = await store.getClearEpoch();
     const outcome = await store.allocateSubmissionSnapshot({
       ownerId: input.ownerId,
-      payload: input.payload,
+      payload: input.cover === undefined ? input.payload : { ...input.payload, cover: input.cover },
       expectedClearEpoch,
     });
     if (outcome.status === "allocated") {
@@ -210,9 +219,15 @@ export async function readStagedSubmissionSnapshot(
   }
   if (row === null) return { status: "absent" };
   if (!isStagedSubmission(row.payload)) return { status: "unusable" };
+  const { cover, ...payload } = row.payload as StagedSubmission & { cover?: RosterCover };
   return {
     status: "found",
-    snapshot: { ownerId, submissionOrdinal: row.submissionOrdinal, payload: row.payload },
+    snapshot: {
+      ownerId,
+      submissionOrdinal: row.submissionOrdinal,
+      payload,
+      cover: cover ?? { entries: [], decrements: [] },
+    },
   };
 }
 

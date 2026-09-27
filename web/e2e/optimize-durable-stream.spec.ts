@@ -137,6 +137,7 @@ async function seedPriorRunRecord(page: Page): Promise<void> {
       snapshotRef: PRIOR_RUN_OWNER,
       submissionOrdinal: 1,
     },
+    coverSheet: null,
   };
   await page.addInitScript(({ key, value }) => sessionStorage.setItem(key, value), {
     key: OPTIMIZE_SESSION_STORAGE_KEY,

@@ -28,6 +28,7 @@ import { typedIdKey } from "@/lib/roster";
 import type { RosterContext, RosterContextShiftType } from "@/lib/roster";
 import {
   dateLabel,
+  exactShiftCoverageLabel,
   shiftContextLabel,
   shiftTimeRange,
   uniformShiftRequirement,
@@ -388,8 +389,11 @@ function CoverageWide({
               {calendar.map((day, dateIdx) => {
                 const cell = coverage[dateIdx]?.shifts[shiftIdx];
                 const people = cell?.people ?? [];
-                const label = `${shiftContextLabel(shift)} on ${dateLabel(calendar, dateIdx)} ${day.weekday} — ${people.length} staffed${
-                  cell?.required != null ? ` of ${cell.required} required` : ""
+                // The label states the WARD's own against the ward need and names
+                // her credit beside it ("2/2 from the ward · +1 cover"), so a cell
+                // never reads as if the ward alone staffed a covered slot.
+                const label = `${shiftContextLabel(shift)} on ${dateLabel(calendar, dateIdx)} ${day.weekday} — ${
+                  cell === undefined ? `${people.length} staffed` : exactShiftCoverageLabel(cell)
                 }${people.length === 0 ? "" : `: ${people.map((personIdx) => String(context.people[personIdx]?.id ?? "")).join(", ")}`}`;
                 return (
                   <div
@@ -401,6 +405,7 @@ function CoverageWide({
                     // 16 x 28 lanes against the stored document instead of
                     // scraping prose.
                     data-staffed={people.length}
+                    data-cover={cell?.cover ?? 0}
                     data-people={people
                       .map((personIdx) => String(context.people[personIdx]?.id ?? ""))
                       .join(",")}
@@ -427,11 +432,21 @@ function CoverageWide({
                           <span className="font-medium text-ink3">/{cell.required}</span>
                         ) : null}
                       </span>
-                      {cell?.short === true ? (
-                        <span className="font-ui text-label font-bold uppercase tracking-[0.04em] text-errorink">
-                          Short
-                        </span>
-                      ) : null}
+                      <span className="flex items-baseline gap-1">
+                        {cell !== undefined && cell.cover > 0 ? (
+                          <span
+                            data-testid="roster-exact-shift-cover"
+                            className="font-ui text-label font-bold uppercase tracking-[0.04em] text-ink3"
+                          >
+                            +{cell.cover} {cell.cover === 1 ? "cover" : "covers"}
+                          </span>
+                        ) : null}
+                        {cell?.short === true ? (
+                          <span className="font-ui text-label font-bold uppercase tracking-[0.04em] text-errorink">
+                            Short
+                          </span>
+                        ) : null}
+                      </span>
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {people.map((personIdx) => (
@@ -652,6 +667,7 @@ function CoverageStacked({
                     data-testid="roster-exact-shift-row"
                     data-shift={String(shift.id)}
                     data-short={cell?.short === true ? "true" : "false"}
+                    data-cover={cell?.cover ?? 0}
                     className={cn(
                       "flex items-start gap-2.5 border-t border-line2 py-2",
                       cell?.short === true && "border-error bg-errortint",
@@ -675,16 +691,26 @@ function CoverageStacked({
                             </span>
                           ) : null}
                         </span>
-                        <span
-                          className={cn(
-                            "shrink-0 font-mono text-label-lg font-bold",
-                            cell?.short === true ? "text-errorink" : "text-ink",
-                          )}
-                        >
-                          {people.length}
-                          {cell?.required != null ? (
-                            <span className="font-medium text-ink3">/{cell.required}</span>
+                        <span className="flex shrink-0 items-baseline gap-1.5">
+                          {cell !== undefined && cell.cover > 0 ? (
+                            <span
+                              data-testid="roster-exact-shift-cover"
+                              className="font-ui text-label font-bold uppercase tracking-[0.04em] text-ink3"
+                            >
+                              +{cell.cover} {cell.cover === 1 ? "cover" : "covers"}
+                            </span>
                           ) : null}
+                          <span
+                            className={cn(
+                              "font-mono text-label-lg font-bold",
+                              cell?.short === true ? "text-errorink" : "text-ink",
+                            )}
+                          >
+                            {people.length}
+                            {cell?.required != null ? (
+                              <span className="font-medium text-ink3">/{cell.required}</span>
+                            ) : null}
+                          </span>
                         </span>
                       </div>
                       <div className="flex flex-wrap gap-1">

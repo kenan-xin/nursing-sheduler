@@ -191,11 +191,25 @@ export const findSickCovers = (
 ) =>
   rankPartners(ctx, personIdx, dateIdxs, (q) => planSickCover(ctx, personIdx, q, dateIdxs), limit);
 
-/** Step 3: what a borrowed nurse must cover, and the skill group a requirement demands there. */
+/**
+ * Step 3: what a borrowed nurse must cover, and the skill group a requirement demands
+ * there. Only where the ward need is still short once the person is gone: a slot a
+ * temporary cover already fills (the model's ward need, d582) needs no borrow.
+ */
 export function borrowNeeds(ctx: SwapContext, personIdx: number, dateIdxs: readonly number[]) {
   return dateIdxs.flatMap((dateIdx) => {
     const cell = ctx.days[personIdx][dateIdx];
     if (cell.kind !== "shift") return [];
+    const after: RosterDayState[][] = ctx.days.map((row) => [...row]);
+    after[personIdx][dateIdx] = OFF;
+    const check = checkRosterChange(ctx.model, ctx.context, ctx.days, after, {
+      people: [personIdx],
+      dates: [dateIdx],
+    });
+    const short = check.hard.some(
+      (issue) => issue.staffing?.part === "short" || issue.staffing?.part === "mix",
+    );
+    if (!short) return [];
     const shiftIdx = ctx.model.shiftIndex.get(typedIdKey(cell.shiftId));
     const scoped = ctx.model.equations.find(
       (equation) =>

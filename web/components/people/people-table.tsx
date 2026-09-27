@@ -79,6 +79,7 @@ import {
   type EditorGroup,
 } from "@/components/entity-editor/core";
 import { GroupsSection, type GroupsSectionConfig } from "@/components/entity-editor/groups-section";
+import { TemporaryCoverSection } from "./temporary-cover-section";
 import { changeKeys } from "@/lib/change-highlight/keys";
 import { useChangeTarget } from "@/lib/change-highlight/store";
 import { peopleDescriptor } from "./people-descriptor";
@@ -487,6 +488,9 @@ export function PeopleTable() {
         config={STAFF_GROUPS_CONFIG}
         groupChangeKey={changeKeys.peopleGroup}
       />
+
+      {/* Third card: temporary cover (d582, spec §6). */}
+      <TemporaryCoverSection />
 
       {uploadOpen && (
         <UploadDialog

@@ -53,6 +53,7 @@ export const productionCandidateBuilder: BuildCandidateDocument = async (input) 
   const result = await assembleRosterDocument({
     container: input.container,
     submission: input.snapshot,
+    cover: input.cover,
     frozenXlsx: input.frozenXlsx,
     appBuild: rosterAppBuild(),
   });

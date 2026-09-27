@@ -15,6 +15,7 @@ import {
   cloneDocument,
   fixtureCanonicalDocument,
   fixtureContainer,
+  fixtureCover,
   fixtureFrozenXlsx,
   fixtureRosterDocument,
   fixtureSubmission,
@@ -117,7 +118,7 @@ describe("validateRosterDocument — structure and versions", () => {
     expect(await validateRosterDocument(subject)).toMatchObject({ ok: false });
   });
 
-  it.each(["roster-file/2", "roster-file/0", "roster-container/1", "", 1, null])(
+  it.each(["roster-file/1", "roster-file/3", "roster-file/0", "roster-container/1", "", 1, null])(
     "rejects document schema version %p",
     async (schemaVersion) => {
       const subject = mutable(await fixtureRosterDocument());
@@ -378,7 +379,50 @@ describe("validateRosterDocument — overlay, coordinates, and workbook", () => 
     expect(result).toMatchObject({ ok: true });
     if (!result.ok) return;
     // The returned value is what F1 stores, so it must be the normalized document.
-    expect(result.document.schemaVersion).toBe("roster-file/1");
+    expect(result.document.schemaVersion).toBe("roster-file/2");
     expect(result.document.frozenXlsx.size).toBe(8);
+  });
+});
+
+describe("validateRosterDocument — cover (roster-file/2)", () => {
+  it("accepts a document carrying a cover and returns it verbatim", async () => {
+    const result = await validateRosterDocument(
+      await fixtureRosterDocument({ cover: fixtureCover() }),
+    );
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) expect(result.document.cover).toEqual(fixtureCover());
+  });
+
+  it("a develop-era /2 with borrowed fails exact-field validation", async () => {
+    const subject = mutable(await fixtureRosterDocument());
+    delete loose(subject).cover;
+    loose(subject).borrowed = [];
+    const result = await validateRosterDocument(subject);
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) expect(result.reason).toContain("cover");
+  });
+
+  it.each<[string, (cover: Record<string, unknown>) => void]>([
+    ["an entry with an empty name", (c) => ((c.entries as { name: string }[])[0].name = "")],
+    [
+      "an entry with an extra field",
+      (c) => ((c.entries as object[])[0] = { ...(c.entries as object[])[0], note: 1 }),
+    ],
+    [
+      "a decrement naming no submitted preference",
+      (c) => ((c.decrements as { pref: number }[])[0].pref = 2),
+    ],
+    [
+      "a decrement off the calendar",
+      (c) => ((c.decrements as { iso: string }[])[0].iso = "2026-08-01"),
+    ],
+    ["a negative decrement", (c) => ((c.decrements as { required: number }[])[0].required = -1)],
+    ["an extra cover field", (c) => (c.pending = [])],
+  ])("rejects %s", async (_label, tamper) => {
+    const subject = mutable(await fixtureRosterDocument({ cover: fixtureCover() }));
+    tamper(subject.cover as unknown as Record<string, unknown>);
+    const result = await validateRosterDocument(subject);
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) expect(result.reason).toContain("cover");
   });
 });

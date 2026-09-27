@@ -14,6 +14,7 @@ import {
   upgradeStoredRosterDocument,
 } from "@/lib/roster";
 import type { RosterChangeOutcome } from "@/lib/roster/change-request";
+import type { RequirementCover } from "@/lib/roster-viewer/requirements";
 import { dayCode, deriveRuleModel, listIssues, plainDate } from "@/lib/roster-viewer/rule-check";
 import { shiftTimeRange } from "@/lib/roster-viewer/shift-label";
 import {
@@ -66,6 +67,8 @@ export interface RosterSummary {
   dates: string[];
   rows: { person: string; days: string[] }[];
   rulesBrokenNow: string[];
+  /** "N on 2026-10-08: +1 cover (Haseena (Ward 3))": temporary covers in range (d582). */
+  temporaryCover?: string[];
   lastChange?: string;
   guidance: string;
 }
@@ -79,6 +82,7 @@ export function summarizeRoster(
   document: RosterDocument,
   filter: { fromDate?: string; toDate?: string; people?: readonly string[] },
   newerRunWaiting: boolean,
+  cover?: RequirementCover,
 ): RosterSummary | string {
   const { context } = document;
   const isos = context.calendar.map((day) => day.iso);
@@ -101,7 +105,17 @@ export function summarizeRoster(
     people = [...new Set(found)];
   }
   const days = deriveCurrentDays(document.solvedDays, document.edits);
-  const model = deriveRuleModel(document.submission);
+  const model = deriveRuleModel(document.submission, cover);
+  // A cover is not a person, so she has no row: one line per shift and date she works.
+  const covered = new Map<string, string[]>();
+  for (const entry of cover?.live ?? []) {
+    if (!dateIdxs.some((d) => isos[d] === entry.date)) continue;
+    const slot = `${String(entry.shiftType)} on ${entry.date}`;
+    covered.set(slot, [...(covered.get(slot) ?? []), entry.name]);
+  }
+  const temporaryCover = [...covered].map(
+    ([slot, names]) => `${slot}: +${names.length} cover (${names.join(", ")})`,
+  );
   // ponytail: the whole range goes back in one answer; a ward period is about 4-6 weeks.
   const rulesBrokenNow =
     model === null
@@ -130,6 +144,7 @@ export function summarizeRoster(
       days: dateIdxs.map((d) => dayCode(days[p][d])),
     })),
     rulesBrokenNow,
+    ...(temporaryCover.length > 0 ? { temporaryCover } : {}),
     guidance: newerRunWaiting
       ? `${ROSTER_GUIDANCE} A newer roster from the last run is waiting: tell the user to press Load on the Roster screen if they mean that one.`
       : ROSTER_GUIDANCE,
@@ -388,37 +403,33 @@ export function buildShortView(
   };
 }
 
-export const BORROW_SOURCE = {
-  relief_pool: "relief pool",
-  other_ward: "another ward",
-  agency: "agency",
-} as const;
-
-/** Step 3, C1: the schedule change only. `question` is the proposal's lending-ward question. */
+/**
+ * Step 3 (d582): book a temporary cover, a display row that lowers each shift's need by
+ * one. The lending ward already agreed in chat (`lenderConfirmed`), so no tick is asked.
+ */
 export function buildBorrowView(
   name: string,
-  source: keyof typeof BORROW_SOURCE,
   groups: readonly string[],
   needs: readonly { date: string; shift: string }[],
-  question: string | null,
   summary: string,
 ): RosterChangeView {
-  const from = BORROW_SOURCE[source];
-  const qualified = groups.length > 0 ? `, and qualified as ${groups.join(", ")}` : "";
+  const shifts = needs.map((n) => `${n.shift} on ${n.date}`).join(", ");
+  const counts = groups.length > 0 ? `, and the cover counts as ${groups.join(", ")}` : "";
+  const fewer = needs.length === 1 ? "on that shift" : "on each of those shifts";
   return {
-    heading: "Ask for a temporary nurse?",
+    heading: "Book a temporary cover?",
     stepLabel: STEP_LABEL[3],
-    title: `${name} (${from}): ${needs.map((n) => `${n.shift} on ${n.date}`).join(", ")}`,
+    title: `${name}: ${shifts}`,
     summary,
     rows: [],
     leaveRows: [],
     worthKnowing: [],
     notChecked: [],
     notes: [
-      `Adds ${name} (${from}) as temporary staff, off on every other date${qualified}.`,
-      `${name}'s roster row appears after the next run.`,
+      `Adds temporary cover ${name}: ${shifts}. The ward needs one fewer nurse ${fewer}${counts}.`,
+      "Run Optimize afterwards so the roster fits the cover.",
       `Please let your ${ROSTER_OWNER} know.`,
     ],
-    agreement: question,
+    agreement: null,
   };
 }

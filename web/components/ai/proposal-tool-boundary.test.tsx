@@ -55,6 +55,11 @@ interface CapturedTool {
 
 const captured: CapturedTool[] = [];
 
+// The Preview's controller holds the host navigation (a cover Apply opens Staff).
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => "/",
+}));
 vi.mock("@copilotkit/react-core/v2", () => ({
   useFrontendTool: (definition: CapturedTool) => {
     if (!captured.some((tool) => tool.name === definition.name)) captured.push(definition);

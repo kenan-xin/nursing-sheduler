@@ -50,6 +50,7 @@ import {
   type CurrentCandidatePointer,
   type RosterStorage,
 } from "@/lib/store";
+import type { RosterCover } from "@/lib/roster/types";
 import type { SessionCaptureState } from "./session-transaction";
 import {
   purgeSubmissionSnapshot,
@@ -77,6 +78,8 @@ export interface CandidateBuildInput {
   container: unknown;
   /** The immutable exact submission — the ONLY de-anonymization authority. */
   snapshot: StagedSubmission;
+  /** The temporary cover staged with it (d582); empty when none. */
+  cover: RosterCover;
   /** The already-restored, de-anonymized workbook: the frozen render input. */
   frozenXlsx: Blob;
 }
@@ -906,6 +909,7 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
         submissionOrdinal: snapshot.submissionOrdinal,
         container: entry.container,
         snapshot: snapshot.payload,
+        cover: snapshot.cover,
         frozenXlsx: request.frozenXlsx,
       });
     } catch (error) {

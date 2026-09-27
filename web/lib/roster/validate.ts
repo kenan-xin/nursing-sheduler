@@ -17,6 +17,7 @@
 // version bump plus a migration that re-derives the context, because old files
 // carry the old derivation and this check would otherwise reject them.
 
+import { z } from "zod";
 import { canonicalStringify, validatePeopleReverseMap } from "@/lib/scenario";
 import { computeSolvedBaselineId, isSolvedBaselineId } from "./baseline";
 import { checkCoordinateMap, checkExactFields, checkSolvedDays, shiftIdKeySet } from "./container";
@@ -35,6 +36,70 @@ export const MAX_FROZEN_XLSX_BYTES = 32 * 1024 * 1024;
 
 const PROVENANCE_FIELDS = ["solverStatus", "score", "solvedBaselineId", "appBuild"] as const;
 const SUBMISSION_FIELDS = ["canonicalYaml", "reverseMap", "schemaVersion"] as const;
+
+const count = z.number().int().nonnegative();
+const isoDate = z.iso.date();
+
+/** The shape of `cover` (roster-file/2); cross-field checks follow in `checkCover`. */
+const coverSchema = z.strictObject({
+  entries: z.array(
+    z.strictObject({
+      name: z.string().min(1),
+      iso: isoDate,
+      shiftId: z.union([z.string().min(1), z.number()]),
+      groups: z.array(z.string()),
+    }),
+  ),
+  decrements: z.array(
+    z.strictObject({
+      pref: count,
+      iso: isoDate,
+      required: count,
+      preferred: count.optional(),
+      mix: z
+        .array(
+          z.strictObject({
+            entryIdx: count,
+            people: z.union([z.string(), z.number()]),
+            authored: count,
+            by: count,
+          }),
+        )
+        .optional(),
+    }),
+  ),
+});
+
+/**
+ * `cover` against the submission it was staged with: every decrement names a
+ * submitted preference and a date on the roster's calendar. Entries are the
+ * scenario's covers as authored, so an entry outside the period is kept (it lowered
+ * nothing, and the ledger says so).
+ */
+function checkCover(
+  value: unknown,
+  preferenceCount: number,
+  calendar: RosterDocument["context"]["calendar"],
+): { ok: true; cover: RosterDocument["cover"] } | { ok: false; reason: string } {
+  const parsed = coverSchema.safeParse(value);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return {
+      ok: false,
+      reason: `cover is malformed at ${["cover", ...issue.path].join(".")}: ${issue.message}`,
+    };
+  }
+  const isos = new Set(calendar.map((day) => day.iso));
+  for (const [index, mark] of parsed.data.decrements.entries()) {
+    if (mark.pref >= preferenceCount) {
+      return { ok: false, reason: `cover.decrements.${index} names no submitted preference` };
+    }
+    if (!isos.has(mark.iso)) {
+      return { ok: false, reason: `cover.decrements.${index} is not on the roster's calendar` };
+    }
+  }
+  return { ok: true, cover: parsed.data };
+}
 
 /** The validator's verdict, in the exact shape F1's promotion contract expects. */
 export type RosterValidation =
@@ -172,6 +237,10 @@ export async function validateRosterDocument(
   });
   if (!overlay.ok) return overlay;
 
+  // --- temporary cover (roster-file/2) --------------------------------------
+  const cover = checkCover(record.cover, derived.document.preferences.length, context.calendar);
+  if (!cover.ok) return cover;
+
   // --- coordinates ---------------------------------------------------------
   const coordinates = checkCoordinateMap(
     record.coordinateMap,
@@ -212,6 +281,7 @@ export async function validateRosterDocument(
       solvedDays: grid.solvedDays,
       edits: record.edits as RosterDocument["edits"],
       coordinateMap: coordinates.coordinateMap,
+      cover: cover.cover,
       frozenXlsx: record.frozenXlsx,
     }),
   };

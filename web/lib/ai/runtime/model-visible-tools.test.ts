@@ -433,6 +433,19 @@ describe("the command arms the provider is actually shown", () => {
         members: ["ana"],
       },
       remove_people_group: { type: "remove_people_group", groupId: "Seniors" },
+      add_temporary_cover: {
+        type: "add_temporary_cover",
+        name: "Haseena (Ward 3)",
+        date: "2026-10-14",
+        shiftType: "N",
+        groups: ["RN"],
+      },
+      remove_temporary_cover: {
+        type: "remove_temporary_cover",
+        name: "Haseena (Ward 3)",
+        date: "2026-10-14",
+        shiftType: "N",
+      },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
     // The only optional wire fields: advertised, present in the payload, not `required`.
@@ -497,13 +510,13 @@ describe("the command arms the provider is actually shown", () => {
     expect(Object.keys(borrow).sort()).toEqual([
       "dates",
       "groups",
+      "lenderConfirmed",
       "name",
       "person",
       "reason",
-      "source",
       "summary",
     ]);
-    expect(child(borrow, "source").enum).toEqual(["relief_pool", "other_ward", "agency"]);
+    expect(child(borrow, "lenderConfirmed").type).toBe("boolean");
     const read = child(child(wire.get("get_roster"), "parameters"), "properties");
     expect(child(child(read, "people"), "items").type).toBe("string");
   });

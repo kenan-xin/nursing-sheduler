@@ -45,7 +45,7 @@ export default defineConfig({
   // — the base config's webServer points BACKEND_API_URL at 127.0.0.1:8000,
   // where a developer's real FastAPI may already be bound.
   testIgnore:
-    /optimize-assembled-stream\.spec\.ts|roster-real-ward-assembled\.spec\.ts|optimize-public-roster-dispatch\.spec\.ts/,
+    /optimize-assembled-stream\.spec\.ts|roster-real-ward-assembled\.spec\.ts|temporary-cover-real-ward\.spec\.ts|optimize-public-roster-dispatch\.spec\.ts/,
   fullyParallel: true,
   workers,
   forbidOnly: !!process.env.CI,

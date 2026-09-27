@@ -60,6 +60,7 @@ export {
   commandsDigest,
   deriveIdempotencyKey,
   describeProposalReadiness,
+  proposalBasisBlock,
   type EvidenceReference,
   type LiveProposalBasis,
   type PreparedProposalV1,
