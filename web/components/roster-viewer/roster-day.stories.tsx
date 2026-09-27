@@ -41,8 +41,6 @@ const meta = {
   title: "RosterViewer/RosterDay",
   parameters: {
     layout: "padded",
-    // a11y violation tracked in nursing-sheduler-w0e.29; restore "error" when fixed
-    a11y: { test: "todo" },
   },
   loaders: [async () => ({ document: await fixtureRosterDocument() })],
   args: { focusedDay: 0, onFocusDay: fn() },

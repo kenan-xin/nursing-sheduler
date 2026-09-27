@@ -69,8 +69,6 @@ export const Editing: Story = {
 };
 
 export const DayLens: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.29; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   play: async ({ canvas, userEvent }) => {
     await userEvent.click(canvas.getByTestId("roster-lens-day"));
     await waitFor(() => expect(canvas.getByTestId("roster-day")).toBeVisible());
