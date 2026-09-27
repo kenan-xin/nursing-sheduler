@@ -17,10 +17,11 @@
 // So a manager may soften or turn off a rest rule, always with REST_PRACTICE_WARNING,
 // and a repair may soften one (never delete it) after the ward-internal fixes.
 //
-// CONTROLLER RULINGS (2026-09-24, binding over the spec draft):
-// - No `mark_person_off` arm exists. The borrowed/float nurse repair is expressed
-//   with EXISTING arms: `add_person`, then `set_off_request` at weight "must" over
-//   the dates she is NOT covering (she is free only on the short dates).
+// CONTROLLER RULINGS (2026-09-24, binding over the spec draft; d582 of 2026-09-27):
+// - No `mark_person_off` arm exists, and a borrowed/float nurse is no longer a roster
+//   person. The repair books TEMPORARY COVERS (`add_temporary_cover`): one per short
+//   (date, shift), each a staffing credit on one date and one shift, so no rule, pin
+//   or roster cell names her and nothing else about the ward changes.
 // - Staffing requirements are EXACT counts (`qualifiedPeople` bans everyone else),
 //   so "lower a staffing minimum" means editing `requiredNumPeople` of an exact
 //   requirement via `edit_staffing_requirement` / `set_staffing_requirement_people`.
@@ -37,7 +38,7 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-24.9";
+export const PLAYBOOK_VERSION = "2026-09-27.1";
 
 /** Said on the Preview and in the reply whenever a change relaxes a rest rule. */
 export const REST_PRACTICE_WARNING =
@@ -258,19 +259,17 @@ export const REPAIRS: readonly RepairEntry[] = [
   },
   {
     id: "borrow_temporary_nurse",
-    title: "Borrow a float, agency or other-ward nurse for the short dates",
+    title: "Book a temporary cover nurse for the short dates",
     whenToUse: "The ward has too few free nurses on some dates.",
     disruption: "medium",
     confirmation: "lending_ward",
-    enforcedBy: "host_question",
-    // No `mark_person_off` arm exists: add the nurse, then pin her OFF (weight "must")
-    // over every date she is not covering, so she is free only on the short dates
-    // (controller ruling, 2026-09-24). A "must" shift request puts her on the short shift, and
-    // a hard count rule she would inherit is narrowed to the ward's own staff in the
-    // same change.
-    opTypes: ["add_person", "set_off_request", "set_shift_request", "edit_count_rule"],
+    enforcedBy: "chat",
+    // A cover is a staffing credit, not a solver person (d582): the option books one
+    // `add_temporary_cover` per short (date, shift), so no roster cell, count rule or pin
+    // is needed. The lending ward is agreed in chat before the covers are shown.
+    opTypes: ["add_temporary_cover"],
     guardrail:
-      "Put her in a skill group only when the manager confirms her qualification. Never invent a name.",
+      "Put her in a staff group only when the manager confirms her qualification. Never invent a name.",
   },
   {
     id: "ask_nurse_on_leave",
@@ -336,7 +335,7 @@ export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
     "run_one_short",
     "split_long_shift",
   ],
-  // Spec: 1, 3, as hypotheses. A whole-period borrow is not a guess worth testing.
+  // Spec: 1, 3, as hypotheses. A blind borrow is not a guess worth testing.
   // Softening a rest rule comes last. Only here: the static check does not model rest
   // rules, so it never blames them for a proven gap.
   unexplained: ["soften_hard_request", "relax_count_rule", "soften_rest_rule"],

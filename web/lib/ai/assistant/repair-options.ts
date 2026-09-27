@@ -7,13 +7,14 @@
 // Nothing here applies anything: an option reaches the schedule only as a Preview the
 // user applies.
 //
-// Controller rulings (2026-09-24) shape the operations: a borrowed nurse is
-// `add_person`, plus `set_off_request` "must" outside the loan (no `mark_person_off`
-// arm);
+// Controller rulings (2026-09-24, d582 2026-09-27) shape the operations: a borrowed nurse is
+// a TEMPORARY COVER (`add_temporary_cover`), one per short (date, shift) -- a staffing credit
+// the reads apply, never a solver person, so no `mark_person_off` arm is needed and no rule,
+// pin or roster cell names her;
 // staffing requirements are EXACT counts; a requirement is lowered for one date through a
 // date exception (set_staffing_requirement_on_date), or lowered outright when it targets
 // that date alone; a skill-mix requirement is never lowered, and no repair creates one (a
-// skill-mix gap is closed by borrowing into its group).
+// skill-mix gap is closed by covering into its group).
 
 import { isEditableCountCard } from "@/components/counts/counts-model";
 import { skillMixFloor } from "@/components/requirements/requirements-model";
@@ -37,7 +38,7 @@ import {
   type StaffingFinding,
 } from "@/lib/rules/shortfalls";
 // Direct path: the barrel re-exports this module and `@/lib/scenario` would cycle.
-import { cardNeedOn } from "@/lib/scenario/temporary-cover";
+import { cardNeedOn, coverStatuses } from "@/lib/scenario/temporary-cover";
 import type {
   CountCard,
   DateRef,
@@ -193,19 +194,6 @@ const gapOn = (findings: StaffingFinding[], dateId: string) =>
 function shortDates(ctx: Ctx, findings: StaffingFinding[]): string[] {
   const set = new Set(findings.flatMap((f) => (f.dateId ? [f.dateId] : [])));
   return ctx.items.map((i) => i.id).filter((id) => set.has(id));
-}
-
-/** ISO runs of consecutive roster days that share a non-null key. */
-function runsOf(ctx: Ctx, keyOf: (dateId: string) => string | null) {
-  const runs: { from: string; to: string; key: string }[] = [];
-  let previous: string | null = null;
-  for (const item of ctx.items) {
-    const key = keyOf(item.id);
-    if (key !== null && key === previous) runs[runs.length - 1].to = item.iso;
-    else if (key !== null) runs.push({ from: item.iso, to: item.iso, key });
-    previous = key;
-  }
-  return runs;
 }
 
 export function classifySituation(
@@ -539,164 +527,119 @@ function skillGroupNeeds(ctx: Ctx, dated: StaffingFinding[]): SkillGroupNeed[] |
   });
 }
 
-function placeholderNames(ctx: Ctx, count: number): string[] {
-  const taken = new Set([...ctx.staffIds, ...ctx.groupIds]);
-  const names: string[] = [];
-  for (let n = 1; names.length < count; n++) {
-    const name = `Borrowed nurse ${n}`;
-    if (!taken.has(name)) names.push(name);
-  }
-  return names;
+/** The finding with the largest people gap on a date: its shifts are the date's short shifts. */
+function worstOn(dated: StaffingFinding[], dateId: string): StaffingFinding | undefined {
+  return [...dated]
+    .filter((f) => f.dateId === dateId)
+    .sort((a, b) => b.required - b.available - (a.required - a.available))[0];
 }
 
-/** Whether a rule's people would take in a nurse who joins one of `groups` (everyone is in ALL). */
-const wouldBind = (refs: PersonRef | PersonRef[], groups: readonly string[]) =>
-  asList(refs).some((r) => isAll(r) || groups.some((g) => String(r) === g));
+interface CoverSlot {
+  dateId: string;
+  shiftType: string;
+}
+
+/** One nurse a borrow books: the group she joins (null = any) and the slots she fills. */
+interface CoverNurse {
+  group: string | null;
+  slots: CoverSlot[];
+}
 
 /**
- * Hard count rules a borrowed nurse would inherit, narrowed to the ward's own staff. A
- * contracted-hours minimum or a cap would bind her on days she is not here. `null` =
- * one cannot be narrowed by `edit_count_rule`, so no loan is offered.
+ * One nurse per short skill group on each date it is short, then one per head-count gap those
+ * nurses do not already fill, each with the (date, shift) slots she covers: the group's own
+ * short shift, or the date's next short shift (bead nursing-sheduler-efi). `undefined` when a
+ * short group's qualification is unknown.
  */
-function narrowedCounts(ctx: Ctx, groups: readonly string[]): AssistantCommandV1[] | null {
-  const ops: AssistantCommandV1[] = [];
-  for (const card of ctx.state.cardsByKind.counts) {
-    if (card.disabled || Number.isFinite(card.weight) || !wouldBind(card.person, groups)) continue;
-    const staff = staffIn(ctx, card.person);
-    if (!editableCount(card) || staff.length === 0) return null;
-    ops.push(
-      editCount(
-        ctx,
-        card,
-        card.target,
-        staff.map((id) => personRef(ctx, id)),
-      ),
-    );
-  }
-  return ops;
-}
-
-/** The dates a cap_short's requirement covers: a loan adds at most one shift per date. */
-function cappedDateCount(ctx: Ctx, f: StaffingFinding): number {
-  const card = requirementCard(ctx, f.ruleIds[0]);
-  return (card ? requirementDateIds(ctx.state, card).length : 0) || ctx.items.length;
+function coverNurses(
+  ctx: Ctx,
+  dated: StaffingFinding[],
+  short: string[],
+): CoverNurse[] | undefined {
+  const needs = skillGroupNeeds(ctx, dated);
+  if (needs === undefined) return undefined;
+  const shiftOn = (dateId: string, slot: number) => {
+    const shifts = [...new Set(worstOn(dated, dateId)?.shiftTypes ?? [])];
+    return shifts.length ? shifts[slot % shifts.length] : null;
+  };
+  const groupShift = (dateId: string, group: string) =>
+    dated.find((f) => f.dateId === dateId && findingGroup(ctx, f) === group)?.shiftTypes[0];
+  const nurses: CoverNurse[] = [];
+  for (const need of needs)
+    for (let n = 0; n < need.count; n++)
+      nurses.push({
+        group: need.group,
+        slots: need.dateIds.flatMap((dateId) => {
+          const shiftType = groupShift(dateId, need.group);
+          return shiftType === undefined ? [] : [{ dateId, shiftType }];
+        }),
+      });
+  const covered = new Map<string, number>();
+  for (const need of needs)
+    for (const id of need.dateIds) covered.set(id, (covered.get(id) ?? 0) + need.count);
+  const spare = (id: string) => Math.max(0, gapOn(dated, id) - (covered.get(id) ?? 0));
+  const spareCount = Math.max(0, ...short.map(spare));
+  for (let n = 0; n < spareCount; n++)
+    nurses.push({
+      group: null,
+      slots: short.flatMap((dateId) => {
+        if (spare(dateId) <= n) return [];
+        const shiftType = shiftOn(dateId, n);
+        return shiftType === null ? [] : [{ dateId, shiftType }];
+      }),
+    });
+  return nurses.filter((nurse) => nurse.slots.length > 0);
 }
 
 const borrowTemporaryNurse: Builder = (ctx, all) => {
   const findings = gapsOnly(all);
   const dated = findings.filter((f) => f.dateId !== null);
-  const capped = findings.find((f) => f.kind === "cap_short");
-  const gap = dated.length
-    ? Math.max(...dated.map((f) => f.required - f.available))
-    : capped
-      ? Math.ceil((capped.required - capped.available) / cappedDateCount(ctx, capped))
-      : 0;
-  if (ctx.items.length === 0) return null;
+  // A cap_short is a period-level ceiling on people, which no (date, shift) cover lowers.
+  if (ctx.items.length === 0 || dated.length === 0) return null;
   const ids = ctx.items.map((i) => i.id);
   const short = shortDates(ctx, dated);
+  const gap = Math.max(...dated.map((f) => f.required - f.available));
+  const nurses = coverNurses(ctx, dated, short);
+  if (nurses === undefined || nurses.length < 1 || nurses.length > MAX_BORROWED) return null;
 
-  // One borrowed nurse per short skill group per date it is short, then one per head-count
-  // gap those nurses do not already fill: she joins the group the date's own shortfall
-  // needs, so a second group's gap does not stay open (bead nursing-sheduler-efi).
-  const nurses: { group: string | null; dateIds: string[] }[] = [];
-  if (short.length === 0) {
-    // No short date: a whole-period loan, sized from the period's cap shortfall.
-    const group = capped ? findingGroup(ctx, capped) : null;
-    if (group === undefined) return null;
-    for (let n = 0; n < gap; n++) nurses.push({ group, dateIds: ids });
-  } else {
-    const needs = skillGroupNeeds(ctx, dated);
-    if (needs === undefined) return null;
-    for (const need of needs)
-      for (let n = 0; n < need.count; n++)
-        nurses.push({ group: need.group, dateIds: need.dateIds });
-    const covered = new Map<string, number>();
-    for (const need of needs)
-      for (const id of need.dateIds) covered.set(id, (covered.get(id) ?? 0) + need.count);
-    const spare = (id: string) => Math.max(0, gapOn(dated, id) - (covered.get(id) ?? 0));
-    const spareCount = Math.max(0, ...short.map(spare));
-    for (let n = 0; n < spareCount; n++)
-      nurses.push({ group: null, dateIds: short.filter((id) => spare(id) > n) });
-  }
-  if (nurses.length < 1 || nurses.length > MAX_BORROWED) return null;
-  // Her hard days off mark her as borrowed, so the Preview asks the lender. A loan over
-  // the whole period has none and would read as a new hire: none is offered (d582).
-  if (nurses.some((n) => n.dateIds.length === ids.length)) return null;
-  const groups = [...new Set(nurses.flatMap((n) => (n.group === null ? [] : [n.group])))];
-  const narrowed = narrowedCounts(ctx, groups);
-  if (narrowed === null) return null;
-
-  // Each nurse is here on the dates she covers and must be off on every other date: a free
-  // day between two short dates would be a hire the caps no longer bind.
-  // On a date short on ONE shift, pin her to that shift. A hard sequence rule she would
-  // inherit could clash with the pins.
-  const pinnable = !ctx.state.cardsByKind.successions.some(
-    (c) => !c.disabled && !Number.isFinite(c.weight) && wouldBind(c.person, groups),
+  // Each cover is a staffing credit on one date and one shift (d582). She takes no roster
+  // cell, inherits no ward rule and needs no pin, so nothing else about the ward changes.
+  const operations = nurses.flatMap((nurse, index) =>
+    nurse.slots.map(
+      ({ dateId, shiftType }): AssistantCommandV1 => ({
+        type: "add_temporary_cover",
+        name: `Borrowed nurse ${index + 1} (another ward)`,
+        date: isoOf(ctx, dateId) ?? dateId,
+        shiftType,
+        groups: nurse.group ? [nurse.group] : [],
+      }),
+    ),
   );
-  const shortShift = (id: string) => {
-    const shifts = new Set(dated.filter((f) => f.dateId === id).flatMap((f) => f.shiftTypes));
-    return shifts.size === 1 ? [...shifts][0] : null;
-  };
-  const names = placeholderNames(ctx, nurses.length);
-  const operations: AssistantCommandV1[] = nurses.flatMap(
-    ({ group, dateIds }, index): AssistantCommandV1[] => {
-      const name = names[index];
-      const here = (id: string) => dateIds.includes(id);
-      return [
-        { type: "add_person", name, groups: group ? [group] : [] },
-        ...runsOf(ctx, (id) => (here(id) ? null : "off")).map(
-          ({ from, to }): AssistantCommandV1 => ({
-            type: "set_off_request",
-            personId: name,
-            startDate: from,
-            endDate: to,
-            weight: "must",
-          }),
-        ),
-        ...(pinnable ? runsOf(ctx, (id) => (here(id) ? shortShift(id) : null)) : []).map(
-          ({ from, to, key }): AssistantCommandV1 => ({
-            type: "set_shift_request",
-            personId: name,
-            shiftType: key,
-            startDate: from,
-            endDate: to,
-            weight: "must",
-          }),
-        ),
-      ];
-    },
-  );
-  operations.push(...narrowed);
   if (operations.length > MAX_ASSISTANT_OPERATIONS) return null;
 
-  const loanIds = ids.filter((id) => nurses.some((n) => n.dateIds.includes(id)));
+  const loanIds = ids.filter((id) => nurses.some((n) => n.slots.some((s) => s.dateId === id)));
   const labels = (loanIds.length ? loanIds : ids).map((id) => dateLabel(ctx, id));
-  const when = !short.length
-    ? `${labels[0]} to ${labels[labels.length - 1]}`
-    : labels.length === 1
+  const when =
+    labels.length === 1
       ? labels[0]
       : labels.length <= 3
         ? `${labels.slice(0, -1).join("; ")} and ${labels[labels.length - 1]}`
         : `${labels.length} days from ${labels[0]} to ${labels[labels.length - 1]}`;
   const who = nurses.length === 1 ? "a nurse" : `${nurses.length} nurses`;
+  const groups = [...new Set(nurses.flatMap((n) => (n.group === null ? [] : [n.group])))];
   const skill = groups.length ? `, qualified as ${groups.join(" and ")}` : "";
   return makeOption("borrow_temporary_nurse", {
     title: `Borrow ${who}${skill} from the float pool, an agency or another ward for ${when}`,
-    why: dated.length
-      ? `${dated.length === 1 ? "That day is" : "Those days are"} short by up to ${gap} ${gap === 1 ? "nurse" : "nurses"} even with everyone free working.`
-      : "More hands over the period remove the pressure the current staff cannot absorb.",
+    why: `${dated.length === 1 ? "That day is" : "Those days are"} short by up to ${gap} ${gap === 1 ? "nurse" : "nurses"} even with everyone free working.`,
     operations,
-    // Her hard days off make the Preview ask the lender (assumptions.ts), so the
-    // agreement is always a host question.
-    enforcedBy: "host_question",
+    // A cover needs no roster cell and no rule change, so the lending ward is the
+    // manager's own word in chat, and the covers are the whole change.
+    enforcedBy: "chat",
     confirmationQuestion: `Has the lending ward or agency confirmed ${nurses.length === 1 ? "the nurse" : "the nurses"} for ${when}${skill}?`,
     needsFromUser: [
-      "Which ward, float pool or agency can lend the nurse, and the name to show on the roster (or keep the placeholder).",
+      "Which ward, float pool or agency can lend her, and the name to show on the roster (or keep the placeholder).",
       ...(groups.length
         ? [`That the borrowed nurse is qualified as ${groups.join(" and ")}.`]
-        : []),
-      ...(narrowed.length
-        ? ["That the ward's own hard shift limits need not apply to the borrowed nurse."]
         : []),
     ],
     capabilityId: "staff-list",
@@ -1286,6 +1229,12 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
           op.groups.every((g) => ctx.groupIds.has(g)) &&
           (op.groups.length === 0 || option.enforcedBy === "host_question")
         );
+      case "add_temporary_cover": {
+        // A cover is a staffing credit, not a person: in period, a worked shift, known
+        // groups, and a card she counts in, which is exactly what `coverStatuses` flags.
+        const [status] = coverStatuses({ ...state, temporaryCover: [op] });
+        return status.flag === null;
+      }
       default:
         return false;
     }

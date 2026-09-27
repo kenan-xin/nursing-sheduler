@@ -109,6 +109,15 @@ describe("repair catalogue", () => {
     }
   });
 
+  it("books a temporary cover, agreed in chat, and never a roster person", () => {
+    const borrow = REPAIRS.find((repair) => repair.id === "borrow_temporary_nurse")!;
+    expect(borrow.enforcedBy).toBe("chat");
+    expect(borrow.confirmation).toBe("lending_ward");
+    expect(borrow.opTypes).toEqual(["add_temporary_cover"]);
+    expect(borrow.title).toMatch(/temporary cover/i);
+    expect(borrow.guardrail).toMatch(/group/);
+  });
+
   it("states the safety floor in ward words", () => {
     const text = SAFETY_FLOOR.join(" ");
     // Rest rules are guidance: they may be softened or turned off, never deleted.
@@ -207,6 +216,6 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS[0]).not.toMatch(/all at once, in plain words/);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-24.9");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-27.1");
   });
 });
