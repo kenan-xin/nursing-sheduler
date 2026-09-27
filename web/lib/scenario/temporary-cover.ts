@@ -20,6 +20,7 @@ import { requiredOn, requirementDateIsos } from "@/lib/rules/shortfalls";
 import {
   RESERVED_SHIFT_TYPE,
   isDayStateSelector,
+  type PersonRef,
   type RequirementCard,
   type RequirementOverride,
   type ScenarioUiState,
@@ -46,8 +47,27 @@ export interface CoverDecrement {
   /** count - wardNeed(count, credit): what the solve subtracted. */
   readonly required: number;
   readonly preferred?: number;
-  /** `entryIdx` indexes the AUTHORED card's skillMix (an entry lowered to 0 is not submitted). */
-  readonly mix?: readonly (readonly [entryIdx: number, by: number])[];
+  readonly mix?: readonly CoverMixDecrement[];
+}
+
+/**
+ * One authored skill-mix floor a cover lowered.
+ *
+ * The AUTHORED floor is recorded, not a position in the submitted copy: a floor
+ * the cover zeroes out is DROPPED from the copy's `skillMix` (a 0 floor asks
+ * nothing of the solver), so the copy's positions no longer line up with the
+ * authored ones and cannot name the floor that went missing. A reader rebuilding
+ * the authored card from the copy needs the floor itself.
+ */
+export interface CoverMixDecrement {
+  /** Index into the AUTHORED card's `skillMix`. */
+  readonly entryIdx: number;
+  /** The authored floor's group/person selector, as written on the card. */
+  readonly people: PersonRef;
+  /** The authored `minNumPeople`. */
+  readonly authored: number;
+  /** What the cover took off it (one head per cover in the floor's groups). */
+  readonly by: number;
 }
 
 export interface CoverApplication {
@@ -304,8 +324,13 @@ function lowerPart(
     const required = n.count - n.required;
     const preferred = (card.preferredNumPeople ?? 0) - (n.preferred ?? 0);
     const mix = (card.skillMix ?? [])
-      .map((entry, k) => [k, entry.minNumPeople - n.mix[k]] as const)
-      .filter(([, by]) => by > 0);
+      .map((entry, k) => ({
+        entryIdx: k,
+        people: entry.people,
+        authored: entry.minNumPeople,
+        by: entry.minNumPeople - n.mix[k],
+      }))
+      .filter((entry) => entry.by > 0);
     if (preferred > 0 || mix.length > 0 || forced.has(iso)) {
       split.add(iso);
       const {

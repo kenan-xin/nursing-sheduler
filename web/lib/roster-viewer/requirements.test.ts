@@ -20,13 +20,30 @@ import {
   summariseRequirements,
   type RequirementCell,
   type RequirementEquation,
+  type RequirementModel,
 } from "./requirements";
-import { PREFERENCE_TYPE, serializeCanonicalDocument } from "@/lib/scenario";
+import {
+  PREFERENCE_TYPE,
+  serializeCanonicalDocument,
+  toCanonicalScenarioDocument,
+} from "@/lib/scenario";
 import type {
   CanonicalPreference,
   CanonicalScenarioDocument,
   CanonicalShiftTypeGroup,
+  RequirementCard,
+  ScenarioUiState,
+  UiTemporaryCover,
 } from "@/lib/scenario";
+// DIRECT LEAF IMPORT, not the `@/lib/scenario` barrel: `temporary-cover.ts` is
+// deliberately not re-exported there (import cycle, see its task report).
+import { applyCovers, wardNeed } from "@/lib/scenario/temporary-cover";
+import {
+  cards,
+  people,
+  requirement as wardCard,
+  ward,
+} from "@/lib/rules/ward-fixtures.test-support";
 import type { RosterContext, RosterDayGrid, RosterDayState } from "@/lib/roster";
 
 const SHIFT_IDS = ["D", "D+", "E", "N"] as const;
@@ -801,6 +818,275 @@ describe("deriveRequirementModel", () => {
     const model = deriveRequirementModel({ canonicalYaml: "" });
     expect(model.equations).toEqual([]);
     expect(model.reason).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// d582 temporary cover: the ledger, and the live credit on top of it.
+//
+// The submission is the SOLVER form, so a solved cover's lowering is already
+// baked into its counts — and a count of 0 cannot say whether the ward authored
+// 0 or authored 1 with a cover clamped onto it. `decrements` is what that solve
+// subtracted (the roster file's ledger); `live` is what the scenario holds RIGHT
+// NOW. Both are read here through ONE `applyCovers` run, which is exactly how the
+// roster file records them (Task 11).
+// ---------------------------------------------------------------------------
+
+/** 1-7 Nov 2026, five staff, RN ⊂ Nurses, Day = D + E — the ward Task 5 tests use. */
+function coveredWard(
+  requirements: RequirementCard[],
+  temporaryCover: UiTemporaryCover[],
+): ScenarioUiState {
+  return ward({
+    staff: people("a1", "a2", "r1", "r2", "h1"),
+    staffGroups: [
+      { id: "RN", members: ["r1", "r2"] },
+      { id: "Nurses", members: ["RN", "a1"] },
+      { id: "HCA", members: ["h1"] },
+    ],
+    shifts: [{ id: "D" }, { id: "E" }, { id: "N" }],
+    shiftGroups: [{ id: "Day", members: ["D", "E"] }],
+    cardsByKind: cards({ requirements }),
+    temporaryCover,
+  });
+}
+
+const NOV03 = "2026-11-03";
+const NOV_DATES = [1, 2, 3, 4, 5, 6, 7].map((day) => `2026-11-0${day}`);
+
+const coverOnN = (name = "Haseena (Ward 3)"): UiTemporaryCover => ({
+  name,
+  date: NOV03,
+  shiftType: "N",
+  groups: [],
+});
+
+/** The AUTHORED model: what the ward typed, before any solve. */
+function authoredModel(state: ScenarioUiState): RequirementModel {
+  return { equations: buildEquations(toCanonicalScenarioDocument(state)), reason: null };
+}
+
+/** The SOLVED model: the submission's ledger, with the scenario's covers on top. */
+function solvedModel(state: ScenarioUiState): RequirementModel {
+  const applied = applyCovers(state);
+  return deriveRequirementModel(
+    { canonicalYaml: serializeCanonicalDocument(toCanonicalScenarioDocument(applied.state)) },
+    { decrements: applied.decrements, live: state.temporaryCover },
+  );
+}
+
+/** Every equation's need on one ISO date, as sorted `shifts=need` strings. */
+function needsOn(model: RequirementModel, iso: string): string[] {
+  const dateIdx = NOV_DATES.indexOf(iso);
+  return model.equations
+    .filter((equation) => equation.dateIndices.has(dateIdx))
+    .map(
+      (equation) =>
+        `${equation.shiftIds.join("+")}=${equation.requiredByDate.get(dateIdx) ?? equation.required}`,
+    )
+    .sort();
+}
+
+/** Every equation's live cover credit on one ISO date, as sorted `shifts=credit` strings. */
+function coversOn(model: RequirementModel, iso: string): string[] {
+  const dateIdx = NOV_DATES.indexOf(iso);
+  return model.equations
+    .filter((equation) => equation.dateIndices.has(dateIdx))
+    .map((equation) => `${equation.shiftIds.join("+")}=${equation.coverByDate.get(dateIdx) ?? 0}`)
+    .sort();
+}
+
+/** The skill-mix floors one equation states on a date, as `label>=need`, in authored order. */
+function floorList(model: RequirementModel, dateIdx: number): string[] {
+  const equation = model.equations.find((entry) => entry.dateIndices.has(dateIdx));
+  return (equation?.skillMix ?? []).map((floor) => `${floor.label}>=${floor.minNumPeople}`);
+}
+
+describe("temporary cover (d582)", () => {
+  it("requirement model counts a temporary cover", () => {
+    const state = coveredWard([wardCard("night", "N", 2)], [coverOnN()]);
+    // Authored: every night needs 2 of the ward's own.
+    expect(needsOn(authoredModel(state), NOV03)).toEqual(["N=2"]);
+    // The solver form: her night needs 1 from the ward, and says why.
+    expect(needsOn(solvedModel(state), NOV03)).toEqual(["N=1"]);
+    expect(coversOn(solvedModel(state), NOV03)).toEqual(["N=1"]);
+    // Off her date nothing moved, in either number.
+    expect(needsOn(solvedModel(state), "2026-11-04")).toEqual(["N=2"]);
+    expect(coversOn(solvedModel(state), "2026-11-04")).toEqual(["N=0"]);
+  });
+
+  it("authored count = submitted + decrement, so a solved roster reads what the solver saw", () => {
+    const state = coveredWard([wardCard("night", "N", 2)], [coverOnN()]);
+    const applied = applyCovers(state);
+    // `pref` indexes the SUBMITTED preferences: max-one-shift-per-day is first,
+    // so the single enabled requirement card is index 1.
+    expect(applied.decrements).toEqual([{ pref: 1, iso: NOV03, required: 1 }]);
+
+    const submitted = buildEquations(toCanonicalScenarioDocument(applied.state));
+    const authored = buildEquations(toCanonicalScenarioDocument(state));
+    const submittedNeed = submitted[0].requiredByDate.get(2) ?? submitted[0].required;
+    expect(submittedNeed).toBe(1);
+    expect(authored[0].required).toBe(2);
+    expect(authored[0].required).toBe(submittedNeed + applied.decrements[0].required);
+
+    // Read back through the ledger, the live credit is what the need came down
+    // by — the same number the solver saw, from two numbers that alone say
+    // nothing about the authored count.
+    const solved = solvedModel(state);
+    expect(needsOn(solved, NOV03)).toEqual([`N=${wardNeed(2, 1)}`]);
+    expect(coversOn(solved, NOV03)).toEqual(["N=1"]);
+  });
+
+  it("a live cover added after the solve lowers the need at once", () => {
+    // Solved with nobody borrowed: the submission is the authored form and the
+    // ledger is empty.
+    const state = coveredWard([wardCard("night", "N", 2)], []);
+    expect(solvedModel(state).equations[0].requiredByDate.size).toBe(0);
+    expect(needsOn(solvedModel(state), NOV03)).toEqual(["N=2"]);
+
+    // Haseena is added in the scenario afterwards. No run, no re-solve, no
+    // change to the submission — and the need is already hers.
+    const live = deriveRequirementModel(
+      { canonicalYaml: serializeCanonicalDocument(toCanonicalScenarioDocument(state)) },
+      { decrements: [], live: [coverOnN()] },
+    );
+    expect(needsOn(live, NOV03)).toEqual(["N=1"]);
+    expect(coversOn(live, NOV03)).toEqual(["N=1"]);
+    expect(needsOn(live, "2026-11-04")).toEqual(["N=2"]);
+  });
+
+  it("a solved cover removed from the scenario raises the need at once", () => {
+    const state = coveredWard([wardCard("night", "N", 2)], [coverOnN()]);
+    const applied = applyCovers(state);
+    // She is gone from the scenario, but the ledger still records what the solve
+    // subtracted — so the roster must go back to needing 2 from the ward.
+    const removed = deriveRequirementModel(
+      { canonicalYaml: serializeCanonicalDocument(toCanonicalScenarioDocument(applied.state)) },
+      { decrements: applied.decrements, live: [] },
+    );
+    expect(needsOn(removed, NOV03)).toEqual(["N=2"]);
+    expect(coversOn(removed, NOV03)).toEqual(["N=0"]);
+  });
+
+  it("clamped-to-0 submission reads the true authored count through the ledger", () => {
+    // Authored 1 with one cover: `wardNeed(1, 1)` is 0, so the submitted count of
+    // 0 is INDISTINGUISHABLE from an authored 0. Only the ledger tells them apart.
+    const state = coveredWard([wardCard("night", "N", 1)], [coverOnN()]);
+    const applied = applyCovers(state);
+    const submitted = buildEquations(toCanonicalScenarioDocument(applied.state));
+    expect(submitted[0].requiredByDate.get(2) ?? submitted[0].required).toBe(0);
+    expect(applied.decrements).toEqual([{ pref: 1, iso: NOV03, required: 1 }]);
+    // With her still booked the ward need is 0 either way...
+    expect(needsOn(solvedModel(state), NOV03)).toEqual(["N=0"]);
+
+    // ...but take her out and the ledger reads the AUTHORED 1 back, where the
+    // submitted 0 alone would have said the ward never needed anybody.
+    const removed = deriveRequirementModel(
+      { canonicalYaml: serializeCanonicalDocument(toCanonicalScenarioDocument(applied.state)) },
+      { decrements: applied.decrements, live: [] },
+    );
+    expect(needsOn(removed, NOV03)).toEqual(["N=1"]);
+  });
+
+  it("credits a cover only through the groups her card is qualified by", () => {
+    const state = coveredWard(
+      [wardCard("rn", "N", 2, { qualifiedPeople: ["RN"] }), wardCard("all", "N", 3)],
+      [{ ...coverOnN(), groups: ["RN"] }],
+    );
+    // The RN card is qualified, so she counts in it; the open card is not
+    // qualified, so `coverCounts` lets her in there too.
+    expect(needsOn(solvedModel(state), NOV03)).toEqual(["N=1", "N=2"]);
+    expect(coversOn(solvedModel(state), NOV03)).toEqual(["N=1", "N=1"]);
+  });
+
+  it("drops a cover naming a group this ward does not declare (F3 unknown-group)", () => {
+    const state = coveredWard(
+      [wardCard("night", "N", 2)],
+      [{ ...coverOnN(), groups: ["WardThree"] }],
+    );
+    // Flagged, never silently counted: she lowers nothing at all.
+    expect(solvedModel(state).equations[0].requiredByDate.size).toBe(0);
+    expect(needsOn(solvedModel(state), NOV03)).toEqual(["N=2"]);
+  });
+
+  it("keeps the authored card-wide soft floor and skill mix under the same credit", () => {
+    // `preferredNumPeople` and each skill-mix floor are CARD-wide, but a cover is
+    // per-date. The solver's date split makes the covered date its own equation,
+    // so both numbers are unambiguously hers there.
+    const state = coveredWard(
+      [
+        wardCard("night", "N", 2, {
+          preferredNumPeople: 3,
+          skillMix: [{ people: "RN", minNumPeople: 2 }],
+        }),
+      ],
+      [{ ...coverOnN(), groups: ["RN"] }],
+    );
+    const authored = authoredModel(state).equations[0];
+    expect(authored.required).toBe(2);
+    expect(authored.preferred).toBe(3);
+    expect(authored.skillMix[0].minNumPeople).toBe(2);
+
+    const solved = solvedModel(state);
+    const split = solved.equations.filter((equation) => equation.shiftIds.join("+") === "N");
+    expect(split).toHaveLength(2);
+    const onHerDate = split.find((equation) => equation.dateIndices.has(2));
+    const offHerDate = split.find((equation) => equation.dateIndices.has(3));
+    // `required` is the AUTHORED card-wide count; the need for a date is
+    // `requiredByDate` where the date has an entry and `required` otherwise.
+    expect(onHerDate?.required).toBe(2);
+    expect(onHerDate?.requiredByDate.get(2)).toBe(1);
+    expect(onHerDate?.preferred).toBe(2);
+    expect(onHerDate?.skillMix[0].minNumPeople).toBe(1);
+    expect(offHerDate?.required).toBe(2);
+    expect(offHerDate?.requiredByDate.size).toBe(0);
+    expect(offHerDate?.preferred).toBe(3);
+    expect(offHerDate?.skillMix[0].minNumPeople).toBe(2);
+    // `groupId` is what `mixCredit` is asked about, so a scalar group selector
+    // has to be readable as a real group id.
+    expect(authored.skillMix[0].groupId).toBe("RN");
+  });
+
+  it("rebuilds a floor the cover zeroed out of the submitted copy", () => {
+    // `applyCovers` DROPS a floor the cover lowered to 0 from the date copy it
+    // submits — the copy below carries only HCA. So the submitted positions no
+    // longer line up with the authored ones, and a ledger that recorded only an
+    // index would credit the wrong floor and lose RN entirely: exactly what this
+    // pins. The ledger records the AUTHORED floor instead.
+    const state = coveredWard(
+      [
+        wardCard("night", "N", 3, {
+          skillMix: [
+            { people: "RN", minNumPeople: 1 },
+            { people: "HCA", minNumPeople: 1 },
+          ],
+        }),
+      ],
+      [{ ...coverOnN(), groups: ["RN"] }],
+    );
+    const applied = applyCovers(state);
+    // `pref` 2, not 1: the split emits the remainder-dates card first and the
+    // covered date's copy second, so the copy is the second submitted requirement.
+    expect(applied.decrements).toEqual([
+      {
+        pref: 2,
+        iso: NOV03,
+        required: 1,
+        mix: [{ entryIdx: 0, people: "RN", authored: 1, by: 1 }],
+      },
+    ]);
+
+    // Take her out: the ledger alone must give back BOTH authored floors at
+    // their authored values — RN>=1 (the one she zeroed) and HCA>=1 (untouched).
+    const removed = deriveRequirementModel(
+      { canonicalYaml: serializeCanonicalDocument(toCanonicalScenarioDocument(applied.state)) },
+      { decrements: applied.decrements, live: [] },
+    );
+    expect(floorList(removed, 2)).toEqual(["RN>=1", "HCA>=1"]);
+
+    // With her still booked the ward need is what the solver saw: her shift
+    // satisfies the RN floor (so the ward needs nobody for it), HCA untouched.
+    expect(floorList(solvedModel(state), 2)).toEqual(["RN>=0", "HCA>=1"]);
   });
 });
 

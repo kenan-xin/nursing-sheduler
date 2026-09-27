@@ -17,6 +17,7 @@
 // DIRECT LEAF IMPORT, not the `@/lib/roster` barrel (see `tallies.ts`).
 import type { RosterCalendarDay, RosterContext, RosterDayState } from "@/lib/roster/types";
 import {
+  exactShiftCover,
   exactShiftRequirement,
   type RequirementModel,
   type RosterAssignmentIndex,
@@ -31,8 +32,18 @@ export interface ShiftCoverage {
   /**
    * The declared target for THIS exact shift, or null when the scenario states
    * none. Null is not "zero" and not "fine" — it means no per-shift claim exists.
+   *
+   * It is the WARD NEED: a temporary cover on her shift and date is already
+   * subtracted from it (d582), which is why `cover` is carried beside it rather
+   * than folded in silently.
    */
   readonly required: number | null;
+  /**
+   * The live temporary-cover credit already subtracted from `required` (d582).
+   * A cover is not a person, so she is never in `people`; this is the only trace
+   * of her here, and it is what makes a cell read "2/2 from the ward · +1 cover".
+   */
+  readonly cover: number;
   /** Under a declared exact-shift target. Always false when `required` is null. */
   readonly short: boolean;
 }
@@ -72,6 +83,7 @@ export function computeCoverage(
         people,
         staffed: people.length,
         required: target,
+        cover: exactShiftCover(model, shiftIdx, dateIdx),
         short: target !== null && people.length < target,
       };
     });
@@ -81,6 +93,26 @@ export function computeCoverage(
       anyShort: shifts.some((shift) => shift.short),
     };
   });
+}
+
+/**
+ * The exact-shift cell's staffing phrase (F5): "2/2 from the ward · +1 cover".
+ *
+ * "from the ward" is load-bearing, not decoration. `required` is the WARD NEED
+ * with a temporary cover already subtracted, so `1/1 from the ward · +1 cover`
+ * says the lane is satisfied — one of ours plus one borrowed nurse — while a
+ * bare `1/1` would read as if the ward alone staffed it.
+ *
+ * A lane with no declared target still states its ward staff ("2 from the ward")
+ * and never invents a denominator, exactly as the grid cell does.
+ */
+export function exactShiftCoverageLabel(cell: ShiftCoverage): string {
+  const ward =
+    cell.required === null
+      ? `${cell.staffed} from the ward`
+      : `${cell.staffed}/${cell.required} from the ward`;
+  if (cell.cover <= 0) return ward;
+  return `${ward} · +${cell.cover} ${cell.cover === 1 ? "cover" : "covers"}`;
 }
 
 /**
