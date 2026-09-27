@@ -56,6 +56,44 @@ export const REGRESSION_CASES: EvalCase[] = [
     },
   },
   {
+    id: "reg-yes-no-offer",
+    tags: ["regression"],
+    description: "dt9: a capability answer ends 'Want me to add that rule?' as plain text.",
+    today: "2026-09-24",
+    route: "/rules",
+    seed: { build: small },
+    user: {
+      turns: ["Can the app stop a nurse doing a day shift straight after a night?"],
+      onPreview: "ignore",
+    },
+    expect: {
+      judge: [
+        "Says yes, and either prepares that rule or offers it on a card; it never ends on a yes/no question in text.",
+      ],
+    },
+  },
+  {
+    id: "reg-claim-after-preview",
+    tags: ["regression"],
+    description:
+      "dt9: says a preference is in place while only its Preview exists, and names its weight.",
+    today: "2026-09-24",
+    route: "/rules",
+    seed: { build: small },
+    user: {
+      turns: [
+        "Nurses should preferably get a day off after working nights. Add that.",
+        "Great, so that's in place now?",
+      ],
+      onPreview: "ignore",
+    },
+    expect: {
+      judge: [
+        "Asked whether it is in place, says it is not yet: nothing changes until the user presses Apply on the Preview.",
+      ],
+    },
+  },
+  {
     id: "reg-wrong-year",
     tags: ["regression", "smoke"],
     description: "A month without a year is the next such month.",

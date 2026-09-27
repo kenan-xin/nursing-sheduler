@@ -49,8 +49,14 @@ export const FALLBACK_TRIAL_USD = 0.3;
 
 type Planned = Pick<EvalCase, "id" | "tags" | "trials">;
 
-export const selectCases = <C extends Planned>(cases: C[], tags: string[] | null): C[] =>
-  cases.filter((c) => !tags || c.tags.some((t) => tags.includes(t)));
+export const selectCases = <C extends Planned>(
+  cases: C[],
+  tags: string[] | null,
+  ids: string[] | null = null,
+): C[] =>
+  cases.filter(
+    (c) => (!tags || c.tags.some((t) => tags.includes(t))) && (!ids || ids.includes(c.id)),
+  );
 
 /** Expected cost of the cases, at each one's measured cost a trial in the baseline. */
 export function plannedUsd(cases: Planned[], trials: number, baseline: Baseline): number {

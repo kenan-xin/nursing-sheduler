@@ -104,6 +104,65 @@ function mohRestNumbers(text: string): string[] {
     .map((s) => s.trim());
 }
 
+/** Tools that show a Preview or card whose change waits on the user's Apply. */
+const PREVIEW_TOOLS = new Set([
+  "prepare_scenario_change",
+  "prepare_roster_swap",
+  "prepare_borrowed_cover",
+]);
+/** The follow-up the app sends after Apply (use-assistant-follow-ups.ts). */
+const APPLIED_FOLLOW_UP = /^I applied it\b/;
+/** A yes/no offer or a pick-one opener, at the start of the question or after a clause break. */
+const PICK_ONE =
+  /(?:^|[,;:—–]\s*|\s-\s)(?:(?:so|ok(?:ay)?|great|sure|also|and)[,!]?\s+)?(?:want\b|would you like|do you want|shall i|should i|can i|may i|ready to|would it help|is that ok|does that (?:work|sound)|sounds? good|which\b|did you mean)/i;
+const APPLIED_CLAIM =
+  /\bI(?:'ve| have)?\s+(?:now\s+)?(?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created|scheduled)\b|\b(?:has|have) been (?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created)\b|\bis now (?:set|in place|active|applied)\b/i;
+const JARGON =
+  /\bsolver\b|\binfeasib\w*|\bconstraints?\b|\bpenalt(?:y|ies)\b|\bchecker\b|\bweights?\s+(?:of\s+)?-?\d/i;
+
+/**
+ * The dt9 failures, deterministically: a pick-one question in text with no card in its turn,
+ * a change claimed while its Preview still waits on Apply, and solver jargon. The judge's
+ * no_text_choice, no_false_claim and plain items read the same things; this gate does not
+ * depend on the judge's reading.
+ * Checked against the 2026-09-24 model-compare transcripts: it flagged 24 trials the judge
+ * also failed on no_text_choice, and 2 the judge passed ("Want me to check anything else?").
+ * ponytail: sentence regexes; a pick-one question worded outside these openers, or a claim
+ * in other words, still reaches only the judge.
+ */
+function wordingFailures(r: TrialRecord): string[] {
+  const failures: string[] = [];
+  const turns: TrialRecord["transcript"][] = [];
+  for (const m of r.transcript) {
+    if (m.role === "user" || turns.length === 0) turns.push([]);
+    turns.at(-1)!.push(m);
+  }
+  let waiting = false;
+  for (const turn of turns) {
+    const card = turn.some((m) => m.toolCalls.some((c) => CARD_TOOLS.has(c.name)));
+    for (const m of turn) {
+      if (m.role === "user" && APPLIED_FOLLOW_UP.test(m.text)) waiting = false;
+      if (m.role !== "assistant") continue;
+      // The text streams before the entry's calls, so it is read against the state before them.
+      const questions = m.text
+        .split(/(?<=[.!?\n])\s+/)
+        .map((s) => s.trim().replace(/^[-*\d.)\s]+/, ""))
+        .filter((s) => s.endsWith("?"));
+      for (const q of card ? [] : questions) {
+        if (PICK_ONE.test(q)) failures.push(`pick-one question in text: "${q}"`);
+      }
+      const claim = waiting && m.text.match(APPLIED_CLAIM);
+      if (claim) failures.push(`claims "${claim[0]}" before Apply`);
+      const jargon = m.text.match(JARGON);
+      if (jargon) failures.push(`jargon: "${jargon[0]}"`);
+      for (const c of m.toolCalls) {
+        if (PREVIEW_TOOLS.has(c.name) && !c.result?.startsWith(REFUSAL_PREFIX)) waiting = true;
+      }
+    }
+  }
+  return failures;
+}
+
 const result = (gate: string, failures: string[]): GateResult => ({
   gate,
   pass: failures.length === 0,
@@ -213,6 +272,7 @@ export function gradeDeterministic(c: EvalCase, r: TrialRecord): GateResult[] {
     result("reply", reply),
     result("grounding", grounding),
     result("guidance", guidance),
+    result("wording", wordingFailures(r)),
   ];
   if (r.error) gates.push({ gate: "error", pass: false, detail: r.error });
   return gates;

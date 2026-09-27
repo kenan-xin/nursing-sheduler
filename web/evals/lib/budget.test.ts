@@ -112,6 +112,11 @@ describe("budget plan", () => {
     expect(selectCases(cases, ["smoke"]).map((c) => c.id)).toEqual(["cheap", "unmeasured"]);
     expect(selectCases(cases, null)).toHaveLength(3);
   });
+
+  it("narrows to named case ids as well", () => {
+    expect(selectCases(cases, null, ["cheap"]).map((c) => c.id)).toEqual(["cheap"]);
+    expect(selectCases(cases, ["smoke"], ["costly"])).toEqual([]);
+  });
 });
 
 describe("cutByBudget", () => {
