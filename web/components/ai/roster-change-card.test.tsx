@@ -119,6 +119,20 @@ describe("RosterChangeCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("a step-3 cover card needs no tick and books the cover on the Staff screen", async () => {
+    applyLinked.mockResolvedValue({ ok: true });
+    const linked = { proposalId: "p-3", assumptionIds: [], record: "staff" as const };
+    assistantActions.showRosterChange({ ...CHANGE, request: null, linked }, TURN);
+    renderCard();
+    expect(screen.getByText(/Opens the Staff screen and books the temporary cover/)).toBeVisible();
+    await userEvent.click(screen.getByTestId("roster-change-apply"));
+    await waitFor(() => expect(useAssistantStore.getState().activeRosterChange).toBeNull());
+    expect(applyLinked).toHaveBeenCalledWith(
+      expect.objectContaining({ request: null, linked }),
+      expect.anything(),
+    );
+  });
+
   it("says each half is undone in its own place", () => {
     assistantActions.showRosterChange(
       { ...CHANGE, linked: { proposalId: "p-1", assumptionIds: [], record: "leave" as const } },

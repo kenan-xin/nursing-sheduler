@@ -94,7 +94,7 @@ import type { RosterChangeView } from "./roster-context";
 export interface LinkedScheduleChange {
   proposalId: string;
   assumptionIds: string[];
-  /** "leave": a leave move or MC leave. "staff": a borrowed temporary nurse. */
+  /** "leave": a leave move or MC leave. "staff": a temporary cover, booked on the Staff screen. */
   record: "leave" | "staff";
 }
 

@@ -200,20 +200,20 @@ describe("ladder views", () => {
     expect(view.agreement).toBe("SN-Kai agreed to come in on 8 Oct for overtime pay.");
   });
 
-  it("says where a temporary nurse comes from", () => {
+  it("books a temporary cover under the name the user gave", () => {
     const view = buildBorrowView(
-      "SN-Tan",
-      "relief_pool",
-      [],
-      [{ date: "8 Oct", shift: "N" }],
-      null,
+      "Haseena (Ward 3)",
+      ["RN"],
+      [{ date: "8 Oct", shift: "Night" }],
       "Short on nights.",
     );
-    expect(view.title).toBe("SN-Tan (relief pool): N on 8 Oct");
+    expect(view.heading).toBe("Book a temporary cover?");
+    expect(view.title).toBe("Haseena (Ward 3): Night on 8 Oct");
     expect(view.notes[0]).toBe(
-      "Adds SN-Tan (relief pool) as temporary staff, off on every other date.",
+      "Adds temporary cover Haseena (Ward 3): Night on 8 Oct. The ward needs one fewer nurse on that shift, and the cover counts as RN.",
     );
     expect(view.notes).toContain("Please let your nurse manager or nurse clinician know.");
+    expect(view.agreement).toBeNull();
   });
 
   it("asks for the nurse manager's sign-off to run one short", () => {

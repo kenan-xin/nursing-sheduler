@@ -254,7 +254,7 @@ describe("deriveAssumptions and the Staff-screen arms", () => {
 });
 
 describe("real-world agreements beyond leave", () => {
-  it("asks whether a bounded loan of a borrowed nurse is arranged", () => {
+  it("no borrowed_staff_arranged assumption is derived", () => {
     const before = SCENARIOS.onlyRnOnLeave();
     const commands: Parameters<typeof applyAssistantCommands>[1] = [
       { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"] },
@@ -275,16 +275,8 @@ describe("real-world agreements beyond leave", () => {
     ];
     const result = applyAssistantCommands(before, commands);
     if (!result.ok) throw new Error(result.rejection.message);
-    const [assumption] = deriveAssumptions(before, result.next, commands);
-    expect(assumption).toMatchObject({
-      type: "borrowed_staff_arranged",
-      person: "Float RN (Ward 5)",
-      date: "2026-11-03",
-      toDate: "2026-11-03",
-    });
-    expect(assumption.question).toMatch(/lending ward or agency/);
-    expect(assumption.question).toMatch(/RN/);
-    expect(assumption.question).toContain("3 Nov");
+    // The lending ward is asked in chat (lenderConfirmed) before any card, d582.
+    expect(deriveAssumptions(before, result.next, commands)).toEqual([]);
   });
 
   it("does not ask about an ordinary new staff member", () => {
@@ -295,25 +287,6 @@ describe("real-world agreements beyond leave", () => {
     const result = applyAssistantCommands(before, commands);
     if (!result.ok) throw new Error(result.rejection.message);
     expect(deriveAssumptions(before, result.next, commands)).toEqual([]);
-  });
-
-  it("asks plain ward English when a borrowed nurse has no staff group", () => {
-    const before = SCENARIOS.onlyRnOnLeave();
-    const commands: Parameters<typeof applyAssistantCommands>[1] = [
-      { type: "add_person", name: "Agency Nurse", groups: [] },
-      {
-        type: "set_off_request",
-        personId: "Agency Nurse",
-        startDate: "2026-11-04",
-        endDate: "2026-11-07",
-        weight: "must",
-      },
-    ];
-    const result = applyAssistantCommands(before, commands);
-    if (!result.ok) throw new Error(result.rejection.message);
-    const [assumption] = deriveAssumptions(before, result.next, commands);
-    expect(assumption.question).not.toContain("qualified as");
-    expect(assumption.question).toMatch(/lending ward or agency confirmed Agency Nurse for .*\?$/);
   });
 
   it("asks one nurse to agree before her own limit goes up, but not a team limit", () => {

@@ -510,13 +510,13 @@ describe("the command arms the provider is actually shown", () => {
     expect(Object.keys(borrow).sort()).toEqual([
       "dates",
       "groups",
+      "lenderConfirmed",
       "name",
       "person",
       "reason",
-      "source",
       "summary",
     ]);
-    expect(child(borrow, "source").enum).toEqual(["relief_pool", "other_ward", "agency"]);
+    expect(child(borrow, "lenderConfirmed").type).toBe("boolean");
     const read = child(child(wire.get("get_roster"), "parameters"), "properties");
     expect(child(child(read, "people"), "items").type).toBe("string");
   });
