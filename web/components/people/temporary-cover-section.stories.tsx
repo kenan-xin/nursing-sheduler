@@ -8,7 +8,7 @@ import { TemporaryCoverSection } from "./temporary-cover-section";
 
 // Zero-prop section: shifts, groups and requirements come from the seeded scenario
 // (temporary-cover-section.test.tsx `coverState`). No working roster is ever seeded
-// here (the rosterStorage single-writer rule), so the "run Optimize" callout is out of scope.
+// here (the roster-storage single-writer rule), so the "run Optimize" callout is out of scope.
 const SEED: Partial<ScenarioUiState> = {
   staff: [{ id: "Aisha", history: [] }],
   staffGroups: [{ id: "RN", members: ["Aisha"] }],
