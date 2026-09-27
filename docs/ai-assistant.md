@@ -83,8 +83,11 @@ comes off those shifts.
    *Needs a tested key*.
 3. Paste an [OpenRouter](https://openrouter.ai) API key and pick a model. Only models
    OpenRouter reports as supporting tool calling are listed, because the assistant
-   needs them to read your schedule. **Advanced: enter a model ID** lets you name any
-   slug; if it cannot do tools, the test below fails and nothing is enabled.
+   needs them to read your schedule. The recommended default is **DeepSeek V4.1 Flash**,
+   routed for speed through OpenRouter, with **Claude Sonnet 4.5** as the fallback if it
+   is unavailable; you can pick any other listed model instead. **Advanced: enter a
+   model ID** lets you name any slug; if it cannot do tools, the test below fails and
+   nothing is enabled.
 4. Press **Save and test**. The app makes one small scenario-free request to check
    that the key works and the model really honours a tool call.
    - On success the card reads **Ready** and the assistant launcher appears.
@@ -119,8 +122,10 @@ Ready, the following may be sent through OpenRouter to the model you chose:
 
 There is no per-message consent step and no local filter that promises to spot
 sensitive text first. OpenRouter may route your request to different downstream
-providers over time without telling you or asking again. If that is not acceptable
-for your ward's data, **leave the assistant off** — that is what the default is for.
+providers over time without telling you or asking again, and when the recommended
+default model is unavailable it retries the request with Claude Sonnet 4.5 — so your
+data may reach that provider too. If that is not acceptable for your ward's data,
+**leave the assistant off** — that is what the default is for.
 
 The key itself is only ever a request credential. It is never put into a prompt, a
 tool argument, the conversation, or your schedule.

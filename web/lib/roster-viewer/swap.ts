@@ -57,7 +57,7 @@ export const personName = (context: RosterContext, idx: number): string =>
   String(context.people[idx]?.id ?? idx);
 
 /** Exact name, else a unique case-insensitive part of one. −1 when unknown or ambiguous. */
-export function findPersonIdx(context: RosterContext, name: string): number {
+export function findPersonIdx(context: Pick<RosterContext, "people">, name: string): number {
   const wanted = name.trim();
   const exact = context.people.findIndex((person) => String(person.id) === wanted);
   if (exact >= 0) return exact;

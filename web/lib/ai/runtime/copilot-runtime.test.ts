@@ -6,6 +6,7 @@ import {
   AI_ERROR_CREDENTIALS_REQUIRED,
   AI_ERROR_REQUEST_TOO_LARGE,
   AI_KEY_HEADER,
+  AI_MODEL_HEADER,
   COPILOT_AGENT_ID,
   OPENROUTER_BASE_URL,
   RUNTIME_INSTANCE_HEADER,
@@ -211,6 +212,35 @@ describe("run", () => {
     // Serial tool calling: the plan's `parallel_tool_calls: false`, proven on the wire.
     expect(call.body.parallel_tool_calls).toBe(false);
     expect(call.body.stream).toBe(true);
+  });
+
+  it("routes the default model for throughput and names Sonnet as its fallback (46g)", async () => {
+    const { runtime, provider } = launch();
+
+    await readSse(
+      await runtime.handler(
+        runRequest(
+          { threadId: "t-route-default" },
+          credentialHeaders({ [AI_MODEL_HEADER]: "deepseek/deepseek-v4.1-flash" }),
+        ),
+      ),
+    );
+
+    const call = provider.calls[0];
+    // The routing variant is applied at the request, so the catalog slug stays real.
+    expect(call.body.model).toBe("deepseek/deepseek-v4.1-flash:nitro");
+    // OpenRouter's own fallback list: Sonnet is tried when the primary fails.
+    expect(call.body.models).toEqual(["anthropic/claude-sonnet-4.5"]);
+  });
+
+  it("sends a user-chosen model unchanged, with no routing or fallback (46g)", async () => {
+    const { runtime, provider } = launch();
+
+    await readSse(await runtime.handler(runRequest({ threadId: "t-route-user" })));
+
+    const call = provider.calls[0];
+    expect(call.body.model).toBe(TEST_MODEL);
+    expect(call.body.models).toBeUndefined();
   });
 
   it("sends the turn's context to the model as the system prompt", async () => {

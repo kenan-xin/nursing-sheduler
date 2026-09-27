@@ -78,10 +78,12 @@ export function optimizeSessionKeyFor(ownerId: string): string {
   return `${OPTIMIZE_SESSION_KEY_PREFIX}${ownerId}`;
 }
 
-// Settled Optimize timeout bounds (backend: `optimize.py` rejects `<= 0` or
-// `> max_timeout_seconds`, whose default is `60 * 60`).
-export const OPTIMIZE_TIMEOUT_MIN_SECONDS = 1;
-export const OPTIMIZE_TIMEOUT_MAX_SECONDS = 60 * 60;
+// A stored timeout's sanity range. The real bounds are per deployment
+// (`GET /optimize/options`, enforced by core on submit), so this only rejects a
+// corrupt record; it must not refuse a run a deployment allows above 60 * 60.
+// ponytail: fixed one-week ceiling, raise it if a deployment ever advertises more.
+const STORED_TIMEOUT_MIN_SECONDS = 1;
+const STORED_TIMEOUT_MAX_SECONDS = 7 * 24 * 60 * 60;
 
 /** Backend run options carried across a reload so a resume submits identically. */
 export interface OptimizeRunOptions {
@@ -1170,8 +1172,8 @@ function isValidRunOptions(value: unknown): value is OptimizeRunOptions {
     if (
       typeof timeout !== "number" ||
       !Number.isInteger(timeout) ||
-      timeout < OPTIMIZE_TIMEOUT_MIN_SECONDS ||
-      timeout > OPTIMIZE_TIMEOUT_MAX_SECONDS
+      timeout < STORED_TIMEOUT_MIN_SECONDS ||
+      timeout > STORED_TIMEOUT_MAX_SECONDS
     ) {
       return false;
     }

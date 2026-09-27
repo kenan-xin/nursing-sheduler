@@ -39,6 +39,7 @@ import {
   explainSearchSummary,
 } from "@/lib/ai/diagnostic";
 import { runDiagnosticSearchForTurn } from "@/lib/ai/diagnostic/diagnostic-runtime";
+import { fetchOptimizeTimeoutOptions } from "@/lib/query/optimize-options";
 import { assertTurnAuthority, isTurnAuthorized, SUPERSEDED } from "./turn-authority";
 import { DiagnosticAuthorityRevokedError } from "@/lib/ai/diagnostic/diagnostic-runtime";
 
@@ -144,6 +145,14 @@ export function useDiagnosticTools(agentId: string, turnEpoch: number): void {
         if (token === null) return SUPERSEDED;
         const authorizedEpoch = token.turnEpoch;
 
+        // 2by.7's options query, read IMPERATIVELY. The diagnostic sends a FIXED
+        // per-candidate timeout, so the deployment's bounds must travel with the run —
+        // a deployment that excludes that value rejects every feasibility run. The
+        // Optimize screen reads the same query, but the assistant mounts outside it
+        // and must work on a cold cache, so this fetches (never throws; falls back to
+        // the legacy bounds) rather than depending on a QueryClientProvider.
+        const timeoutOptions = await fetchOptimizeTimeoutOptions(context.signal);
+
         // The search's own effect boundaries throw once authority is gone, which is
         // how a POST, a durable write or a card publication is stopped rather than
         // merely having its result withheld afterwards.
@@ -164,6 +173,7 @@ export function useDiagnosticTools(agentId: string, turnEpoch: number): void {
             },
             parentExpiresAt: parent.expiresAt,
             scenarioId: parent.scenarioId,
+            timeoutBounds: timeoutOptions.timeout,
             proposed: args.candidates.map((candidate, index) => ({
               candidateId: `${index}-${crypto.randomUUID()}`,
               commands: candidate.operations as AssistantCommandV1[],

@@ -10,6 +10,7 @@ import type { JobBasis } from "@/lib/bff/types";
 import type { RecoveryClassification } from "@/lib/optimize/basis/recovery";
 import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 import {
+  DIAGNOSTIC_CANDIDATE_TIMEOUT_SECONDS,
   appendSubmittedCandidate,
   closeSearch,
   openDiagnosticSearch,
@@ -60,6 +61,45 @@ function openSearch(over: Partial<DiagnosticSearchRecordV1> = {}): DiagnosticSea
     ...over,
   };
 }
+
+// The assistant's feasibility-test run sends a FIXED per-candidate timeout, but a
+// deployment's `GET /optimize/options` bounds may exclude it (min > 90 or max < 90),
+// and such a run is rejected before it starts. The record must carry a timeout the
+// deployment actually accepts.
+describe("openDiagnosticSearch — the fixed candidate timeout is clamped to the loaded bounds", () => {
+  function candidateTimeout(bounds?: {
+    default: number;
+    minimum: number;
+    maximum: number;
+  }): number {
+    return openDiagnosticSearch({
+      searchId: "search-1",
+      scenarioId: "scenario-1",
+      threadId: null,
+      turnId: null,
+      parent: {
+        basisId: PARENT_BASIS,
+        jobId: "job_parent",
+        scenarioId: "scenario-1",
+        documentRevision: 5,
+      },
+      turnEpoch: 3,
+      leaseEpoch: 1,
+      globalGeneration: 1,
+      scenarioGeneration: 1,
+      compare: false,
+      parentExpiresAt: null,
+      now: NOW,
+      timeoutBounds: bounds,
+    }).candidateTimeoutSeconds;
+  }
+
+  it("clamps to the deployment's bounds, and keeps the fixed timeout without them", () => {
+    expect(candidateTimeout({ default: 120, minimum: 120, maximum: 600 })).toBe(120);
+    expect(candidateTimeout({ default: 60, minimum: 1, maximum: 60 })).toBe(60);
+    expect(candidateTimeout()).toBe(DIAGNOSTIC_CANDIDATE_TIMEOUT_SECONDS);
+  });
+});
 
 function candidate(over: Partial<DiagnosticCandidate> = {}): DiagnosticCandidate {
   return {

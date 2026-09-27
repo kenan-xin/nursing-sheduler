@@ -18,6 +18,7 @@ import {
 import { streamText, type ToolSet } from "ai";
 
 import { ATTACHED_FILE_NOTE, hasFileAttachment, prepareAttachments } from "./attachments";
+import { routeModel, withModelFallbacks } from "@/lib/ai/openrouter/routing";
 
 // Request-scoped BYO OpenRouter agent (tech-plan "Credential and model transport").
 //
@@ -79,16 +80,21 @@ export function createOpenRouterAgent(
       // boundary; this keeps the invariant true for any other caller of the factory.
       if (!credentials) throw new AiRuntimeError(AI_ERROR_CREDENTIALS_REQUIRED);
 
+      // The shipped default is routed for throughput with a Sonnet fallback; a
+      // model the user chose is sent exactly as chosen (see `routing.ts`).
+      const routing = routeModel(credentials.model);
       const openrouter = createOpenAI({
         apiKey: credentials.apiKey,
         baseURL: OPENROUTER_BASE_URL,
-        ...(options.fetch ? { fetch: options.fetch } : {}),
+        // `fetch` is the provider's documented middleware seam; OpenRouter's `models`
+        // fallback list has no typed option to travel through.
+        fetch: withModelFallbacks(options.fetch ?? globalThis.fetch, routing.fallbacks),
       });
 
       return streamText({
         // `.chat()` explicitly: the provider's default callable resolves to OpenAI's
         // Responses API, which OpenRouter's /api/v1 does not implement.
-        model: openrouter.chat(credentials.model),
+        model: openrouter.chat(routing.model),
         // Factory mode hands the run input to THIS call, so the context the browser
         // attaches to every hop (standing instructions, the scenario, the screen) only
         // reaches the model if it is rendered here. It once was not: the model ran with

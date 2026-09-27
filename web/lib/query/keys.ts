@@ -9,3 +9,6 @@ export const optimizeKeys = {
   jobScoped: (jobId: string, attachmentKey: unknown) =>
     ["optimize", jobId, "attach", attachmentKey] as const,
 };
+
+// Not under `optimizeKeys.all`: `["optimize", x]` is a job key, and "options" is not a job.
+export const optimizeOptionsKey = ["optimize-options"] as const;

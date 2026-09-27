@@ -65,6 +65,7 @@ import type { RecoveryClassification } from "@/lib/optimize/basis/recovery";
 import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 import type { JobResponse } from "@/lib/bff/types";
 import type { ProductOutcomeView } from "@/lib/optimize/outcome-mapping";
+import type { OptimizeTimeoutOptions } from "@/app/api/optimize/options/validate";
 
 /** One model-proposed candidate: typed commands + rationale. */
 export interface ProposedCandidate {
@@ -179,6 +180,8 @@ export async function runDiagnosticSearch(
     parent: { basisId: string; jobId: string; scenarioId: string; documentRevision: number };
     parentExpiresAt: string | null;
     proposed: readonly ProposedCandidate[];
+    /** The deployment's accepted timeout bounds; the fixed candidate timeout is clamped into them. */
+    timeoutBounds?: OptimizeTimeoutOptions;
   },
   runtime: DiagnosticRuntime,
 ): Promise<DiagnosticSearchResult> {
@@ -211,6 +214,7 @@ export async function runDiagnosticSearch(
       scenarioGeneration: 0,
       compare: input.compare,
       parentExpiresAt: input.parentExpiresAt,
+      timeoutBounds: input.timeoutBounds,
       now,
     });
     const closed = closeSearch(search, gate.reason, gate.message, now);
@@ -236,6 +240,7 @@ export async function runDiagnosticSearch(
     scenarioGeneration: guard.find((g) => g.scopeKey === `scenario:${scenarioId}`)?.generation ?? 0,
     compare: input.compare,
     parentExpiresAt: input.parentExpiresAt,
+    timeoutBounds: input.timeoutBounds,
     now,
   });
   await runtime.putSearch(search, guard);
