@@ -66,6 +66,7 @@ import type {
   AssistantThreadV1,
   AssistantTurnV1,
 } from "@/lib/ai/assistant/records";
+import { BLANK_HISTORY_ENTRY, truncateHistoryAtBlankEntries } from "@/lib/scenario/person-history";
 import type {
   AssistantClearOperationV1,
   AssistantProposalV1,
@@ -253,19 +254,61 @@ export class NurseSchedulerDb extends Dexie {
     this.snapshot = this.table("snapshot");
     this.meta = this.table("meta");
 
-    // An envelope written before d582 (production b3b8903) has no `temporaryCover`,
-    // and its readers index it — Staff and Optimise & Export crashed on
-    // `undefined.map` (jyz2). A pre-d582 scenario held no covers, so
-    // defaulting on READ is lossless and needs no version bump or row rewrite; the
-    // next commit persists the slice. Legacy `staff[].temporary` flags are kept as-is:
-    // the canonical projection ignores them and dropping them would lose user data.
-    this.scenarioEnvelopes.hook("reading", (row: ScenarioEnvelopeV3 | undefined) =>
-      row?.scenario &&
-      (row.scenario as Partial<ScenarioEnvelopeV3["scenario"]>).temporaryCover === undefined
-        ? { ...row, scenario: { ...row.scenario, temporaryCover: [] } }
-        : row,
-    );
+    // THE single normalize-on-read step for a durable envelope. One hook, one
+    // normalizer: a second, scattered repair is how two of them drift.
+    //
+    // Two durable shapes a PREVIOUS build could persist need repair, and both are
+    // lossless on READ — no version bump, no row rewrite, and the next commit
+    // persists the repaired slice:
+    //
+    //   • `temporaryCover` (jyz2): a pre-d582 envelope (production b3b8903) has no
+    //     slice, and its readers index it — Staff and Optimise & Export crashed on
+    //     `undefined.map`. A pre-d582 scenario held no covers, so defaulting to `[]`
+    //     loses nothing.
+    //   • blank history slots (ubb, FR-RI-09/D7): a pre-D7 shift-type delete blanked
+    //     the deleted id in place, and the producer and core reject `''`. The
+    //     file-load paths repair this through `normalizePerson`; the boot read path
+    //     did not, so the same repair is applied here from the SAME helper.
+    //
+    // Neither repair deletes user data. Legacy `staff[].temporary` flags ride along
+    // untouched: the canonical projection ignores them and dropping them would lose
+    // user data, so the normalizer spreads the person and touches ONLY `history`.
+    this.scenarioEnvelopes.hook("reading", normalizeEnvelopeOnRead);
   }
+}
+
+/** Repair a person's blank history slots, spreading so every other field (incl. the
+ *  legacy `temporary` flag) rides along; the person is returned unchanged when clean. */
+function repairPersonHistory<T extends { history?: string[] }>(person: T): T {
+  const history = person.history;
+  if (!history || !history.includes(BLANK_HISTORY_ENTRY)) return person;
+  return { ...person, history: truncateHistoryAtBlankEntries(history) };
+}
+
+/**
+ * The durable envelope's one read normalizer: default the missing `temporaryCover`
+ * slice and repair blank history slots, returning the row UNCHANGED when neither
+ * applies so an untouched read allocates nothing.
+ */
+function normalizeEnvelopeOnRead(
+  row: ScenarioEnvelopeV3 | undefined,
+): ScenarioEnvelopeV3 | undefined {
+  if (!row?.scenario) return row;
+  const scenario = row.scenario as Partial<ScenarioEnvelopeV3["scenario"]>;
+  const staff = scenario.staff;
+  const repairedStaff = Array.isArray(staff) ? staff.map(repairPersonHistory) : undefined;
+  const staffChanged =
+    repairedStaff !== undefined && repairedStaff.some((person, index) => person !== staff?.[index]);
+  const needsCover = scenario.temporaryCover === undefined;
+  if (!needsCover && !staffChanged) return row;
+  return {
+    ...row,
+    scenario: {
+      ...row.scenario,
+      ...(needsCover ? { temporaryCover: [] } : {}),
+      ...(staffChanged ? { staff: repairedStaff } : {}),
+    },
+  };
 }
 
 /**
