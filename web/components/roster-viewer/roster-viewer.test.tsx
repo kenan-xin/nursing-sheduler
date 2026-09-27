@@ -9,21 +9,25 @@
 // mobile, and the forbidden-copy surface (no Forget/Abandon/Optimize-again/
 // recovery terminology) is absent.
 
+import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { act, type ComponentProps } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { RosterViewer } from "./roster-viewer";
 import { RosterContentWidthProvider } from "./roster-content-width";
 import { ShiftChip } from "./shift-chip";
 import { COVERAGE_STACK_THRESHOLD, MOBILE_DEFAULT_LENS_VIEWPORT } from "./use-container-width";
-import type { RosterDocument, RosterDayState } from "@/lib/roster";
+import type { EditCoordinate, RosterDocument, RosterDayState } from "@/lib/roster";
 import { ROSTER_VIEW_PREFERENCE_KEY, SHIFT_FAMILY_RAMP, SHIFT_RAMP } from "@/lib/roster-viewer";
 import {
   fixtureCanonicalDocument,
   fixtureContainer,
+  fixtureCover,
   fixtureRosterDocument,
 } from "@/lib/roster/test-fixtures";
 import { PREFERENCE_TYPE } from "@/lib/scenario";
+import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
+import { resetScenarioForTest, scenarioCommands } from "@/lib/store/test-authority";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1937,5 +1941,177 @@ describe("Forbidden terminology", () => {
     const { container } = render(<Viewer document={document} />);
     // The viewer is read-only; none of these terms should appear.
     expect(container.textContent).not.toContain(term);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Temporary cover band (d582, spec §4 "Display rows")
+//
+// A cover is never on the person axis: her band row carries her shift on her
+// dates and NOTHING anywhere else — not even the `·` a rest day shows. It states
+// the same disagreement the coverage numbers do, between what the solve counted
+// (the roster file's entries) and what the scenario holds right now.
+// ---------------------------------------------------------------------------
+
+describe("temporary cover band", () => {
+  beforeEach(async () => {
+    // The live covers come from the real durable store, written exactly as the
+    // Staff screen writes them.
+    await resetScenarioForTest();
+    installResizeObserver();
+    setViewportWidth(1400);
+    mockContainerWidth(1200);
+  });
+
+  const COVER_NAME = "Haseena (Ward 3)";
+
+  function bandRow(): HTMLElement {
+    return screen.getByTestId("roster-cover-band-row");
+  }
+
+  function bandCells(): HTMLElement[] {
+    return within(bandRow()).getAllByTestId("roster-cover-band-cell");
+  }
+
+  async function addLiveCover(overrides: Partial<{ name: string; date: string }> = {}) {
+    await scenarioCommands.mutate({
+      temporaryCover: [
+        makeTemporaryCover({ name: COVER_NAME, date: "2026-07-04", shiftType: "D", ...overrides }),
+      ],
+    });
+  }
+
+  it("sits below the staff rows under a 'Temporary cover' heading", async () => {
+    const document = await fixtureRosterDocument({ cover: fixtureCover() });
+    render(<Viewer document={document} />);
+    const grid = screen.getByTestId("roster-grid");
+    const rows = [...grid.querySelectorAll("tbody tr")];
+    const headingIdx = rows.indexOf(
+      screen.getByTestId("roster-cover-band-heading").closest("tr") as HTMLTableRowElement,
+    );
+    expect(headingIdx).toBe(document.context.people.length);
+    expect(rows[headingIdx].textContent).toContain("Temporary cover");
+    expect(rows.indexOf(bandRow())).toBe(headingIdx + 1);
+    expect(within(bandRow()).getByTestId("roster-cover-band-name").textContent).toBe(COVER_NAME);
+  });
+
+  it("shows her shift on her date only, and no rest glyph anywhere else", async () => {
+    const document = await fixtureRosterDocument({ cover: fixtureCover() });
+    render(<Viewer document={document} />);
+    const cells = bandCells();
+    expect(cells).toHaveLength(document.context.calendar.length);
+    // 2026-07-04 is index 1 in the fixture calendar.
+    expect(cells[1].querySelector("[data-shift-id]")?.getAttribute("data-shift-id")).toBe("D");
+    for (const [dateIdx, cell] of cells.entries()) {
+      if (dateIdx === 1) continue;
+      // Not a chip, and not the bare `·` an off day carries: nothing at all.
+      expect(cell.textContent).toBe("");
+    }
+    // No tallies either — the band is not on the person axis.
+    expect(within(bandRow()).queryByTestId("roster-weekend-rest")).toBeNull();
+  });
+
+  it("a live cover missing from the solve shows NOT OPTIMIZED YET", async () => {
+    await addLiveCover();
+    const document = await fixtureRosterDocument();
+    render(<Viewer document={document} />);
+    const row = bandRow();
+    expect(row.getAttribute("data-cover-status")).toBe("not-optimized");
+    expect(within(row).getByTestId("roster-cover-band-badge").textContent).toBe(
+      "NOT OPTIMIZED YET",
+    );
+    expect(bandCells()[1].querySelector("[data-shift-id]")).not.toBeNull();
+  });
+
+  it("a solved cover removed from the scenario is struck through with REMOVED", async () => {
+    const document = await fixtureRosterDocument({ cover: fixtureCover() });
+    render(<Viewer document={document} />);
+    const row = bandRow();
+    expect(row.getAttribute("data-cover-status")).toBe("removed");
+    expect(within(row).getByTestId("roster-cover-band-badge").textContent).toBe("REMOVED");
+    expect(within(row).getByTestId("roster-cover-band-name").className).toContain("line-through");
+  });
+
+  it("a solved cover still in the scenario carries no badge at all", async () => {
+    await addLiveCover();
+    const document = await fixtureRosterDocument({ cover: fixtureCover() });
+    render(<Viewer document={document} />);
+    expect(bandRow().getAttribute("data-cover-status")).toBe("solved");
+    expect(within(bandRow()).queryByTestId("roster-cover-band-badge")).toBeNull();
+  });
+
+  it("band cells are not editable or draggable", async () => {
+    const document = await fixtureRosterDocument({ cover: fixtureCover() });
+    const selections: (EditCoordinate | null)[] = [];
+    render(
+      <Viewer
+        document={document}
+        editing={{
+          selectedCell: null,
+          selectCell: (coordinate) => selections.push(coordinate),
+          setCell: () => {},
+          swapCells: () => {},
+          undo: () => {},
+          canUndo: false,
+        }}
+      />,
+    );
+    const cell = bandCells()[1];
+    expect(cell.getAttribute("draggable")).toBeNull();
+    expect(cell.getAttribute("tabindex")).toBeNull();
+    expect(cell.getAttribute("role")).toBeNull();
+    fireEvent.click(cell);
+    fireEvent.keyDown(cell, { key: "Enter" });
+    expect(selections).toEqual([]);
+    expect(screen.queryByTestId("roster-edit-bar")).toBeNull();
+  });
+
+  it("tip reads 'Temporary cover. Change it on Staff.'", async () => {
+    const document = await fixtureRosterDocument({ cover: fixtureCover() });
+    render(<Viewer document={document} />);
+    expect(screen.getByTestId("roster-cover-band-heading").getAttribute("title")).toBe(
+      "Temporary cover. Change it on Staff.",
+    );
+  });
+
+  it("truncates a long cover name and exposes the whole value on hover", async () => {
+    const long = "Haseena bint Abdulrahman Al-Mansouri (Ward 3, night team)";
+    await addLiveCover({ name: long });
+    const document = await fixtureRosterDocument();
+    render(<Viewer document={document} />);
+    const name = within(bandRow()).getByTestId("roster-cover-band-name");
+    expect(name.textContent).toBe(long);
+    expect(name.getAttribute("title")).toBe(long);
+    expect(name.className).toContain("truncate");
+  });
+
+  it("shows no band at all when nothing is covered", async () => {
+    const document = await makeDocument();
+    render(<Viewer document={document} />);
+    expect(screen.queryByTestId("roster-cover-band-heading")).toBeNull();
+    expect(screen.queryByTestId("roster-cover-band-row")).toBeNull();
+  });
+
+  it("F8: adding a cover changes no assignment without a run", async () => {
+    // The cover is a display row and a number: nobody moves until Optimize runs.
+    const document = await makeDocument();
+    const chips = (): (string | null)[] =>
+      // The person rows only: the band's own chips are display, not assignment.
+      [
+        ...screen.getByTestId("roster-grid").querySelectorAll("tbody tr:not([data-cover-status])"),
+      ].flatMap((row) =>
+        [...row.querySelectorAll("td [data-shift-id]")].map((chip) =>
+          chip.getAttribute("data-shift-id"),
+        ),
+      );
+    const first = render(<Viewer document={document} />);
+    const before = chips();
+    expect(screen.queryByTestId("roster-cover-band-row")).toBeNull();
+    first.unmount();
+
+    await addLiveCover();
+    render(<Viewer document={document} />);
+    expect(chips()).toEqual(before);
+    expect(screen.getByTestId("roster-cover-band-row")).toBeDefined();
   });
 });
