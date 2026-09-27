@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
-import { useHotStore } from "@/lib/store";
+import { useAuthorityStore, useHotStore } from "@/lib/store";
 import { INITIAL_OPTIMIZE_RUN_VIEW, type OptimizeRunView } from "@/lib/optimize/run-view";
 import { useRunRequestStore } from "@/lib/optimize/run-request";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
@@ -80,7 +80,7 @@ beforeEach(() => {
   fixture.isOwner = true;
   fixture.capture = "idle";
   useAssistantStore.setState({ turnEpoch: TURN });
-  useRunRequestStore.setState({ pending: null, last: null });
+  useRunRequestStore.setState({ pending: null, last: null, runRevision: null });
   useHotStore.getState().resetRunView();
   boundTurn = bindTurnForTest({ turnEpoch: TURN });
   render(<Host />);
@@ -142,6 +142,45 @@ describe("get_optimize_result", () => {
       "started",
     );
     expect(summary.guidance).toMatch(/^The schedule can be built now: a roster was produced\./);
+  });
+
+  it("flags a finished run made before the latest schedule change, and says to wait (2vtv)", async () => {
+    const before = useAuthorityStore.getState().documentRevision;
+    try {
+      useHotStore.getState().setRunView(
+        view({
+          lifecycle: "completed",
+          jobId: "opt_1",
+          outcome: "infeasible",
+          result: {
+            outcome: "infeasible",
+            score: null,
+            solverStatus: "INFEASIBLE",
+            terminationReason: null,
+          },
+        }),
+      );
+      useRunRequestStore.setState({ runRevision: 3 });
+      useAuthorityStore.setState({ documentRevision: 4 });
+      const stale = (await tool("get_optimize_result").handler({}, {})) as {
+        stale: boolean;
+        guidance: string;
+      };
+      expect(stale.stale).toBe(true);
+      expect(stale.guidance).toMatch(/before the latest change to the schedule/);
+      expect(stale.guidance).toMatch(/press Run/);
+      expect(stale.guidance).not.toMatch(/suggest_feasibility_options/);
+
+      useRunRequestStore.setState({ runRevision: 4 });
+      const fresh = (await tool("get_optimize_result").handler({}, {})) as {
+        stale: boolean;
+        guidance: string;
+      };
+      expect(fresh.stale).toBe(false);
+      expect(fresh.guidance).toMatch(/suggest_feasibility_options/);
+    } finally {
+      useAuthorityStore.setState({ documentRevision: before });
+    }
   });
 
   it("reports an idle screen and how to get a run", async () => {
