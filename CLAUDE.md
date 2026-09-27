@@ -116,8 +116,8 @@ source-analysis engine.
 
 ### The acquisition boundary in test/support code
 
-Test and support code — `**/*.{test,spec}.{ts,tsx,js,jsx,mjs,cjs,mts,cts}`, `e2e/**`,
-`__tests__` subtrees, and test-only helpers — may **not** acquire:
+Test and support code — `**/*.{test,spec}.{ts,tsx,js,jsx,mjs,cjs,mts,cts}`, `**/*.stories.*`,
+`.storybook/**`, `e2e/**`, `__tests__` subtrees, and test-only helpers — may **not** acquire:
 
 - a **compiler or parser library** (`typescript`, `ts-morph`, `@babel/*`, `acorn`, `esprima`,
   `espree`, `tree-sitter*`, `recast`, `jscodeshift`, `@swc/*`, `oxc-parser`, `@ast-grep/*`).
@@ -143,7 +143,8 @@ does a known source analyzer. A directory listing (`readdirSync`) and a path-exi
 (`existsSync`) are not source reads.
 
 **Where it is enforced** (all in `web/`):
-`pnpm lint` = `oxlint && ast-grep scan`. `pnpm test:ast-grep` runs the rule fixtures.
+`pnpm lint` = `oxlint && ast-grep scan --no-ignore hidden` (ast-grep skips dot-directories such
+as `.storybook/` without the flag). `pnpm test:ast-grep` runs the rule fixtures.
 `oxlint-boundary-config.test.ts` pins the whole Oxlint config; `ast-grep-substrate.test.ts`
 proves no rule scope has gone stale; `ast-grep-rule-pairs.test.ts` keeps language variants in
 step; `acquisition-prevention.test.ts` materialises each bypass family and asserts the normal

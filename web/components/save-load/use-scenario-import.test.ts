@@ -182,6 +182,35 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     expect(loadScenarioMock).toHaveBeenCalledTimes(1);
   });
 
+  it("onContinue settles only after the load has committed (nursing-sheduler-iks)", async () => {
+    // The confirm holds its busy state on this promise; settling early reopened the
+    // window in which a hard reload aborts the IndexedDB switch.
+    isEmptyMock.mockReturnValue(false);
+    let commitLoad!: (outcome: { ok: true }) => void;
+    loadScenarioMock.mockReturnValue(new Promise((resolve) => (commitLoad = resolve)));
+    stageResult(targetWithCounts([MARKED_CONTRACT]));
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleFile("<yaml>"));
+
+    let settled = false;
+    let continued!: Promise<void>;
+    act(() => {
+      continued = result.current.confirm!.onContinue().then(() => {
+        settled = true;
+      });
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(toast.success).not.toHaveBeenCalled();
+
+    await act(async () => {
+      commitLoad({ ok: true });
+      await continued;
+    });
+    expect(settled).toBe(true);
+    expect(toast.success).toHaveBeenCalledOnce();
+  });
+
   it("a REFUSED switch keeps the staged file and reports no success", async () => {
     // T03F1 finding 5. The commit used to clear staging and toast "Scenario loaded"
     // before the switch had settled — so a refusal (this tab is read-only, or was

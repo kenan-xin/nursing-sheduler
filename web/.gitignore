@@ -47,5 +47,9 @@ next-env.d.ts
 /blob-report
 /.playwright
 
+# storybook
+/storybook-static
+*storybook.log
+
 # eval run output
 evals/runs/

@@ -94,11 +94,13 @@ const SKIP = new Set([
   "test-results",
   "public",
   "acquisition-fixtures",
+  "storybook-static",
 ]);
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
-    if (entry.startsWith(".") || SKIP.has(entry)) continue;
+    // `.storybook` is authored source that `pnpm lint` scans with `--no-ignore hidden`.
+    if ((entry.startsWith(".") && entry !== ".storybook") || SKIP.has(entry)) continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) walk(full, out);
     else out.push(full.slice(WEB_ROOT.length));
