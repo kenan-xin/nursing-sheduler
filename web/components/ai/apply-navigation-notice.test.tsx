@@ -61,14 +61,40 @@ function controller(outcome: ApplyOutcomeView | null): AssistantProposalControll
   };
 }
 
-const applied = (receiptId = "r1"): ApplyOutcomeView => ({
+/** A covering rule lives on the "Shift Type Coverings" screen; its Preview scope word is
+ *  "Supervision" (SCOPE_LABEL). Two direct entries make it the primary screen, so the
+ *  announcement is what names it. */
+const COVERING_DIFF: ProposalDiff = {
+  direct: [
+    entry("rule:coverings:c1", "shift-type-coverings"),
+    entry("rule:coverings:c2", "shift-type-coverings"),
+    entry('person:"cy"', "staff-list"),
+  ],
+  cascade: [],
+  capabilityIds: ["shift-type-coverings", "staff-list"],
+  needsReview: [],
+};
+
+/** One covering rule, two people: the covering screen is the LINK, so the button names it. */
+const COVERING_LINK_DIFF: ProposalDiff = {
+  direct: [
+    entry("rule:coverings:c1", "shift-type-coverings"),
+    entry('person:"cy"', "staff-list"),
+    entry('person:"bo"', "staff-list"),
+  ],
+  cascade: [],
+  capabilityIds: ["shift-type-coverings", "staff-list"],
+  needsReview: [],
+};
+
+const applied = (receiptId = "r1", diff: ProposalDiff = DIFF): ApplyOutcomeView => ({
   kind: "applied",
   receiptId,
   proposalId: "p1",
   proposalRevision: 1,
   documentRevision: 2,
   reloadRequired: false,
-  diff: DIFF,
+  diff,
 });
 
 const highlighted = () => [...useChangeHighlightStore.getState().keys];
@@ -120,13 +146,34 @@ describe("ApplyNavigationNotice", () => {
     );
     await waitFor(() =>
       expect(screen.getByTestId("apply-navigation-status")).toHaveTextContent(
-        "Opened Shift types. 3 shift types added.",
+        "Opened Shifts. 3 shift types added.",
       ),
     );
     expect(navigate).toHaveBeenCalledWith("shift-types", { reveal: false });
     expect(highlighted()).toEqual(['shift:"EVE"', 'shift:"LATE"', 'shift:"N2"']);
     // Reduced motion: the scroll is never asked to be smooth.
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" }));
+  });
+
+  it("names the screen by the sidebar's own name, never the Preview scope label", async () => {
+    render(<ApplyNavigationNotice controller={controller(applied("r-cover", COVERING_DIFF))} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("apply-navigation-status")).toHaveTextContent(
+        "Opened Shift Type Coverings. 2 supervision rules added.",
+      ),
+    );
+  });
+
+  it("names a linked screen by the sidebar's own name too", async () => {
+    render(
+      <ApplyNavigationNotice
+        controller={controller(applied("r-cover-link", COVERING_LINK_DIFF))}
+      />,
+    );
+    const link = await screen.findByRole("button", {
+      name: "Shift Type Coverings (1 supervision rule added)",
+    });
+    expect(link).toHaveAttribute("data-capability-id", "shift-type-coverings");
   });
 
   it("offers the other screens, and a link opens and outlines that one", async () => {
@@ -151,7 +198,7 @@ describe("ApplyNavigationNotice", () => {
     render(<ApplyNavigationNotice controller={controller(applied())} />);
     await waitFor(() =>
       expect(screen.getByTestId("apply-navigation-status")).toHaveTextContent(
-        "Stayed here so your unsaved edit is kept. The change is on Shift types. 3 shift types added.",
+        "Stayed here so your unsaved edit is kept. The change is on Shifts. 3 shift types added.",
       ),
     );
     expect(highlighted()).toEqual([]);
@@ -169,7 +216,7 @@ describe("ApplyNavigationNotice", () => {
     render(<ApplyNavigationNotice controller={controller(applied())} />);
     await waitFor(() =>
       expect(screen.getByTestId("apply-navigation-status")).toHaveTextContent(
-        "Stayed here so the optimiser run keeps going. The change is on Shift types. 3 shift types added.",
+        "Stayed here so the optimiser run keeps going. The change is on Shifts. 3 shift types added.",
       ),
     );
     expect(navigate).not.toHaveBeenCalled();

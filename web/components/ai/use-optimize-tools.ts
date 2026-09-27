@@ -46,7 +46,9 @@ export interface OptimizeRunSummary {
 }
 
 const REQUEST_REFUSAL: Record<Exclude<RunRequestOutcome, "started">, string> = {
-  "not-ready": "The requested run did not start: dates, staff or shifts are still missing.",
+  "not-ready":
+    "The requested run did not start: dates, staff or shifts are still missing, or a shift " +
+    "count rule uses an unsupported expression.",
   "backend-offline": "The requested run did not start: the optimiser is not reachable right now.",
   busy: "The requested run did not start: another start was already in progress.",
   blocked:
@@ -160,12 +162,18 @@ export function useOptimizeTools(agentId: string, turnEpoch: number): void {
             "get_optimize_result to follow it."
           );
         }
-        const readiness = deriveOptimizeReadiness(pickScenario(useScenarioStore.getState()));
+        const scenario = pickScenario(useScenarioStore.getState());
+        const readiness = deriveOptimizeReadiness({
+          ...scenario,
+          counts: scenario.cardsByKind.counts,
+        });
         if (!readiness.ready) {
-          const missing = readiness.issues.map((issue) => issue.linkLabel).join(", ");
+          const reasons = readiness.issues
+            .map((issue) => `${issue.before}${issue.linkLabel}${issue.after}`)
+            .join(" ");
           return (
-            `The optimiser cannot run yet. Missing: ${missing}. Help the user set these up ` +
-            "first, preparing changes where you can."
+            `The optimiser cannot run yet. ${reasons} Help the user fix these first, ` +
+            "preparing changes where you can."
           );
         }
         const ownership = await readAuthoritativeScenarioOwnership();

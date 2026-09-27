@@ -145,6 +145,7 @@ const readiness = deriveOptimizeReadiness({
   staff: [],
   shifts: [],
   shiftGroups: [],
+  counts: [],
 });
 
 /** Same L1 card + hairline head band as the route's own `Section` (R6 v2). */

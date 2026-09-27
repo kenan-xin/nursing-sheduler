@@ -37,7 +37,7 @@ import {
 } from "@/lib/ai/assistant/playbook";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { planChangeHighlight } from "@/lib/change-highlight/plan";
-import { resolveNavigationTarget } from "@/lib/capability/resolve";
+import { resolveScreenName } from "@/lib/capability/resolve";
 import { readCapabilityContext } from "./capability-context";
 import { assertTurnAuthority, SUPERSEDED } from "./turn-authority";
 
@@ -210,11 +210,11 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
         );
         const waiting = outcome.proposal.assumptions.length;
         // The screen the Apply notice will open (bead 3ew), by the sidebar's own name, so the
-        // model never guesses one.
+        // model never guesses one. `resolveScreenName` is the one place that name is derived,
+        // shared with the Apply notice itself.
         const capabilities = readCapabilityContext();
         const primary = planChangeHighlight(outcome.proposal.diff, capabilities.mode).primary;
-        const target = primary ? resolveNavigationTarget(primary.capabilityId, capabilities) : null;
-        const screen = target?.status === "ok" ? target.value.screenName : null;
+        const screen = primary ? resolveScreenName(primary.capabilityId, capabilities) : null;
         return (
           "A preview of this change is now shown to the user, with the exact before and " +
           "after values and every knock-on effect the app worked out. " +
