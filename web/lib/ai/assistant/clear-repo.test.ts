@@ -12,6 +12,7 @@ import {
 import { activateProbedConfiguration } from "./settings-repo";
 import {
   createAssistantHarness,
+  dumpDatabase,
   SENTINEL_KEY,
   TEST_MODEL,
   type AssistantHarness,
@@ -105,6 +106,41 @@ describe("clear history", () => {
     expect(await harness.db.assistantMessages.count()).toBe(0);
     expect(await harness.db.assistantTurns.count()).toBe(0);
     expect(await harness.db.assistantThreads.count()).toBe(0);
+  });
+
+  it("deletes attachment data with the messages (2by.10)", async () => {
+    const harness = createAssistantHarness();
+    const thread = await selectActiveThread("scenario-a", harness.config);
+    const message = {
+      id: "m1",
+      role: "user",
+      content: [
+        { type: "text", text: "look" },
+        {
+          type: "image",
+          source: { type: "data", value: "QVRUQUNITUVOVC1EQVRB", mimeType: "image/png" },
+          metadata: { filename: "ward.png" },
+        },
+      ],
+    } as Message;
+    await persistThreadMessages(
+      [message],
+      {
+        threadId: thread.threadId,
+        scenarioId: "scenario-a",
+        modelId: TEST_MODEL,
+        turnId: "turn-1",
+        globalGeneration: 0,
+        scenarioGeneration: 0,
+        createdAt: harness.now().toISOString(),
+      },
+      harness.config,
+    );
+    expect(JSON.stringify(await dumpDatabase(harness.db))).toContain("QVRUQUNITUVOVC1EQVRB");
+
+    await finishClear(await beginClear("history", "scenario-a", harness.config), harness.config);
+
+    expect(JSON.stringify(await dumpDatabase(harness.db))).not.toContain("QVRUQUNITUVOVC1EQVRB");
   });
 
   it("keeps the credential, the preferences and the permanent fence rows", async () => {
