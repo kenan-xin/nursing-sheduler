@@ -182,6 +182,31 @@ describe("readStagedSubmissionSnapshot — fail-closed consumption", () => {
     expect(await readProven("own-ok", store)).not.toBeNull();
   });
 
+  it("stages the cover beside the submission and reads both back", async () => {
+    const store = openTab(freshDbName());
+    const cover = {
+      entries: [{ name: "Haseena (Ward 3)", iso: "2026-07-04", shiftId: "D", groups: [] }],
+      decrements: [{ pref: 1, iso: "2026-07-04", required: 1 }],
+    };
+    await stageSubmissionSnapshot({ ownerId: "own-cover", payload: payload(), cover, store });
+
+    const read = await readProven("own-cover", store);
+    expect(read?.cover).toEqual(cover);
+    // The submission envelope stays exactly the three fields F3 validates.
+    expect(read?.payload).toEqual(payload());
+  });
+
+  it("a snapshot with no cover reads as an empty cover", async () => {
+    // A row staged by an older build, or a run with no cover at all.
+    const store = openTab(freshDbName());
+    await store.allocateSubmissionSnapshot({
+      ownerId: "own-plain",
+      payload: payload(),
+      expectedClearEpoch: await store.getClearEpoch(),
+    });
+    expect((await readProven("own-plain", store))?.cover).toEqual({ entries: [], decrements: [] });
+  });
+
   it("carries an UNKNOWN submission version through verbatim — F2 owns no version authority", async () => {
     // The version is F3's contract, enforced inside `assembleRosterDocument`. If F2
     // second-guessed it here, a snapshot staged by a newer build would be silently

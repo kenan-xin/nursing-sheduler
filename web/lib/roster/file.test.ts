@@ -23,6 +23,7 @@ import { rosterFileVersionString, type RosterFileMigration } from "./schema-vers
 import { MAX_FROZEN_XLSX_BYTES } from "./validate";
 import {
   FIXTURE_DATES,
+  fixtureCover,
   fixtureFrozenXlsx,
   fixtureRosterDocument,
   fixtureSolvedDays,
@@ -102,6 +103,21 @@ describe("round trips", () => {
     expect(imported.coordinateMap).toEqual(document.coordinateMap);
     expect(await bytesOf(imported.frozenXlsx)).toEqual(await bytesOf(document.frozenXlsx));
     expect(imported.frozenXlsx.type).toBe(XLSX_MEDIA_TYPE);
+    expect(imported.cover).toEqual({ entries: [], decrements: [] });
+  });
+
+  it("file round-trips cover exactly", async () => {
+    const document = await fixtureRosterDocument({ cover: fixtureCover() });
+    const imported = await decode(await encode(document));
+    expect(imported.schemaVersion).toBe("roster-file/2");
+    expect(imported.cover).toEqual(fixtureCover());
+  });
+
+  it("imports a roster-file/1 file with an empty cover", async () => {
+    const { cover: _absent, ...raw } = await rawOf(await fixtureRosterDocument());
+    const imported = await decode(reencode({ ...raw, schemaVersion: "roster-file/1" }));
+    expect(imported.schemaVersion).toBe("roster-file/2");
+    expect(imported.cover).toEqual({ entries: [], decrements: [] });
   });
 
   it("preserves the immutable baseline AND the overlay of an edited roster", async () => {
@@ -218,12 +234,12 @@ describe("structural and version rejection", () => {
 
   it("rejects a NEWER file with a message naming both versions", async () => {
     const raw = await rawOf(await fixtureRosterDocument());
-    raw.schemaVersion = "roster-file/2";
+    raw.schemaVersion = "roster-file/3";
     const result = await decodeRosterFileBytes(reencode(raw));
     expect(result).toMatchObject({ ok: false });
     if (!result.ok) {
       expect(result.reason).toContain("newer version of the app");
-      expect(result.reason).toContain("roster-file/2");
+      expect(result.reason).toContain("roster-file/3");
     }
   });
 
@@ -238,28 +254,28 @@ describe("structural and version rejection", () => {
   it("migrates an OLDER file end to end and IMPORTS it successfully", async () => {
     // The real contract: a supported older file migrates, passes FULL validation at
     // the version it was migrated TO, and decodes. Exercised through an injected
-    // policy because v1 is the first version, so migrate-older is otherwise
-    // unreachable — and the policy's `currentVersion` and validator advance together,
-    // which is precisely what makes this success path reachable at all.
+    // policy, so a chain past the shipped one is proven before it is needed. The
+    // policy's `currentVersion` and validator advance together, which is precisely
+    // what makes this success path reachable at all.
     const document = await fixtureRosterDocument();
     const raw = await rawOf(document);
-    const legacy = { ...raw, schemaVersion: rosterFileVersionString(1), legacyNote: "retired" };
+    const legacy = { ...raw, schemaVersion: rosterFileVersionString(2), legacyNote: "retired" };
     const migration: RosterFileMigration = {
-      from: 1,
+      from: 2,
       migrate: (stored) => {
         // A realistic step: drop a retired field and restamp the version.
         const { legacyNote: _retired, ...rest } = stored;
-        return { ok: true, document: { ...rest, schemaVersion: rosterFileVersionString(2) } };
+        return { ok: true, document: { ...rest, schemaVersion: rosterFileVersionString(3) } };
       },
     };
 
     const migrated = await decodeRosterFileBytes(reencode(legacy), {
       migrations: [migration],
-      currentVersion: 2,
+      currentVersion: 3,
     });
     expect(migrated).toMatchObject({ ok: true });
     if (!migrated.ok) return;
-    expect(migrated.document.schemaVersion).toBe(rosterFileVersionString(2));
+    expect(migrated.document.schemaVersion).toBe(rosterFileVersionString(3));
     expect(migrated.document.solvedDays).toEqual(fixtureSolvedDays());
     expect(migrated.document.provenance.solvedBaselineId).toBe(
       document.provenance.solvedBaselineId,
@@ -271,14 +287,14 @@ describe("structural and version rejection", () => {
     // Migration is not a bypass: a step that emits a structurally invalid document is
     // rejected by the post-migration validator rather than waved through.
     const raw = await rawOf(await fixtureRosterDocument());
-    const legacy = { ...raw, schemaVersion: rosterFileVersionString(1) };
+    const legacy = { ...raw, schemaVersion: rosterFileVersionString(2) };
     const corrupting: RosterFileMigration = {
-      from: 1,
+      from: 2,
       migrate: (stored) => ({
         ok: true,
         document: {
           ...stored,
-          schemaVersion: rosterFileVersionString(2),
+          schemaVersion: rosterFileVersionString(3),
           // An overlay entry equal to its solved day-state — never storable.
           edits: [{ personIdx: 0, dateIdx: 0, day: { kind: "shift", shiftId: "D" } }],
         },
@@ -286,7 +302,7 @@ describe("structural and version rejection", () => {
     };
     const result = await decodeRosterFileBytes(reencode(legacy), {
       migrations: [corrupting],
-      currentVersion: 2,
+      currentVersion: 3,
     });
     expect(result).toMatchObject({ ok: false });
     if (!result.ok) expect(result.reason).toContain("equals its solved day-state");
@@ -294,12 +310,12 @@ describe("structural and version rejection", () => {
 
   it("reports a failing migration as a migration failure, not a structural one", async () => {
     const raw = await rawOf(await fixtureRosterDocument());
-    const legacy = { ...raw, schemaVersion: rosterFileVersionString(1) };
+    const legacy = { ...raw, schemaVersion: rosterFileVersionString(2) };
     const failing = await decodeRosterFileBytes(reencode(legacy), {
       migrations: [
-        { from: 1, migrate: () => ({ ok: false, reason: "legacy overlay is ambiguous" }) },
+        { from: 2, migrate: () => ({ ok: false, reason: "legacy overlay is ambiguous" }) },
       ],
-      currentVersion: 2,
+      currentVersion: 3,
     });
     expect(failing).toMatchObject({ ok: false });
     if (!failing.ok) expect(failing.reason).toContain("legacy overlay is ambiguous");
@@ -307,10 +323,10 @@ describe("structural and version rejection", () => {
 
   it("rejects an older file when the policy registers no chain to current", async () => {
     const raw = await rawOf(await fixtureRosterDocument());
-    const legacy = { ...raw, schemaVersion: rosterFileVersionString(1) };
+    const legacy = { ...raw, schemaVersion: rosterFileVersionString(2) };
     const result = await decodeRosterFileBytes(reencode(legacy), {
       migrations: [],
-      currentVersion: 2,
+      currentVersion: 3,
     });
     expect(result).toMatchObject({ ok: false });
     if (!result.ok) expect(result.reason).toContain("too old");

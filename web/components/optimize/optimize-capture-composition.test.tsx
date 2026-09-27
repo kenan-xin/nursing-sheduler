@@ -20,13 +20,16 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { JobResponse } from "@/lib/bff/types";
-import { scenarioCommands, useHotStore } from "@/lib/store";
+import { scenarioCommands, useHotStore, useScenarioStore } from "@/lib/store";
 import { resetScenarioForTest } from "@/lib/store/test-authority";
-import type {
-  CanonicalScenarioDocument,
-  PrepareOptimizeSubmissionResult,
-  UiTemporaryCover,
+import {
+  toCanonicalScenarioDocument,
+  type CanonicalScenarioDocument,
+  type PrepareOptimizeSubmissionResult,
+  type UiTemporaryCover,
 } from "@/lib/scenario";
+import { applyCovers } from "@/lib/scenario/temporary-cover";
+import type { RosterCover } from "@/lib/roster/types";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
 import { cards, requirement } from "@/lib/rules/ward-fixtures.test-support";
 import {
@@ -486,7 +489,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
       // container's own coordinates, and the recomputed baseline identity.
       const row = await store.readCandidate<RosterDocument>("opt_1");
       const document = row!.document;
-      expect(document.schemaVersion).toBe("roster-file/1");
+      expect(document.schemaVersion).toBe("roster-file/2");
       expect(document.submission.canonicalYaml).toBe(fixtureSubmission().canonicalYaml);
       // De-anonymized through the SNAPSHOT's reverse map: `P1` → "Alice Ng", `P2` → 7
       // with its numeric identity preserved.
@@ -1372,7 +1375,7 @@ describe("OptimizeAndExportScreen — G4 dedicated /roster route", () => {
 
 describe("OptimizeAndExportScreen — temporary cover (d582)", () => {
   /** Mount a ready screen whose `prepare` records the document Optimize built. */
-  async function mountWithCovers(temporaryCover: UiTemporaryCover[]) {
+  async function mountWithCovers(temporaryCover: UiTemporaryCover[], staged: RosterCover[] = []) {
     await scenarioCommands.mutate({
       staff: [{ id: "p1" }, { id: "p2" }],
       shifts: [{ id: "day" }],
@@ -1400,6 +1403,10 @@ describe("OptimizeAndExportScreen — temporary cover (d582)", () => {
           },
           storage: memStorage(),
           createOwnerId: () => "o-cover",
+          stageSnapshot: async (input: { cover: RosterCover }) => {
+            staged.push(input.cover);
+            return { status: "unavailable" as const, reason: "snapshot_persist_failed" as const };
+          },
         }}
         terminalDeps={{
           fetchXlsx: vi.fn(async () => ({ blob: new Blob(["x"]), filename: "schedule.xlsx" })),
@@ -1435,5 +1442,31 @@ describe("OptimizeAndExportScreen — temporary cover (d582)", () => {
     await waitFor(() => expect(prepared).toHaveLength(1));
     // A flagged cover lowers nothing.
     expect(prepared[0].preferences[1]).not.toHaveProperty("requiredNumPeopleOverrides");
+  });
+
+  it("the staged cover comes from the same applyCovers run as the YAML", async () => {
+    const staged: RosterCover[] = [];
+    const prepared = await mountWithCovers(
+      [makeTemporaryCover({ date: "2026-07-03", shiftType: "day" })],
+      staged,
+    );
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+    await waitFor(() => expect(staged).toHaveLength(1));
+    const applied = applyCovers(useScenarioStore.getState());
+    expect(prepared[0]).toEqual(toCanonicalScenarioDocument(applied.state));
+    expect(applied.decrements).not.toHaveLength(0);
+    expect(staged[0]).toEqual({
+      entries: [{ name: "Haseena (Ward 3)", iso: "2026-07-03", shiftId: "day", groups: [] }],
+      decrements: applied.decrements,
+    });
+  });
+
+  it("no cover stages an empty cover and identical YAML", async () => {
+    const staged: RosterCover[] = [];
+    const prepared = await mountWithCovers([], staged);
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+    await waitFor(() => expect(staged).toHaveLength(1));
+    expect(staged[0]).toEqual({ entries: [], decrements: [] });
+    expect(prepared[0]).toEqual(toCanonicalScenarioDocument(useScenarioStore.getState()));
   });
 });
