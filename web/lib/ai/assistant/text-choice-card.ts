@@ -11,12 +11,21 @@ import { assistantActions, turnAwaitsUserOnCard, useAssistantStore } from "./sto
 // widen or narrow the list if real transcripts show misfires.
 const YES_NO_OPENER =
   /^(?:do|does|did|is|are|was|were|can|could|will|would|shall|should|may|have|has|want|ready|ok|okay|sounds?)\b/i;
-/** A first word that makes a phrase a clause, a filler or a non-answer, not an option. */
+/** A word that makes a phrase a clause, a filler or a non-answer, not an option. */
 const NOT_AN_OPTION =
   /^(?:do|does|did|is|are|was|were|can|could|will|would|shall|should|may|might|must|have|has|want|i|you|we|it|they|he|she|there|which|what|who|how|when|where|why|if|not|no|nothing|none|so|also|and|but|else|otherwise|something|anything|someone|anyone|other|ok|okay|sure|great|thanks|right|alright|yes|perfect|got)$/i;
-const DETERMINER =
-  /^(?:the|a|an|every|each|all|this|that|these|those|my|your|our|their|its|some|any)$/i;
-const PREPOSITION = /^(?:to|on|in|at|for|by|with|from|before|after|per|until|during)$/i;
+/** Shapes where the options are not clearly delimited: never a card. */
+const UNCLEAR =
+  /[&"\u201c\u201d]|(?:^|\s)['\u2018]|['\u2019](?=[\s?]|$)|\b(?:either|whether|neither|rather than)\b|\/or\b|\bor\//i;
+/** One-token option kinds; a mid-sentence choice needs every option to be one of the same. */
+const TOKEN_KINDS = [
+  /^(?!I$)[A-Z]{1,3}\d?$/, // shift code: AM, PM, N, N2
+  /^\d+(?:[:.]\d+)?$/, // number or ratio: 3, 7.5, 1:4
+  /^\d{4}-\d{2}-\d{2}$|^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$/, // date: 2026-11-05, 5/11
+  /^[A-Z][a-z]+$/, // one capitalised word: Ben, Monday
+];
+/** A lower-case word: an option only when the whole sentence is the options (Nights or weekends?). */
+const LOWER_WORD = /^[a-z]+(?:-[a-z]+)*$/;
 
 export interface TextChoice {
   /** The last sentence, shown as the card's question. */
@@ -29,96 +38,87 @@ export function endingTextChoice(text: string): TextChoice | null {
   const plain = text.replace(/[*_`]/g, "").trim();
   const question =
     plain
-      .split(/(?<=[.!?])\s+|\n+/)
+      .split(/(?<=[.!?]["'\u201d\u2019]?)\s+|\n+/)
       .at(-1)
       ?.trim() ?? "";
   if (!question.endsWith("?")) return null;
   if (!/\bor\b/i.test(question))
     return YES_NO_OPENER.test(question) ? { question, options: ["Yes", "No"] } : null;
-  const options = namedOptions(question.slice(0, -1));
+  const options = namedOptions(question);
   return options && { question, options };
 }
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean);
+const kindOf = (token: string) => TOKEN_KINDS.findIndex((k) => k.test(token));
 
-function isOption(ws: string[]): boolean {
-  return ws.length >= 1 && ws.length <= 5 && !NOT_AN_OPTION.test(ws[0]);
+/**
+ * The 2 to 3 options of an explicitly delimited choice, or null. Only three shapes:
+ * (a) a lead-in ending in ":" or " - ", then "A or B?" / "A, B or C?" (same word counts);
+ * (b) the whole sentence is one-word options ("Nights or weekends?");
+ * (c) one-token options of the same kind (AM or PM, 1:4 or 1:5, Ben or Chloe) right before
+ *     the "?", with no tail. Anything else, including a wrong-looking split, gets no card:
+ *     a wrong card is worse than none (user, 2026-09-27).
+ */
+function namedOptions(question: string): string[] | null {
+  if (UNCLEAR.test(question)) return null;
+  const body = question.slice(0, -1).trim();
+  if (body.split(/\s+or\s+/i).length !== 2) return null;
+  const listed = body.match(/^(.+?)(?::\s+|\s+[-\u2013\u2014]\s+)(.+)$/);
+  const items = (listed ? listed[2] : body)
+    .split(/,\s*|\s+or\s+/i)
+    .filter(Boolean)
+    .map(words);
+  if (listed) {
+    const n = items[0].length;
+    if (n > 4 || !items.every((ws) => ws.length === n && !NOT_AN_OPTION.test(ws[0]))) return null;
+    return finish(items.map(label));
+  }
+  if (items.every((ws) => ws.length === 1)) {
+    const tokens = items.map(([t]) => t);
+    const first = tokens[0].charAt(0).toLowerCase() + tokens[0].slice(1);
+    const sameKind = (ts: string[]) =>
+      ts.every((t) => LOWER_WORD.test(t)) ||
+      ts.every((t) => kindOf(t) >= 0 && kindOf(t) === kindOf(ts[0]));
+    if (tokens.some((t) => NOT_AN_OPTION.test(t))) return null;
+    if (sameKind(tokens) || sameKind([first, ...tokens.slice(1)]))
+      return finish(tokens.map((t) => t.charAt(0).toUpperCase() + t.slice(1)));
+  }
+  return inlineTokens(body);
 }
 
-/** "Tan Wei" stays; "the Staff screen" becomes "Staff screen"; "nights" becomes "Nights". */
+/** Shape (c): "... A or B" / "... A, B or C" where each option is one token of one kind. */
+function inlineTokens(body: string): string[] | null {
+  const [head, tail] = body.split(/\s+or\s+/i);
+  const last = words(tail);
+  const kind = kindOf(last[0] ?? "");
+  if (last.length !== 1 || kind < 0) return null;
+  const segments = head.split(/,\s*/).filter(Boolean);
+  const inSegment = words(segments.at(-1) ?? "");
+  const options = [inSegment.at(-1) ?? "", last[0]];
+  let before = inSegment.at(-2);
+  if (inSegment.length === 1 && segments.length >= 2) {
+    const prev = words(segments.at(-2)!);
+    if (kindOf(prev.at(-1)!) === kind) {
+      if (prev.length === 1 && segments.length >= 3) return null; // four or more options
+      options.unshift(prev.at(-1)!);
+      before = prev.at(-2);
+    }
+  }
+  // A same-kind token before the first option means a longer name or code: not delimited.
+  if (before !== undefined && kindOf(before) === kind) return null;
+  if (!options.every((t) => kindOf(t) === kind && !NOT_AN_OPTION.test(t))) return null;
+  return finish(options);
+}
+
+/** "the Staff screen" becomes "Staff screen"; "nights" becomes "Nights". */
 function label(ws: string[]): string {
   const s = (ws.length > 1 && /^(?:the|a|an)$/i.test(ws[0]) ? ws.slice(1) : ws).join(" ");
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/**
- * The 2 to 3 options of "STEM A or B" / "STEM A, B or C" (a question body, no "?"), or null.
- * One "or" only, never "either"/"whether", and each option a short phrase. The stem can end
- * on ": " or " - ", or be a "Which ...," clause; otherwise the first option is found by the
- * shape of the one after it (same article or preposition, a number, a name, or as many words).
- * ponytail: word shapes, not grammar; a mid-phrase split ("the month" out of "every night in
- * the month") can still slip through. Tighten here if real transcripts show misfires.
- */
-function namedOptions(body: string): string[] | null {
-  if (/\b(?:either|whether)\b|\/or\b|\bor\//i.test(body)) return null;
-  const halves = body.split(/\s+or\s+/i);
-  if (halves.length !== 2 || /,/.test(halves[1])) return null;
-  const last = words(halves[1]);
-  if (!isOption(last)) return null;
-
-  // "Which do you want: days or nights" / "Which would you prefer, days or nights"
-  const listed =
-    body.match(/^(.+?)(?::\s+|\s+[-–—]\s+)(.+)$/) ??
-    body.match(/^((?:which|what)\b[^,]*),\s*(.+)$/i);
-  if (listed) {
-    const items = listed[2]
-      .split(/,\s*|\s+or\s+/i)
-      .filter(Boolean)
-      .map(words);
-    if (items.length > 3 || !items.every(isOption)) return null;
-    return distinct(items.map(label));
-  }
-
-  const segments = halves[0].split(/,\s*/);
-  if (segments.at(-1) === "") segments.pop();
-  const later = [last];
-  if (segments.length >= 2 && isOption(words(segments.at(-1)!)))
-    later.unshift(words(segments.pop()!));
-  const ws = words(segments.at(-1) ?? "");
-  const start = firstOptionStart(ws, later[0]);
-  if (start < 0) return null;
-  // No stem before the first option while more text precedes it: a longer list or a filler.
-  if (start === 0 && segments.length > 1) return null;
-  const first = ws.slice(start);
-  if (!isOption(first)) return null;
-  return distinct([first, ...later].map(label));
-}
-
-/** Where the first option starts in `ws`, matched to the shape of the option after it. */
-function firstOptionStart(ws: string[], next: string[]): number {
-  const head = next[0];
-  if (DETERMINER.test(head) || PREPOSITION.test(head))
-    return ws.map((w) => w.toLowerCase()).lastIndexOf(head.toLowerCase());
-  if (/^\d/.test(head)) return ws.findLastIndex((w) => /^\d/.test(w));
-  if (/^[A-Z]/.test(head)) {
-    let i = ws.length;
-    while (i > 0 && /^[A-Z0-9]/.test(ws[i - 1])) i--;
-    return i < ws.length ? i : -1;
-  }
-  // A plain word: as many words as the next option (or one fewer), not starting on a
-  // determiner or a preposition and not cut out of a noun phrase ("a nurse from ...").
-  const fits = (i: number) =>
-    i >= 0 &&
-    i < ws.length &&
-    !DETERMINER.test(ws[i]) &&
-    !PREPOSITION.test(ws[i]) &&
-    !(i > 0 && DETERMINER.test(ws[i - 1]));
-  const i = ws.length - next.length;
-  return fits(i) ? i : fits(i + 1) ? i + 1 : -1;
-}
-
-function distinct(labels: string[]): string[] | null {
-  return new Set(labels.map((l) => l.toLowerCase())).size === labels.length ? labels : null;
+function finish(labels: string[]): string[] | null {
+  const distinct = new Set(labels.map((l) => l.toLowerCase())).size === labels.length;
+  return distinct && labels.length >= 2 && labels.length <= 3 ? labels : null;
 }
 
 /**

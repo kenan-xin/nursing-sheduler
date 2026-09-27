@@ -131,20 +131,6 @@ describe("judge", () => {
     expect(renderTranscript(bad)).toBe("Card: Which fix? []");
   });
 
-  it("renders the card the app adds under a text choice (09x8, 7xw)", () => {
-    const withCard: TrialRecord = {
-      ...r,
-      transcript: [
-        { role: "user", text: "Set our ratio.", toolCalls: [] },
-        { role: "assistant", text: "The ward decides. Set it now or later?", toolCalls: [] },
-      ],
-    };
-    expect(renderTranscript(withCard)).toBe(
-      "User: Set our ratio.\nAssistant: The ward decides. Set it now or later?\n" +
-        "Card: Set it now or later? [Now | Later]",
-    );
-  });
-
   it("renders an assistant's text before the card it leads into", () => {
     const leadIn: TrialRecord = {
       ...r,
