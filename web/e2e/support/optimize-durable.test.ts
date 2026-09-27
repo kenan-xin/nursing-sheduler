@@ -112,6 +112,8 @@ const VALID_ACTIVE_SESSION: Record<string, unknown> = {
   // product's closed schema binds them, so a fixture that named a different owner
   // would be unreadable rather than merely unusual.
   capture: { status: "staged", snapshotRef: "owner-1", submissionOrdinal: 1 },
+  // d582's temporary-cover plan: `null` for a run with no cover.
+  coverSheet: null,
   jobId: "job-from-page",
 };
 
@@ -1937,7 +1939,10 @@ describe("accepted-job ownership fails closed and recovers", () => {
 
     it("reads the exact key and schema version the product writes", () => {
       expect(OPTIMIZE_SESSION_RECORD_KEY).toBe("nurse.optimize.session");
-      expect(OPTIMIZE_SESSION_SCHEMA_VERSION).toBe(2);
+      // v3 added d582's `coverSheet`. Pinned rather than compared so a version bump
+      // has to be a deliberate edit here too — the harness must never silently track
+      // a schema it no longer matches.
+      expect(OPTIMIZE_SESSION_SCHEMA_VERSION).toBe(3);
     });
   });
 

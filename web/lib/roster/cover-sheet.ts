@@ -123,6 +123,27 @@ function countRowTarget(
   };
 }
 
+/**
+ * Project the authored cover cards onto the submission's cover entries (d582).
+ *
+ * The only real work is the rename: the UI stores the ISO date and the shift ref
+ * under the names its date/shift inputs use (`date`, `shiftType`), while the
+ * submission type names them `iso` and `shiftId`. `_k` is the React list key and
+ * is deliberately dropped — it is never serialized anywhere.
+ *
+ * One entry per card, in the authored order. Collapsing a name's several dates
+ * into one roster row is the PLAN's job (`buildCoverSheetPlan`), not this
+ * projection's: the submission stages the cards as authored.
+ */
+export function toCoverEntries(covers: readonly UiTemporaryCover[]): RosterCoverEntry[] {
+  return covers.map(({ name, date, shiftType, groups }) => ({
+    name,
+    iso: date,
+    shiftId: shiftType,
+    groups,
+  }));
+}
+
 /** The staged entries in the shape the cover arithmetic reads. */
 function coversOf(entries: readonly RosterCoverEntry[]): UiTemporaryCover[] {
   return entries.map((entry) => ({

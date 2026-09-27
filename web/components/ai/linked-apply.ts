@@ -7,8 +7,18 @@
 // the roster, and undo the schedule's receipt if the roster refuses. The schedule goes
 // first because it has the strictest gates (lease, revision, agreement) and a durable
 // Undo. The one case it cannot undo is said plainly, never hidden.
+//
+// A schedule half that books or cancels a temporary cover (d582 Task 17) is applied
+// on the Staff screen, in view: the Temporary cover form fills and its Save runs the
+// proposal's one durable Apply (`staff-form-apply.ts`). Then the other screens the
+// proposal touches are walked in the Apply notice's order (Requests for the asking
+// nurse's leave), and only then the Roster screen.
 
 import type { RosterDocument } from "@/lib/roster";
+import type { ProposalDiff } from "@/lib/proposal";
+import { planChangeHighlight } from "@/lib/change-highlight/plan";
+import { showChangeHighlight } from "@/lib/change-highlight/store";
+import { awaitCoverEditOutcome, requestCoverEdit } from "@/lib/scenario/cover-edit-request";
 import {
   awaitRosterChangeOutcome,
   requestRosterChange,
@@ -20,15 +30,23 @@ import { readRosterForAssistant } from "@/lib/ai/assistant/roster-context";
 import type { LinkedScheduleChange } from "@/lib/ai/assistant/store";
 import { assistantProposalCommands } from "@/lib/store";
 import { describeApplyFailure } from "./use-assistant-proposals";
+import { readCapabilityContext } from "./capability-context";
+import {
+  applyThroughStaffForm,
+  coverEditsOf,
+  type StaffFormDeps,
+  type StaffFormProposal,
+} from "./staff-form-apply";
 
-export interface LinkedApplyDeps {
+export type LinkedProposal = StaffFormProposal & { diff: ProposalDiff };
+
+type Applied = { ok: true; receiptId: string } | { ok: false; reason: string };
+
+export interface LinkedApplyDeps extends StaffFormDeps {
   readRoster(): Promise<RosterDocument | null>;
-  applyProposal(
-    proposalId: string,
-  ): Promise<{ ok: true; receiptId: string } | { ok: false; reason: string }>;
+  readProposal(proposalId: string): Promise<LinkedProposal | null>;
+  applyProposal(proposalId: string): Promise<Applied>;
   undoReceipt(receiptId: string): Promise<boolean>;
-  /** Opens the Roster screen. False when it could not be opened or the user cancelled. */
-  navigate(): Promise<boolean>;
   requestRosterChange(request: RosterChangeRequest): void;
   awaitRosterChangeOutcome(): Promise<RosterChangeOutcome>;
 }
@@ -36,7 +54,7 @@ export interface LinkedApplyDeps {
 /** The record the linked proposal changes, and what to undo when the roster refuses. */
 const RECORD: Record<LinkedScheduleChange["record"], { name: string; undo: string }> = {
   leave: { name: "leave record", undo: "the leave change" },
-  staff: { name: "staff list", undo: "the added temporary nurse" },
+  staff: { name: "temporary cover", undo: "the temporary cover" },
 };
 
 const WHY: Record<Exclude<RosterChangeOutcome, "applied">, string> = {
@@ -65,7 +83,28 @@ export async function applyLinkedChange(
   // 2. The schedule half. Its own transaction re-checks lease, revision and agreement.
   let applied: { receiptId: string; record: { name: string; undo: string } } | null = null;
   if (change.linked !== null) {
-    const result = await deps.applyProposal(change.linked.proposalId);
+    const { proposalId } = change.linked;
+    const proposal = await deps.readProposal(proposalId);
+    let result: Applied | null;
+    if (proposal !== null && coverEditsOf(proposal.commands).length > 0) {
+      const box: { result: Applied | null } = { result: null };
+      const refused = await applyThroughStaffForm(
+        proposal,
+        async () => {
+          box.result = await deps.applyProposal(proposalId);
+          return box.result.ok
+            ? { ok: true }
+            : { ok: false, message: describeApplyFailure(box.result.reason) };
+        },
+        deps,
+      );
+      if (refused !== null) return { ok: false, message: refused };
+      result = box.result;
+      if (result?.ok) await walkOtherScreens(proposal.diff, deps);
+    } else {
+      result = await deps.applyProposal(proposalId);
+    }
+    if (result === null) return { ok: false, message: describeApplyFailure("unknown") };
     if (!result.ok) return { ok: false, message: describeApplyFailure(result.reason) };
     applied = { receiptId: result.receiptId, record: RECORD[change.linked.record] };
   }
@@ -88,7 +127,9 @@ export async function applyLinkedChange(
   };
   let outcome: RosterChangeOutcome;
   try {
-    if (!(await deps.navigate())) return undo("the Roster screen could not be opened");
+    if (!(await deps.navigate("roster-viewer"))) {
+      return undo("the Roster screen could not be opened");
+    }
     deps.requestRosterChange(change.request);
     outcome = await deps.awaitRosterChangeOutcome();
   } catch {
@@ -97,13 +138,37 @@ export async function applyLinkedChange(
   return outcome === "applied" ? { ok: true } : undo(WHY[outcome]);
 }
 
+/**
+ * After Staff, show the proposal's other screens (Requests for the leave) in the
+ * Apply notice's order (`planChangeHighlight`), outlining their rows. Display only: the change is already saved, so a
+ * screen that does not open is skipped, not undone.
+ */
+async function walkOtherScreens(diff: ProposalDiff, deps: LinkedApplyDeps): Promise<void> {
+  const plan = planChangeHighlight(diff, readCapabilityContext().mode);
+  const screens = [plan.primary, ...plan.others].filter(
+    (screen): screen is NonNullable<typeof screen> =>
+      screen !== null && screen.capabilityId !== "staff-list",
+  );
+  for (const screen of screens) {
+    if (await deps.navigate(screen.capabilityId).catch(() => false)) {
+      showChangeHighlight(screen.keys);
+    }
+  }
+}
+
 /** The production wiring. `navigate` comes from the card's `useCapabilityNavigation`. */
-export function linkedApplyDeps(navigate: () => Promise<boolean>): LinkedApplyDeps {
+export function linkedApplyDeps(
+  navigate: (capabilityId: string) => Promise<boolean>,
+): LinkedApplyDeps {
   return {
     readRoster: async () => {
       const read = await readRosterForAssistant();
       return read.status === "ready" ? read.document : null;
     },
+    readProposal: (proposalId) => assistantProposalCommands.read(proposalId),
+    readBasis: () => assistantProposalCommands.readScenarioBasis(),
+    requestCoverEdit: (run) => requestCoverEdit(run),
+    awaitCoverEditOutcome: () => awaitCoverEditOutcome(),
     applyProposal: async (proposalId) => {
       const result = await assistantProposalCommands.apply({
         proposalId,

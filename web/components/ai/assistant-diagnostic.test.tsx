@@ -12,7 +12,7 @@
 // stopped with no live control rather than as work still in progress.
 
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
@@ -38,6 +38,12 @@ import type { ProductOutcomeView } from "@/lib/optimize/outcome-mapping";
 import { DiagnosticSearchCard } from "./diagnostic-search-card";
 import { ProposalPreviewCard } from "./proposal-preview-card";
 import { useAssistantProposals } from "./use-assistant-proposals";
+
+// The Preview's controller holds the host navigation (a cover Apply opens Staff).
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => "/",
+}));
 
 /** The Preview bound to its controller exactly as the panel binds it. */
 function PreviewHost() {
