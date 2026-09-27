@@ -1,5 +1,5 @@
 import type { Decorator } from "@storybook/nextjs-vite";
-import { expect, spyOn } from "storybook/test";
+import { expect, spyOn, waitFor } from "storybook/test";
 
 // Long-text story helpers (bead w0e.3; bd memory `long-user-text-no-overflow`). Read-only for
 // story authors: one definition, so every LongText story tests the same inputs.
@@ -50,6 +50,29 @@ export function withFetchRoutes(routes: readonly FetchRoute[]) {
     });
     return () => spy.mockRestore();
   };
+}
+
+/**
+ * Click a FullCalendar day cell. Its `dateClick` hit-tests the pointer's page coordinates, and a
+ * synthetic user-event click lands at (0, 0), so this dispatches mousedown/mouseup at the cell's
+ * real centre (what Playwright's real click does in e2e/dates.spec.ts).
+ */
+export async function clickCalendarDay(root: HTMLElement, iso: string): Promise<void> {
+  const selector = `.fc-day[data-ns-date="${iso}"]`;
+  await waitFor(() => expect(root.querySelector(selector)).not.toBeNull());
+  const cell = root.querySelector<HTMLElement>(selector)!;
+  cell.scrollIntoView({ block: "center" });
+  const box = cell.getBoundingClientRect();
+  const init = {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    view: window,
+    clientX: box.x + box.width / 2,
+    clientY: box.y + box.height / 2,
+  };
+  cell.dispatchEvent(new MouseEvent("mousedown", init));
+  cell.dispatchEvent(new MouseEvent("mouseup", init));
 }
 
 export function jsonResponse(status: number, body: unknown): Response {
