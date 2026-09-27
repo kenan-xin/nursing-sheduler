@@ -12,12 +12,14 @@
 # package and that single scenario file.
 FROM python:3.12-slim
 
-# Version stamping: the SAME boundary as Dockerfile.backend — APP_VERSION env var
-# (fed by the build wrapper), with NO Git at build or runtime. There is deliberately
+# Version stamping: the SAME boundary as Dockerfile.backend — APP_VERSION build arg
+# (fed by the build wrapper) written to /app/.app-version, with NO Git at build or runtime. There is deliberately
 # no literal default, so a stamp-less build fails loudly like the backend.
 ARG APP_VERSION
 RUN test -n "$APP_VERSION" || { echo "ERROR: APP_VERSION is empty — build via 'make diagnostic'" >&2; exit 1; }
 ENV APP_VERSION=${APP_VERSION}
+# Genie version.py and app.py read <repo>/.app-version (= /app here) before git.
+RUN mkdir -p /app && printf '%s\n' "$APP_VERSION" > /app/.app-version
 
 WORKDIR /app/core
 COPY core/requirements.txt .

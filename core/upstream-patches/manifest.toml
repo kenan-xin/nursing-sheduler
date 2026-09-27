@@ -312,3 +312,8 @@ path = "nurse_scheduling/server/diagnostic.py"
 class = "patched"
 upstream_blob = "e09e2002eead50f3c4e46807a613063b0e4f191e"
 patches = ["W2-server-diagnostic.patch"]
+
+[[file]]
+path = "nurse_scheduling/version.py"
+class = "verbatim"
+upstream_blob = "8a848d24ced79048a6fde4ca6db2d4e64072feab"
