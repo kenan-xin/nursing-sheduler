@@ -72,6 +72,7 @@ describe("session record — F2 capture authority survives the write path", () =
     runOptions: {},
     peopleCount: 0,
     reverseMap: [] as PeopleReverseMap,
+    coverSheet: null,
   });
 
   function inspectRaw(value: unknown) {
@@ -209,6 +210,90 @@ describe("session record — F2 capture authority survives the write path", () =
   });
 });
 
+// ---------------------------------------------------------------------------
+// d582 — the temporary-cover sheet on the record.
+// ---------------------------------------------------------------------------
+
+/** A minimal, structurally valid plan: one cover row, one count credit. */
+const COVER_SHEET = {
+  rows: [{ name: "Haseena (Ward 3)", cells: ["", "", "N"] }],
+  countCredits: [{ header: "Duty count", byDate: [0, 0, 1] }],
+  entries: [{ name: "Haseena (Ward 3)", iso: "2023-08-20", shiftId: "N", groups: ["Ward 3"] }],
+};
+
+describe("session record — d582 cover sheet survives the write path", () => {
+  it("round-trips the plan through the durable record", () => {
+    const storage = new FakeStorage();
+    const provisional = buildProvisionalSession({
+      ownerId: "owner-A",
+      anonymized: true,
+      peopleCount: 2,
+      reverseMap: REVERSE_MAP,
+      runOptions: {},
+      capture: { status: "staged", snapshotRef: "owner-A", submissionOrdinal: 1 },
+      coverSheet: COVER_SHEET,
+    });
+    expect(stageProvisionalSession(storage, provisional)).toMatchObject({ status: "staged" });
+    expect(decodeSessionRecord(storage.raw(KEY)!)?.coverSheet).toEqual(COVER_SHEET);
+  });
+
+  it("a run with no cover reads back a null cover sheet", () => {
+    const storage = new FakeStorage();
+    stageProvisionalSession(storage, plainProvisional());
+    expect(decodeSessionRecord(storage.raw(KEY)!)?.coverSheet).toBeNull();
+  });
+
+  it("reads a v2 record (which predates the cover sheet) as the current version, no cover", () => {
+    // Unlike v1's capture authority, a v2 record's cover sheet CAN be inferred:
+    // nothing could have written one, so the only honest reading is `null`.
+    const v2 = JSON.parse(validActiveJson()) as Record<string, unknown>;
+    v2.schemaVersion = 2;
+    delete v2.coverSheet;
+    const storage = new FakeStorage();
+    storage.seed(JSON.stringify(v2));
+
+    const record = decodeSessionRecord(storage.raw(KEY)!);
+    expect(record?.phase).toBe("active");
+    expect(record?.schemaVersion).toBe(OPTIMIZE_SESSION_SCHEMA_VERSION);
+    expect(record?.coverSheet).toBeNull();
+  });
+
+  it("rejects every malformed cover sheet", () => {
+    const malformed = [
+      undefined, // the key is dropped by JSON ⇒ not the closed shape
+      "cover",
+      7,
+      [],
+      {},
+      { ...COVER_SHEET, extra: true },
+      { ...COVER_SHEET, rows: "rows" },
+      { ...COVER_SHEET, rows: [{ name: "H", cells: [1] }] }, // cells are text
+      { ...COVER_SHEET, rows: [{ name: "", cells: [] }] },
+      { ...COVER_SHEET, rows: [{ cells: [] }] },
+      { ...COVER_SHEET, countCredits: [{ header: "Duty count" }] },
+      { ...COVER_SHEET, countCredits: [{ header: "Duty count", byDate: ["1"] }] },
+      { ...COVER_SHEET, entries: [{ name: "H", iso: "2023-08-20", shiftId: "N" }] },
+      { ...COVER_SHEET, entries: [{ name: "H", iso: "", shiftId: "N", groups: [] }] },
+      { ...COVER_SHEET, entries: [{ name: "H", iso: "2023-08-20", shiftId: "N", groups: [1] }] },
+      {
+        ...COVER_SHEET,
+        entries: [{ ...COVER_SHEET.entries[0], extra: true }],
+      },
+    ];
+    for (const coverSheet of malformed) {
+      const storage = new FakeStorage();
+      storage.seed(JSON.stringify({ ...JSON.parse(validActiveJson()), coverSheet }));
+      expect(decodeSessionRecord(storage.raw(KEY)!)).toBeNull();
+    }
+  });
+
+  it("an explicit null cover sheet is valid (a run with no cover)", () => {
+    const storage = new FakeStorage();
+    storage.seed(JSON.stringify({ ...JSON.parse(validActiveJson()), coverSheet: null }));
+    expect(decodeSessionRecord(storage.raw(KEY)!)?.coverSheet).toBeNull();
+  });
+});
+
 /** An injectable Storage subset with per-operation overrides for the adversarial
  *  matrix (throwing / no-op / partial / write-then-throw / wipe-then-throw). */
 class FakeStorage implements SessionTransactionStorage {
@@ -330,6 +415,7 @@ function validActiveJson(jobId = "job-seed", ownerId = "owner-seed"): string {
     peopleCount: 2,
     reverseMap: REVERSE_MAP,
     capture: { status: "staged", snapshotRef: ownerId, submissionOrdinal: 1 },
+    coverSheet: null,
   };
   return JSON.stringify(active);
 }
@@ -553,6 +639,9 @@ describe("stageProvisionalSession — durable, verified, validated write before 
     ["a different prettify", { runOptions: { prettify: false, timeout: 300 } }],
     ["a flipped anonymized flag", { anonymized: false, reverseMap: [] }],
     ["a different owner", { ownerId: "owner-EVIL" }],
+    // The cover rows are written into the downloaded workbook, so a codec that
+    // smuggles in different rows would export covers nobody asked for.
+    ["a different cover sheet", { coverSheet: COVER_SHEET }],
   ])(
     "writer validation: a valid-but-different codec payload (%s) writes nothing",
     (_label, patch) => {
@@ -657,6 +746,7 @@ describe("activateSession — owner-scoped replacement + verified reconciliation
       anonymized: true,
       peopleCount: 2,
       reverseMap: REVERSE_MAP,
+      coverSheet: null,
     });
     expect(JSON.parse(storage.raw(KEY)!).phase).toBe("provisional");
   });

@@ -9,9 +9,14 @@
 // removal. The exact ordering it guarantees for a completed job with a
 // downloadable artifact:
 //
-//   fetch artifact → restore original ids when anonymized → complete the FIRST
-//   browser download → retain a tab-lifetime blob for Download Again → attempt a
-//   best-effort terminal DELETE.
+//   fetch artifact → restore original ids when anonymized → insert the d582
+//   temporary-cover rows → complete the FIRST browser download → retain a
+//   tab-lifetime blob for Download Again → attempt a best-effort terminal DELETE.
+//
+// Restoration and the cover insert are ONE step (`applyPeopleIdRestoration`), and
+// they are ordered: ids first, on the core bytes, because the cover insert shifts
+// the `Score`/`Status` boundary rows down. The retained blob the user downloads
+// carries the cover rows; the blob handed to roster capture does not (F6).
 //
 // The only server artifact is NEVER deleted before a successful local
 // restoration/download: a failed download leaves the artifact available to retry
@@ -213,7 +218,17 @@ function defaultSaveBlob(blob: Blob, filename: string): void {
 
 interface RetainedDownload {
   jobId: string;
+  /** The bytes the user downloads: id-restored, WITH any temporary-cover rows. */
   blob: Blob;
+  /**
+   * The same bytes WITHOUT cover rows — the roster's frozen workbook (d582 F6).
+   *
+   * The roster's coordinate axes and the edited export's `lastPersonRow` both
+   * describe the SOLVED people window, so a cover row inserted under it would move
+   * every boundary the roster addresses by row number. Identical to `blob` when
+   * the run has no cover.
+   */
+  frozenBlob: Blob;
   filename: string;
 }
 
@@ -307,11 +322,23 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
       try {
         const { blob, filename } = await seams.current.fetchXlsx(jobId, attempt?.signal);
         if (!stillOwned(attempt)) return false;
-        const restored = await seams.current.restore(blob, {
+        const restoreInput = {
           anonymized: activation.anonymized,
           reverseMap: activation.reverseMap,
           peopleCount: activation.peopleCount,
+        };
+        const restored = await seams.current.restore(blob, {
+          ...restoreInput,
+          cover: activation.coverSheet,
         });
+        // The roster's frozen workbook must NOT carry the cover rows (F6), while the
+        // download MUST. Only a cover makes those two different files, so the second
+        // restoration is made only when there is one; without a cover the restored
+        // blob already IS the frozen workbook and is retained as both.
+        const frozenBlob =
+          activation.coverSheet === null
+            ? restored
+            : await seams.current.restore(blob, { ...restoreInput, cover: null });
         // THE LAST CHECK BEFORE THE DOWNLOAD PRIMITIVE. No browser API can retract a
         // download once `saveBlob` has been called, so the contract is stated at the
         // only place it can be kept: a call already made is not undone, and no call
@@ -324,7 +351,7 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
         // unbounded memory. The run view bounds its own copy from this same value.
         seams.current.saveBlob(restored, filename);
         const displayFilename = truncateUtf8(filename, MAX_DISPLAY_FILENAME_BYTES);
-        retainRef.current = { jobId, blob: restored, filename: displayFilename };
+        retainRef.current = { jobId, blob: restored, frozenBlob, filename: displayFilename };
         if (mountedRef.current) setRetained({ jobId, filename: displayFilename });
         controller.notifyDownloadSucceeded(displayFilename);
         return true;
@@ -375,7 +402,7 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
       return {
         jobId,
         capture,
-        frozenXlsx: entry !== null && entry.jobId === jobId ? entry.blob : null,
+        frozenXlsx: entry !== null && entry.jobId === jobId ? entry.frozenBlob : null,
         signal: attempt?.signal,
       };
     },

@@ -68,6 +68,7 @@ import {
   type UseOptimizeServerInfoDeps,
   type UseOptimizeTerminalDeps,
 } from "@/lib/optimize";
+import { toCoverEntries } from "@/lib/roster/cover-sheet";
 import { CaptureNotice } from "./capture-notice";
 import { Callout } from "./callout";
 import { CoverPreflight } from "./cover-preflight";
@@ -469,12 +470,9 @@ export function OptimizeAndExportScreen({
     return {
       document,
       cover: {
-        entries: scenario.temporaryCover.map(({ name, date, shiftType, groups }) => ({
-          name,
-          iso: date,
-          shiftId: shiftType,
-          groups,
-        })),
+        // The shared projection, so the entries staged with the submission and the
+        // rows the raw download writes are built from ONE reading of the cards.
+        entries: toCoverEntries(scenario.temporaryCover),
         decrements: applied.decrements,
       },
       anonymize,

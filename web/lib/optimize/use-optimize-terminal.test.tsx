@@ -14,6 +14,8 @@ import {
 } from "./use-optimize-terminal";
 import type { RemoveOwnerSessionOutcome } from "./session-transaction";
 import type { RunActivation } from "./use-optimize-run";
+import type { PeopleIdRestorationInput } from "./restore-people-ids-in-xlsx";
+import type { CoverSheetPlan } from "@/lib/roster/cover-sheet";
 import { MAX_DISPLAY_FILENAME_BYTES } from "@/lib/query/sse-limits";
 import { ScenarioPersistenceDb } from "@/lib/store/dexie-storage";
 import { createRosterStorageForDb, type RosterStorage } from "@/lib/store/roster-storage";
@@ -55,6 +57,7 @@ function activation(over: Partial<RunActivation> = {}): RunActivation {
     peopleCount: 2,
     reverseMap: [],
     capture: { status: "staged", snapshotRef: "owner-1", submissionOrdinal: 1 },
+    coverSheet: null,
     ...over,
   };
 }
@@ -145,7 +148,11 @@ describe("useOptimizeTerminal — completed with artifact", () => {
       anonymized: true,
       reverseMap: [["P1", 1]],
       peopleCount: 1,
+      cover: null,
     });
+    // No cover ⇒ the download and the frozen workbook are the SAME restoration, so
+    // the extra no-cover pass is not made.
+    expect(restore).toHaveBeenCalledTimes(1);
     expect(saveBlob).toHaveBeenCalledWith(restored, "schedule.xlsx");
     expect(notify.succeeded).toHaveBeenCalledWith("schedule.xlsx");
     expect(deleteJob).toHaveBeenCalledWith("opt_1");
@@ -525,6 +532,71 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
     // Parity download is unaffected.
     expect(seams.saveBlob).toHaveBeenCalledWith(seams.restored, "schedule.xlsx");
     expect(await store.readCurrentCandidate()).toMatchObject({ jobId: "opt_1" });
+  });
+
+  it("hands capture the frozen workbook WITHOUT the cover rows (d582 F6)", async () => {
+    // The user's download carries her rows; the roster's frozen workbook must not.
+    // A cover row inserted under the staff window moves the `Score`/`Status`
+    // boundary, and the roster addresses cells by row number off the SOLVED people
+    // window — so a cover row in the frozen copy would silently mis-address every
+    // edited cell.
+    const store = freshStore();
+    const withCover = new Blob(["restored-with-cover"], { type: "x" });
+    const withoutCover = new Blob(["restored-without-cover"], { type: "x" });
+    const act = {
+      ...(await stagedActivation(store)),
+      coverSheet: {
+        rows: [{ name: "Haseena (Ward 3)", cells: ["", "N"] }],
+        countCredits: [],
+        entries: [{ name: "Haseena (Ward 3)", iso: "2023-08-20", shiftId: "N", groups: [] }],
+      } satisfies CoverSheetPlan,
+    };
+    const restore = vi.fn(async (_blob: Blob, input: PeopleIdRestorationInput) =>
+      input.cover === null ? withoutCover : withCover,
+    );
+    const saveBlob = vi.fn();
+    let frozenSeen: Blob | null = null;
+    const gate = createRosterCapture({
+      store,
+      fetchRoster: async () => ({ solvedDays: [] }),
+      buildCandidate: ({ container, frozenXlsx }) => {
+        frozenSeen = frozenXlsx;
+        return { ok: true, document: { container } };
+      },
+    });
+
+    const { rerender } = render(
+      {
+        fetchXlsx: vi.fn(async () => ({ blob: xlsxBlob, filename: "schedule.xlsx" })),
+        restore,
+        saveBlob,
+        deleteJob: vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" })),
+        capture: gate,
+      },
+      INITIAL_OPTIMIZE_RUN_VIEW,
+      act,
+    );
+    rerender({ view: completedView("opt_1", true), act });
+
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
+    // ONE fetch, TWO restorations: the same server bytes, once with her rows and
+    // once without, in that order (ids are restored first, on the core bytes).
+    expect(restore).toHaveBeenCalledTimes(2);
+    expect(restore).toHaveBeenNthCalledWith(1, xlsxBlob, {
+      anonymized: false,
+      reverseMap: [],
+      peopleCount: 2,
+      cover: act.coverSheet,
+    });
+    expect(restore).toHaveBeenNthCalledWith(2, xlsxBlob, {
+      anonymized: false,
+      reverseMap: [],
+      peopleCount: 2,
+      cover: null,
+    });
+    // The user gets the cover-bearing file; capture gets the other one.
+    expect(saveBlob).toHaveBeenCalledWith(withCover, "schedule.xlsx");
+    expect(frozenSeen).toBe(withoutCover);
   });
 
   it("a capture FETCH failure never deletes the job, and never blocks the download", async () => {
