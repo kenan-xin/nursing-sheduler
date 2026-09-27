@@ -34,6 +34,8 @@ import {
 } from "@/lib/ai/assistant/history-repo";
 import { completeToolPairs, freezeMessages, toTransportThread } from "@/lib/ai/assistant/messages";
 import { readAssistantSettings } from "@/lib/ai/assistant/settings-repo";
+import { omittedMessageIds } from "@/lib/ai/assistant/compaction";
+import { compactHistory } from "./compact-history";
 
 /**
  * Write the panel's visible list and record that the list changed.
@@ -130,7 +132,11 @@ export interface AssistantSessionInput {
  * What a live turn is doing, for the panel's status line. `null` when there is nothing
  * to say: no live turn, or reply text is already streaming onto the screen.
  */
-export type AssistantActivity = { kind: "thinking" } | { kind: "tool"; name: string } | null;
+export type AssistantActivity =
+  | { kind: "thinking" }
+  | { kind: "summarising" }
+  | { kind: "tool"; name: string }
+  | null;
 
 const THINKING: AssistantActivity = { kind: "thinking" };
 
@@ -178,6 +184,8 @@ export interface AssistantSession {
   interrupting: boolean;
   /** A send is in flight, from prepare until its last write settles. */
   sending: boolean;
+  /** bead ypo: this thread's older messages are sent as a summary. */
+  summarised: boolean;
   /**
    * Resolves false only when refused before preparing: a historical conversation, or
    * a send already in flight. Refusals during preparation or launch are published
@@ -242,6 +250,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
   // Written only by the authorized turn's own callbacks, and only shown while a turn is
   // live, so a detached turn's late events cannot relabel the current one.
   const [turnActivity, setTurnActivity] = useState<AssistantActivity>(THINKING);
+  const [summarised, setSummarised] = useState(false);
 
   // Hydration. Runs per (real) agent instance: `useAgent` swaps `agent` for the
   // runtime-synced instance once `/info` resolves, and a provisional instance that
@@ -264,6 +273,9 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
       // disk would otherwise reach the visible panel and, through the next send's
       // history, the provider -- before any publication filter could run.
       publishVisibleIfOwned(agent, completeToolPairs(toTransportThread(records)), owned);
+    });
+    void readThread(input.threadId).then((thread) => {
+      if (!cancelled) setSummarised(Boolean(thread?.summary));
     });
     return () => {
       cancelled = true;
@@ -468,6 +480,33 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
         createdAt: new Date().toISOString(),
       });
 
+      // bead ypo: a long thread is summarised here, in preparation. Every check below
+      // still runs after this await, so a Stop or Clear during it refuses the launch, and
+      // the summary write itself is fenced by this turn's generations.
+      // Any interruption (Stop, Clear, takeover, Disable) aborts the summary at once, so
+      // a stalled provider cannot keep this send -- and every later one -- in flight.
+      const summaryAbort = new AbortController();
+      const abortOnInterrupt = (state = useAssistantStore.getState()) => {
+        if (isInterrupting(state)) summaryAbort.abort();
+      };
+      abortOnInterrupt();
+      const unsubscribe = useAssistantStore.subscribe((state) => abortOnInterrupt(state));
+      let compacted;
+      try {
+        compacted = await compactHistory({
+          threadId: plan.threadId,
+          scenarioId: plan.scenarioId,
+          history: plan.history,
+          generations: plan,
+          signal: summaryAbort.signal,
+          onSummarising: () => setTurnActivity({ kind: "summarising" }),
+        });
+      } finally {
+        unsubscribe();
+      }
+      if (compacted.compactedNow) setSummarised(true);
+      setTurnActivity(THINKING);
+
       // THE FINAL AUTHORIZATION. Everything above this line is preparation, and every
       // await in it is a window in which Stop, Disable, Remove key, Clear, a scenario
       // switch, a lease loss or a takeover could have closed this turn's authority.
@@ -591,7 +630,9 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
               turnEpochForSend,
               plan.documentRevision,
             ),
+            earlierSummary: compacted.summary?.text ?? null,
           }),
+          omitMessageIds: omittedMessageIds(plan.history, compacted.summary),
         }),
       );
 
@@ -986,6 +1027,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
     connecting: !isReady,
     interrupting,
     sending: sendInFlight,
+    summarised,
     send,
     stop,
   };

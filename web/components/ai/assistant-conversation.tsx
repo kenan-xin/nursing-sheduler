@@ -21,6 +21,7 @@ import { CopilotChatMessageView, CopilotChatView } from "@copilotkit/react-core/
 import type { Message } from "@ag-ui/client";
 import { readThreadMessages } from "@/lib/ai/assistant/history-repo";
 import { toTransportThread } from "@/lib/ai/assistant/messages";
+import { COMPACTION_NOTICE } from "@/lib/ai/assistant/compaction";
 import { describeInterruptionPhase, describeSettlement } from "@/lib/ai/assistant/lifecycle";
 import { describeRefusal } from "@/lib/ai/assistant/send-gate";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
@@ -116,6 +117,16 @@ export function LifecycleNotice({ onRetry = null }: { onRetry?: (() => void) | n
   );
 }
 
+/** bead ypo: one quiet line while this thread carries a summary of older messages. */
+export function CompactionNotice({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <p className="px-4 pb-2 text-meta text-ink2" role="status" data-testid="assistant-compacted">
+      {COMPACTION_NOTICE}
+    </p>
+  );
+}
+
 /** What each model-visible tool is doing, in the user's terms. */
 export const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
   get_schedule_overview: "Reading your schedule…",
@@ -145,7 +156,11 @@ export const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
 export function AssistantActivityStatus({ activity }: { activity: AssistantActivity }) {
   if (!activity) return null;
   const label =
-    activity.kind === "tool" ? (TOOL_ACTIVITY[activity.name] ?? "Working…") : "Thinking…";
+    activity.kind === "tool"
+      ? (TOOL_ACTIVITY[activity.name] ?? "Working…")
+      : activity.kind === "summarising"
+        ? "Summarising earlier messages…"
+        : "Thinking…";
   return (
     <p
       className="flex items-center gap-2 text-meta text-ink2"
@@ -232,6 +247,7 @@ export function AssistantLiveConversation({
       {session.messages.length === 0 && <WelcomeState />}
       <RefusalNotice />
       <LifecycleNotice onRetry={retry.canRetry ? retry.retry : null} />
+      <CompactionNotice show={session.summarised} />
       <AssistantReceipts controller={proposals} />
       <ApplyNavigationNotice controller={proposals} />
       <ActivityContext.Provider value={session.activity}>
