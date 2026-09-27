@@ -2112,6 +2112,65 @@ describe("add a nurse to the staff list (bead 2vtv)", () => {
     expect(isSafeOption(state, { ...add, repairId: "relax_count_rule" })).toBe(false);
   });
 
+  const threeShifts = (staff: string[], day = 1) =>
+    ward({
+      shifts: [
+        { id: "D", description: "Day" },
+        { id: "E", description: "Evening" },
+        { id: "N", description: "Night" },
+      ],
+      staff: people(...staff),
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", day),
+          requirement("eve", "E", 1),
+          requirement("night", "N", 1),
+        ],
+      }),
+    });
+
+  it("skips a placeholder name a kept new nurse already has", () => {
+    const state = threeShifts(["ana", "New nurse 1"]);
+    const add = rank(state).find((o) => o.repairId === "add_staff_member");
+    expect(add?.operations).toEqual([{ type: "add_person", name: "New nurse 2", groups: [] }]);
+    expect(isSafeOption(state, add!)).toBe(true);
+  });
+
+  it("offers two new nurses for a two-nurse gap, in plain words, and they close it", () => {
+    const state = threeShifts(["ana", "ben"], 2);
+    const add = rank(state).find((o) => o.repairId === "add_staff_member")!;
+    expect(add.operations.map((op) => (op.type === "add_person" ? op.name : ""))).toEqual([
+      "New nurse 1",
+      "New nurse 2",
+    ]);
+    expect(add.title).toMatch(/^Add 2 nurses to the staff list/);
+    expect(add.confirmationQuestion).toBe(
+      "Are 2 new nurses joining the ward's staff for this roster period?",
+    );
+    expect(isSafeOption(state, add)).toBe(true);
+    const after = applyAssistantCommands(state, add.operations);
+    if (!after.ok) throw new Error(after.rejection.message);
+    expect(findStaffingShortfalls(after.next)).toEqual([]);
+  });
+
+  it("is never offered for a skill-mix gap, even a chronic one", () => {
+    const state = ward({
+      staff: people("rn1", "en1", "en2"),
+      staffGroups: [{ id: "RN", members: ["rn1"] }],
+      reqData: ["01", "02", "03", "04", "05"].map((d) => leave("rn1", d)),
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", 1),
+          requirement("night-rn", "N", 1, { qualifiedPeople: ["RN"] }),
+        ],
+      }),
+    });
+    const findings = findStaffingShortfalls(state);
+    expect(classifySituation(findings, false)).toBe("chronic");
+    expect(findings.every((f) => f.skillMix)).toBe(true);
+    expect(rank(state).map((o) => o.repairId)).not.toContain("add_staff_member");
+  });
+
   it("lets a candidate test the placeholder but not an invented name", () => {
     const state = SCENARIOS.tooFewNurses();
     const op = (name: string) => [{ type: "add_person" as const, name, groups: [] }];

@@ -659,18 +659,20 @@ const addStaffMember: Builder = (ctx, all) => {
   const count = Math.max(...short.map((id) => gapOn(dated, id)));
   if (count < 1 || count > MAX_NEW_STAFF) return null;
   const who = count === 1 ? "a nurse" : `${count} nurses`;
+  // A kept placeholder is a real staff id now, and the floor refuses a name already taken.
+  const names: string[] = [];
+  for (let n = 1; names.length < count; n++) {
+    const name = `New nurse ${n}`;
+    if (!ctx.staffIds.has(name) && !ctx.groupIds.has(name)) names.push(name);
+  }
   return makeOption("add_staff_member", {
     title: `Add ${who} to the staff list for the whole period (a new starter, a transfer or a relief nurse)`,
     why: `${short.length} days are short by up to ${count} ${count === 1 ? "nurse" : "nurses"} even with everyone free working. A nurse on the staff list can be rostered on any of them.`,
-    operations: Array.from(
-      { length: count },
-      (_, index): AssistantCommandV1 => ({
-        type: "add_person",
-        name: `New nurse ${index + 1}`,
-        groups: [],
-      }),
-    ),
-    confirmationQuestion: `Is ${who} joining the ward's staff for this roster period?`,
+    operations: names.map((name): AssistantCommandV1 => ({ type: "add_person", name, groups: [] })),
+    confirmationQuestion:
+      count === 1
+        ? "Is a new nurse joining the ward's staff for this roster period?"
+        : `Are ${count} new nurses joining the ward's staff for this roster period?`,
     needsFromUser: [
       "Her name as the roster should show it (or keep the placeholder until you know it).",
       "Which staff groups she is in, if a rule counts that group. Leave her in none if unsure.",
