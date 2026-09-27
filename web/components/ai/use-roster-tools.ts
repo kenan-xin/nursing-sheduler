@@ -292,8 +292,8 @@ function noRoster(): string {
     "The last optimiser run made a roster, but no copy of it is saved in the app, so you cannot " +
     "see who works when; say so, and never guess it. " +
     (view.download.status === "downloaded" ? "The user downloaded it as an XLSX file. " : "") +
-    "A new run can change everyone's shifts: for a change to a roster staff already work from, " +
-    "such as a swap or someone off sick, say so and use the cover steps instead of offering a run."
+    "For a change to a roster staff already work from, such as a swap or someone off sick, tell " +
+    "the user a new run can change everyone's shifts, and use the cover steps instead of offering one."
   );
 }
 const UNREADABLE =
