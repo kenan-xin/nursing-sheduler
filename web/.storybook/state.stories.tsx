@@ -1,8 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { toast } from "sonner";
 import { expect, screen, waitFor } from "storybook/test";
+import { noteGuidedArrival, peekGuidedArrival } from "@/components/shell/guided-arrival";
 import { Button } from "@/components/ui/button";
 import { useChangeHighlightStore } from "@/lib/change-highlight/store";
+import { useModeStore } from "@/lib/mode/mode";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import { pickScenario, scenarioCommands, useScenarioStore } from "@/lib/store";
 import { withResetTransientStores, withScenarioStore, withToaster } from "./harness";
@@ -47,6 +49,19 @@ export const TransientStoresReset: Story = {
     useChangeHighlightStore.setState({ keys: new Set(["probe"]) });
     withResetTransientStores();
     await expect(useChangeHighlightStore.getState().keys.size).toBe(0);
+  },
+};
+
+// Bucket B stories switch mode and stage Guided arrivals; both stores are module singletons.
+export const ModeReset: Story = {
+  play: async () => {
+    useModeStore.getState().setMode("advanced");
+    useModeStore.getState().markAdopted();
+    noteGuidedArrival("/shift-counts");
+    withResetTransientStores();
+    await expect(useModeStore.getState().mode).toBe("guided");
+    await expect(useModeStore.getState().adoption).toBe("unhydrated");
+    await expect(peekGuidedArrival()).toBeNull();
   },
 };
 
