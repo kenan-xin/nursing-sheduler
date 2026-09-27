@@ -286,6 +286,8 @@ export async function runDiagnosticSearchForTurn(input: {
   parentExpiresAt: string | null;
   scenarioId: string | null;
   proposed: Parameters<typeof runDiagnosticSearch>[0]["proposed"];
+  /** The deployment's accepted timeout bounds; the fixed candidate timeout is clamped into them. */
+  timeoutBounds?: Parameters<typeof runDiagnosticSearch>[0]["timeoutBounds"];
   isTurnActive: (turnEpoch: number) => boolean;
   authorize: () => boolean;
   publish: (search: DiagnosticSearchRecordV1) => void;
@@ -310,6 +312,7 @@ export async function runDiagnosticSearchForTurn(input: {
       parent: input.parent,
       parentExpiresAt: input.parentExpiresAt,
       proposed: input.proposed,
+      timeoutBounds: input.timeoutBounds,
     },
     runtime,
   );

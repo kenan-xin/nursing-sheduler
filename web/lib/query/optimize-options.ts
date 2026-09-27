@@ -33,7 +33,7 @@ const LEGACY: OptimizeTimeoutOptionsResult = { source: "legacy", timeout: LEGACY
  * not stop a run.
  */
 export async function fetchOptimizeTimeoutOptions(
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<OptimizeTimeoutOptionsResult> {
   try {
     const response = await fetch("/api/optimize/options", { cache: "no-store", signal });
@@ -54,4 +54,21 @@ export function useOptimizeTimeoutOptions() {
     queryKey: optimizeOptionsKey,
     queryFn: ({ signal }) => fetchOptimizeTimeoutOptions(signal),
   });
+}
+
+/**
+ * Clamp a FIXED solver timeout into the bounds the deployment accepts.
+ *
+ * The diagnostic's per-candidate timeout is a constant (`DIAGNOSTIC_CANDIDATE_TIMEOUT_SECONDS`),
+ * but a deployment whose `GET /optimize/options` bounds exclude it (`minimum > 90` or
+ * `maximum < 90`) rejects the run before it starts. Absent bounds mean the options query
+ * has not answered, so the legacy defaults apply — the same fallback the ordinary run uses.
+ * This is the ONE clamp: callers pass whatever the query loaded and get an accepted value.
+ */
+export function clampTimeoutSeconds(
+  seconds: number,
+  bounds: OptimizeTimeoutOptions | undefined,
+): number {
+  const { minimum, maximum } = bounds ?? LEGACY_OPTIMIZE_TIMEOUT;
+  return Math.min(Math.max(seconds, minimum), maximum);
 }
