@@ -3,7 +3,7 @@
 upstream = "j3soon/nurse-scheduling feature/genie"
 upstream_commit = "1bf4b85"
 # Oldest first. The check reverse-applies them newest first.
-patch_order = ["P0-fixture-restamp.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch", "W2-server-maintenance.patch", "W2-server-errors.patch", "W2-server-jobs-runner.patch", "W2-server-diagnostic.patch", "W2-server-config.patch", "W2-server-api-schemas.patch", "W2-server-api-optimize.patch", "W2-server-app.patch", "W6-server-job_store.patch", "W6-server-jobs-models.patch", "W6-server-jobs-controller.patch", "W6-server-jobs-worker.patch", "W6-server-stores-memory.patch", "W6-server-stores-redis.patch"]
+patch_order = ["P0-fixture-restamp.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch", "W2-server-maintenance.patch", "W2-server-errors.patch", "W2-server-jobs-runner.patch", "W2-server-diagnostic.patch", "W2-server-config.patch", "W2-server-api-schemas.patch", "W2-server-api-optimize.patch", "W2-server-app.patch", "W6-server-job_store.patch", "W6-server-jobs-models.patch", "W6-server-jobs-controller.patch", "W6-server-jobs-worker.patch", "W6-server-stores-memory.patch", "W6-server-stores-redis.patch", "W6-tests-test_serve.patch"]
 
 [[file]]
 path = "nurse_scheduling/cli.py"
@@ -412,3 +412,9 @@ path = "nurse_scheduling/server/stores/redis.py"
 class = "patched"
 upstream_blob = "a5892b30866808521a06a556218f9606b73ae414"
 patches = ["W6-server-stores-redis.patch"]
+
+[[file]]
+path = "tests/test_serve.py"
+class = "patched"
+upstream_blob = "00598907deac001747f53dda4c328da5edee36d4"
+patches = ["W6-tests-test_serve.patch"]

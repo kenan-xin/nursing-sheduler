@@ -17,11 +17,10 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-Every test here runs against memory, the isolated fakeredis fallback, AND real
-Redis when `NURSE_TEST_REDIS_URL` is configured. That breadth is the point: the
-fakeredis adapter exists only because fakeredis cannot execute Lua, so a suite
-that passed only there would have proved nothing about the state machine that
-actually ships.
+Every test here runs against memory, fakeredis, AND real Redis when
+`NURSE_TEST_REDIS_URL` is configured. That breadth is the point: fakeredis runs
+the production WATCH/MULTI code, but a suite that passed only there would have
+proved nothing about real Redis transaction semantics.
 
 After every transition the six invariants are asserted against a fresh atomic
 snapshot of what the store PERSISTED, not against what the transition returned
@@ -34,6 +33,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
+import fakeredis
 import pytest
 from fastapi.testclient import TestClient
 
@@ -53,6 +53,7 @@ from nurse_scheduling.server.jobs.models import (
     JobPurpose,
     JobState,
     StoreLimits,
+    WorkerLease,
 )
 from nurse_scheduling.server.queue_state import (
     INVARIANT_ERROR_ORPHAN_QUEUE_MEMBER,
@@ -66,6 +67,7 @@ from nurse_scheduling.server.queue_state import (
     check_queue_invariants,
     effective_positions,
 )
+from nurse_scheduling.server.stores import redis as redis_store
 from tests.server_support import (
     MINIMAL_SCENARIO,
     assert_queue_invariants,
@@ -769,3 +771,73 @@ def test_invariant_checker_detects_each_class_of_violation():
         diagnostic_members=(),
     )
     assert any("invariant-4" in violation for violation in check_queue_invariants(lingering_lease))
+
+
+def test_direct_settings_reserve_no_slot_so_upstream_shapes_stay_valid():
+    assert ServerSettings(max_pending_jobs=1).ordinary_reserved_slots == 0
+    assert StoreLimits(max_pending=1, max_retained=1).ordinary_reserved_slots == 0
+
+
+def test_env_settings_keep_the_v2_defaults(monkeypatch):
+    for name in (
+        "JOB_ORDINARY_RESERVED_SLOTS",
+        "JOB_MAX_PENDING",
+        "OPTIMIZE_DEFAULT_PRETTIFY",
+        "JOB_REDIS_KEY_PREFIX",
+        "JOB_WORKER_LEASE_SECONDS",
+        "USAGE_METRICS_ENABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    settings = ServerSettings.from_env()
+    assert settings.ordinary_reserved_slots == 1
+    assert settings.max_pending_jobs == 32  # genie default; compose and dev.sh set 8
+    assert settings.default_prettify is False
+    assert settings.redis_key_prefix == "nurse_scheduling:jobs:v2"  # X13
+    assert settings.worker_lease_seconds == 90.0
+    assert settings.usage_metrics_enabled is False  # X6
+    assert settings.solver_ids == ("ortools/cp-sat",)
+    assert settings.auth_required is False and settings.auth_token is None
+
+
+OLD_JOB_ID = "job_" + "0" * 32
+
+
+def test_v1_namespace_residue_is_invisible_to_the_v2_store(monkeypatch):
+    # X13 cutover: keys left by the T19 deployment must not reach the lease store.
+    server = fakeredis.FakeServer()
+    monkeypatch.setattr(
+        redis_store.redis.Redis,
+        "from_url",
+        lambda url, **kwargs: fakeredis.FakeRedis.from_url(url, server=server, **kwargs),
+    )
+    raw = fakeredis.FakeRedis(server=server)
+    raw.zadd("nurse_scheduling:jobs:v1:{q}:queue:ordinary", {OLD_JOB_ID: 1.0})
+    raw.hset(f"nurse_scheduling:jobs:v1:{{q}}:job:{OLD_JOB_ID}", mapping={"state": "queued"})
+    settings = ServerSettings(job_backend="redis", redis_url="redis://localhost/0")
+    with TestClient(create_app(settings=settings, start_background=False)) as client:
+        assert client.get("/ready").status_code == 200
+        assert client.get("/info").json()["jobs"] == {"running": 0, "queued": 0, "cancelling": 0}
+        assert client.get(f"/optimize/{OLD_JOB_ID}").status_code == 404
+        store = client.app.state.job_store
+    now = datetime.now(timezone.utc)
+    lease = WorkerLease("w", "t", now + timedelta(seconds=30))
+    assert store.register_worker(lease, now)
+    assert store.claim_next_job(lease, now) is None
+
+
+def test_default_app_writes_no_usage_metrics_keys(monkeypatch):
+    # X6: USAGE_METRICS_ENABLED stays off. Genie stages metrics at create, so a created
+    # job must leave no key under the metrics prefix.
+    server = fakeredis.FakeServer()
+    monkeypatch.setattr(
+        redis_store.redis.Redis,
+        "from_url",
+        lambda url, **kwargs: fakeredis.FakeRedis.from_url(url, server=server, **kwargs),
+    )
+    settings = ServerSettings(job_backend="redis", redis_url="redis://localhost/0")
+    assert settings.usage_metrics_enabled is False
+    with TestClient(create_app(settings=settings, start_background=False)) as client:
+        assert client.post("/optimize", data={"yaml_content": MINIMAL_SCENARIO}).status_code == 202
+    keys = [key.decode() for key in fakeredis.FakeRedis(server=server).scan_iter("*")]
+    assert keys
+    assert not [key for key in keys if key.startswith(settings.usage_metrics_key_prefix)]

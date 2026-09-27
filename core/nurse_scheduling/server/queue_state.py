@@ -19,9 +19,9 @@
 
 This module owns the RULES; the stores own the ATOMICITY. Two independent
 implementations must agree on ordering, admission, and the invariants: the memory
-store under its single lock, and the Redis Lua state machine, which re-expresses
-these same rules in Lua because a script cannot import Python. This file is
-therefore the normative statement both are checked against, and the parity suite
+store under its single lock, and the Redis store's WATCH/MULTI transactions (v1
+sync W6 replaced the Lua state machine). Both call `queue_sort_key` and
+`validate_transition` from here. This file is therefore the normative statement both are checked against, and the parity suite
 asserts these invariants against BOTH backends after every transition rather
 than trusting either implementation's own bookkeeping.
 
