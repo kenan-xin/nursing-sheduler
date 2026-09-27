@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AssistantMessageV1 } from "./records";
 import {
+  ATTACHMENT_CHARS,
   COMPACT_AT_CHARS,
   KEEP_RECENT_USER_TURNS,
   historyChars,
@@ -99,6 +100,34 @@ describe("planCompaction", () => {
     });
     expect([...ids]).toEqual(plan.slice.map((r) => r.messageId));
     expect(omittedMessageIds(records, null).size).toBe(0);
+  });
+});
+
+describe("attachments (2by.10)", () => {
+  const image = {
+    kind: "image" as const,
+    filename: "ward.png",
+    mimeType: "image/png",
+    data: "A".repeat(50_000),
+  };
+  const csv = { kind: "text" as const, filename: "leave.csv", mimeType: "text/csv", data: "QW5h" };
+
+  it("counts each attachment at a fixed size, not by its data", () => {
+    expect(historyChars([row("user", "look", { attachments: [image, csv] })])).toBe(
+      "look".length + 2 * ATTACHMENT_CHARS,
+    );
+  });
+
+  it("describes attachments to the summariser by name and never sends their data", () => {
+    const text = transcriptForSummary([row("user", "look", { attachments: [image, csv] })]);
+    expect(JSON.parse(text)).toEqual([
+      {
+        role: "user",
+        text: "look\n[attached image: ward.png]\n[attached file: leave.csv]",
+      },
+    ]);
+    expect(text).not.toContain("AAAA");
+    expect(text).not.toContain("QW5h");
   });
 });
 

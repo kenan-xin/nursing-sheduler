@@ -17,6 +17,11 @@ export const KEEP_RECENT_USER_TURNS = 4;
  */
 export const MIN_COMPACT_SLICE_CHARS = 20_000;
 const TOOL_RESULT_CHARS = 600;
+/**
+ * 2by.10: what one attachment counts for in the budget. A fixed size, because its base64
+ * length says nothing about what the model is charged for it.
+ */
+export const ATTACHMENT_CHARS = 1_000;
 export const COMPACTION_NOTICE =
   "Earlier messages were summarised to keep this conversation going.";
 
@@ -30,6 +35,7 @@ export function historyChars(records: readonly AssistantMessageV1[]): number {
     (sum, r) =>
       sum +
       r.content.length +
+      (r.attachments?.length ?? 0) * ATTACHMENT_CHARS +
       (r.toolCalls ?? []).reduce((n, call) => n + call.name.length + call.args.length, 0),
     0,
   );
@@ -75,7 +81,18 @@ export function transcriptForSummary(slice: readonly AssistantMessageV1[]): stri
   const records = bySeq(slice).flatMap((r): TranscriptRecord[] => {
     switch (r.role) {
       case "user":
-        return [{ role: "user", text: r.content }];
+        // Attachments by name only: the summariser gets no image or file data.
+        return [
+          {
+            role: "user",
+            text: [
+              r.content,
+              ...(r.attachments ?? []).map(
+                (a) => `[attached ${a.kind === "image" ? "image" : "file"}: ${a.filename}]`,
+              ),
+            ].join("\n"),
+          },
+        ];
       case "assistant":
         return [
           ...(r.content ? [{ role: "assistant" as const, text: r.content }] : []),
