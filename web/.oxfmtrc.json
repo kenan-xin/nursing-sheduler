@@ -13,6 +13,7 @@
     "coverage",
     "playwright-report",
     "test-results",
-    "public/examples"
+    "public/examples",
+    "storybook-static"
   ]
 }

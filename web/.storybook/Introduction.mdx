@@ -1,0 +1,51 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+
+<Meta title="Introduction" />
+
+# Nurse Scheduler workbench
+
+Every component in `web/components/` renders here in isolation, on the real
+`app/globals.css` tokens and the real app fonts ("Mint Canvas, Warm Ink", see
+`DESIGN.md`). Use the toolbar to switch **Theme** (light/dark) and **Accent**.
+
+## Commands (run in `web/`)
+
+| Command                | What it does                                                        |
+| ---------------------- | ------------------------------------------------------------------- |
+| `pnpm storybook`       | Workbench on http://localhost:6006                                  |
+| `pnpm build-storybook` | Static build into `storybook-static/`                               |
+| `pnpm test:stories`    | Every story as a test in headless Chromium: render, `play`, and axe |
+| `pnpm test`            | Unit suite only (unchanged; never runs stories)                     |
+
+`pnpm test:stories` needs Chromium: `pnpm exec playwright install chromium`.
+
+## Writing a story
+
+- Colocate it: `button.tsx` → `button.stories.tsx`. Title `<Area>/<Component>`,
+  Area = the PascalCase `components/` folder (`UI/Button`, `Optimize/ProgressChart`).
+- Interactive components get a `play` function that asserts the behaviour.
+- Accessibility is enforced: any axe violation fails the story (`a11y.test: "error"`).
+  Fix the component; do not disable the check.
+- Never restyle a component or write colour literals in a story. The lint rules that
+  guard production styling also scan stories.
+- Stories are test/support code: no `node:fs`, no `require`, no parser libraries.
+  `pnpm lint` rejects them.
+
+## Harness (`.storybook/harness.tsx`)
+
+Applied to every story automatically: `withTheme` (toolbar globals → real
+ThemeProvider), `withQueryClient` (fresh client, app defaults) and
+`withResetTransientStores` (all UI singleton stores reset before each story).
+
+Opt in per story:
+
+- `beforeEach: withScenarioStore(seed?)` gives a fresh scenario in its own IndexedDB,
+  seeded through `scenarioCommands`, deleted afterwards. See
+  `SaveLoad/BackupStatusBadge`.
+- `decorators: [withToaster]` covers components that call sonner's `toast()`.
+- `parameters: { nextjs: { appDirectory: true } }` is for anything using
+  `next/navigation`; assert on `getRouter()` from
+  `@storybook/nextjs-vite/navigation.mock`. See `Optimize/ReadinessBanner`.
+
+Reference stories: `UI/Button` (presentational), `Optimize/ReadinessBanner`
+(navigation), `SaveLoad/BackupStatusBadge` (store), `Optimize/ProgressChart` (data).

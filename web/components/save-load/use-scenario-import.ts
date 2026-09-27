@@ -40,7 +40,8 @@ export interface PendingImportConfirm {
   description: string;
   /** FR-SL-19 file/current version pair for the mono detail box, when the version case applies. */
   detail?: string;
-  onContinue: () => void;
+  /** Resolves only after the load has committed or been refused -- hold the confirm busy until then. */
+  onContinue: () => Promise<void>;
   onCancel: () => void;
 }
 
@@ -142,8 +143,13 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     // AWAITED, and BRANCHED ON. Fire-and-forget cleared the staged file and reported
     // "Scenario loaded" before the switch had settled — so a refused switch (this tab
     // is read-only, or was taken over mid-dialog) destroyed the user's staged upload
-    // and told them it had worked. On refusal the staging is kept exactly as it was,
-    // so the same file can be retried after taking editing back.
+    // and told them it had worked. On refusal nothing is changed and the error toast
+    // says so; the confirm then closes (its close discards the staging), so a retry
+    // means choosing the file again after taking editing back.
+    //
+    // The returned promise is what the confirm dialog holds its busy state on: it must
+    // not settle before the IndexedDB switch has committed, or a hard reload in that
+    // window aborts the write and silently drops the import (nursing-sheduler-iks).
     const outcome = await loadScenario(target);
     if (!outcome.ok) {
       toast.error(

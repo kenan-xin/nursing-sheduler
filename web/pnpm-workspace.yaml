@@ -22,6 +22,9 @@ allowBuilds:
   # before every `pnpm <script>`, so an undeclared ignored build makes `pnpm build`,
   # `pnpm test`, `pnpm lint` and the Playwright `webServer` all exit 1.
   "@ast-grep/cli": false
+  # Arrives with vite (Storybook workbench, bead w0e). Its postinstall only validates
+  # the platform binary, which ships via the @esbuild/<platform> optional package.
+  esbuild: false
 
 # pnpm 11 reads `overrides` from this file, not from `package.json`'s `pnpm`
 # field (that field is silently ignored — see the warning emitted on every

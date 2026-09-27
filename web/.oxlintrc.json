@@ -381,7 +381,16 @@
         "**/*.test-support.jsx",
         "**/*.test-support.mjs",
         "**/*.test-support.cjs",
-        "lib/store/test-authority.ts"
+        "lib/store/test-authority.ts",
+        "**/*.stories.ts",
+        "**/*.stories.tsx",
+        "**/*.stories.mts",
+        "**/*.stories.cts",
+        "**/*.stories.js",
+        "**/*.stories.jsx",
+        "**/*.stories.mjs",
+        "**/*.stories.cjs",
+        "**/.storybook/**"
       ],
       "rules": {
         "no-restricted-imports": [
@@ -2915,6 +2924,7 @@
     "coverage",
     "playwright-report",
     "test-results",
-    "next-env.d.ts"
+    "next-env.d.ts",
+    "storybook-static"
   ]
 }
