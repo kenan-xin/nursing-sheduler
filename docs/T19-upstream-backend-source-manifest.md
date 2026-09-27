@@ -296,8 +296,8 @@ No upstream counterpart. Both are **net-new, additive, and test-only** — nothi
 | `core/tests/test_catalogue_oracle_g7.py` | Vets catalogue check **G7** (weighted attainable-max) across 19 candidate shapes, and pins the three build-time premises its soundness rests on: coefficients >= 1, duplicate coefficient entries rejected, `at most one shift per day` mandatory. |
 
 **Why it lives in `tests/` rather than `scripts/`.** `pyproject.toml` scopes discovery to
-the test tree so slow real-solver tools under `core/scripts` (e.g.
-`solver_capability_probe.py`) are never collected. That exemption exists for *runtime*,
+the test tree so runnable tools under `core/scripts` (e.g. `check_upstream_sync.py`) are
+never collected. That exemption exists for *runtime*,
 and does not apply here: these scenarios are 1-2 people over 6-28 days, so the whole
 sweep solves in **~0.5 s** and belongs in the ordinary run.
 
@@ -390,6 +390,11 @@ above; **excluded** = intentionally not applied (owner/reason noted); **mapped**
 the rebuild has no identically-named file, so the upstream behavior is represented
 in a differently-organized rebuild path.
 
+**Partly superseded by W1/W2.** This table records the T19 rebuild disposition. W1 and
+W2 have since adopted most of these paths byte-identical to genie `1bf4b85`, tracked per
+file in `core/upstream-patches/manifest.toml` (classes `verbatim` / `patched`). That
+manifest is the source of truth: where the two disagree, the manifest wins.
+
 | Upstream path | Disposition | Notes |
 | --- | --- | --- |
 | `core/nurse_scheduling/server/jobs/process_executor.py` | adapted | Spawned-child supervisor (`run_optimization_process`, `ProcessControl`, `ProcessStatus`) imported by U31a, with one rebuild adaptation: it imports `OptimizationExecutionError` and adds a child-side `except OptimizationExecutionError` branch that buffers a structured `JobFailure(code, message)` terminal frame — because the rebuild runner **raises** those expected failures rather than returning them (upstream returns `JobFailure`). This keeps the public FAILED contract without pickling the exception across the pipe. |
@@ -406,9 +411,9 @@ in a differently-organized rebuild path.
 | `core/nurse_scheduling/server/solver_capabilities.py` | excluded | Multi-solver capability registry (`solver_supports_finish_now`, graceful-timeout traits for CBC/SCIP/BOP/MathOpt). Not imported; the rebuild keeps its narrow `solver_supports_stop` in `models.py`. |
 | `core/nurse_scheduling/solver_pulp.py` | excluded | PuLP feasibility-check change. No PuLP backend exists in the rebuild. |
 | `core/tests/test_process_executor.py` | adapted | Imported as the executor/tree suite: startup guard, hard timeout, buffered-terminal priority, cancel-vs-abort, descendant cleanup, abrupt child, platform fallbacks. |
-| `core/tests/real/solver_capabilities.py` | mapped | The multi-solver real probe is re-authored as the CP-SAT-only `core/scripts/solver_capability_probe.py` (U31d), kept outside pytest discovery (`pyproject.toml` `testpaths = ["tests"]`). |
-| `core/tests/test_real_solver_capabilities.py` | mapped | Its pure classification/reporting assertions map into the fast, always-collected `core/tests/test_real_solver_capability_probe.py`; the slow rounds run only via the explicit `scripts/` gate. |
-| `core/tests/real/README.md` | mapped | The upstream capability-probe documentation is re-authored as `core/scripts/README.md` for the CP-SAT-only probe; the multi-solver support text is not carried over. |
+| `core/tests/real/solver_capabilities.py` | direct | Adopted byte-identical to genie `1bf4b85` by wave bead `nursing-sheduler-r6g` (manifest class `verbatim`), replacing the T19-era CP-SAT-only `core/scripts/solver_capability_probe.py`. It drives the real app (`create_app` / `TestClient` / `MemoryJobStore`) over the large 87-person scenario; run it with `--solver ortools/cp-sat` (X4). Not collected by the default suite (no `test_` prefix). Its six E402 findings are exempted per file in `core/pyproject.toml`; the file is never reformatted. |
+| `core/tests/test_real_solver_capabilities.py` | direct | Adopted byte-identical to genie `1bf4b85` by wave bead `nursing-sheduler-r6g` (manifest class `verbatim`), replacing `core/tests/test_real_solver_capability_probe.py`. Always collected and fast: it never launches the solver, only the pure classification/reporting helpers over monkeypatched observations. |
+| `core/tests/real/README.md` | adapted | Keeps the rebuild's real-world-check text and documents the adopted v1 probe, plus `solver_capabilities_residue.py`, which carries the retired v2 probe's Linux `/proc` process-residue audit as one separate opt-in check. |
 | `core/tests/test_optimize_job_backends.py` | mapped | Target has no such file (T19 deleted the monolithic backend test); the `complete_cancellation` owner/stale assertions are represented by the rebuild's `test_server_*` worker/store suites. |
 | `core/tests/test_serve.py` | excluded (mapped) | The rebuild has no monolithic `test_serve.py` (deleted at T19); upstream's new-behavior assertions are represented in the `test_server_*` suites and its multi-solver additions are not ported. |
 | `core/tests/test_solver_pulp_cbc.py` | excluded | PuLP/CBC feasibility tests; no PuLP backend in the rebuild. |
@@ -448,6 +453,10 @@ root. The source manifest was advanced to `d63519b` only after the rebuild sourc
   (feasible artifact), forced `process_timeout`, cancellation with discarded
   output, cooperative `user_requested`, and 17 intermediate incumbents — with a
   clean post-run process-tree residue audit on each cancel/watchdog round.
+  *(Superseded 2026-09-27 by bead `nursing-sheduler-r6g`: that probe was replaced
+  by the genie `tests/real/solver_capabilities.py` verbatim, which runs four
+  rounds through the real app; only the residue audit survives, in
+  `tests/real/solver_capabilities_residue.py`.)*
 - Full Web: `tsc --noEmit`, `oxlint`, `oxfmt --check` clean; Vitest **1,963
   passed, 63 skipped**; Next production build succeeded.
 - `make verify-deploy` (private-base build, network segmentation, non-root,

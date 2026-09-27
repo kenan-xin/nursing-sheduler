@@ -17,7 +17,7 @@
 - W1 is one branch with the commits below. Intermediate commits may fail the v2-only tests that a later commit fixes. Only the branch tip must pass.
 - Every genie file stays byte-identical to `1bf4b85` except the lines of P0 to P4.
 - The server keeps rejecting every solver other than `ortools/cp-sat` (`server/scheduling_input.py`).
-- Do not port the Docker performance benchmark or `tests/real/solver_capabilities.py` (fails the Ruff pin with 6 E402; v2 maps it to `core/scripts/solver_capability_probe.py`).
+- Do not port the Docker performance benchmark. `tests/real/solver_capabilities.py` and `tests/test_real_solver_capabilities.py` are **not** ported in W1 either: the probe file fails the Ruff pin with 6 E402, and W1 keeps the v2 probe untouched. Wave bead `nursing-sheduler-r6g` (run after W2) adopts both files byte-identical from genie `1bf4b85`, runs the probe with `--solver ortools/cp-sat`, and adds a `tests/real/solver_capabilities.py` E402 per-file ignore to `core/pyproject.toml`.
 - `SOLVER_SEMANTIC_VERSION` becomes `ortools/cp-sat@2` (X12).
 - The PuLP/GLPK tests need `glpsol` on `PATH` (`which glpsol`): `glpk` on Arch/CachyOS, `glpk-utils` on Debian/Ubuntu. The W0 CI job installs it.
 - Shell convention. Shell state does not persist between command blocks. Every block starts with `cd "$(cat /tmp/v1sync-w1-root)"`, names the interpreter by its full path (`/tmp/v1sync-w1-venv/bin/python`), and runs `core/` or `web/` commands inside a subshell: `(cd core && …)`. The genie file list lives in `/tmp/v1sync-w1-files.txt` (written in Task 1 Step 3).
@@ -137,6 +137,12 @@ done < /tmp/v1sync-w1-files.txt
 wc -l < /tmp/v1sync-w1-files.txt
 ```
 Expected: `51`. (`constants.py` is already identical to genie; `serve.py` differs by one blank line.)
+
+Two genie files are deliberately absent from this list and are adopted later, by wave bead
+`nursing-sheduler-r6g` after W2: `tests/real/solver_capabilities.py` and
+`tests/test_real_solver_capabilities.py`. Both land byte-identical (manifest class
+`verbatim`); the first carries the 6 E402 the Ruff pin rejects, so
+`core/pyproject.toml` gets a per-file ignore for it instead of a reformat.
 
 - [ ] **Step 4: Move the shift-type map helper into `workspace.py`**
 

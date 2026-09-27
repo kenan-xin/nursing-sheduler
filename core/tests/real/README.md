@@ -47,5 +47,40 @@ python tests/real/run_schedule.py \
   --progress-output progress.jsonl
 ```
 
-The supervised CP-SAT capability gate is a separate opt-in tool that lives
-outside the test tree; see `core/scripts/README.md`.
+## Solver capability probe
+
+`solver_capabilities.py` probes the supervised optimization process through the
+real FastAPI app (`create_app`, `TestClient`, `MemoryJobStore`) on the large
+87-person scenario. It uses four isolated rounds in fixed order: timeout,
+cancellation, finish-now, then intermediate scores. The product ships OR-Tools
+CP-SAT only, so name that selector:
+
+```sh
+cd core
+python tests/real/solver_capabilities.py --solver ortools/cp-sat
+```
+
+Each round runs in its own killable subprocess as a final safety boundary. The
+command prints a Markdown table and exits nonzero when any round reports `FAIL`.
+`INCONCLUSIVE` means the solver finished before the capability was exercised, or
+finish-now stopped before a feasible incumbent was available. `NOT_CONFIRMED`
+means the registry does not claim a cooperative control or progress capability.
+`--json-output PATH` also writes elapsed times, terminal states, solver statuses
+and runtime information.
+
+The module omits pytest's `test_` filename prefix, so the default suite never
+collects it. Its pure classification and reporting helpers are covered by the
+fast, always-collected `tests/test_real_solver_capabilities.py`.
+
+## Solver process residue
+
+`solver_capabilities_residue.py` keeps the Linux-only `/proc` audit that the
+retired v2 probe carried: once a cancelled CP-SAT job is terminal, no supervised
+solver child may still be alive. It runs the probe's real cancellation round
+in-process and samples `multiprocessing` spawn children of the test process. It
+is opt-in as well, and skips on non-Linux platforms:
+
+```sh
+cd core
+PYTHONPATH=. pytest -q tests/real/solver_capabilities_residue.py
+```
