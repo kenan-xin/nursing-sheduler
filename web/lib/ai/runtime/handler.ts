@@ -1,5 +1,6 @@
 import {
   AI_DETACH_REASON_INSTANCE_MISMATCH,
+  AI_ERROR_ATTACHMENT_REJECTED,
   AI_ERROR_CREDENTIALS_REQUIRED,
   AI_KEY_HEADER,
   COPILOT_RUNTIME_BASE_PATH,
@@ -15,6 +16,7 @@ import {
   type RouteInfo,
 } from "./copilotkit-runtime";
 
+import { AttachmentRejectedError, prepareAttachments } from "./attachments";
 import { assertSingleWebInstance } from "./deployment";
 import { getRuntimeInstanceId } from "./instance-identity";
 import {
@@ -63,8 +65,9 @@ export function createSchedulerCopilotRuntime(
     basePath: COPILOT_RUNTIME_BASE_PATH,
     mode: "multi-route",
     hooks: {
-      onBeforeHandler: ({ request, route }) => {
-        const rejection = guardRoute(request, route, instanceId);
+      onBeforeHandler: async ({ request, route }) => {
+        const rejection =
+          guardRoute(request, route, instanceId) ?? (await guardAttachments(request, route));
         // A thrown Response is CopilotKit's documented short-circuit: it still runs
         // the onResponse hook, so these bodies get the same containment headers.
         if (rejection) throw rejection;
@@ -102,6 +105,32 @@ function guardRoute(request: Request, route: RouteInfo, instanceId: string): Res
   // A mismatched `connect` is handled inside the runner, which answers it with the
   // same empty non-leaking stream as an unknown thread.
   return null;
+}
+
+/**
+ * 2by.10: a run whose attachments fail the type, size, count or content check is
+ * refused here, before a run starts or the provider is called. Reads a CLONE, so the
+ * body CopilotKit parses is untouched. A body that is not JSON is CopilotKit's to
+ * reject. The response carries the app code only, never the offending content.
+ */
+async function guardAttachments(request: Request, route: RouteInfo): Promise<Response | null> {
+  if (route.method !== "agent/run") return null;
+  let messages: unknown;
+  try {
+    messages = ((await request.clone().json()) as { messages?: unknown })?.messages;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(messages)) return null;
+  try {
+    prepareAttachments(messages);
+    return null;
+  } catch (error) {
+    if (error instanceof AttachmentRejectedError) {
+      return jsonResponse({ error: AI_ERROR_ATTACHMENT_REJECTED }, 400);
+    }
+    throw error;
+  }
 }
 
 /**

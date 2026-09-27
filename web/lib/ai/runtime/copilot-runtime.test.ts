@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import {
   AI_DETACH_REASON_INSTANCE_MISMATCH,
+  AI_ERROR_ATTACHMENT_REJECTED,
   AI_ERROR_CREDENTIALS_REQUIRED,
   AI_KEY_HEADER,
   COPILOT_AGENT_ID,
@@ -71,6 +72,27 @@ let runtimes: SchedulerCopilotRuntime[] = [];
 afterEach(() => {
   runtimes = [];
 });
+
+/** A PNG signature and IHDR start: enough for the content check (2by.10). */
+const PNG_BASE64 = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52,
+]).toString("base64");
+
+function imagePart(filename: string, value: string) {
+  return {
+    type: "image",
+    source: { type: "data", value, mimeType: "image/png" },
+    metadata: { filename },
+  };
+}
+
+function documentPart(filename: string, mimeType: string, text: string) {
+  return {
+    type: "document",
+    source: { type: "data", value: Buffer.from(text).toString("base64"), mimeType },
+    metadata: { filename },
+  };
+}
 
 function launch(options: OpenRouterFixtureOptions & { instanceId?: string } = {}): {
   runtime: SchedulerCopilotRuntime;
@@ -206,6 +228,120 @@ describe("run", () => {
     expect(messages[0].content).toContain('{"staff":["Ana"]}');
     expect(messages.filter((m) => m.role === "system")).toHaveLength(1);
     expect(messages.at(-1)).toMatchObject({ role: "user", content: "hello" });
+  });
+
+  it("sends an image as an image and a text file as text (2by.10)", async () => {
+    const { runtime, provider } = launch();
+    await readSse(
+      await runtime.handler(
+        runRequest({
+          threadId: "t-attach",
+          messages: [
+            {
+              id: "m1",
+              role: "user",
+              content: [
+                { type: "text", text: "What does this show?" },
+                imagePart("ward.png", PNG_BASE64),
+                documentPart("leave.csv", "text/csv", "Ana,leave,3 Nov"),
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+    const user = (provider.calls[0].body.messages as { role: string; content: unknown }[]).at(-1)!;
+    const parts = user.content as { type: string; text?: string; image_url?: { url: string } }[];
+    expect(parts[0]).toMatchObject({ type: "text", text: "What does this show?" });
+    expect(
+      parts.some(
+        (p) => p.type === "image_url" && p.image_url!.url.startsWith("data:image/png;base64,"),
+      ),
+    ).toBe(true);
+    expect(
+      parts.some(
+        (p) =>
+          p.type === "text" && p.text!.startsWith('Attached file "leave.csv":\nAna,leave,3 Nov'),
+      ),
+    ).toBe(true);
+    expect(parts.some((p) => p.type === "file")).toBe(false);
+  });
+
+  it.each([
+    ["an executable named .png", imagePart("ward.png", Buffer.from("MZ\x90\0").toString("base64"))],
+    ["a binary .txt", documentPart("notes.txt", "text/plain", "PK\x03\x04\0")],
+    ["a PDF", documentPart("rota.pdf", "application/pdf", "%PDF-1.7")],
+    ["an oversized text file", documentPart("big.txt", "text/plain", "x".repeat(200 * 1024 + 1))],
+    [
+      "an image by URL",
+      { type: "image", source: { type: "url", value: "https://example.com/a.png" } },
+    ],
+  ])("refuses %s without calling the provider (2by.10)", async (_label, part) => {
+    const { runtime, provider } = launch();
+    const response = await runtime.handler(
+      runRequest({
+        threadId: "t-refuse",
+        messages: [{ id: "m1", role: "user", content: [{ type: "text", text: "look" }, part] }],
+      }),
+    );
+    expect(response.status).toBe(400);
+    assertContained(response);
+    expect(await response.json()).toEqual({ error: AI_ERROR_ATTACHMENT_REJECTED });
+    expect(provider.calls).toHaveLength(0);
+    expect(runtime.runner.activeRunCount()).toBe(0);
+    // Neither the attachment's bytes nor the key reach a server log.
+    const logged = consoleOutput.join("\n");
+    expect(logged).not.toContain(SENTINEL_KEY);
+    if ("source" in part && part.source.type === "data") {
+      expect(logged).not.toContain(part.source.value);
+    }
+  });
+
+  it("refuses a fifth attachment on one message (2by.10)", async () => {
+    const { runtime, provider } = launch();
+    const response = await runtime.handler(
+      runRequest({
+        threadId: "t-five",
+        messages: [
+          {
+            id: "m1",
+            role: "user",
+            content: [
+              { type: "text", text: "look" },
+              ...[1, 2, 3, 4, 5].map((n) => documentPart(`f${n}.txt`, "text/plain", "x")),
+            ],
+          },
+        ],
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: AI_ERROR_ATTACHMENT_REJECTED });
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("carries four 5 MB images in one run request, about 28 MB of JSON (2by.10)", async () => {
+    const big = Buffer.alloc(5 * 1024 * 1024);
+    Buffer.from(PNG_BASE64, "base64").copy(big);
+    const value = big.toString("base64");
+    const { runtime, provider } = launch();
+    const request = runRequest({
+      threadId: "t-big",
+      messages: [
+        {
+          id: "m1",
+          role: "user",
+          content: [
+            { type: "text", text: "compare" },
+            ...[1, 2, 3, 4].map((n) => imagePart(`ward-${n}.png`, value)),
+          ],
+        },
+      ],
+    });
+    const { events } = await readSse(await runtime.handler(request));
+    expect(eventTypes(events)).not.toContain("RUN_ERROR");
+    const user = (provider.calls[0].body.messages as { content: unknown }[]).at(-1)!;
+    const images = (user.content as { type: string }[]).filter((p) => p.type === "image_url");
+    expect(images).toHaveLength(4);
   });
 
   it("sends no system prompt when the turn carries no context", async () => {
