@@ -607,11 +607,11 @@ function pairingFields() {
         "How strongly, written as you would type it in the Weight box. On each date where " +
           "someone from people and someone from withPeople both work one of these shifts, the " +
           'solver gains the weight: a positive number such as "5" = together where possible, ' +
-          'a negative number such as "-10" = apart where possible, "-infinity" = never ' +
-          'together (hard rule). Never send "infinity": it forces both sides onto those ' +
-          "shifts on every date. The schedule shows hard weights as .inf / -.inf: send them " +
-          "as infinity / -infinity. Ask the user whether a new rule is a must or a preference " +
-          "when they did not say.",
+          'a negative number such as "-10" = apart where possible, "-infinity" = keep apart ' +
+          'always (hard rule). Soft weights are finite numbers; "+infinity" is refused, ' +
+          "because it forces both sides onto those shifts on every date. The schedule shows " +
+          "a hard weight as -.inf: send it as -infinity. Ask the user whether a new rule is " +
+          "a must or a preference when they did not say.",
       ),
   };
 }
@@ -638,13 +638,15 @@ function supervisionFields() {
         "The shifts it applies to: shift codes or shift group ids. OFF and LEAVE are not " +
           "allowed, and neither is ALL: list every worked shift it applies to.",
       ),
-    dates: z
-      .array(z.string())
-      .describe(
-        'Which dates. [] = every date. Otherwise EITHER exactly one of "ALL", "WEEKDAY", ' +
-          '"WEEKEND", a weekday name such as "MONDAY", or an existing date group id -- OR ' +
-          "one or more roster dates written YYYY-MM-DD.",
-      ),
+    dates: z.array(z.string()).describe(
+      // Deliberately NOT `ruleDatesSchema()`: unlike the other rule dates fields,
+      // a Covering's date is OPTIONAL, so an empty list means every date and the
+      // description must say so (`validateCoveringForm` allows it; the pairing /
+      // succession / count forms require a date). The rest of the wording matches.
+      'Which dates. [] = every date. Otherwise EITHER exactly one of "ALL", "WEEKDAY", ' +
+        '"WEEKEND", a weekday name such as "MONDAY", or an existing date group id -- OR ' +
+        "one or more roster dates written YYYY-MM-DD.",
+    ),
   };
 }
 

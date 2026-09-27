@@ -2252,6 +2252,29 @@ describe("add_pairing_rule / edit_pairing_rule", () => {
     expect(result.rejection.message).toContain("Valid choices:");
   });
 
+  it("gives a numeric shift id the screen's own reason, not 'no such shift'", () => {
+    const state = pairingWardScenario();
+    state.shifts = [...state.shifts, { _k: "s9", id: 7 }];
+    const result = applyAssistantCommand(state, { ...apart, shiftTypes: ["7"] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain("numeric shift type ID");
+  });
+
+  it("refuses a +infinity weight and suggests a large finite one", () => {
+    const result = applyAssistantCommand(pairingWardScenario(), { ...apart, weight: "infinity" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain('Pairing rule "Keep Ana and Ben apart on nights"');
+    expect(result.rejection.message.toLowerCase()).toContain("finite");
+    // -infinity stays allowed (the first test asserts the card it builds).
+    expect(applyAssistantCommand(pairingWardScenario(), { ...apart, weight: "-infinity" }).ok).toBe(
+      true,
+    );
+  });
+
   it("refuses a matrix day id and accepts the ISO date", () => {
     const bad = applyAssistantCommand(pairingWardScenario(), { ...apart, dates: ["06"] });
     expect(bad.ok).toBe(false);

@@ -99,15 +99,16 @@ describe("the rule arms' text states what the solver enforces", () => {
     }
   });
 
-  it("a pairing rule's weight: negative keeps apart, -infinity never together", () => {
+  it("a pairing rule's weight: soft numbers, -infinity keeps apart, +infinity refused", () => {
     // core shift_affinity: the weight rewards both groups being on the shifts that date.
     for (const type of ["add_pairing_rule", "edit_pairing_rule"]) {
       const weight = arm(type).weight.description ?? "";
-      expect(weight).toContain('"-infinity" = never');
+      expect(weight).toContain('"-infinity" = keep apart always');
       expect(weight).toContain("apart");
       expect(weight).toContain("together");
-      // "infinity" makes both work those shifts on every date: steer it away.
-      expect(weight).toMatch(/Never send "infinity"/);
+      // "+infinity" makes both work those shifts on every date: refused, not suggested.
+      expect(weight).toContain('"+infinity" is refused');
+      expect(weight).toContain("every date");
     }
   });
 

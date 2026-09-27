@@ -958,7 +958,10 @@ function shiftPickerRefusal(
 ): OperationResult | undefined {
   const shift = firstUnoffered(picked, offered);
   if (shift === undefined) return undefined;
-  const greyed = offered.find((option) => option.disabled && Object.is(option.value, shift));
+  // A numeric shift entity id is offered disabled with a reason, but its option
+  // `value` is a number while the picked ref is the string form, so compare on the
+  // stringified value (not `Object.is`) to reach the screen's own reason.
+  const greyed = offered.find((option) => option.disabled && String(option.value) === shift);
   if (greyed?.disabledReason) {
     return reject(index, "invalid_value", `${name}: ${greyed.disabledReason}.`);
   }
@@ -1037,6 +1040,19 @@ function pairingRejection(
   if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
   const error = firstFormError(validateAffinityForm(pairingDraft(fields)));
   if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  // Deliberate deviation from the Affinities screen, which ACCEPTS +Infinity. On a
+  // pairing rule +Infinity is not "keep together where possible" but "force both
+  // sides onto these shifts on every date" (the solver is paid for the expression
+  // holding), which is almost never intended; a large finite weight is the honest
+  // way to say "prefer together". -Infinity stays allowed ("keep apart always").
+  if (parseWeightInput(fields.weight) === Number.POSITIVE_INFINITY) {
+    return reject(
+      index,
+      "invalid_value",
+      `${name}: "+infinity" is not allowed. It forces both sides onto those shifts on every ` +
+        "date. Use a large finite weight such as 1000 to strongly prefer them together.",
+    );
+  }
   return undefined;
 }
 
