@@ -257,6 +257,41 @@ describe("a cleanup failure after the deletion committed", () => {
   });
 });
 
+describe("a committed Clear takes the deleted conversation's cards with it (dt9)", () => {
+  // The next turn's context reads these to say a Preview is still waiting; after a Clear
+  // there is no Preview left to wait on.
+  const showCards = () => {
+    assistantActions.showProposal("p1", useAssistantStore.getState().turnEpoch);
+    useAssistantStore.setState({
+      activeRosterChange: { turnEpoch: 0 } as never,
+    });
+  };
+
+  it("Clear history drops the Preview and the roster card", async () => {
+    showCards();
+    const facts = await assistantActions.clearHistory({ threadId: null, scenarioId: TARGET });
+    expect(facts.status).toBe("deleted");
+    expect(useAssistantStore.getState().activeProposal).toBeNull();
+    expect(useAssistantStore.getState().activeRosterChange).toBeNull();
+  });
+
+  it("Clear all drops them too", async () => {
+    showCards();
+    const facts = await assistantActions.clearAll({ threadId: null, scenarioId: null });
+    expect(facts.status).toBe("deleted");
+    expect(useAssistantStore.getState().activeProposal).toBeNull();
+    expect(useAssistantStore.getState().activeRosterChange).toBeNull();
+  });
+
+  it("a Clear that deleted nothing leaves them", async () => {
+    showCards();
+    fail.beginClear = true;
+    const facts = await assistantActions.clearHistory({ threadId: null, scenarioId: TARGET });
+    expect(facts.status).not.toBe("deleted");
+    expect(useAssistantStore.getState().activeProposal).not.toBeNull();
+  });
+});
+
 describe("hydration that cannot read the outcome records", () => {
   it("keeps the notice the user was already looking at", async () => {
     // A real incomplete clear leaves an actionable notice.
