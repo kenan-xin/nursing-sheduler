@@ -11,6 +11,7 @@ import {
   type AiSetupCode,
 } from "@/lib/ai/protocol";
 import { classifyStatus } from "./probe";
+import { routeModel, withModelFallbacks } from "./routing";
 
 export type SummaryResult = { ok: true; summary: string } | { ok: false; code: AiSetupCode };
 
@@ -38,10 +39,13 @@ export async function summarizeConversation(input: {
 }): Promise<SummaryResult> {
   const timeout = AbortSignal.timeout(input.timeoutMs ?? SUMMARY_TIMEOUT_MS);
   const abortSignal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
+  // A summary is on the send path, so the default model is routed the same way a turn
+  // is: throughput first, Sonnet when it fails (see `routing.ts`).
+  const routing = routeModel(input.model);
   const openrouter = createOpenAI({
     apiKey: input.apiKey,
     baseURL: OPENROUTER_BASE_URL,
-    ...(input.fetchImpl ? { fetch: input.fetchImpl } : {}),
+    fetch: withModelFallbacks(input.fetchImpl ?? globalThis.fetch, routing.fallbacks),
   });
   // One JSON object, so neither field can close a delimiter and speak as the prompt.
   const prompt = JSON.stringify({
@@ -51,7 +55,7 @@ export async function summarizeConversation(input: {
   try {
     const { text } = await generateText({
       // `.chat()`: OpenRouter does not implement the Responses API (see openrouter-agent.ts).
-      model: openrouter.chat(input.model),
+      model: openrouter.chat(routing.model),
       system: SYSTEM,
       prompt,
       maxOutputTokens: 700,

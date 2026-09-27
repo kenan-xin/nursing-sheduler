@@ -1,0 +1,306 @@
+$ EVAL_GIT_SHA=$(git rev-parse --short HEAD) vitest run -c vitest.eval.config.ts
+
+ RUN  v4.1.10 /home/kenan/work/nursing-sheduler.research-46g-fast-models/web
+
+stderr | evals/repair.eval.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | evals/regressions.eval.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | evals/flows.eval.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | evals/regressions.eval.ts > 'reg-pick-one-as-text' > trial 1
+Agent scheduler:d2e7a033-ad43-40b2-8741-c2c14b25515f not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 1
+Agent scheduler:c0e6fd7c-aebb-42e8-9bb5-58494d48c2bb not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 1
+Agent scheduler:c0e6fd7c-aebb-42e8-9bb5-58494d48c2bb not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 1
+Agent scheduler:c0e6fd7c-aebb-42e8-9bb5-58494d48c2bb not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/regressions.eval.ts > 'reg-pick-one-as-text' > trial 2
+Agent scheduler:c7475fb3-c0c8-416e-b646-e7e035f0b726 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 2
+Agent scheduler:d657a202-ea98-4742-b01a-5d0e0e9acc03 not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 2
+Agent scheduler:d657a202-ea98-4742-b01a-5d0e0e9acc03 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 2
+Agent scheduler:d657a202-ea98-4742-b01a-5d0e0e9acc03 not found
+
+stderr | evals/regressions.eval.ts > 'reg-pick-one-as-text' > trial 3
+Agent scheduler:c955ba63-8193-4326-8e9e-234eeca23605 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent execution failed: AGUIError: Cannot send 'RUN_FINISHED' while tool calls are still active: call_02b5b03ecf7b4645993871ea
+    at file:///home/kenan/work/nursing-sheduler.research-46g-fast-models/web/node_modules/.pnpm/@ag-ui+client@0.0.57/node_modules/@ag-ui/client/dist/index.mjs:1:16411
+    at Observable.init [as _subscribe] (/home/kenan/work/nursing-sheduler.research-46g-fast-models/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/observable/throwError.js:8:64)
+    at Observable._trySubscribe (/home/kenan/work/nursing-sheduler.research-46g-fast-models/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/Observable.js:41:25)
+    at /home/kenan/work/nursing-sheduler.research-46g-fast-models/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/Observable.js:35:31
+    at Object.errorContext (/home/kenan/work/nursing-sheduler.research-46g-fast-models/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/util/errorContext.js:22:9)
+    at Observable.subscribe (/home/kenan/work/nursing-sheduler.research-46g-fast-models/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/Observable.js:26:24)
+    at doInnerSub (/home/kenan/work/nursing-sheduler.research-46g-fast-models/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/operators/mergeInternals.js:22:56)
+    at outerNext (/home/kenan/work/nursing-sheduler.research-46g-fast-models/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/operators/mergeInternals.js:17:70)
+    at OperatorSubscriber._this._next (/home/kenan/work/nursing-sheduler.research-46g-fast-models/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/operators/OperatorSubscriber.js:33:21)
+    at OperatorSubscriber.Subscriber.next (/home/kenan/work/nursing-sheduler.research-46g-fast-models/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/Subscriber.js:51:18)
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/regressions.eval.ts > 'reg-claim-after-preview' > trial 1
+Agent scheduler:609ed15c-3908-4877-b749-1421d10a4aa7 not found
+
+stderr | evals/regressions.eval.ts > 'reg-claim-after-preview' > trial 1
+Agent scheduler:609ed15c-3908-4877-b749-1421d10a4aa7 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 3
+Agent scheduler:cb2c9710-bdfd-4037-8c54-718e191fc1f8 not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 3
+Agent scheduler:cb2c9710-bdfd-4037-8c54-718e191fc1f8 not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 3
+Agent scheduler:cb2c9710-bdfd-4037-8c54-718e191fc1f8 not found
+
+stderr | evals/regressions.eval.ts > 'reg-claim-after-preview' > trial 2
+Agent scheduler:a402767a-4fdd-4147-ac86-cf2b4b9da01b not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/regressions.eval.ts > 'reg-claim-after-preview' > trial 2
+Agent scheduler:a402767a-4fdd-4147-ac86-cf2b4b9da01b not found
+
+ ❯ evals/repair.eval.ts (3 tests | 3 failed) 70173ms
+     × trial 1 24066ms
+     × trial 2 22279ms
+     × trial 3 23828ms
+stderr | evals/safety.eval.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+ ❯ evals/safety.eval.ts (0 test)
+stderr | evals/singapore.eval.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/singapore.eval.ts > 'sg-moh-rest-rule' > trial 1
+Agent scheduler:07101904-32de-4635-8865-3147b2f2d6e2 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:f13f871e-0626-4061-8824-b1b7fd2d4ccf not found
+
+stderr | evals/regressions.eval.ts > 'reg-claim-after-preview' > trial 3
+Agent scheduler:c6ff700a-19a8-46a7-987f-04f6084933ae not found
+
+stderr | evals/regressions.eval.ts > 'reg-claim-after-preview' > trial 3
+Agent scheduler:c6ff700a-19a8-46a7-987f-04f6084933ae not found
+
+stderr | evals/singapore.eval.ts > 'sg-moh-rest-rule' > trial 2
+Agent scheduler:42c6ec60-be74-47cf-85a6-d68f2b94be31 not found
+
+ ❯ evals/regressions.eval.ts (6 tests | 1 failed) 102638ms
+     ✓ trial 1  19400ms
+     ✓ trial 2  15055ms
+     × trial 3 13618ms
+     ✓ trial 1  17435ms
+     ✓ trial 2  21414ms
+     ✓ trial 3  15714ms
+stderr | evals/calibration.eval.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+ ↓ evals/calibration.eval.ts (1 test | 1 skipped)
+stderr | evals/singapore.eval.ts > 'sg-moh-rest-rule' > trial 3
+Agent scheduler:31df4a89-c3a9-4c99-80a2-d20c1e95d0a9 not found
+
+stderr | evals/flows.eval.ts > 'limit-consecutive-days' > trial 1
+Agent scheduler:9790a492-c139-4d5b-8ed2-6ca4f14a634f not found
+
+ ✓ evals/singapore.eval.ts (3 tests) 50425ms
+     ✓ trial 1  16416ms
+     ✓ trial 2  15569ms
+     ✓ trial 3  18439ms
+stderr | evals/flows.eval.ts > 'limit-consecutive-days' > trial 2
+Agent scheduler:35e5cf48-8114-4f20-85c8-20120841ec65 not found
+
+stderr | evals/flows.eval.ts > 'limit-consecutive-days' > trial 3
+Agent scheduler:5f829224-69a1-48af-8e2b-ed7c2fc281ac not found
+
+ ❯ evals/flows.eval.ts (4 tests | 2 failed) 166551ms
+     × trial 1 104144ms
+     ✓ trial 1  21604ms
+     × trial 2 20782ms
+     ✓ trial 3  20021ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  evals/safety.eval.ts [ evals/safety.eval.ts ]
+Error: No test suite found in file /home/kenan/work/nursing-sheduler.research-46g-fast-models/web/evals/safety.eval.ts
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  evals/flows.eval.ts > 'setup-flow-a' > trial 1
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "no hard N then M forbid",
++     "gate": "final",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:136:48
+    134|             skip("budget");
+    135|           }
+    136|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    137|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    138|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  evals/flows.eval.ts > 'limit-consecutive-days' > trial 2
+AssertionError: expected [ { gate: 'proposal', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "no op matches {\"type\":\"add_succession_rule\",\"pattern\":[\"ALL\",\"ALL\",\"ALL\",\"ALL\",\"ALL\",\"ALL\"],\"weight\":\"-infinity\"}",
++     "gate": "proposal",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:136:48
+    134|             skip("budget");
+    135|           }
+    136|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    137|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    138|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  evals/regressions.eval.ts > 'reg-pick-one-as-text' > trial 3
+AssertionError: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "suggests_default",
++     "pass": false,
++     "reasoning": "The assistant asked “which Friday” without suggesting a usual default (for example ‘this Friday’ or ‘next Friday’), so it failed to offer a suggested value.",
++   },
++   {
++     "id": "one_question",
++     "pass": false,
++     "reasoning": "The reply asks two distinct questions (“Which Tan, and which Friday”), exceeding the limit of one question per reply.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:137:48
+    135|           }
+    136|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    137|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    138|         },
+    139|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-understaffed-night' > trial 1
+ FAIL  evals/repair.eval.ts > 'repair-understaffed-night' > trial 2
+ FAIL  evals/repair.eval.ts > 'repair-understaffed-night' > trial 3
+AssertionError: expected [ { gate: 'proposal', …(2) }, …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "no op matches {\"type\":\"add_person\",\"temporary\":true}",
++     "gate": "proposal",
++     "pass": false,
++   },
++   {
++     "detail": "1 staffing shortfall(s) remain",
++     "gate": "final",
++     "pass": false,
++   },
++   {
++     "detail": "no follow-up after Apply or a finished run",
++     "gate": "error",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:136:48
+    134|             skip("budget");
+    135|           }
+    136|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    137|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    138|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+
+ Test Files  4 failed | 1 passed | 1 skipped (6)
+      Tests  6 failed | 10 passed | 1 skipped (17)
+   Start at  18:23:35
+   Duration  168.61s (transform 1.62s, setup 138ms, import 8.15s, tests 389.79s, environment 1.43s)
+
+eval report: /home/kenan/work/nursing-sheduler.research-46g-fast-models/web/evals/runs/latest/report.md
+[ELIFECYCLE] Command failed with exit code 1.

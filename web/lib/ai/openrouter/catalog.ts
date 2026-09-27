@@ -35,14 +35,22 @@ export interface ModelCatalog {
 }
 
 /** Bump when {@link FALLBACK_MODELS} changes. */
-export const FALLBACK_CATALOG_VERSION = 2;
+export const FALLBACK_CATALOG_VERSION = 3;
 
 /**
  * The versioned offline list. Every entry is a tool-capable slug at the time of
  * writing; availability is still the account's and OpenRouter's to decide, which
- * the probe is what establishes. All five read images (live catalog, 2026-09-27).
+ * the probe is what establishes. All six read images (live catalog, 2026-09-27).
+ *
+ * The recommended default is first so that even the offline list preselects it.
  */
 export const FALLBACK_MODELS: readonly CatalogModel[] = Object.freeze([
+  {
+    id: "deepseek/deepseek-v4.1-flash",
+    name: "DeepSeek V4.1 Flash",
+    contextLength: 1_048_576,
+    imageInput: true,
+  },
   {
     id: "anthropic/claude-sonnet-4.5",
     name: "Claude Sonnet 4.5",
@@ -65,8 +73,15 @@ export const FALLBACK_MODELS: readonly CatalogModel[] = Object.freeze([
   },
 ]);
 
-/** The one recommended default the enablement flow asks Settings to preselect. */
-export const RECOMMENDED_MODEL_ID = "anthropic/claude-sonnet-4.5";
+/**
+ * The one recommended default the enablement flow asks Settings to preselect.
+ *
+ * A REAL catalog slug, deliberately. The shipped default is this model WITH
+ * OpenRouter's throughput routing; that routing is a request-time variant applied in
+ * `routing.ts`, never part of this id -- a `:nitro` slug here would match no catalog
+ * row and `pickRecommended` would fall through to the first row.
+ */
+export const RECOMMENDED_MODEL_ID = "deepseek/deepseek-v4.1-flash";
 
 /** OpenRouter's public catalog row, narrowed to the fields this app reads. */
 interface RawModel {
