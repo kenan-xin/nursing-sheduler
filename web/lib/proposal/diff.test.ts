@@ -296,7 +296,7 @@ describe("deriveProposalDiff", () => {
   it("lists every new rule as asked-for and states each in plain words", () => {
     const before = ruleWardScenario();
     const nightAfter = {
-      type: "add_succession_rule" as const,
+      type: "add_shift_sequence_rule" as const,
       description: "No day shift straight after a night shift",
       people: ["ana", "ben", "cai"],
       pattern: ["Night", "Day"],
