@@ -206,6 +206,18 @@ describe("the escalation ladder", () => {
       expect(ladder.step).toBe(4);
     });
 
+    it("borrowNeeds counts a temporary cover", () => {
+      // A cover booked after the solve lowers the night on 8 Oct to 0 from the ward,
+      // so Priya giving it up leaves nothing short: no borrow is asked for.
+      const live = [
+        { name: "Haseena (Ward 3)", date: "2026-10-08", shiftType: "N", groups: ["Nights"] },
+      ];
+      const model = buildRuleModel(borrowDocument(), { decrements: [], live });
+      expect(borrowNeeds({ context: borrowContext(), days: borrowGrid(), model }, 0, [1])).toEqual(
+        [],
+      );
+    });
+
     it("resolves every date to no need when the restriction names people, not a group", () => {
       const document = {
         ...borrowDocument(),

@@ -59,4 +59,12 @@ describe("changeKeys matches the proposal diff", () => {
     expect(keys).toContain(changeKeys.cell("bo", "12"));
     expect(changeKeys.cell("bo", "12").startsWith(changeKeys.cellRow("bo"))).toBe(true);
   });
+  it("temporary cover row", () => {
+    const keys = keysAfter(() => ({
+      temporaryCover: [
+        { name: "Haseena (Ward 3)", date: "2026-04-14", shiftType: "Day", groups: [] },
+      ],
+    }));
+    expect(keys).toContain(changeKeys.cover("Haseena (Ward 3)", "2026-04-14", "Day"));
+  });
 });

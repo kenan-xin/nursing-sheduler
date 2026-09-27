@@ -570,4 +570,81 @@ describe("parseAssistantCommands", () => {
       expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
     }
   });
+
+  it("accepts the temporary-cover arms, trimming nothing on the wire", () => {
+    const result = parseAssistantCommands([
+      {
+        type: "add_temporary_cover",
+        name: "Haseena (Ward 3)",
+        date: "2026-10-14",
+        shiftType: "N",
+        groups: ["RN"],
+      },
+      {
+        type: "remove_temporary_cover",
+        name: "Haseena (Ward 3)",
+        date: "2026-10-14",
+        shiftType: "N",
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The host trims (the Staff form trims); the wire keeps what the model sent.
+    expect(result.commands[0]).toEqual({
+      type: "add_temporary_cover",
+      name: "Haseena (Ward 3)",
+      date: "2026-10-14",
+      shiftType: "N",
+      groups: ["RN"],
+    });
+  });
+
+  it("locked schema keys for add_temporary_cover and remove_temporary_cover", () => {
+    // Strict objects, like every other arm: an extra key is refused, not stripped, and
+    // every field the host reads is REQUIRED on the wire.
+    const add = assistantCommandSchema.safeParse({
+      type: "add_temporary_cover",
+      name: "Haseena (Ward 3)",
+      date: "2026-10-14",
+      shiftType: "N",
+      groups: [],
+    });
+    expect(add.success).toBe(true);
+    if (add.success) {
+      expect(Object.keys(add.data).sort()).toEqual(["date", "groups", "name", "shiftType", "type"]);
+    }
+    const remove = assistantCommandSchema.safeParse({
+      type: "remove_temporary_cover",
+      name: "Haseena (Ward 3)",
+      date: "2026-10-14",
+      shiftType: "N",
+    });
+    expect(remove.success).toBe(true);
+    if (remove.success) {
+      expect(Object.keys(remove.data).sort()).toEqual(["date", "name", "shiftType", "type"]);
+    }
+  });
+
+  it("refuses temporary-cover payloads the model must fix itself", () => {
+    const add = {
+      type: "add_temporary_cover",
+      name: "Haseena (Ward 3)",
+      date: "2026-10-14",
+      shiftType: "N",
+      groups: [],
+    };
+    const refused: unknown[] = [
+      // groups omitted: the model must send [] for "no groups".
+      [{ ...add, groups: undefined }],
+      // A date the wire schema refuses before the host can name it.
+      [{ ...add, date: "14 Oct" }],
+      // A field the host derives, never accepts.
+      [{ ...add, _k: "x" }],
+      // shiftType omitted on a removal: the cover identity is the three fields.
+      [{ type: "remove_temporary_cover", name: "Haseena (Ward 3)", date: "2026-10-14" }],
+    ];
+    for (const payload of refused) {
+      expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
+    }
+  });
 });

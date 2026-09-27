@@ -32,14 +32,23 @@
 //     retains the map. The pre-`202` rollback never runs after the server may have
 //     accepted the job.
 
+import type { CoverSheetPlan } from "@/lib/roster/cover-sheet";
 import { validatePeopleReverseMap, type PeopleReverseMap } from "@/lib/scenario";
 
 /** Bump when the record shape changes; a mismatched version is not resumable.
  *  v2 adds the F2 `capture` authority (the roster submission-snapshot ref and its
  *  origin-wide ordinal, or the reason capture is unavailable for this run). A v1
  *  record predates roster capture and is deliberately NOT migrated: it is read as
- *  unreadable, exactly like any other unknown shape. */
-export const OPTIMIZE_SESSION_SCHEMA_VERSION = 2;
+ *  unreadable, exactly like any other unknown shape.
+ *  v3 adds the d582 `coverSheet` — the temporary-cover rows the raw download
+ *  writes into the exported workbook. A v2 record predates it and is READ (not
+ *  rejected): unlike v1's capture authority, its cover sheet is knowable rather
+ *  than merely absent — nothing could have written one — so it upgrades to `null`.
+ *  A v1 record stays unreadable for the same reason it always did. */
+export const OPTIMIZE_SESSION_SCHEMA_VERSION = 3;
+
+/** The version immediately before the current one. Read-only: never written. */
+const PREVIOUS_SESSION_SCHEMA_VERSION = 2;
 
 /**
  * The LEGACY single-slot key.
@@ -114,6 +123,15 @@ interface OptimizeSessionCommon {
    * survives them verbatim.
    */
   capture: SessionCaptureState;
+  /**
+   * The temporary-cover rows the raw download must write into the exported
+   * workbook after id restoration (d582, F6), or `null` for a run with no cover.
+   *
+   * Built once, from the SUBMITTED document, before the POST — so the plan a
+   * reload reads is the plan the submitted counts were computed against, and it
+   * survives activation and rollback verbatim like every other load-bearing field.
+   */
+  coverSheet: CoverSheetPlan | null;
 }
 
 /** Written before `POST`; a reload finding this means an interrupted submission. */
@@ -195,6 +213,8 @@ export interface VolatileActivation {
   anonymized: boolean;
   peopleCount: number;
   reverseMap: PeopleReverseMap;
+  /** The d582 cover rows for the download; `null` when the run has no cover. */
+  coverSheet: CoverSheetPlan | null;
 }
 
 // --- guarded storage primitives -------------------------------------------
@@ -469,6 +489,8 @@ export function buildProvisionalSession(input: {
   runOptions: OptimizeRunOptions;
   /** The outcome of the write-ahead snapshot transaction (F2). */
   capture: SessionCaptureState;
+  /** The d582 cover rows for the download; omitted (or null) for a plain run. */
+  coverSheet?: CoverSheetPlan | null;
 }): ProvisionalOptimizeSession {
   return {
     schemaVersion: OPTIMIZE_SESSION_SCHEMA_VERSION,
@@ -479,6 +501,7 @@ export function buildProvisionalSession(input: {
     peopleCount: input.peopleCount,
     reverseMap: input.reverseMap,
     capture: input.capture,
+    coverSheet: input.coverSheet ?? null,
   };
 }
 
@@ -525,6 +548,22 @@ function runOptionsEqual(a: OptimizeRunOptions, b: OptimizeRunOptions): boolean 
   return a.prettify === b.prettify && a.timeout === b.timeout;
 }
 
+/**
+ * Closed cover-sheet equality: both absent, or byte-identical structure.
+ *
+ * Structural rather than field-by-field on purpose. The plan is a nested, frozen
+ * tree produced by ONE builder, and the only two things ever compared are that
+ * builder's output and that same value after a codec round-trip — so key order is
+ * the builder's own and is stable. A codec that reorders keys therefore fails
+ * this comparison and is refused, which is the conservative direction: the cover
+ * rows are written into the user's workbook, so a "different but plausible" plan
+ * is worse than none.
+ */
+function coverSheetsEqual(a: CoverSheetPlan | null, b: CoverSheetPlan | null): boolean {
+  if (a === null || b === null) return a === b;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /** Full semantic equality across EVERY load-bearing field of the closed record. */
 function recordsEqual(a: OptimizeSessionRecord, b: OptimizeSessionRecord): boolean {
   if (a.schemaVersion !== b.schemaVersion) return false;
@@ -535,6 +574,7 @@ function recordsEqual(a: OptimizeSessionRecord, b: OptimizeSessionRecord): boole
   if (!runOptionsEqual(a.runOptions, b.runOptions)) return false;
   if (!reverseMapsEqual(a.reverseMap, b.reverseMap)) return false;
   if (!captureEqual(a.capture, b.capture)) return false;
+  if (!coverSheetsEqual(a.coverSheet, b.coverSheet)) return false;
   if (a.phase === "active" && b.phase === "active") {
     if (a.jobId !== b.jobId) return false;
   }
@@ -666,6 +706,7 @@ function volatileFrom(provisional: ProvisionalOptimizeSession, jobId: string): V
     anonymized: provisional.anonymized,
     peopleCount: provisional.peopleCount,
     reverseMap: provisional.reverseMap,
+    coverSheet: provisional.coverSheet,
   };
 }
 
@@ -1018,15 +1059,25 @@ const COMMON_KEYS = [
   "peopleCount",
   "reverseMap",
   "capture",
+  "coverSheet",
 ] as const;
+// A v2 record is the current shape MINUS the d582 cover sheet. Read-only: the
+// version is never written back at 2, and the parser upgrades it on the way out.
+const COMMON_V2_KEYS = COMMON_KEYS.filter((key) => key !== "coverSheet");
 const PROVISIONAL_KEYS = new Set<string>(COMMON_KEYS);
+const PROVISIONAL_V2_KEYS = new Set<string>(COMMON_V2_KEYS);
 // The active variant is exactly the provisional keys plus `jobId`. It used to
 // also allow an optional `lastCursor`; with reload-resume gone, a record carrying
 // one was written by an older build and is not a shape this build understands.
 const ACTIVE_KEYS = new Set<string>([...COMMON_KEYS, "jobId"]);
+const ACTIVE_V2_KEYS = new Set<string>([...COMMON_V2_KEYS, "jobId"]);
 const RUN_OPTION_KEYS = new Set<string>(["prettify", "timeout"]);
 const CAPTURE_STAGED_KEYS = new Set<string>(["status", "snapshotRef", "submissionOrdinal"]);
 const CAPTURE_UNAVAILABLE_KEYS = new Set<string>(["status", "reason"]);
+const COVER_PLAN_KEYS = new Set<string>(["rows", "countCredits", "entries"]);
+const COVER_ROW_KEYS = new Set<string>(["name", "cells"]);
+const COVER_COUNT_KEYS = new Set<string>(["header", "byDate"]);
+const COVER_ENTRY_KEYS = new Set<string>(["name", "iso", "shiftId", "groups"]);
 
 function hasExactKeys(record: Record<string, unknown>, allowed: Set<string>): boolean {
   const keys = Object.keys(record);
@@ -1035,6 +1086,53 @@ function hasExactKeys(record: Record<string, unknown>, allowed: Set<string>): bo
 
 function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isNumberArray(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "number");
+}
+
+function isValidCoverRow(value: unknown): boolean {
+  if (!isPlainObject(value) || !hasExactKeys(value, COVER_ROW_KEYS)) return false;
+  return isNonEmptyString(value.name) && isStringArray(value.cells);
+}
+
+function isValidCoverCountCredit(value: unknown): boolean {
+  if (!isPlainObject(value) || !hasExactKeys(value, COVER_COUNT_KEYS)) return false;
+  return isNonEmptyString(value.header) && isNumberArray(value.byDate);
+}
+
+function isValidCoverEntry(value: unknown): boolean {
+  if (!isPlainObject(value) || !hasExactKeys(value, COVER_ENTRY_KEYS)) return false;
+  if (!isNonEmptyString(value.name) || !isNonEmptyString(value.iso)) return false;
+  // `ShiftTypeId` is a finite integer or a string; anything else would key a row
+  // cell that no shift lookup can ever resolve.
+  if (typeof value.shiftId !== "number" && typeof value.shiftId !== "string") return false;
+  return isStringArray(value.groups);
+}
+
+/**
+ * Closed cover-sheet validation: `null`, or the exact three-field plan with every
+ * row, credit and entry closed in turn. Nested closure matters here — the plan is
+ * written into the user's workbook, so a shape this build cannot account for must
+ * not become durable.
+ */
+function isValidCoverSheet(value: unknown): value is CoverSheetPlan | null {
+  if (value === null) return true;
+  if (!isPlainObject(value) || !hasExactKeys(value, COVER_PLAN_KEYS)) return false;
+  if (!Array.isArray(value.rows) || !value.rows.every(isValidCoverRow)) return false;
+  if (!Array.isArray(value.countCredits) || !value.countCredits.every(isValidCoverCountCredit)) {
+    return false;
+  }
+  return Array.isArray(value.entries) && value.entries.every(isValidCoverEntry);
 }
 
 /**
@@ -1083,26 +1181,35 @@ function isValidRunOptions(value: unknown): value is OptimizeRunOptions {
 
 /**
  * Strictly validate an untrusted value as a session record, returning the typed
- * record or `null`. Closed schema: exact keys per variant, current schema version
- * only (future/unknown versions are unreadable), non-empty owner id, non-negative
- * integer people count, closed run options within the settled timeout bounds, a
- * closed F2 capture authority (a staged snapshot ref plus a positive origin-wide
- * ordinal, or an explicit unavailable reason), and
+ * record or `null`. Closed schema: exact keys per variant, the current schema
+ * version — or the ONE previous version, upgraded below — and no other (future/
+ * unknown versions are unreadable), non-empty owner id, non-negative integer
+ * people count, closed run options within the settled timeout bounds, a closed F2
+ * capture authority (a staged snapshot ref plus a positive origin-wide ordinal, or
+ * an explicit unavailable reason), a closed d582 cover sheet, and
  * a consistent anonymized/reverse-map invariant validated as a strict people-only
  * tuple map (unique well-formed `P#` ids, unique typed finite-integer/string
  * originals, cardinality equal to the people count). Shared by the reload reader
  * AND the writer-side pre-write validation.
  */
 function parseSession(value: unknown): OptimizeSessionRecord | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const candidate = value as Record<string, unknown>;
+  if (!isPlainObject(value)) return null;
+  const candidate = value;
 
-  if (candidate.schemaVersion !== OPTIMIZE_SESSION_SCHEMA_VERSION) return null;
+  // v2 is READ, v1 and the unknown future are not. The difference from the v1→v2
+  // step is not sentiment: a v2 record's cover sheet is DETERMINED by its version
+  // (no v2 build could write cover rows), whereas a v1 record's capture authority
+  // is genuinely unknowable, which is why that one still fails closed.
+  const isPreviousVersion = candidate.schemaVersion === PREVIOUS_SESSION_SCHEMA_VERSION;
+  if (!isPreviousVersion && candidate.schemaVersion !== OPTIMIZE_SESSION_SCHEMA_VERSION) {
+    return null;
+  }
   if (typeof candidate.ownerId !== "string" || candidate.ownerId.length === 0) return null;
   if (typeof candidate.anonymized !== "boolean") return null;
   if (!isNonNegativeInteger(candidate.peopleCount)) return null;
   if (!isValidRunOptions(candidate.runOptions)) return null;
   if (!isValidCapture(candidate.capture)) return null;
+  if (!isValidCoverSheet(isPreviousVersion ? null : candidate.coverSheet)) return null;
 
   // AUTHORITY BINDING. `snapshotRef` IS the transaction owner id — that identity is
   // the whole reason the exact-owner snapshot deletion is as narrowly scoped
@@ -1121,14 +1228,31 @@ function parseSession(value: unknown): OptimizeSessionRecord | null {
   const reverseMap = validatePeopleReverseMap(candidate.reverseMap, expectedMapSize);
   if (reverseMap === null) return null;
 
+  // A v2 record carries every current field except `coverSheet`, and is upgraded
+  // to the current version on the way out so nothing downstream has to know that
+  // two shapes were ever readable.
+  const coverSheet = isPreviousVersion ? null : (candidate.coverSheet as CoverSheetPlan | null);
+
   if (candidate.phase === "provisional") {
-    if (!hasExactKeys(candidate, PROVISIONAL_KEYS)) return null;
-    return { ...(candidate as unknown as ProvisionalOptimizeSession), reverseMap };
+    if (!hasExactKeys(candidate, isPreviousVersion ? PROVISIONAL_V2_KEYS : PROVISIONAL_KEYS)) {
+      return null;
+    }
+    return {
+      ...(candidate as unknown as ProvisionalOptimizeSession),
+      schemaVersion: OPTIMIZE_SESSION_SCHEMA_VERSION,
+      reverseMap,
+      coverSheet,
+    };
   }
   if (candidate.phase === "active") {
-    if (!hasExactKeys(candidate, ACTIVE_KEYS)) return null;
+    if (!hasExactKeys(candidate, isPreviousVersion ? ACTIVE_V2_KEYS : ACTIVE_KEYS)) return null;
     if (!isValidJobId(candidate.jobId)) return null;
-    return { ...(candidate as unknown as ActiveOptimizeSession), reverseMap };
+    return {
+      ...(candidate as unknown as ActiveOptimizeSession),
+      schemaVersion: OPTIMIZE_SESSION_SCHEMA_VERSION,
+      reverseMap,
+      coverSheet,
+    };
   }
   return null;
 }

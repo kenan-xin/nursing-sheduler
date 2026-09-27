@@ -1331,7 +1331,7 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
         edits: unknown[];
         frozenXlsx: { base64: string };
       };
-      expect(decoded.schemaVersion).toBe("roster-file/1");
+      expect(decoded.schemaVersion).toBe("roster-file/2");
       // The EXPORT is Ward 8 too, element by element — not merely 32-and-28 long.
       const exportedFacts = readWardDocumentFacts(decoded);
       expect(judgeWardDocument(exportedFacts).problems, "the export is Ward 8").toEqual([]);

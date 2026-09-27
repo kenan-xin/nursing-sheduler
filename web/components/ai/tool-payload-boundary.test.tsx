@@ -476,11 +476,11 @@ describe("malformed payloads, for every parameterized tool in the registry", () 
     prepare_borrowed_cover: [
       [
         "missing name",
-        '{"person":"SN-Priya","dates":["2026-10-08"],"reason":"swap","source":"agency","groups":[],"summary":"s"}',
+        '{"person":"SN-Priya","dates":["2026-10-08"],"reason":"swap","lenderConfirmed":true,"groups":[],"summary":"s"}',
       ],
       [
-        "unknown source",
-        '{"person":"SN-Priya","dates":["2026-10-08"],"reason":"swap","name":"Mei","source":"friend","groups":[],"summary":"s"}',
+        "missing lenderConfirmed",
+        '{"person":"SN-Priya","dates":["2026-10-08"],"reason":"swap","name":"Mei (Ward 6)","groups":[],"summary":"s"}',
       ],
     ],
     explain_app_capability: [

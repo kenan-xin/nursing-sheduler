@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { priyaRosterDocument } from "@/lib/roster-viewer/swap-fixtures";
-import { applyLinkedChange, type LinkedApplyDeps } from "./linked-apply";
+import { clearChangeHighlight, useChangeHighlightStore } from "@/lib/change-highlight/store";
+import type { CoverEditRun } from "@/lib/scenario/cover-edit-request";
+import type { ProposalDiffEntry } from "@/lib/proposal";
+import { applyLinkedChange, type LinkedApplyDeps, type LinkedProposal } from "./linked-apply";
 
 const document = priyaRosterDocument();
 const REQUEST = {
@@ -17,12 +20,71 @@ const REQUEST = {
 const CHANGE = { request: REQUEST, linked: { proposalId: "p-1", record: "leave" as const } };
 const BORROW = { request: REQUEST, linked: { proposalId: "p-1", record: "staff" as const } };
 
-function deps(overrides: Partial<LinkedApplyDeps> = {}) {
+const COVER_KEY = "cover:Haseena (Ward 3)|2026-10-14|N";
+const LEAVE_KEY = "cell:priya|2026-10-14";
+function entry(key: string, scope: ProposalDiffEntry["scope"]): ProposalDiffEntry {
+  return { key, scope, label: key, before: null, after: "x", kind: "created" };
+}
+/** A plain leave proposal: no cover, so it applies without the Staff screen. */
+const LEAVE_PROPOSAL: LinkedProposal = {
+  scenarioId: "s-1",
+  baseDocumentRevision: 4,
+  baseCommitId: "c-4",
+  status: "preview_ready",
+  commands: [
+    { type: "add_leave", personId: "priya", startDate: "2026-10-14", endDate: "2026-10-14" },
+  ],
+  diff: {
+    direct: [entry(LEAVE_KEY, "leave-and-requests")],
+    cascade: [],
+    capabilityIds: [],
+    needsReview: [],
+  },
+};
+/** The cover ladder's linked proposal: a cover plus the asking nurse's leave. */
+const COVER_PROPOSAL: LinkedProposal = {
+  ...LEAVE_PROPOSAL,
+  commands: [
+    {
+      type: "add_temporary_cover",
+      name: "Haseena (Ward 3)",
+      date: "2026-10-14",
+      shiftType: "N",
+      groups: [],
+    },
+    ...LEAVE_PROPOSAL.commands,
+  ],
+  diff: {
+    ...LEAVE_PROPOSAL.diff,
+    direct: [entry(COVER_KEY, "staff-list"), entry(LEAVE_KEY, "leave-and-requests")],
+  },
+};
+const BASIS = { scenarioId: "s-1", documentRevision: 4, topCommitId: "c-4" };
+
+afterEach(() => clearChangeHighlight());
+
+function deps(overrides: Partial<LinkedApplyDeps> = {}, proposal = LEAVE_PROPOSAL) {
   const calls: string[] = [];
+  let run: CoverEditRun | null = null;
   const d: LinkedApplyDeps = {
     readRoster: vi.fn(async () => {
       calls.push("readRoster");
       return document;
+    }),
+    readProposal: vi.fn(async () => {
+      calls.push("readProposal");
+      return proposal;
+    }),
+    readBasis: vi.fn(async () => BASIS),
+    requestCoverEdit: vi.fn((next: CoverEditRun) => {
+      calls.push("requestCoverEdit");
+      run = next;
+    }),
+    // The Staff form presses its own Save, which runs the proposal's one Apply.
+    awaitCoverEditOutcome: vi.fn(async () => {
+      calls.push("awaitCover");
+      const saved = await run!.commit();
+      return saved.ok ? ("applied" as const) : ("rejected" as const);
     }),
     applyProposal: vi.fn(async () => {
       calls.push("applyProposal");
@@ -32,8 +94,8 @@ function deps(overrides: Partial<LinkedApplyDeps> = {}) {
       calls.push("undoReceipt");
       return true;
     }),
-    navigate: vi.fn(async () => {
-      calls.push("navigate");
+    navigate: vi.fn(async (capabilityId: string) => {
+      calls.push(`navigate:${capabilityId}`);
       return true;
     }),
     requestRosterChange: vi.fn(() => {
@@ -54,8 +116,9 @@ describe("applyLinkedChange", () => {
     await expect(applyLinkedChange(CHANGE, d)).resolves.toEqual({ ok: true });
     expect(calls).toEqual([
       "readRoster",
+      "readProposal",
       "applyProposal",
-      "navigate",
+      "navigate:roster-viewer",
       "requestRosterChange",
       "await",
     ]);
@@ -109,12 +172,12 @@ describe("applyLinkedChange", () => {
     });
   });
 
-  it("names the staff list for a borrowed nurse", async () => {
+  it("names the temporary cover for a borrowed nurse", async () => {
     const undone = deps({ awaitRosterChangeOutcome: async () => "rejected" as const });
     await expect(applyLinkedChange(BORROW, undone.d)).resolves.toEqual({
       ok: false,
       message:
-        "Nothing was changed: the Roster screen refused the change. The staff list was put back too.",
+        "Nothing was changed: the Roster screen refused the change. The temporary cover was put back too.",
     });
     const refused = deps({
       awaitRosterChangeOutcome: async () => "rejected" as const,
@@ -123,7 +186,7 @@ describe("applyLinkedChange", () => {
     await expect(applyLinkedChange(BORROW, refused.d)).resolves.toEqual({
       ok: false,
       message:
-        "The staff list was changed, but the roster was not: the Roster screen refused the change. Undo the added temporary nurse from the change list, or ask me again.",
+        "The temporary cover was changed, but the roster was not: the Roster screen refused the change. Undo the temporary cover from the change list, or ask me again.",
     });
   });
 
@@ -170,7 +233,7 @@ describe("applyLinkedChange", () => {
     await expect(applyLinkedChange({ ...BORROW, request: null }, d)).resolves.toEqual({
       ok: true,
     });
-    expect(calls).toEqual(["applyProposal"]);
+    expect(calls).toEqual(["readProposal", "applyProposal"]);
   });
 
   it("has nothing to put back when there is no linked change", async () => {
@@ -182,4 +245,57 @@ describe("applyLinkedChange", () => {
       message: "Nothing was changed: the Roster screen refused the change.",
     });
   });
+
+  it("a linked cover + leave proposal walks Staff then Requests, then the roster", async () => {
+    const { d, calls } = deps({}, COVER_PROPOSAL);
+    await expect(applyLinkedChange(BORROW, d)).resolves.toEqual({ ok: true });
+    expect(calls).toEqual([
+      "readRoster",
+      "readProposal",
+      "navigate:staff-list",
+      "requestCoverEdit",
+      "awaitCover",
+      "applyProposal",
+      "navigate:leave-and-requests",
+      "navigate:roster-viewer",
+      "requestRosterChange",
+      "await",
+    ]);
+    expect(run(d).edits).toEqual([
+      {
+        kind: "add",
+        entry: { name: "Haseena (Ward 3)", date: "2026-10-14", shiftType: "N", groups: [] },
+      },
+    ]);
+    // The last screen walked before the roster outlines its own rows.
+    expect([...useChangeHighlightStore.getState().keys]).toEqual([LEAVE_KEY]);
+  });
+
+  it("a stale Preview writes nothing and never opens Staff", async () => {
+    const { d } = deps(
+      { readBasis: async () => ({ ...BASIS, documentRevision: 5 }) },
+      COVER_PROPOSAL,
+    );
+    await expect(applyLinkedChange(BORROW, d)).resolves.toEqual({
+      ok: false,
+      message: "Nothing was changed: the schedule changed after this was prepared. Ask again.",
+    });
+    expect(d.navigate).not.toHaveBeenCalled();
+    expect(d.applyProposal).not.toHaveBeenCalled();
+  });
+
+  it("a Staff form that refuses the cover writes nothing", async () => {
+    const { d } = deps({ awaitCoverEditOutcome: async () => "rejected" as const }, COVER_PROPOSAL);
+    await expect(applyLinkedChange(BORROW, d)).resolves.toEqual({
+      ok: false,
+      message:
+        "Nothing was changed: the Staff screen did not save the temporary cover. The reason is shown there.",
+    });
+    expect(d.applyProposal).not.toHaveBeenCalled();
+    expect(d.requestRosterChange).not.toHaveBeenCalled();
+  });
 });
+
+function run(d: LinkedApplyDeps): CoverEditRun {
+  return vi.mocked(d.requestCoverEdit).mock.calls[0][0];
+}

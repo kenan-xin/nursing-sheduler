@@ -156,8 +156,13 @@ function RosterChangeBody({
       // gets the usual confirm.
       const result = await applyLinkedChange(
         active,
-        linkedApplyDeps(async () => {
-          const outcome = await navigate("roster-viewer");
+        linkedApplyDeps(async (capabilityId) => {
+          // The Roster screen is where the user acts next; the screens before it only
+          // show what was saved, so they keep focus where it is.
+          const outcome = await navigate(
+            capabilityId,
+            capabilityId === "roster-viewer" ? undefined : { reveal: false },
+          );
           return outcome.status !== CAPABILITY_UNAVAILABLE;
         }),
       );
@@ -187,7 +192,9 @@ function RosterChangeBody({
                 label: applying ? "Opening…" : "Apply to roster",
                 detail:
                   request === null
-                    ? "Makes this change to the schedule. You can undo it from the change list."
+                    ? linked?.record === "staff"
+                      ? "Opens the Staff screen and books the temporary cover. You can undo it from the change list."
+                      : "Makes this change to the schedule. You can undo it from the change list."
                     : linked === null
                       ? "Opens the Roster screen and makes this change. You can undo it there."
                       : "Opens the Roster screen and makes this change. Undo the roster part on the Roster screen and the schedule part from the change list.",

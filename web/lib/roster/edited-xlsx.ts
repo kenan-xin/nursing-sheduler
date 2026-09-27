@@ -28,6 +28,11 @@
 // parses sheet[0] column A and the literal `Score`/`Status` labels, so provenance must
 // never relabel those rows or insert between the people window and them.
 //
+// Temporary cover (d582, F6): her display rows are inserted under the staff window and
+// her credit is added to the count rows, then the "Temporary cover" table is appended
+// to that same provenance sheet. The insert happens after the edits are patched, so
+// every edit lands at its frozen `coordinateMap` coordinate.
+//
 // ExcelJS re-serializes the whole workbook, so byte-identical output is not claimed
 // (ZIP framing, calc-chain, and parts ExcelJS does not model shift). The proof is a
 // semantic one: unedited surfaces reproduce exactly, and edited surfaces match the
@@ -35,6 +40,7 @@
 
 import type ExcelJS from "exceljs";
 
+import { applyCoverSheet, PROVENANCE_SHEET_NAME, type CoverSheetPlan } from "./cover-sheet";
 import { dayStateDisplay } from "./day-state";
 import type { RosterCoordinateMap, RosterDayState, RosterEdit, RosterProvenance } from "./types";
 
@@ -65,6 +71,11 @@ export interface EditedXlsxPatchInput {
   readonly coordinateMap: RosterCoordinateMap;
   /** Solve provenance, written "as solved" into the dedicated sheet. */
   readonly provenance: RosterProvenance;
+  /**
+   * The temporary-cover rows and count credit to write (d582). `null`/absent with
+   * no edits returns the frozen bytes untouched.
+   */
+  readonly cover?: CoverSheetPlan | null;
 }
 
 /** The provenance view written into the dedicated sheet. */
@@ -90,9 +101,6 @@ const SCHEDULE_SHEET_INDEX = 0;
 
 /** The Notes sheet's name, as the exporter creates it (`exporter.py:783`). */
 const NOTES_SHEET_NAME = "Notes";
-
-/** The dedicated provenance sheet's name. */
-const PROVENANCE_SHEET_NAME = "Roster provenance";
 
 /** The workbook media type the patched blob carries. */
 const XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -126,10 +134,12 @@ export function buildEditedCellPatches(
  * every edited cell is patched in one pass before re-serialization.
  */
 export async function patchFrozenXlsxWithEdits(input: EditedXlsxPatchInput): Promise<Blob> {
-  if (input.edits.length === 0) {
-    // No edits: the frozen bytes are the export. Avoid an ExcelJS round-trip that
-    // would re-serialize the whole workbook for no semantic change — the captured
-    // bytes are exactly what the export should be.
+  const cover = input.cover ?? null;
+  if (input.edits.length === 0 && cover === null) {
+    // No edits and no cover: the frozen bytes are the export. Avoid an ExcelJS
+    // round-trip that would re-serialize the whole workbook for no semantic change
+    // — the captured bytes are exactly what the export should be. A cover alone
+    // still needs the round-trip: the frozen workbook cannot carry her rows.
     return input.frozenXlsx;
   }
 
@@ -177,6 +187,19 @@ export async function patchFrozenXlsxWithEdits(input: EditedXlsxPatchInput): Pro
   // 3. Provenance: a dedicated sheet, never the schedule sheet. Remove any prior
   //    provenance sheet first so a re-export replaces rather than duplicates.
   writeProvenanceSheet(workbook, input.provenance);
+
+  // 4. Temporary cover: her rows go in under the staff window, and the cover table
+  //    is APPENDED to the provenance sheet just written — so it must come after it
+  //    (the provenance writer replaces the sheet wholesale).
+  if (cover !== null) {
+    // The staff window ends at the last frozen people row; a valid document has at
+    // least one person, so the axis is never empty.
+    const peopleRows = input.coordinateMap.peopleRows;
+    applyCoverSheet(workbook, cover, {
+      lastPersonRow: peopleRows[peopleRows.length - 1],
+      dateColumns: input.coordinateMap.dateColumns,
+    });
+  }
 
   let outputBuffer: ExcelJS.Buffer;
   try {

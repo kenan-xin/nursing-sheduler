@@ -32,6 +32,7 @@ def test_the_harness_wrote_every_case():
         "rnMixOnLeave",
         "ruleTooStrict",
         "shortOnLeaveDay",
+        "tooFewNurses",
         "understaffedNight",
     ]
 

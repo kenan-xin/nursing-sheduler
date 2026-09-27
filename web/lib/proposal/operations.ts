@@ -119,6 +119,7 @@ import { skillMixOverflow, skillMixOverflowMessage } from "@/lib/rules/shortfall
 import { RenameCollisionError } from "@/lib/cascade";
 import { foldPaintIntents, type MintCellUid } from "@/lib/store/paint-fold";
 import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
+import { validateCover } from "@/lib/scenario/temporary-cover";
 import type { AssistantCommandV1, RequestWeight } from "./commands";
 import {
   choiceList,
@@ -1626,6 +1627,77 @@ function applyRemovePeopleGroup(
   };
 }
 
+/** The covers a refusal can offer instead, named as the Staff screen names them. */
+function coverChoices(state: ScenarioUiState): string {
+  if (state.temporaryCover.length === 0) return "No temporary cover is booked.";
+  const list = state.temporaryCover
+    .map((cover) => `${cover.name} on ${shownDate(cover.date)} (${String(cover.shiftType)})`)
+    .join("; ");
+  return `Booked: ${list}.`;
+}
+
+/** A date as the Staff screen shows it, or the text as sent when it is not a date at all. */
+function shownDate(date: string): string {
+  return isValidIso(date) ? formatShortDate(date) : date;
+}
+
+/**
+ * Book one temporary cover -- the Staff screen's "Add temporary cover" form. The form's
+ * own validator (`validateCover`) is the whole gate, so the host refuses exactly what
+ * the screen refuses, in the screen's words: a missing name, a missing date, a shift she
+ * does not work, a group that no longer exists, a cover already booked for that name and
+ * date, and a second shift for the same nurse on the same date.
+ *
+ * She is written into `temporaryCover` and NOTHING else: no staff row, no request, no
+ * rule. She is a staffing credit the reads apply (d582), so this arm touches no card.
+ */
+function applyAddTemporaryCover(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_temporary_cover" }>,
+  index: number,
+): OperationResult {
+  const entry = {
+    name: command.name.trim(),
+    date: command.date,
+    shiftType: command.shiftType,
+    groups: [...new Set(command.groups)],
+  };
+  const valid = validateCover(state, entry);
+  if (!valid.ok) return reject(index, "invalid_value", valid.message);
+  return { ok: true, next: { ...state, temporaryCover: [...state.temporaryCover, entry] } };
+}
+
+/**
+ * Remove one temporary cover, named by the three fields the Staff row shows as its
+ * identity: name, date and shift. A date and shift that name no cover is `unknown_target`
+ * and says what IS booked, the same shape every other unknown-id refusal has.
+ */
+function applyRemoveTemporaryCover(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "remove_temporary_cover" }>,
+  index: number,
+): OperationResult {
+  const name = command.name.trim();
+  const at = state.temporaryCover.findIndex(
+    (cover) =>
+      cover.name.trim() === name &&
+      cover.date === command.date &&
+      String(cover.shiftType) === String(command.shiftType),
+  );
+  if (at === -1) {
+    return reject(
+      index,
+      "unknown_target",
+      `There is no temporary cover for ${name} on ${shownDate(command.date)} ` +
+        `(${command.shiftType}). ${coverChoices(state)}`,
+    );
+  }
+  return {
+    ok: true,
+    next: { ...state, temporaryCover: state.temporaryCover.filter((_cover, i) => i !== at) },
+  };
+}
+
 /** Validate and apply exactly one command against `state`. */
 export function applyAssistantCommand(
   state: ScenarioUiState,
@@ -1680,6 +1752,10 @@ export function applyAssistantCommand(
       return applyEditPeopleGroup(state, command, index);
     case "remove_people_group":
       return applyRemovePeopleGroup(state, command, index);
+    case "add_temporary_cover":
+      return applyAddTemporaryCover(state, command, index);
+    case "remove_temporary_cover":
+      return applyRemoveTemporaryCover(state, command, index);
   }
 }
 

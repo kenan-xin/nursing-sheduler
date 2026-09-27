@@ -17,6 +17,7 @@ import { XLSX_MEDIA_TYPE, type RosterContainerView } from "./container";
 import { assembleRosterDocument } from "./assemble";
 import {
   ROSTER_SUBMISSION_SCHEMA_VERSION,
+  type RosterCover,
   type RosterDayState,
   type RosterDocument,
   type RosterEdit,
@@ -35,6 +36,17 @@ export const FIXTURE_REVERSE_MAP: ReverseMapTuple[] = [
   // A numeric original id: `7` must never be confused with the string `"7"`.
   ["P2", 7],
 ];
+
+/**
+ * A solved cover on the fixture: one nurse on `D` on the second date, and the
+ * ledger entry for the requirement it lowered (`preferences[1]`).
+ */
+export function fixtureCover(): RosterCover {
+  return {
+    entries: [{ name: "Haseena (Ward 3)", iso: FIXTURE_DATES[1], shiftId: "D", groups: [] }],
+    decrements: [{ pref: 1, iso: FIXTURE_DATES[1], required: 1 }],
+  };
+}
 
 /**
  * The submitted document. `D` carries exactly one unscoped, uncoefficiented
@@ -184,11 +196,13 @@ export async function fixtureRosterDocument(
     reverseMap?: ReverseMapTuple[];
     container?: RosterContainerView;
     frozenXlsx?: Blob;
+    cover?: RosterCover;
   } = {},
 ): Promise<RosterDocument> {
   const result = await assembleRosterDocument({
     container: overrides.container ?? fixtureContainer(),
     submission: fixtureSubmission(overrides.document, overrides.reverseMap),
+    cover: overrides.cover ?? { entries: [], decrements: [] },
     frozenXlsx: overrides.frozenXlsx ?? fixtureFrozenXlsx(),
     appBuild: FIXTURE_APP_BUILD,
   });

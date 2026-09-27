@@ -1,10 +1,9 @@
 // The roster-file version matrix (F3).
 //
 // Compatibility is the file's business, not the app's. These tests cover all five
-// verdicts and the whole migration chain — including migrate-older, which at v1 is
-// only reachable through the injected policy the module exposes for exactly this
-// reason. Shipping the chain machinery untested would mean writing the first real
-// migration on top of unproven code.
+// verdicts and the whole migration chain: the shipped 1 → 2 step, and longer
+// chains through the injected policy the module exposes, so a v3 is proven before
+// it is needed.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -41,9 +40,20 @@ describe("the shipped version", () => {
     );
   });
 
-  it("ships no migrations yet, because v1 is the first version", () => {
-    expect(ROSTER_FILE_MIGRATIONS).toEqual([]);
-    expect(CURRENT_ROSTER_FILE_VERSION).toBe(1);
+  it("current is roster-file/2", () => {
+    expect(CURRENT_ROSTER_FILE_VERSION).toBe(2);
+    expect(ROSTER_FILE_MIGRATIONS.map((migration) => migration.from)).toEqual([1]);
+  });
+
+  it("1→2 adds an empty cover", () => {
+    expect(migrateRosterFileDocument({ schemaVersion: "roster-file/1", edits: [] }, 1)).toEqual({
+      ok: true,
+      document: {
+        schemaVersion: "roster-file/2",
+        edits: [],
+        cover: { entries: [], decrements: [] },
+      },
+    });
   });
 });
 
@@ -51,12 +61,13 @@ describe("classifyRosterFileVersion", () => {
   it("loads an exact match", () => {
     expect(classifyRosterFileVersion(ROSTER_DOCUMENT_SCHEMA_VERSION)).toEqual({
       status: "exact",
-      version: 1,
+      version: 2,
     });
+    expect(classifyRosterFileVersion("roster-file/1")).toEqual({ status: "migrate", version: 1 });
   });
 
-  it("rejects a NEWER file rather than best-effort loading it", () => {
-    expect(classifyRosterFileVersion("roster-file/2")).toEqual({ status: "newer", version: 2 });
+  it("roster-file/3 is newer", () => {
+    expect(classifyRosterFileVersion("roster-file/3")).toEqual({ status: "newer", version: 3 });
     expect(classifyRosterFileVersion("roster-file/99")).toEqual({ status: "newer", version: 99 });
   });
 
@@ -182,5 +193,12 @@ describe("upgradeStoredRosterDocument", () => {
     expect(upgradeStoredRosterDocument(current)).toBe(current);
     expect(upgradeStoredRosterDocument(newer)).toBe(newer);
     expect(upgradeStoredRosterDocument(null)).toBeNull();
+  });
+
+  it("restamps a stored roster-file/1 with an empty cover", () => {
+    expect(upgradeStoredRosterDocument({ schemaVersion: "roster-file/1" })).toEqual({
+      schemaVersion: "roster-file/2",
+      cover: { entries: [], decrements: [] },
+    });
   });
 });
