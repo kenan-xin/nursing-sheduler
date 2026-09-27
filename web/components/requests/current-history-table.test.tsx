@@ -75,3 +75,20 @@ describe("CurrentHistoryTable — render (FR-SR-40)", () => {
     expect(screen.getByTestId("history-chip-p-2-H-1")).toHaveAttribute("data-kind", "worked");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Long user text (bd memory `long-user-text-no-overflow`): the person slot is a
+// single-line slot, so a long name truncates with an ellipsis and the full value
+// stays readable through `title`.
+// ---------------------------------------------------------------------------
+describe("CurrentHistoryTable — long person name", () => {
+  const LONG_PERSON = "ward8-east-extended-weekend-night-cover-rotation-".repeat(3).slice(0, 120);
+
+  it("truncates the person slot and exposes the full value on hover", () => {
+    render(<CurrentHistoryTable people={[{ key: "p-long", person: LONG_PERSON, entries: [] }]} />);
+
+    const person = screen.getByTitle(LONG_PERSON);
+    expect(person).toHaveTextContent(LONG_PERSON);
+    expect(person).toHaveClass("min-w-0", "truncate");
+  });
+});
