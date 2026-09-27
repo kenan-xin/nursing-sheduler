@@ -5,6 +5,7 @@ import {
   AI_ERROR_REQUEST_TOO_LARGE,
   AI_KEY_HEADER,
   COPILOT_RUNTIME_BASE_PATH,
+  MAX_STOP_REQUEST_BYTES,
   RUNTIME_INSTANCE_HEADER,
 } from "./containment";
 
@@ -73,8 +74,9 @@ export function createSchedulerCopilotRuntime(
         // A thrown Response is CopilotKit's documented short-circuit: it still runs
         // the onResponse hook, so these bodies get the same containment headers.
         if (rejection) throw rejection;
-        if (route.method !== "agent/run") return request;
-        const checked = await guardRunBody(request);
+        const limit = BODY_CEILINGS[route.method];
+        if (limit === undefined || request.body === null) return request;
+        const checked = await guardBody(request, limit, route.method === "agent/run");
         if (checked instanceof Response) throw checked;
         return checked;
       },
@@ -85,7 +87,31 @@ export function createSchedulerCopilotRuntime(
   return { handler, runner, instanceId };
 }
 
+/**
+ * t0c9: the only CopilotKit routes the app's client calls. Every other one (suggest runs
+ * the agent with any key and an unbounded body; transcribe, threads, and whatever a
+ * future CopilotKit adds) answers 404.
+ */
+const ALLOWED_ROUTES: ReadonlySet<string> = new Set([
+  "info",
+  "agent/run",
+  "agent/connect",
+  "agent/stop",
+]);
+
+/**
+ * t0c9: per-route body ceilings. connect carries the whole run input (the client resends
+ * the thread on reconnect), so it shares the run ceiling; stop is sent with no body.
+ */
+const BODY_CEILINGS: Readonly<Record<string, number>> = {
+  "agent/run": MAX_RUN_REQUEST_BYTES,
+  "agent/connect": MAX_RUN_REQUEST_BYTES,
+  "agent/stop": MAX_STOP_REQUEST_BYTES,
+};
+
 function guardRoute(request: Request, route: RouteInfo, instanceId: string): Response | null {
+  if (!ALLOWED_ROUTES.has(route.method)) return jsonResponse({ error: "Not found" }, 404);
+
   if (route.method === "agent/run") {
     // The run route requires a validated key AND model. info/connect/stop do not.
     if (!readAiCredentials(request)) {
@@ -113,20 +139,25 @@ function guardRoute(request: Request, route: RouteInfo, instanceId: string): Res
 }
 
 /**
- * 2by.10: the run body, read ONCE through a byte ceiling, then checked.
+ * 2by.10 / t0c9: a body, read ONCE through a byte ceiling, then (for a run) checked.
  *
- * Over {@link MAX_RUN_REQUEST_BYTES} -- by its declared length, or by the bytes counted
- * as they stream when no length is declared -- the run is refused before anything is
- * buffered past the ceiling. Otherwise its attachments must pass `prepareAttachments`
- * (type allowlist, size, count, content). CopilotKit then gets a new Request over the
- * SAME bytes, so the body is held once rather than cloned. A body that is not JSON is
- * CopilotKit's to reject. Responses carry the app code only, never content.
+ * Over `limit` -- by its declared length, or by the bytes counted as they stream when
+ * no length is declared -- the request is refused before anything is buffered past the
+ * ceiling. A run's attachments must then pass `prepareAttachments` (type allowlist,
+ * size, count, content). CopilotKit then gets a new Request over the SAME bytes, so the
+ * body is held once rather than cloned. A body that is not JSON is CopilotKit's to
+ * reject. Responses carry the app code only, never content.
  */
-async function guardRunBody(request: Request): Promise<Request | Response> {
+async function guardBody(
+  request: Request,
+  limit: number,
+  checkAttachments: boolean,
+): Promise<Request | Response> {
   const tooLarge = () => jsonResponse({ error: AI_ERROR_REQUEST_TOO_LARGE }, 413);
-  if (Number(request.headers.get("content-length")) > MAX_RUN_REQUEST_BYTES) return tooLarge();
-  const bytes = await readCapped(request.body, MAX_RUN_REQUEST_BYTES);
+  if (Number(request.headers.get("content-length")) > limit) return tooLarge();
+  const bytes = await readCapped(request.body, limit);
   if (bytes === null) return tooLarge();
+  if (!checkAttachments) return rebuilt(request, bytes);
 
   let messages: unknown;
   try {
@@ -144,6 +175,10 @@ async function guardRunBody(request: Request): Promise<Request | Response> {
       throw error;
     }
   }
+  return rebuilt(request, bytes);
+}
+
+function rebuilt(request: Request, bytes: Uint8Array<ArrayBuffer>): Request {
   return new Request(request.url, {
     method: request.method,
     headers: request.headers,
