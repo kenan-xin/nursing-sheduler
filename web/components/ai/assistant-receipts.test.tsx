@@ -10,10 +10,11 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { AssistantReceiptV1, ReceiptStanding } from "@/lib/store";
+import { useModeStore } from "@/lib/mode/mode";
 import { AssistantReceipts } from "./assistant-receipts";
 import type { AssistantProposalController } from "./use-assistant-proposals";
 
-function makeReceipt(id: string, label: string): AssistantReceiptV1 {
+function makeReceipt(id: string, label: string, capabilityIds: string[] = []): AssistantReceiptV1 {
   return {
     receiptId: id,
     schemaVersion: 1,
@@ -37,7 +38,7 @@ function makeReceipt(id: string, label: string): AssistantReceiptV1 {
         kind: "changed",
       },
     ],
-    capabilityIds: [],
+    capabilityIds,
     createdAt: "2026-04-01T00:00:00.000Z",
   };
 }
@@ -146,6 +147,49 @@ describe("AssistantReceipts", () => {
     const detail = within(olderRow).getByTestId("assistant-receipt");
     expect(detail).toHaveAttribute("data-receipt-id", "r1");
     expect(detail).toHaveTextContent("Undo no longer available");
+  });
+
+  it("names the affected screens by their sidebar names, never raw capability ids", async () => {
+    useModeStore.setState({ mode: "guided", adoption: "ready" });
+    const user = userEvent.setup();
+    const receipt = makeReceipt("r1", "Set the roster range", [
+      "leave-and-requests",
+      "roster-period",
+    ]);
+    const controller = controllerWith([
+      { receipt, undo: "unavailable", reason: "That step can no longer be reversed." },
+    ]);
+    render(<AssistantReceipts controller={controller} />);
+
+    await user.click(screen.getByTestId("assistant-receipts-toggle"));
+    await user.click(screen.getByTestId("receipt-row-toggle"));
+
+    const detail = screen.getByTestId("assistant-receipt");
+    expect(detail).toHaveTextContent("Affects: Requests & Leave, Dates");
+    expect(detail).not.toHaveTextContent("leave-and-requests");
+    expect(detail).not.toHaveTextContent("roster-period");
+  });
+
+  it("drops a screen it cannot open rather than printing the raw capability id", async () => {
+    // An Advanced-only capability in Guided mode has no sidebar screen to name, so
+    // it is dropped; the raw id is never shown as a substitute.
+    useModeStore.setState({ mode: "guided", adoption: "ready" });
+    const user = userEvent.setup();
+    const receipt = makeReceipt("r1", "Forbid night to day", [
+      "roster-period",
+      "shift-successions",
+    ]);
+    const controller = controllerWith([
+      { receipt, undo: "unavailable", reason: "That step can no longer be reversed." },
+    ]);
+    render(<AssistantReceipts controller={controller} />);
+
+    await user.click(screen.getByTestId("assistant-receipts-toggle"));
+    await user.click(screen.getByTestId("receipt-row-toggle"));
+
+    const detail = screen.getByTestId("assistant-receipt");
+    expect(detail).toHaveTextContent("Affects: Dates");
+    expect(detail).not.toHaveTextContent("shift-successions");
   });
 
   it("renders nothing when there are no receipts", () => {
