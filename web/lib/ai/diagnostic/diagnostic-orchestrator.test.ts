@@ -414,12 +414,66 @@ describe("runDiagnosticSearch — temporary cover (d582)", () => {
       rt,
     );
     // The candidate relaxes Day cover to 1; her Day shift on the 10th lowers it to 0.
+    // The submission is anonymized (kb7v), so the authored description is stripped:
+    // identify the Day requirement by its shift selector instead.
     const preferences = (parse(rt.yamls[0]!) as { preferences: Record<string, unknown>[] })
       .preferences;
-    expect(preferences.find((p) => p.description === "Day cover")).toMatchObject({
+    expect(preferences.find((p) => p.shiftType === "Day")).toMatchObject({
       requiredNumPeople: 1,
       requiredNumPeopleOverrides: [["2026-04-10", 0]],
     });
+  });
+});
+
+describe("runDiagnosticSearch — candidate submissions are anonymized (kb7v)", () => {
+  // A rename is a direct change whose host-derived diff names the real person, so
+  // this command proves both halves at once: the SUBMITTED bytes are anonymized,
+  // while the CLIENT-side record keeps the real name.
+  const RENAME: AssistantCommandV1 = {
+    type: "edit_person",
+    personId: "ana",
+    name: "Ana",
+    groups: [],
+  };
+
+  it("sends only anonymized people ids and no descriptions, with a people-anonymized basis", async () => {
+    const rt = makeFakeRuntime({
+      submit: [accepted(makeJob("completed", "feasible"))],
+      poll: { job_cand_1: makeJob("completed", "feasible") },
+    });
+    const result = await runDiagnosticSearch(
+      {
+        searchId: "s1",
+        threadId: null,
+        turnId: null,
+        turnEpoch: 1,
+        leaseEpoch: 1,
+        compare: false,
+        parent: PARENT,
+        parentExpiresAt: null,
+        proposed: [{ candidateId: "cand-0", commands: [RENAME], rationale: "test" }],
+      },
+      rt,
+    );
+
+    // The basis the backend receives must claim the people-only anonymization.
+    expect(rt.submitted[0]!.anonymization_mode).toBe("people");
+
+    // The submitted bytes carry only generated P# ids and no free-text descriptions.
+    const doc = parse(rt.yamls[0]!) as {
+      people: { items: { id: unknown }[] };
+      preferences: Record<string, unknown>[];
+    };
+    expect(doc.people.items.map((p) => p.id)).toEqual(["P1", "P2"]);
+    expect(doc.preferences.every((p) => !("description" in p))).toBe(true);
+    expect(rt.yamls[0]!).not.toMatch(/\bana\b/);
+    expect(rt.yamls[0]!).not.toContain("Day cover");
+
+    // The client keeps real names: the stored diff still names the real person and
+    // the candidate still settles as tested evidence.
+    const labels = result.search.candidates[0]!.diff.direct.map((entry) => entry.label);
+    expect(labels.some((label) => label.includes("ana"))).toBe(true);
+    expect(result.search.candidates[0]!.outcome!.outcome).toBe("tested-feasible");
   });
 });
 
