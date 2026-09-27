@@ -156,8 +156,13 @@ function RosterChangeBody({
       // gets the usual confirm.
       const result = await applyLinkedChange(
         active,
-        linkedApplyDeps(async () => {
-          const outcome = await navigate("roster-viewer");
+        linkedApplyDeps(async (capabilityId) => {
+          // The Roster screen is where the user acts next; the screens before it only
+          // show what was saved, so they keep focus where it is.
+          const outcome = await navigate(
+            capabilityId,
+            capabilityId === "roster-viewer" ? undefined : { reveal: false },
+          );
           return outcome.status !== CAPABILITY_UNAVAILABLE;
         }),
       );
