@@ -1103,6 +1103,22 @@ html [data-copilotkit] * {
   scrollbar-color: var(--rule) transparent;
 }
 
+/* 7. Attachment chips (2by.10). The library breaks a long file name onto as many
+      lines as it takes (`break-all`); a name is user text, so it ends in an
+      ellipsis on one line instead, and `use-composer-attachments.ts` puts the full
+      name in the chip's `title`. The chip's own look is untouched. `min-width: 0`
+      on the chip's direct child lets that flex item shrink to the chip's 240px
+      cap, which is what gives the ellipsis a width to end at. */
+html [data-copilotkit] [data-testid="copilot-attachment-queue"] > * > * {
+  min-width: 0;
+}
+html [data-copilotkit] [data-testid="copilot-attachment-queue"] .cpk\:break-all {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
 /* A row or card a just-applied assistant change touched (lib/change-highlight).
    The OUTLINE is the cue: a 3px ring is a shape change that reads without colour
    vision (WCAG 1.4.1), and --brand clears 3:1 against every surface (1.4.11).

@@ -7,16 +7,22 @@
 //
 // The mapping is deliberately LOSSY in one direction and total in the other:
 //   * `toCanonical` keeps exactly the fields the product promises to restore --
-//     role, text, tool calls, and the tool result each call produced. Attachments,
-//     activity messages and provider-internal encrypted payloads are NOT
-//     persisted, so a reload cannot resurrect material the app never claimed to
-//     keep.
+//     role, text, tool calls, the tool result each call produced, and a user
+//     message's attachments (2by.10: the product promises to keep them with the
+//     conversation). Activity messages and provider-internal encrypted payloads
+//     are NOT persisted, so a reload cannot resurrect material the app never
+//     claimed to keep.
 //   * `toTransport` reconstructs a message the transport accepts from those fields
 //     alone, so hydration can never depend on something only a live run had.
 
-import type { Message } from "@ag-ui/client";
+import type { Message, UserMessage } from "@ag-ui/client";
 import type { AssistantGenerationPair } from "./fence";
-import type { AssistantMessageRole, AssistantMessageV1, AssistantToolCallV1 } from "./records";
+import type {
+  AssistantAttachmentV1,
+  AssistantMessageRole,
+  AssistantMessageV1,
+  AssistantToolCallV1,
+} from "./records";
 
 /** The transport roles this app persists. Anything else is dropped on capture. */
 const PERSISTED_ROLES: readonly string[] = ["user", "assistant", "tool", "reasoning"];
@@ -36,6 +42,77 @@ function readText(content: unknown): string {
         : "",
     )
     .join("");
+}
+
+type Part = {
+  type?: string;
+  source?: { type?: string; value?: string; mimeType?: string };
+  metadata?: { filename?: string };
+};
+
+/** A user message's image and document parts, as durable attachments. */
+function readAttachments(content: unknown): AssistantAttachmentV1[] | null {
+  if (!Array.isArray(content)) return null;
+  const found = (content as Part[]).flatMap((part): AssistantAttachmentV1[] =>
+    (part?.type === "image" || part?.type === "document") && part.source?.type === "data"
+      ? [
+          {
+            kind: part.type === "image" ? "image" : "text",
+            filename: part.metadata?.filename ?? "attachment",
+            mimeType: part.source.mimeType ?? "application/octet-stream",
+            data: part.source.value ?? "",
+          },
+        ]
+      : [],
+  );
+  return found.length > 0 ? found : null;
+}
+
+/** A user message's content: plain text, or text followed by one part per attachment. */
+export function toUserContent(
+  text: string,
+  attachments: readonly AssistantAttachmentV1[] | null,
+): UserMessage["content"] {
+  if (!attachments || attachments.length === 0) return text;
+  return [
+    { type: "text", text },
+    ...attachments.map((a) => ({
+      type: a.kind === "image" ? ("image" as const) : ("document" as const),
+      source: { type: "data" as const, value: a.data, mimeType: a.mimeType },
+      metadata: { filename: a.filename },
+    })),
+  ];
+}
+
+/**
+ * Keep the newest images within `budgetChars` of base64 and replace each older one with
+ * the line `[image: <name>]`. A budget of 0 names every image: the model cannot read
+ * them, and a thread with images must still run after a switch to it. Provider input
+ * only; the stored record and the panel keep every image.
+ */
+export function describeImages(messages: readonly Message[], budgetChars: number): Message[] {
+  let left = budgetChars;
+  return [...messages]
+    .reverse()
+    .map((message) => {
+      if (message.role !== "user" || !Array.isArray(message.content)) return message;
+      const parts = message.content as Part[];
+      if (!parts.some((part) => part?.type === "image")) return message;
+      const content = [...parts]
+        .reverse()
+        .map((part) => {
+          if (part?.type !== "image") return part;
+          const size = part.source?.value?.length ?? 0;
+          if (size <= left) {
+            left -= size;
+            return part;
+          }
+          return { type: "text", text: `[image: ${part.metadata?.filename ?? "attachment"}]` };
+        })
+        .reverse();
+      return { ...message, content } as Message;
+    })
+    .reverse();
 }
 
 function readToolCalls(message: Message): AssistantToolCallV1[] | null {
@@ -80,6 +157,7 @@ export function toCanonical(
     scenarioId: context.scenarioId,
     role: message.role,
     content: readText((message as { content?: unknown }).content),
+    attachments: readAttachments((message as { content?: unknown }).content),
     toolCalls: readToolCalls(message),
     toolCallId: (message as { toolCallId?: string }).toolCallId ?? null,
     modelId: context.modelId,
@@ -97,7 +175,11 @@ export function toCanonical(
 export function toTransport(record: AssistantMessageV1): Message {
   switch (record.role) {
     case "user":
-      return { id: record.messageId, role: "user", content: record.content };
+      return {
+        id: record.messageId,
+        role: "user",
+        content: toUserContent(record.content, record.attachments ?? null),
+      };
     case "tool":
       return {
         id: record.messageId,

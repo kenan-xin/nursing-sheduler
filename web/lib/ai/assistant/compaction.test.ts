@@ -102,6 +102,34 @@ describe("planCompaction", () => {
   });
 });
 
+describe("attachments (2by.10)", () => {
+  const image = {
+    kind: "image" as const,
+    filename: "ward.png",
+    mimeType: "image/png",
+    data: "A".repeat(50_000),
+  };
+  const csv = { kind: "text" as const, filename: "leave.csv", mimeType: "text/csv", data: "QW5h" };
+
+  it("counts an image at its base64 size and a text file by its text", () => {
+    expect(historyChars([row("user", "look", { attachments: [image, csv] })])).toBe(
+      "look".length + image.data.length + 3,
+    );
+  });
+
+  it("describes attachments to the summariser by name and never sends their data", () => {
+    const text = transcriptForSummary([row("user", "look", { attachments: [image, csv] })]);
+    expect(JSON.parse(text)).toEqual([
+      {
+        role: "user",
+        text: "look\n[attached image: ward.png]\n[attached file: leave.csv]",
+      },
+    ]);
+    expect(text).not.toContain("AAAA");
+    expect(text).not.toContain("QW5h");
+  });
+});
+
 describe("transcriptForSummary", () => {
   it("keeps the words, names the tools, trims results and skips reasoning", () => {
     const text = transcriptForSummary([

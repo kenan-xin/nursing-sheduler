@@ -128,6 +128,18 @@ describe("describeFinishedRun", () => {
   });
 });
 
+describe("the user's own send", () => {
+  it("passes a user send's options through (2by.10)", async () => {
+    const send = vi.fn(async (_text: string, _options?: unknown) => true);
+    const { result } = renderHook(() => useAssistantFollowUps(false, null, send));
+    const png = { kind: "image" as const, filename: "a.png", mimeType: "image/png", data: "x" };
+    await act(async () => {
+      await result.current("look", { attachments: [png] });
+    });
+    expect(send).toHaveBeenCalledWith("look", { attachments: [png] });
+  });
+});
+
 describe("after Apply", () => {
   it("sends exactly one message with the human summary", () => {
     const { send, rerender } = mount();

@@ -331,6 +331,7 @@ export async function persistThreadMessages(
                 content: canonical.content || prior.content,
                 toolCalls: canonical.toolCalls ?? prior.toolCalls,
                 toolCallId: canonical.toolCallId ?? prior.toolCallId,
+                attachments: canonical.attachments ?? prior.attachments ?? null,
               }
             : { ...canonical, seq: nextSeq++ },
         );

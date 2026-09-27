@@ -20,6 +20,8 @@ export interface CatalogModel {
   name: string;
   /** Context window in tokens, when OpenRouter reports one. */
   contextLength: number | null;
+  /** OpenRouter lists "image" in `architecture.input_modalities` (2by.10). */
+  imageInput: boolean;
 }
 
 export interface ModelCatalog {
@@ -33,19 +35,34 @@ export interface ModelCatalog {
 }
 
 /** Bump when {@link FALLBACK_MODELS} changes. */
-export const FALLBACK_CATALOG_VERSION = 1;
+export const FALLBACK_CATALOG_VERSION = 2;
 
 /**
  * The versioned offline list. Every entry is a tool-capable slug at the time of
  * writing; availability is still the account's and OpenRouter's to decide, which
- * the probe is what establishes.
+ * the probe is what establishes. All five read images (live catalog, 2026-09-27).
  */
 export const FALLBACK_MODELS: readonly CatalogModel[] = Object.freeze([
-  { id: "anthropic/claude-sonnet-4.5", name: "Claude Sonnet 4.5", contextLength: 200_000 },
-  { id: "anthropic/claude-haiku-4.5", name: "Claude Haiku 4.5", contextLength: 200_000 },
-  { id: "openai/gpt-4.1", name: "GPT-4.1", contextLength: 1_047_576 },
-  { id: "openai/gpt-4.1-mini", name: "GPT-4.1 mini", contextLength: 1_047_576 },
-  { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", contextLength: 1_048_576 },
+  {
+    id: "anthropic/claude-sonnet-4.5",
+    name: "Claude Sonnet 4.5",
+    contextLength: 200_000,
+    imageInput: true,
+  },
+  {
+    id: "anthropic/claude-haiku-4.5",
+    name: "Claude Haiku 4.5",
+    contextLength: 200_000,
+    imageInput: true,
+  },
+  { id: "openai/gpt-4.1", name: "GPT-4.1", contextLength: 1_047_576, imageInput: true },
+  { id: "openai/gpt-4.1-mini", name: "GPT-4.1 mini", contextLength: 1_047_576, imageInput: true },
+  {
+    id: "google/gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
+    contextLength: 1_048_576,
+    imageInput: true,
+  },
 ]);
 
 /** The one recommended default the enablement flow asks Settings to preselect. */
@@ -57,6 +74,12 @@ interface RawModel {
   name?: unknown;
   context_length?: unknown;
   supported_parameters?: unknown;
+  architecture?: { input_modalities?: unknown } | null;
+}
+
+function modalities(row: RawModel): unknown[] {
+  const list = row.architecture?.input_modalities;
+  return Array.isArray(list) ? list : [];
 }
 
 /**
@@ -81,6 +104,7 @@ export function selectToolCapableModels(payload: unknown): CatalogModel[] {
       id: row.id,
       name: typeof row.name === "string" && row.name.length > 0 ? row.name : row.id,
       contextLength: typeof row.context_length === "number" ? row.context_length : null,
+      imageInput: modalities(row).includes("image"),
     });
   }
   models.sort((a, b) => a.name.localeCompare(b.name));

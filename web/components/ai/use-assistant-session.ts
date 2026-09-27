@@ -32,7 +32,14 @@ import {
   setTurnState,
   settleTurnIfUnsettled,
 } from "@/lib/ai/assistant/history-repo";
-import { completeToolPairs, freezeMessages, toTransportThread } from "@/lib/ai/assistant/messages";
+import {
+  completeToolPairs,
+  freezeMessages,
+  toTransportThread,
+  toUserContent,
+} from "@/lib/ai/assistant/messages";
+import type { AssistantAttachmentV1 } from "@/lib/ai/assistant/records";
+import { IMAGE_REQUEST_BUDGET_CHARS } from "@/lib/ai/assistant/attachment-rules";
 import { readAssistantSettings } from "@/lib/ai/assistant/settings-repo";
 import { omittedMessageIds } from "@/lib/ai/assistant/compaction";
 import { compactHistory } from "./compact-history";
@@ -126,6 +133,11 @@ export interface AssistantSessionInput {
    * caller decides this from the thread's own state and this tab's ownership.
    */
   historical: boolean;
+  /**
+   * 2by.10: whether the selected model reads images. When it does not (or is not known
+   * to), stored images are named, not sent. Defaults to false.
+   */
+  imageInput?: boolean;
 }
 
 /**
@@ -171,6 +183,8 @@ function describeTurnActivity(messages: readonly Message[]): AssistantActivity {
 export interface AssistantSendOptions {
   /** The failed or interrupted turn whose own messages this send replaces. */
   replaceTurnId?: string;
+  /** 2by.10: the composer's ready attachments. Sent only through the gate, like the text. */
+  attachments?: readonly AssistantAttachmentV1[];
 }
 
 export interface AssistantSession {
@@ -197,6 +211,9 @@ export interface AssistantSession {
 
 export function useAssistantSession(input: AssistantSessionInput): AssistantSession {
   const agentId = localAgentId(input.threadId);
+  // Read at send time, so a model switch applies to the next turn without a new session.
+  const imageInput = useRef(false);
+  imageInput.current = input.imageInput ?? false;
   // THE PANEL CORE'S PUBLIC CONFIGURATION, AS DATA -- never the core itself.
   //
   // This hook used to hold the whole mutable core. Everything below reads from it; the
@@ -473,7 +490,11 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
       // on this provider ingress too: `plan.history` is read straight from Dexie, so
       // this is the last point before a dangling call would be sent.
       publishVisible(agent, completeToolPairs(toTransportThread(plan.history)));
-      const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: plan.text };
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: toUserContent(plan.text, options?.attachments ?? null),
+      };
       agent.addMessage(userMessage);
       await persistThreadMessages([userMessage], {
         ...writeContext,
@@ -633,6 +654,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
             earlierSummary: compacted.summary?.text ?? null,
           }),
           omitMessageIds: omittedMessageIds(plan.history, compacted.summary),
+          imageBudgetChars: imageInput.current ? IMAGE_REQUEST_BUDGET_CHARS : 0,
         }),
       );
 

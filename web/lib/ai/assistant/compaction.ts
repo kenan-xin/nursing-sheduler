@@ -5,7 +5,7 @@
 // the durable history and the transcript keep every message.
 
 import { MAX_SUMMARY_INPUT_CHARS } from "@/lib/ai/protocol";
-import type { AssistantMessageV1, ThreadSummaryV1 } from "./records";
+import type { AssistantAttachmentV1, AssistantMessageV1, ThreadSummaryV1 } from "./records";
 
 export { MAX_SUMMARY_INPUT_CHARS };
 export const COMPACT_AT_CHARS = 60_000;
@@ -17,6 +17,13 @@ export const KEEP_RECENT_USER_TURNS = 4;
  */
 export const MIN_COMPACT_SLICE_CHARS = 20_000;
 const TOOL_RESULT_CHARS = 600;
+/**
+ * 2by.10: an image counts at its base64 size, which is what every later run re-sends
+ * until a summary covers it; a text file counts by its text (3 bytes per 4 base64).
+ */
+function attachmentChars(a: AssistantAttachmentV1): number {
+  return a.kind === "image" ? a.data.length : Math.floor((a.data.length * 3) / 4);
+}
 export const COMPACTION_NOTICE =
   "Earlier messages were summarised to keep this conversation going.";
 
@@ -30,6 +37,7 @@ export function historyChars(records: readonly AssistantMessageV1[]): number {
     (sum, r) =>
       sum +
       r.content.length +
+      (r.attachments ?? []).reduce((n, a) => n + attachmentChars(a), 0) +
       (r.toolCalls ?? []).reduce((n, call) => n + call.name.length + call.args.length, 0),
     0,
   );
@@ -75,7 +83,18 @@ export function transcriptForSummary(slice: readonly AssistantMessageV1[]): stri
   const records = bySeq(slice).flatMap((r): TranscriptRecord[] => {
     switch (r.role) {
       case "user":
-        return [{ role: "user", text: r.content }];
+        // Attachments by name only: the summariser gets no image or file data.
+        return [
+          {
+            role: "user",
+            text: [
+              r.content,
+              ...(r.attachments ?? []).map(
+                (a) => `[attached ${a.kind === "image" ? "image" : "file"}: ${a.filename}]`,
+              ),
+            ].join("\n"),
+          },
+        ];
       case "assistant":
         return [
           ...(r.content ? [{ role: "assistant" as const, text: r.content }] : []),

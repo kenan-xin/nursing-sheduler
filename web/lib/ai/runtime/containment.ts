@@ -43,6 +43,10 @@ export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 /** Stable app error codes. These are the ONLY strings that reach a client body. */
 export const AI_ERROR_CREDENTIALS_REQUIRED = "ai_credentials_required";
+/** 2by.10: an attachment failed the server's type, size, count or content check. */
+export const AI_ERROR_ATTACHMENT_REJECTED = "ai_attachment_rejected";
+/** 2by.10: a run request over `MAX_RUN_REQUEST_BYTES`; refused before it is buffered. */
+export const AI_ERROR_REQUEST_TOO_LARGE = "ai_request_too_large";
 export const AI_DETACH_REASON_INSTANCE_MISMATCH = "runtime_instance_mismatch";
 
 /**

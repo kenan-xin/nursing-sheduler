@@ -26,7 +26,10 @@ const captured = vi.hoisted(() => [] as CapturedTool[]);
 const send = vi.hoisted(() => vi.fn());
 const session = vi.hoisted(() => ({ isRunning: false }));
 
-vi.mock("@copilotkit/react-core/v2", () => ({
+vi.mock("@copilotkit/react-core/v2", async (importOriginal) => ({
+  // 2by.10: the real attachment queue; it is plain React state and needs no provider.
+  useAttachments: (await importOriginal<typeof import("@copilotkit/react-core/v2")>())
+    .useAttachments,
   // A stand-in view: a transcript, then whatever the `input` slot renders, exactly
   // where the real view puts its composer.
   CopilotChatView: ({
