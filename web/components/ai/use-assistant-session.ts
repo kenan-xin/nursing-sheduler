@@ -132,6 +132,11 @@ export interface AssistantSessionInput {
    * caller decides this from the thread's own state and this tab's ownership.
    */
   historical: boolean;
+  /**
+   * 2by.10: whether the selected model reads images. When it does not (or is not known
+   * to), stored images are named, not sent. Defaults to false.
+   */
+  imageInput?: boolean;
 }
 
 /**
@@ -205,6 +210,9 @@ export interface AssistantSession {
 
 export function useAssistantSession(input: AssistantSessionInput): AssistantSession {
   const agentId = localAgentId(input.threadId);
+  // Read at send time, so a model switch applies to the next turn without a new session.
+  const imageInput = useRef(false);
+  imageInput.current = input.imageInput ?? false;
   // THE PANEL CORE'S PUBLIC CONFIGURATION, AS DATA -- never the core itself.
   //
   // This hook used to hold the whole mutable core. Everything below reads from it; the
@@ -645,6 +653,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
             earlierSummary: compacted.summary?.text ?? null,
           }),
           omitMessageIds: omittedMessageIds(plan.history, compacted.summary),
+          describeImages: !imageInput.current,
         }),
       );
 

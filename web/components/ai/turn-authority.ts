@@ -37,6 +37,7 @@ import {
   type SendPlan,
   type SendRefusal,
 } from "@/lib/ai/assistant/send-gate";
+import { describeImages } from "@/lib/ai/assistant/messages";
 import { readWriterContext, type WriterContext } from "@/lib/ai/assistant/writer-context";
 
 /**
@@ -239,6 +240,11 @@ export interface ProviderHopGuardDeps {
    * the agent's own list (the panel, persistence) keeps them.
    */
   omitMessageIds?: ReadonlySet<string>;
+  /**
+   * 2by.10: the selected model cannot read images, so each hop names them instead
+   * (`describeImages`). The agent's own list keeps them.
+   */
+  describeImages?: boolean;
 }
 
 /**
@@ -308,11 +314,15 @@ export function createProviderHopGuard(agent: object, deps: ProviderHopGuardDeps
         // The approved snapshot rides the run input. Replaced rather than merged: the
         // context this turn was authorised under is the whole context it may send.
         const omit = deps.omitMessageIds;
+        const kept =
+          omit && omit.size > 0
+            ? input.messages.filter((message) => !omit.has(message.id))
+            : input.messages;
         const authorizedInput = {
           ...input,
           ...(deps.context ? { context: [...deps.context] } : {}),
-          ...(omit && omit.size > 0
-            ? { messages: input.messages.filter((message) => !omit.has(message.id)) }
+          ...(kept !== input.messages || deps.describeImages
+            ? { messages: deps.describeImages ? describeImages(kept) : kept }
             : {}),
         };
         delegated = next.run(authorizedInput).subscribe(subscriber);

@@ -211,7 +211,14 @@ export function AssistantLiveConversation({
   routeLabel,
   onHasMessages,
 }: AssistantLiveConversationProps) {
-  const session = useAssistantSession({ threadId, routePath, routeLabel, historical: false });
+  const imageInput = useModelImageInput();
+  const session = useAssistantSession({
+    threadId,
+    routePath,
+    routeLabel,
+    historical: false,
+    imageInput,
+  });
   // HOST STATE, HOST HANDLERS. The Preview and the receipts are host surfaces, not
   // entries in the transcript -- see the note in `proposal-preview-card.tsx`.
   const proposals = useAssistantProposals();
@@ -236,7 +243,7 @@ export function AssistantLiveConversation({
   );
   // 2by.10. Only a composer submit carries files; cards and follow-ups send text alone.
   // A send refused as busy keeps the queue, an accepted one clears it.
-  const attach = useComposerAttachments(useModelImageInput());
+  const attach = useComposerAttachments(imageInput);
   const { ready, consume } = attach;
   const submit = useCallback(
     (text: string) => {

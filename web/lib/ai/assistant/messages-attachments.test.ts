@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "@ag-ui/client";
 
-import { toCanonical, toTransport, toUserContent } from "./messages";
+import { describeImages, toCanonical, toTransport, toUserContent } from "./messages";
 import type { AssistantMessageV1 } from "./records";
 
 const png = {
@@ -64,5 +64,30 @@ describe("attachments through the transport adapter (2by.10)", () => {
     } as AssistantMessageV1;
     delete (record as Partial<AssistantMessageV1>).attachments;
     expect(toTransport(record)).toEqual({ id: "m2", role: "user", content: "hi" });
+  });
+
+  it("replaces stored images with a named text line for a model that cannot read them", () => {
+    const history = [
+      { id: "m1", role: "user", content: toUserContent("What is this?", [png, csv]) },
+      { id: "m2", role: "assistant", content: "A roster." },
+      { id: "m3", role: "user", content: "thanks" },
+    ] as Message[];
+    expect(describeImages(history)).toEqual([
+      {
+        id: "m1",
+        role: "user",
+        content: [
+          { type: "text", text: "What is this?" },
+          { type: "text", text: "[image: ward.png]" },
+          {
+            type: "document",
+            source: { type: "data", value: csv.data, mimeType: "text/csv" },
+            metadata: { filename: "leave.csv" },
+          },
+        ],
+      },
+      history[1],
+      history[2],
+    ]);
   });
 });

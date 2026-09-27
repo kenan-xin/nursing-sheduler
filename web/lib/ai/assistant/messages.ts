@@ -84,6 +84,26 @@ export function toUserContent(
   ];
 }
 
+/**
+ * For a model that cannot read images: each stored image becomes the line
+ * `[image: <name>]`, so a thread with images still runs after a switch to a text-only
+ * model. Provider input only; the stored record and the panel keep the image.
+ */
+export function describeImages(messages: readonly Message[]): Message[] {
+  return messages.map((message) => {
+    if (message.role !== "user" || !Array.isArray(message.content)) return message;
+    if (!(message.content as Part[]).some((part) => part?.type === "image")) return message;
+    return {
+      ...message,
+      content: (message.content as Part[]).map((part) =>
+        part?.type === "image"
+          ? { type: "text", text: `[image: ${part.metadata?.filename ?? "attachment"}]` }
+          : part,
+      ),
+    } as Message;
+  });
+}
+
 function readToolCalls(message: Message): AssistantToolCallV1[] | null {
   const calls = (message as { toolCalls?: unknown }).toolCalls;
   if (!Array.isArray(calls) || calls.length === 0) return null;
