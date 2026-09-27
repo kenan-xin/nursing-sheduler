@@ -33,12 +33,28 @@ const CASES: [string, string[] | null][] = [
   ["Ben, Chloe or Dana?", ["Ben", "Chloe", "Dana"]],
   // (c) one-token options of one kind right before the "?"
   ["Did you mean Ben or Chloe?", ["Ben", "Chloe"]],
-  ["Should Ben work AM or PM?", ["AM", "PM"]],
-  ["Should the ratio be 1:4, 1:5 or 1:6?", ["1:4", "1:5", "1:6"]],
-  ["Should the limit be 5 or 6?", ["5", "6"]],
-  ["Should it start on 2026-11-05 or 2026-11-12?", ["2026-11-05", "2026-11-12"]],
-  ["Should it start on Monday or Tuesday?", ["Monday", "Tuesday"]],
-  ["Which shift is that on Ward 5, N or PM?", ["N", "PM"]],
+  ["Want him on AM or PM?", ["AM", "PM"]],
+  ["Which shift did you mean: AM or PM?", ["AM", "PM"]],
+  ["Which ratio do you want: 1:4, 1:5 or 1:6?", ["1:4", "1:5", "1:6"]],
+  ["Did you say 5 or 6?", ["5", "6"]],
+  ["Did you say 2026-11-05 or 2026-11-12?", ["2026-11-05", "2026-11-12"]],
+  ["Did you mean Monday or Tuesday?", ["Monday", "Tuesday"]],
+  // no card (re-review): comma before a 2-option "or", weekday mixed with a name, a title
+  // abbreviation, a yes/no opener with one-word options
+  ["Do you want to swap Ben with Chloe on Monday, or Dana?", null],
+  ["Which shift is that on Ward 5, N or PM?", null],
+  ["Got it, Ben or Chloe?", null],
+  ["Did you mean Monday or Dana?", null],
+  ["Ask Dr. Lim or Ben?", null],
+  ["Ask Dr Lim or Ben?", null],
+  ["Is that OK for Chloe or Dana?", null],
+  ["Does Ben have leave on Monday or Tuesday?", null],
+  ["Is Ben on leave Monday or Tuesday?", null],
+  ["Should Ben work AM or PM?", null],
+  ["Should the ratio be 1:4, 1:5 or 1:6?", null],
+  ["Should the limit be 5 or 6?", null],
+  ["Should it start on 2026-11-05 or 2026-11-12?", null],
+  ["Should it start on Monday or Tuesday?", null],
   // no card: shapes where the options are not clearly delimited (adversarial review)
   ["Should I move Ben or Chloe to nights?", null],
   ["Should Ben work AM or PM on Monday?", null],
@@ -101,7 +117,7 @@ describe("offerTextChoiceCard (09x8, 7xw)", () => {
 
   it("adds nothing when the turn already offered a card", () => {
     assistantActions.showChoices({ question: "Pick one", options: [], multiple: false }, 3);
-    offerTextChoiceCard("Should Ben work AM or PM?", 3);
+    offerTextChoiceCard("Want him on AM or PM?", 3);
     expect(useAssistantStore.getState().activeChoices?.question).toBe("Pick one");
 
     assistantActions.clearChoices();

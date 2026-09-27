@@ -16,13 +16,17 @@ const NOT_AN_OPTION =
   /^(?:do|does|did|is|are|was|were|can|could|will|would|shall|should|may|might|must|have|has|want|i|you|we|it|they|he|she|there|which|what|who|how|when|where|why|if|not|no|nothing|none|so|also|and|but|else|otherwise|something|anything|someone|anyone|other|ok|okay|sure|great|thanks|right|alright|yes|perfect|got)$/i;
 /** Shapes where the options are not clearly delimited: never a card. */
 const UNCLEAR =
-  /[&"\u201c\u201d]|(?:^|\s)['\u2018]|['\u2019](?=[\s?]|$)|\b(?:either|whether|neither|rather than)\b|\/or\b|\bor\//i;
+  /[&"“”]|(?:^|\s)['‘]|['’](?=[\s?]|$)|\b(?:either|whether|neither|rather than)\b|\/or\b|\bor\/|\b(?:Dr|Mr|Mrs|Ms|St)\.(?=\s)/i;
+/** A yes/no opener: with one-word options the question is likely yes/no ("Is that OK for Chloe or Dana?"). */
+const YES_NO_SHAPED = /^(?:is|are|does|do|has|have|can|could|will|would|should)\b/i;
 /** One-token option kinds; a mid-sentence choice needs every option to be one of the same. */
 const TOKEN_KINDS = [
   /^(?!I$)[A-Z]{1,3}\d?$/, // shift code: AM, PM, N, N2
   /^\d+(?:[:.]\d+)?$/, // number or ratio: 3, 7.5, 1:4
   /^\d{4}-\d{2}-\d{2}$|^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$/, // date: 2026-11-05, 5/11
-  /^[A-Z][a-z]+$/, // one capitalised word: Ben, Monday
+  /^(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day$/, // weekday, before names so never mixed
+  /^(?:January|February|March|April|May|June|July|August|September|October|November|December)$/,
+  /^[A-Z][a-z]+$/, // one capitalised word: Ben, Chloe
 ];
 /** A lower-case word: an option only when the whole sentence is the options (Nights or weekends?). */
 const LOWER_WORD = /^[a-z]+(?:-[a-z]+)*$/;
@@ -38,14 +42,16 @@ export function endingTextChoice(text: string): TextChoice | null {
   const plain = text.replace(/[*_`]/g, "").trim();
   const question =
     plain
-      .split(/(?<=[.!?]["'\u201d\u2019]?)\s+|\n+/)
+      .split(/(?<!\b(?:Dr|Mr|Mrs|Ms|St)\.)(?<=[.!?]["'”’]?)\s+|\n+/)
       .at(-1)
       ?.trim() ?? "";
   if (!question.endsWith("?")) return null;
   if (!/\bor\b/i.test(question))
     return YES_NO_OPENER.test(question) ? { question, options: ["Yes", "No"] } : null;
   const options = namedOptions(question);
-  return options && { question, options };
+  if (!options || (YES_NO_SHAPED.test(question) && options.every((o) => !o.includes(" "))))
+    return null;
+  return { question, options };
 }
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean);
@@ -104,6 +110,8 @@ function inlineTokens(body: string): string[] | null {
       before = prev.at(-2);
     }
   }
+  // "... on Monday, or Dana": a comma before a two-option "or" leaves the first unclear.
+  if (options.length === 2 && head.includes(",")) return null;
   // A same-kind token before the first option means a longer name or code: not delimited.
   if (before !== undefined && kindOf(before) === kind) return null;
   if (!options.every((t) => kindOf(t) === kind && !NOT_AN_OPTION.test(t))) return null;
