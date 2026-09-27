@@ -1525,6 +1525,13 @@ const GOVERNED: GovernedPath[] = [
     properties: "base",
     note: "class {2} -- STORYBOOK (w0e.2). The hidden workbench config directory. Oxlint walks dot-directories; this row proves the glob actually reaches it",
   },
+  {
+    path: "components/ai/dock-card.stories.tsx",
+    exempt: [],
+    acquisition: [],
+    properties: "base",
+    note: "class {1,2} -- STORYBOOK (w0e.4). A story inside the AI owner's tree: the later Storybook override must win over the AI-owner override, so it keeps every acquisition family, no assistant exemption and the base property contract",
+  },
 ];
 
 function effective(path: string, rule: string): RuleValue | undefined {
