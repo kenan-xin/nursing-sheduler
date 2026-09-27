@@ -21,7 +21,10 @@
     "test:ast-grep": "ast-grep test",
     "eval": "EVAL_GIT_SHA=$(git rev-parse --short HEAD) vitest run -c vitest.eval.config.ts",
     "eval:smoke": "EVAL_TAGS=smoke EVAL_TRIALS=1 pnpm eval",
-    "eval:baseline": "EVAL_PROMOTE=1 pnpm eval"
+    "eval:baseline": "EVAL_PROMOTE=1 pnpm eval",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build",
+    "test:stories": "vitest run -c vitest.storybook.config.ts"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.57",
@@ -59,6 +62,8 @@
     "@ast-grep/cli": "0.45.1",
     "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.61.1",
+    "@storybook/addon-vitest": "^10.6.0",
+    "@storybook/nextjs-vite": "^10.6.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -67,16 +72,20 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/browser-playwright": "4.1.10",
     "axe-core": "^4.12.1",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
     "lefthook": "^2.1.10",
     "oxfmt": "^0.59.0",
     "oxlint": "^1.74.0",
+    "playwright": "1.61.1",
     "postcss": "^8.5.23",
     "shadcn": "^4.13.0",
+    "storybook": "^10.6.0",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vite": "^8.1.4",
     "vitest": "^4.1.10"
   },
   "engines": {
