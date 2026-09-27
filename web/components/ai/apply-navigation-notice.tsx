@@ -111,6 +111,9 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
     [navigate, nameFor],
   );
 
+  // An unmount also voids an in-flight show(): its navigation can settle later.
+  useEffect(() => () => void showToken.current++, []);
+
   useEffect(() => {
     if (outcome?.kind === "applied" && handled.current !== outcome.receiptId) {
       handled.current = outcome.receiptId;

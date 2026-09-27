@@ -19,6 +19,39 @@ export const REGRESSION_CASES: EvalCase[] = [
     expect: { noProposal: true, choicesFromStaff: true },
   },
   {
+    id: "grounding-state-question",
+    tags: ["grounding"],
+    description:
+      "v1 reject-no-change: a question about the schedule is answered, not turned into an edit.",
+    today: "2026-10-28",
+    route: "/staff",
+    seed: {
+      build: () => ({ ...small(), staffGroups: [{ id: "Seniors", members: ["ana", "ben"] }] }),
+    },
+    user: { turns: ["Is Ben in the Seniors group?"], onPreview: "ignore" },
+    expect: { noProposal: true, judge: ["Says yes, Ben is in the Seniors group."] },
+  },
+  {
+    id: "reg-reject-then-narrower",
+    tags: ["regression"],
+    description:
+      "v1 reject-then-narrower-edit: after a rejected Preview, the new change is only the narrower one.",
+    today: "2026-10-28",
+    route: "/shift-requests",
+    seed: { build: small },
+    user: {
+      turns: ["Give Ana and Ben Friday 6 November off.", "No, only Ana."],
+      onPreview: "reject",
+    },
+    expect: {
+      proposalOps: [{ type: "set_off_request", personId: "ana" }],
+      proposalCheck: (ops) =>
+        ops.some((op) => JSON.stringify(op).includes('"ben"'))
+          ? "the last proposal still gives Ben the day off"
+          : null,
+    },
+  },
+  {
     id: "reg-empty-reply-after-infeasible",
     tags: ["regression", "smoke"],
     description: "A failed run must end in a reply and an option card.",
