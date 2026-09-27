@@ -127,6 +127,14 @@ export interface AssistantThreadV1 {
   updatedAt: string;
 }
 
+/** bead ypo: the rolling summary of a thread's older messages. */
+export interface ThreadSummaryV1 {
+  text: string;
+  /** Every message with seq <= throughSeq is covered by `text` and is not sent. */
+  throughSeq: number;
+  createdAt: string;
+}
+
 /** Lifecycle of one provider turn. `detached` is a terminal LOCAL settlement. */
 export type AssistantTurnState =
   | "preparing"
