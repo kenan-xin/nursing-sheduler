@@ -355,7 +355,9 @@ const softenHardRequest: Builder = (ctx, findings, situation) => {
             c.weight === cell.weight &&
             shiftOf(c) === shiftOf(cell),
         )
-        .map(at),
+        .map(at)
+        // An imported request can sit outside the roster range (at() === -1).
+        .filter((i) => i >= 0),
     );
     while (run.has(first - 1)) first--;
     while (run.has(last + 1)) last++;

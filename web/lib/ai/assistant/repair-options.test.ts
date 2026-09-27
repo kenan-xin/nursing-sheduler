@@ -2315,4 +2315,13 @@ describe("unexplained-path guesses (bead nursing-sheduler-spdk, l3m fixtures)", 
       expect.objectContaining({ personId: "n1", startDate: "2026-11-02", endDate: "2026-11-03" }),
     ]);
   });
+
+  it("ignores an imported request dated outside the roster when it finds the block", () => {
+    const state = neverNightRest();
+    state.reqData = [...state.reqData, never("n1", "2026-10-31")];
+    const soften = unexplained(state).find((o) => o.repairId === "soften_hard_request");
+    expect(soften?.operations).toEqual([
+      expect.objectContaining({ personId: "n1", startDate: "2026-11-01", endDate: "2026-11-07" }),
+    ]);
+  });
 });
