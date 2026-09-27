@@ -38,7 +38,22 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-27.5";
+export const PLAYBOOK_VERSION = "2026-09-27.6";
+
+/**
+ * How every `offer_choices` option must read (bead tpt2). The card is a pick, not a prompt:
+ * each option is a complete answer the user can choose without reading anything else, and a
+ * numeric question offers the concrete numbers with their unit while the card's own
+ * free-text box carries any other answer. Never a bare action such as "Set a number". The
+ * `offer_choices` tool description carries these lines, and the tool refuses a label listed
+ * in `PLACEHOLDER_OPTION_LABELS` (use-choice-tools) so the rule has a runtime edge too.
+ */
+export const CHOICE_OPTION_RULES: readonly string[] = [
+  "Every option is a complete, self-explanatory answer the user can pick on its own, not an action or a prompt for more: write the answer itself.",
+  "When the question needs a number, offer the concrete numbers with their unit as the options, for example '1 senior every night' and '2 seniors every night'; the card's free-text box already carries any other answer.",
+  "Never offer a placeholder such as 'Set a number', 'Choose a value', 'Custom', 'Other value' or 'Enter a number'.",
+  "Never re-ask a question the user already answered in this thread; use their earlier answer.",
+];
 
 /** Said on the Preview and in the reply whenever a change relaxes a rest rule. */
 export const REST_PRACTICE_WARNING =

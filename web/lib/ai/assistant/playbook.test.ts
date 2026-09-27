@@ -8,6 +8,7 @@ import { CAPABILITY_ENTRIES } from "@/lib/capability/help-content";
 import { ASSISTANT_COMMAND_TYPES } from "@/lib/proposal/commands";
 import { paidMinutesFor } from "@/components/entity-editor/core";
 import {
+  CHOICE_OPTION_RULES,
   FEASIBILITY_INSTRUCTIONS,
   MAX_DAILY_WORKING_MINUTES,
   PLAYBOOK_VERSION,
@@ -287,6 +288,26 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(help?.nurseFacingSummary).not.toMatch(/cannot yet create pairing/);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-27.5");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-27.6");
+  });
+});
+
+describe("choice cards carry concrete answers (tpt2)", () => {
+  it("tells the model to write each option as a complete answer with concrete values", () => {
+    const text = CHOICE_OPTION_RULES.join(" ");
+    expect(text).toMatch(/complete, self-explanatory answer/);
+    expect(text).toMatch(/concrete numbers with their unit/);
+    expect(text).toMatch(/free-text box/);
+    expect(text).toMatch(/'Set a number'/);
+    expect(text).toMatch(/'Choose a value'/);
+    expect(text).toMatch(/'Custom'/);
+    expect(text).toMatch(/'Other value'/);
+    expect(text).toMatch(/'Enter a number'/);
+  });
+
+  it("forbids re-asking a question the user already answered", () => {
+    expect(CHOICE_OPTION_RULES.join(" ")).toMatch(
+      /Never re-ask a question the user already answered/,
+    );
   });
 });

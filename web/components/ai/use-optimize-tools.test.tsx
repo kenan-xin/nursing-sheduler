@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
 import { useAuthorityStore, useHotStore } from "@/lib/store";
 import { INITIAL_OPTIMIZE_RUN_VIEW, type OptimizeRunView } from "@/lib/optimize/run-view";
@@ -303,5 +303,42 @@ describe("get_optimize_result", () => {
     expect(summary.rosterSaved).toBe(true);
     expect(summary.score).toBe(42);
     expect(summary.guidance).toMatch(/Open & adjust roster/);
+  });
+
+  describe("after an assistant-started run made a roster (cvkv)", () => {
+    const done = view({ lifecycle: "completed", outcome: "feasible", jobId: "opt_9" });
+
+    it("says the app is opening the Roster page", () => {
+      const summary = summarizeOptimizeRun(done, true, "started", false, "opening");
+      expect(summary.guidance).toMatch(/opening it on the Roster page/);
+      expect(summary.guidance).not.toMatch(/Open & adjust roster/);
+    });
+
+    it("says the Roster page is open once the screen has moved there", async () => {
+      useRunRequestStore.setState({ last: "started" });
+      act(() => assistantActions.setRunFollowUp("opened"));
+      const summary = (await tool("get_optimize_result").handler({}, {})) as {
+        status: string;
+        rosterOpened: boolean;
+        guidance: string;
+      };
+      expect(summary.status).toBe("idle");
+      expect(summary.rosterOpened).toBe(true);
+      expect(summary.guidance).toMatch(/opened it on the Roster page/);
+      expect(summary.guidance).not.toMatch(/request_optimize_run/);
+    });
+
+    it("says the user stayed to keep an unsaved edit", () => {
+      const summary = summarizeOptimizeRun(done, true, "started", false, "stayed");
+      expect(summary.rosterOpened).toBe(false);
+      expect(summary.guidance).toMatch(/chose to stay/);
+      expect(summary.guidance).toMatch(/Open & adjust roster/);
+    });
+
+    it("says the Roster page could not be opened", () => {
+      const summary = summarizeOptimizeRun(done, true, "started", false, "failed");
+      expect(summary.guidance).toMatch(/could not be opened/);
+      expect(summary.guidance).toMatch(/Open & adjust roster/);
+    });
   });
 });

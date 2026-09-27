@@ -188,6 +188,16 @@ export interface ChoiceOffer extends ChoiceQuestion {
   moreQuestions?: readonly ChoiceQuestion[];
 }
 
+/** See `AssistantUiState.runFollowUp`. */
+export type RunFollowUp =
+  | "requested"
+  | "running"
+  | "opening"
+  | "opened"
+  | "stayed"
+  | "failed"
+  | null;
+
 export interface AssistantUiState {
   /** False until the durable settings row has been read at least once. */
   hydrated: boolean;
@@ -254,6 +264,13 @@ export interface AssistantUiState {
    * the user already stopped. In memory only; a reload has no live card.
    */
   activeRunRequest: { turnEpoch: number } | null;
+  /**
+   * Where the run the user started from the run card is, so its roster can be opened
+   * when it finishes (`use-open-roster-after-run.ts`). `requested` until the run goes
+   * live, `running` until it ends, then how opening the Roster page went. `null` for
+   * no such run, or one that ended without a roster. In memory only.
+   */
+  runFollowUp: RunFollowUp;
   /**
    * The live "Swap shifts?" card from `prepare_roster_swap`, stamped with the turn that
    * asked for it. Same authority rule as `activeRunRequest`: after an interruption it
@@ -326,6 +343,7 @@ const INITIAL: AssistantUiState = {
   activeProposal: null,
   activeDiagnostic: null,
   activeRunRequest: null,
+  runFollowUp: null,
   activeRosterChange: null,
   rosterChangeApplying: false,
   rosterChangeNotice: null,
@@ -1163,6 +1181,10 @@ export const assistantActions = {
   /** Dismiss the run card: Run was pressed, or the user said not now. */
   clearRunRequest(): void {
     useAssistantStore.setState({ activeRunRequest: null });
+  },
+
+  setRunFollowUp(runFollowUp: RunFollowUp): void {
+    useAssistantStore.setState({ runFollowUp });
   },
 
   /**
