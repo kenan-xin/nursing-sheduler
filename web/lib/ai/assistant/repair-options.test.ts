@@ -75,7 +75,7 @@ const conflictingNights = (outerSkillMix = false): ScenarioUiState =>
     }),
   });
 
-/** ruleTooStrict, but the night cap binds ALL, so a borrowed nurse would inherit it. */
+/** ruleTooStrict, but the night cap binds ALL: a cap-only shortfall, so no borrow is offered. */
 const capOnAll = (): ScenarioUiState => {
   const base = SCENARIOS.ruleTooStrict();
   return {
@@ -133,8 +133,7 @@ describe("rankRepairOptions", () => {
         const result = applyAssistantCommands(state, o.operations);
         expect(result.ok, `${name}/${o.repairId}: ${JSON.stringify(result)}`).toBe(true);
       }
-      // A ward only a whole-period borrow fixed has no repair until Task 19's cover (d582).
-      if (findStaffingShortfalls(state).length === 0 || name === "tooFewNurses") continue;
+      if (findStaffingShortfalls(state).length === 0) continue;
       const [top] = options;
       expect(top?.operations.length, name).toBeGreaterThan(0);
       const after = applyAssistantCommands(state, top.operations);
@@ -143,46 +142,34 @@ describe("rankRepairOptions", () => {
     }
   });
 
-  it("borrows a nurse in the needed group, off outside the loan and pinned to the short night", () => {
+  it("borrow option is chat-enforced, and books the short shift in the needed group", () => {
     const borrow = rank().find((o) => o.repairId === "borrow_temporary_nurse");
-    expect(borrow).toMatchObject({ confirmation: "lending_ward", enforcedBy: "host_question" });
-    const name = "Borrowed nurse 1";
+    expect(borrow).toMatchObject({ confirmation: "lending_ward", enforcedBy: "chat" });
     expect(borrow?.operations).toEqual([
-      { type: "add_person", name, groups: ["RN"] },
       {
-        type: "set_off_request",
-        personId: name,
-        startDate: "2026-11-01",
-        endDate: "2026-11-02",
-        weight: "must",
-      },
-      {
-        type: "set_off_request",
-        personId: name,
-        startDate: "2026-11-04",
-        endDate: "2026-11-07",
-        weight: "must",
-      },
-      {
-        type: "set_shift_request",
-        personId: name,
+        type: "add_temporary_cover",
+        name: "Borrowed nurse 1 (another ward)",
+        date: "2026-11-03",
         shiftType: "N",
-        startDate: "2026-11-03",
-        endDate: "2026-11-03",
-        weight: "must",
+        groups: ["RN"],
       },
     ]);
+    const asked = borrow?.needsFromUser.join(" ") ?? "";
+    expect(asked).toMatch(/name/i);
+    expect(asked).toMatch(/lend/i);
   });
 
-  it("picks a free placeholder name", () => {
-    const base = SCENARIOS.onlyRnOnLeave();
-    const state = { ...base, staff: [...base.staff, ...people("Borrowed nurse 1")] };
-    const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse");
-    expect(borrow?.operations[0]).toEqual({
-      type: "add_person",
-      name: "Borrowed nurse 2",
-      groups: ["RN"],
-    });
+  it("books covers only: no roster person, no pin and no rule change", () => {
+    // A cover is a staffing credit the reads apply (d582), never a solver person, so the
+    // option touches no roster cell and inherits no ward rule.
+    const state = SCENARIOS.onlyRnOnLeave();
+    const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse")!;
+    for (const op of borrow.operations) expect(op.type).toBe("add_temporary_cover");
+    const applied = applyAssistantCommands(state, borrow.operations);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    expect(applied.next.staff).toEqual(state.staff);
+    expect(applied.next.temporaryCover).toHaveLength(1);
+    expect(findStaffingShortfalls(applied.next)).toEqual([]);
   });
 
   it("offers no borrow option when the skill group is unknown", () => {
@@ -201,7 +188,9 @@ describe("rankRepairOptions", () => {
     expect(ids).toContain("ask_nurse_on_leave");
   });
 
-  it("offers no borrow option when a contracted-hours rule would bind the borrowed nurse", () => {
+  it("offers the cover even when a hard count rule names the whole ward", () => {
+    // A cover is not a solver person, so no count rule -- contracted hours or cap -- binds
+    // her: the loan's count-narrowing is gone (d582).
     const base = SCENARIOS.tooFewNurses();
     const state: ScenarioUiState = {
       ...base,
@@ -218,12 +207,24 @@ describe("rankRepairOptions", () => {
         ],
       },
     };
-    expect(rank(state).map((o) => o.repairId)).not.toContain("borrow_temporary_nurse");
+    const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse");
+    expect(borrow?.operations.every((op) => op.type === "add_temporary_cover")).toBe(true);
+    expect(borrow && isSafeOption(state, borrow)).toBe(true);
   });
 
-  it("does not offer one-person fixes for a gap of two", () => {
+  it("cap-only shortfall offers no borrow", () => {
+    // ruleTooStrict is short only through a hard cap on nights, with no date short at all.
+    // A cover credits one (date, shift), so it cannot fix a cap (d582).
+    const state = SCENARIOS.ruleTooStrict();
+    expect(findStaffingShortfalls(state).every((f) => f.kind === "cap_short")).toBe(true);
+    expect(rank(state).map((o) => o.repairId)).not.toContain("borrow_temporary_nurse");
+    expect(rank(capOnAll()).map((o) => o.repairId)).not.toContain("borrow_temporary_nurse");
+  });
+
+  it("two short slots give two covers, one per shift", () => {
     // With Ana on leave on the 5th, the night requirement alone is 1 short, but the day
-    // (night 3 + day 1 from 2 free) is 2 short. The date-level gap must win.
+    // (night 3 + day 1 from 2 free) is 2 short. The date-level gap must win, and each of its
+    // two shifts gets its own cover, named apart so one nurse is not on both.
     const base = SCENARIOS.understaffedNight();
     const state = { ...base, reqData: [leave("ana", "05")] };
     const options = rank(state);
@@ -231,7 +232,25 @@ describe("rankRepairOptions", () => {
     expect(ids).not.toContain("ask_nurse_on_leave");
     expect(ids).not.toContain("run_one_short");
     const borrow = options.find((o) => o.repairId === "borrow_temporary_nurse");
-    expect(borrow?.operations.filter((op) => op.type === "add_person")).toHaveLength(2);
+    expect(borrow?.operations).toEqual([
+      {
+        type: "add_temporary_cover",
+        name: "Borrowed nurse 1 (another ward)",
+        date: "2026-11-05",
+        shiftType: "N",
+        groups: [],
+      },
+      {
+        type: "add_temporary_cover",
+        name: "Borrowed nurse 2 (another ward)",
+        date: "2026-11-05",
+        shiftType: "D",
+        groups: [],
+      },
+    ]);
+    const applied = applyAssistantCommands(state, borrow!.operations);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    expect(findStaffingShortfalls(applied.next)).toEqual([]);
   });
 
   it("never lowers a skill-mix requirement", () => {
@@ -539,7 +558,9 @@ describe("rankRepairOptions", () => {
     }
   });
 
-  it("offers no whole-period borrow: with no hard day off she would read as a new hire (d582)", () => {
+  it("covers every short date with one nurse when the ward is short all period", () => {
+    // rn1 on leave all 7 days: a cover is a credit, not a hire, so one nurse covering the
+    // whole period is a real answer (the whole-period LOAN is gone, d582).
     const base = SCENARIOS.onlyRnOnLeave();
     const state: ScenarioUiState = {
       ...base,
@@ -550,7 +571,16 @@ describe("rankRepairOptions", () => {
         kind: "leave" as const,
       })),
     };
-    expect(rank(state).find((o) => o.repairId === "borrow_temporary_nurse")).toBeUndefined();
+    const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse");
+    expect(borrow?.operations).toHaveLength(7);
+    const names = borrow?.operations.map((op) =>
+      op.type === "add_temporary_cover" ? op.name : "not a cover",
+    );
+    expect(new Set(names)).toEqual(new Set(["Borrowed nurse 1 (another ward)"]));
+    expect(borrow?.title).toContain("7 days from");
+    const applied = applyAssistantCommands(state, borrow!.operations);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    expect(findStaffingShortfalls(applied.next)).toEqual([]);
   });
 });
 
@@ -1006,12 +1036,42 @@ describe("isSafeOption", () => {
     expect(isSafeOption(state, option(partial))).toBe(true);
   });
 
-  it("isSafeOption accepts a borrow without a temporary flag (d582)", () => {
-    const option_ = rank(rn).find((o) => o.repairId === "borrow_temporary_nurse")!;
-    const [add] = option_.operations;
-    expect(add.type).toBe("add_person");
-    expect(add).not.toHaveProperty("temporary");
-    expect(isSafeOption(rn, option_)).toBe(true);
+  it("isSafeOption accepts the borrow option's covers (d582)", () => {
+    const borrow = rank(rn).find((o) => o.repairId === "borrow_temporary_nurse")!;
+    expect(borrow.operations[0].type).toBe("add_temporary_cover");
+    expect(isSafeOption(rn, borrow)).toBe(true);
+  });
+
+  it("isSafeOption rejects a flagged cover", () => {
+    const state = SCENARIOS.onlyRnOnLeave();
+    const coverOp = (patch: Partial<Extract<Op, { type: "add_temporary_cover" }>> = {}): Op => ({
+      type: "add_temporary_cover",
+      name: "Borrowed nurse 1 (another ward)",
+      date: "2026-11-03",
+      shiftType: "N",
+      groups: ["RN"],
+      ...patch,
+    });
+    const safe = (patch = {}, on: ScenarioUiState = state) =>
+      isSafeOption(
+        on,
+        option({ repairId: "borrow_temporary_nurse", operations: [coverOp(patch)] }),
+      );
+    expect(safe()).toBe(true);
+    expect(safe({ date: "2026-12-03" })).toBe(false);
+    expect(safe({ date: "2026-11-32" })).toBe(false);
+    expect(safe({ shiftType: "OFF" })).toBe(false);
+    expect(safe({ shiftType: "X" })).toBe(false);
+    expect(safe({ groups: ["ghost"] })).toBe(false);
+    // A date no requirement covers credits nobody, so the cover fixes nothing.
+    const nightOnly = ward({
+      staff: people("ana", "ben"),
+      cardsByKind: cards({
+        requirements: [requirement("night", "N", 1, { date: ["2026-11-05"] })],
+      }),
+    });
+    expect(safe({ groups: [] }, nightOnly)).toBe(false);
+    expect(safe({ groups: [], date: "2026-11-05" }, nightOnly)).toBe(true);
   });
 });
 
@@ -1119,7 +1179,7 @@ describe("review fixes (2026-09-24)", () => {
     expect(rank(two).map((o) => o.repairId)).not.toContain("soften_hard_request");
   });
 
-  it("books a borrowed nurse only on the short dates, off on every day between them", () => {
+  it("books a cover on each busy date, and nothing on the days between", () => {
     const state = ward({
       staff: people("ana", "ben", "cara"),
       cardsByKind: cards({
@@ -1133,11 +1193,21 @@ describe("review fixes (2026-09-24)", () => {
       }),
     });
     const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse");
-    const off = borrow?.operations.filter((op) => op.type === "set_off_request");
-    expect(off?.map((op) => [op.startDate, op.endDate])).toEqual([
-      ["2026-11-01", "2026-11-01"],
-      ["2026-11-03", "2026-11-05"],
-      ["2026-11-07", "2026-11-07"],
+    expect(borrow?.operations).toEqual([
+      {
+        type: "add_temporary_cover",
+        name: "Borrowed nurse 1 (another ward)",
+        date: "2026-11-02",
+        shiftType: "N",
+        groups: [],
+      },
+      {
+        type: "add_temporary_cover",
+        name: "Borrowed nurse 1 (another ward)",
+        date: "2026-11-06",
+        shiftType: "N",
+        groups: [],
+      },
     ]);
     expect(borrow?.title).toMatch(/Nov 2, 2026 and .*Nov 6, 2026$/);
     expect(borrow?.confirmationQuestion).toMatch(/Nov 2, 2026 and .*Nov 6, 2026\?$/);
@@ -1707,13 +1777,21 @@ describe("skill-mix repairs (bead nursing-sheduler-2ti)", () => {
   const ranked = () =>
     rankRepairOptions(state(), findStaffingShortfalls(state()), { runInfeasible: true });
 
-  it("borrows a nurse into the skill-mix group, then asks the RN on leave", () => {
+  it("skill-mix shortfall cover carries the entry's group", () => {
     const options = ranked();
     expect(options.map((o) => o.repairId)).toEqual([
       "borrow_temporary_nurse",
       "ask_nurse_on_leave",
     ]);
-    expect(options[0].operations[0]).toMatchObject({ type: "add_person", groups: ["RN"] });
+    expect(options[0].operations).toEqual([
+      {
+        type: "add_temporary_cover",
+        name: "Borrowed nurse 1 (another ward)",
+        date: "2026-11-03",
+        shiftType: "N",
+        groups: ["RN"],
+      },
+    ]);
     expect(options[0].needsFromUser.join(" ")).toMatch(/qualif/i);
   });
 
@@ -1740,29 +1818,31 @@ describe("skill-mix repairs (bead nursing-sheduler-2ti)", () => {
       }),
     });
     const borrow = rank(two).find((o) => o.repairId === "borrow_temporary_nurse");
-    expect(borrow?.operations.filter((op) => op.type === "add_person")).toEqual([
-      { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"] },
-      { type: "add_person", name: "Borrowed nurse 2", groups: ["Senior"] },
-    ]);
-    // Each nurse is free on her own group's date only: hers, not the other group's.
-    expect(
-      borrow?.operations
-        .filter((op) => op.type === "set_off_request")
-        .map((op) => [op.personId, op.startDate, op.endDate]),
-    ).toEqual([
-      ["Borrowed nurse 1", "2026-11-01", "2026-11-02"],
-      ["Borrowed nurse 1", "2026-11-04", "2026-11-07"],
-      ["Borrowed nurse 2", "2026-11-01", "2026-11-04"],
-      ["Borrowed nurse 2", "2026-11-06", "2026-11-07"],
+    // Each nurse covers her own group's date only: hers, not the other group's.
+    expect(borrow?.operations).toEqual([
+      {
+        type: "add_temporary_cover",
+        name: "Borrowed nurse 1 (another ward)",
+        date: "2026-11-03",
+        shiftType: "N",
+        groups: ["RN"],
+      },
+      {
+        type: "add_temporary_cover",
+        name: "Borrowed nurse 2 (another ward)",
+        date: "2026-11-05",
+        shiftType: "N",
+        groups: ["Senior"],
+      },
     ]);
     const applied = applyAssistantCommands(two, borrow!.operations);
     if (!applied.ok) throw new Error(applied.rejection.message);
     expect(findStaffingShortfalls(applied.next)).toEqual([]);
   });
 
-  it("borrows one nurse per short skill group on the same date", () => {
+  it("a gap of 2 gives two covers on one slot", () => {
     // Night needs 4 with 2 RNs and 2 Seniors, who share nobody: with one of each on leave
-    // on the 3rd both groups are short that day, so both need their own borrowed nurse.
+    // on the 3rd both groups are short that day, so both get their own cover on the night.
     const both = ward({
       staff: people("rn1", "rn2", "sen1", "sen2", "en1", "en2"),
       staffGroups: [
@@ -1783,9 +1863,21 @@ describe("skill-mix repairs (bead nursing-sheduler-2ti)", () => {
       }),
     });
     const borrow = rank(both).find((o) => o.repairId === "borrow_temporary_nurse");
-    expect(borrow?.operations.filter((op) => op.type === "add_person")).toEqual([
-      { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"] },
-      { type: "add_person", name: "Borrowed nurse 2", groups: ["Senior"] },
+    expect(borrow?.operations).toEqual([
+      {
+        type: "add_temporary_cover",
+        name: "Borrowed nurse 1 (another ward)",
+        date: "2026-11-03",
+        shiftType: "N",
+        groups: ["RN"],
+      },
+      {
+        type: "add_temporary_cover",
+        name: "Borrowed nurse 2 (another ward)",
+        date: "2026-11-03",
+        shiftType: "N",
+        groups: ["Senior"],
+      },
     ]);
     const applied = applyAssistantCommands(both, borrow!.operations);
     if (!applied.ok) throw new Error(applied.rejection.message);

@@ -8,13 +8,10 @@ people:
     - id: rn1
     - id: en1
     - id: en2
-    - id: Borrowed nurse 1
-      history: []
   groups:
     - id: RN
       members:
         - rn1
-        - Borrowed nurse 1
 shiftTypes:
   items:
     - id: D
@@ -40,6 +37,9 @@ preferences:
     requiredNumPeople: 1
     qualifiedPeople:
       - RN
+    requiredNumPeopleOverrides:
+      - - 2026-11-03
+        - 0
     date:
       - ALL
     weight: -1
@@ -47,39 +47,4 @@ preferences:
     person: rn1
     date: 2026-11-03
     shiftType: LEAVE
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-01
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-02
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-04
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-05
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-06
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-07
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-03
-    shiftType: N
     weight: .inf
