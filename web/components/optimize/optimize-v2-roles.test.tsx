@@ -144,6 +144,7 @@ function renderOptions(over: Partial<React.ComponentProps<typeof RunOptionsForm>
       prettify
       anonymize
       timeout="300"
+      timeoutBounds={{ default: 300, minimum: 1, maximum: 3600 }}
       timeoutError={null}
       optionsDisabled={false}
       submitEnabled

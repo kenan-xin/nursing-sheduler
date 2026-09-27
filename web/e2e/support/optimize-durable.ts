@@ -2038,6 +2038,7 @@ export interface OptimizeRouteConfig {
   onSubmit?: (route: Route) => Promise<void> | void;
   /** `GET /api/optimize/{id}` poll. Defaults to a completed job. */
   onPoll?: (route: Route) => Promise<void> | void;
+  onOptions?: (route: Route) => Promise<void> | void;
   /** `GET /api/optimize/{id}/events` SSE. Defaults to a full happy-path stream. */
   onEvents?: (route: Route) => Promise<void> | void;
   /** `GET /api/optimize/{id}/xlsx`. Defaults to a valid empty workbook. */
@@ -2144,6 +2145,17 @@ export async function installOptimizeRoutes(
     }
     if (path === "/api/health") {
       return json(route, 200, { status: "ok", appVersion: "0.1.0" });
+    }
+    // The screen's per-visit timeout-options probe (2by.7). Answered before the
+    // `/api/optimize/{id}` match below, which would otherwise read "options" as a
+    // job id and count it as a poll. Default: a backend without the endpoint, so
+    // the screen keeps its legacy timeout.
+    if (path === "/api/optimize/options" && method === "GET") {
+      return config.onOptions
+        ? config.onOptions(route)
+        : json(route, 404, {
+            error: { code: "backend_route_unsupported", message: "unsupported" },
+          });
     }
     if (path === "/api/optimize" && method === "POST") {
       return config.onSubmit ? config.onSubmit(route) : json(route, 202, runningJob());

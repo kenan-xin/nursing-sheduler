@@ -15,7 +15,7 @@
 
 import { selectReady, useAssistantStore } from "@/lib/ai/assistant/store";
 import { resolveFeatureGates } from "@/lib/capability/gates";
-import type { CapabilityContext } from "@/lib/capability/resolve";
+import { resolveScreenName, type CapabilityContext } from "@/lib/capability/resolve";
 import type { CapabilityRegistryStamp } from "@/lib/capability/types";
 import { useModeStore } from "@/lib/mode/mode";
 
@@ -34,4 +34,18 @@ export function readCapabilityContext(stamp?: CapabilityRegistryStamp): Capabili
     gates: resolveFeatureGates({ assistantReady: selectReady(assistantState) }),
     ...(stamp ? { stamp } : {}),
   };
+}
+
+/**
+ * The SIDEBAR's own names for a set of capabilities, in the order given, with any
+ * that cannot be opened in the current context dropped. A caller shows a screen's
+ * name or nothing -- never a raw capability id. One live context is read for the
+ * whole list, so every name in one answer is resolved against the same mode and
+ * gates.
+ */
+export function screenNamesFor(capabilityIds: readonly string[]): string[] {
+  const context = readCapabilityContext();
+  return capabilityIds
+    .map((capabilityId) => resolveScreenName(capabilityId, context))
+    .filter((name): name is string => name !== null);
 }

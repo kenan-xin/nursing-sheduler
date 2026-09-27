@@ -24,6 +24,8 @@
 import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 import type { ProposalDiff } from "@/lib/proposal/diff";
 import type { ProductOutcomeView } from "@/lib/optimize/outcome-mapping";
+import type { OptimizeTimeoutOptions } from "@/app/api/optimize/options/validate";
+import { clampTimeoutSeconds } from "@/lib/query/optimize-options";
 
 /** The schema version of the durable row. Bump on any shape change. */
 export const DIAGNOSTIC_SEARCH_SCHEMA_VERSION = 1 as const;
@@ -31,7 +33,10 @@ export const DIAGNOSTIC_SEARCH_SCHEMA_VERSION = 1 as const;
 /** The hard ceiling on submitted candidates per search (tech-plan "Diagnostic budget"). */
 export const MAX_DIAGNOSTIC_CANDIDATES = 5;
 
-/** The per-candidate solver timeout (tech-plan "Diagnostic budget"). */
+/**
+ * The per-candidate solver timeout (tech-plan "Diagnostic budget"). A fixed value the
+ * record clamps into the deployment's bounds at open — see `OpenDiagnosticSearchInput.timeoutBounds`.
+ */
 export const DIAGNOSTIC_CANDIDATE_TIMEOUT_SECONDS = 90;
 
 /**
@@ -178,6 +183,12 @@ export interface OpenDiagnosticSearchInput {
   compare: boolean;
   /** When the parent's server evidence expires, so the search knows it is stale after. */
   parentExpiresAt: string | null;
+  /**
+   * The deployment's accepted solver-timeout bounds (`GET /optimize/options`). The fixed
+   * per-candidate timeout is clamped into them, because a deployment whose bounds exclude
+   * it rejects the run outright. Absent => the legacy bounds apply.
+   */
+  timeoutBounds?: OptimizeTimeoutOptions;
   now: Date;
 }
 
@@ -196,7 +207,10 @@ export function openDiagnosticSearch(input: OpenDiagnosticSearchInput): Diagnost
     globalGeneration: input.globalGeneration,
     scenarioGeneration: input.scenarioGeneration,
     compare: input.compare,
-    candidateTimeoutSeconds: DIAGNOSTIC_CANDIDATE_TIMEOUT_SECONDS,
+    candidateTimeoutSeconds: clampTimeoutSeconds(
+      DIAGNOSTIC_CANDIDATE_TIMEOUT_SECONDS,
+      input.timeoutBounds,
+    ),
     maxCandidates: MAX_DIAGNOSTIC_CANDIDATES,
     status: "open",
     candidates: [],

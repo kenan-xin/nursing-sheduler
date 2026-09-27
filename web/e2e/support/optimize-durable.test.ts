@@ -1441,7 +1441,7 @@ describe("accepted-job ownership fails closed and recovers", () => {
       ["`peopleCount` negative", activeSessionRecord("job-x", { peopleCount: -1 })],
       ["`peopleCount` fractional", activeSessionRecord("job-x", { peopleCount: 1.5 })],
       ["`peopleCount` a string", activeSessionRecord("job-x", { peopleCount: "0" })],
-      // Run options: closed key set and the settled timeout bounds (1..3600 seconds).
+      // Run options: closed key set and the stored-record sanity bounds (1 s..1 week).
       [
         "`runOptions` carrying an unknown key",
         activeSessionRecord("job-x", { runOptions: { prettify: false, timeout: 30, fast: true } }),
@@ -1456,7 +1456,9 @@ describe("accepted-job ownership fails closed and recovers", () => {
       ],
       [
         "`runOptions.timeout` above the maximum",
-        activeSessionRecord("job-x", { runOptions: { prettify: false, timeout: 3_601 } }),
+        activeSessionRecord("job-x", {
+          runOptions: { prettify: false, timeout: 7 * 24 * 60 * 60 + 1 },
+        }),
       ],
       [
         "`runOptions.timeout` fractional",
