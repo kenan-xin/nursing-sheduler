@@ -211,4 +211,28 @@ test.describe("T17b-2 — Load flow UI", () => {
     // A confirmed Load is the same atomic switch as an unconfirmed one.
     expect(await pastStatesLength(page)).toBe(0);
   });
+
+  // nursing-sheduler-iks: the dialog closing IS the "done" signal a user acts on.
+  // A hard reload fired the instant it closes must still find the import, because
+  // the confirm stays busy until the IndexedDB switch has committed. Before the fix
+  // the dialog closed on click and the reload aborted the in-flight transaction.
+  test("a hard reload right after Continue closes keeps the import", async ({ page }) => {
+    await gotoReadySaveAndLoad(page);
+
+    await page.getByTestId("scenario-upload-button").click();
+    await page.getByTestId("upload-file-input").setInputFiles({
+      name: "mismatch.yaml",
+      mimeType: "text/yaml",
+      buffer: Buffer.from(VALID_YAML_MISMATCHED_VERSION),
+    });
+
+    await page.getByTestId("confirm-dialog-confirm").click();
+    await expect(page.getByTestId("confirm-dialog")).toHaveCount(0);
+    await page.reload();
+    await page.waitForFunction(() =>
+      Boolean((window as unknown as { __nsStore?: unknown }).__nsStore),
+    );
+
+    await expect.poll(() => rangeStart(page)).toBe("2026-06-01");
+  });
 });
