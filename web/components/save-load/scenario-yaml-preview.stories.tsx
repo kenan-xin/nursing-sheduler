@@ -66,8 +66,6 @@ export const Invalid: Story = {
 };
 
 export const Editing: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.27; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   args: { editing: true, draft: "meta:\n" },
   play: async ({ args, canvas, userEvent }) => {
     await expect(canvas.getByRole("heading", { name: "Edit YAML Configuration" })).toBeVisible();
@@ -82,8 +80,6 @@ export const Editing: Story = {
 };
 
 export const EditingWithIssues: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.27; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   args: { editing: true, draft: "meta:\n", issues: ISSUES },
   play: async ({ canvas }) => {
     await expect(
