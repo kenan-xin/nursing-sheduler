@@ -1,0 +1,119 @@
+# W6 patch for core/tests/test_serve.py against genie 1bf4b85.
+# hunk: valid MINIMAL_SCENARIO at every HTTP submit, unsupported_solver 422 (P5)
+# hunk: semantic_profile in the /info body (P8)
+# hunk: /health stays 200 (P11)
+# note: genie tests whose behaviour v2 changes are skipped by tests/conftest.py UPSTREAM_DEVIATIONS
+
+diff --git a/core/tests/test_serve.py b/core/tests/test_serve.py
+index 0059890..202dfcb 100644
+--- a/core/tests/test_serve.py
++++ b/core/tests/test_serve.py
+@@ -69,9 +69,11 @@ from nurse_scheduling.server.jobs.process_executor import (
+ from nurse_scheduling.server.jobs.runner import OptimizationRunner, RunOutput
+ from nurse_scheduling.server.jobs.worker import JobWorker
+ from nurse_scheduling.server.runtime_identity import get_deployment_id
++from nurse_scheduling.server.semantic_profile import semantic_profile
+ from nurse_scheduling.server.solver_capabilities import SOLVER_CAPABILITIES
+ from nurse_scheduling.server.solver_options import solver_is_available
+ from nurse_scheduling.server.stores.memory import MemoryJobStore
++from tests.server_support import MINIMAL_SCENARIO
+ 
+ PROCESS_START_TIMEOUT_SECONDS = 10
+ 
+@@ -243,9 +245,10 @@ def _client(runner=None, *, start_background=True, settings=None) -> TestClient:
+ 
+ 
+ def _create(client: TestClient, headers=None, **data):
++    # v2 P5: a valid scenario, because the Workspace boundary validates at submit.
+     return client.post(
+         "/optimize",
+-        data={"yaml_content": "apiVersion: alpha\n", **data},
++        data={"yaml_content": MINIMAL_SCENARIO, **data},
+         headers=headers,
+     )
+ 
+@@ -318,13 +321,14 @@ def test_info_and_readiness_report_status_without_caching():
+             "job_store_id": client.app.state.job_store.store_id,
+             "auth": {"required": False, "scheme": "bearer"},
+             "claimed_performance": None,
++            "semantic_profile": semantic_profile(),  # v2 P8
+             "jobs": {"running": 0, "queued": 0, "cancelling": 0},
+             "workers": {"online": 0},
+         }
+         assert ready.json() == {"status": "ready"}
+         assert info.headers["cache-control"] == "no-store"
+         assert ready.headers["cache-control"] == "no-store"
+-        assert client.get("/health").status_code == 404
++        assert client.get("/health").status_code == 200  # v2 P11 keeps the /health shim
+ 
+ 
+ def test_info_reports_shared_job_and_worker_activity():
+@@ -555,7 +559,7 @@ def test_job_creation_offloads_the_synchronous_store_write():
+         event_loop_thread_id = threading.get_ident()
+         transport = httpx.ASGITransport(app=app)
+         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+-            response = await client.post("/optimize", data={"yaml_content": "apiVersion: alpha\n"})
++            response = await client.post("/optimize", data={"yaml_content": MINIMAL_SCENARIO})
+         return event_loop_thread_id, response
+ 
+     event_loop_thread_id, response = asyncio.run(create_job())
+@@ -845,7 +849,8 @@ def test_job_creation_enforces_advertised_options():
+     )
+     with _client(start_background=False, settings=settings) as client:
+         defaulted = _create(client)
+-        normalized = _create(client, solver=" ORTOOLS/CP-SAT ", timeout="10", prettify="true")
++        # v2 P5: only the exact CP-SAT selector passes parse_solver, before the allowlist.
++        normalized = _create(client, solver="ortools/cp-sat", timeout="10", prettify="true")
+         disabled_solver = _create(client, solver="pulp/highs")
+         unknown_solver = _create(client, solver="unknown/solver")
+         below_minimum = _create(client, timeout="9")
+@@ -860,9 +865,9 @@ def test_job_creation_enforces_advertised_options():
+     assert normalized.json()["request"]["solver"] == "ortools/cp-sat"
+     assert normalized.json()["request"]["timeout_seconds"] == 10
+     assert normalized.json()["request"]["prettify"] is True
+-    assert disabled_solver.status_code == 400
+-    assert disabled_solver.json()["detail"] == "Solver must be one of: ortools/cp-sat"
+-    assert unknown_solver.status_code == 400
++    assert disabled_solver.status_code == 422
++    assert disabled_solver.json()["error"]["code"] == "unsupported_solver"
++    assert unknown_solver.status_code == 422
+     assert below_minimum.status_code == 400
+     assert above_maximum.status_code == 400
+     assert non_integer.status_code == 422
+@@ -2068,11 +2073,11 @@ def test_client_cookie_is_marked_secure_when_the_deployment_says_so():
+     # A TLS-terminating proxy forwards plain HTTP, so the request scheme alone
+     # would leave the cookie unmarked on an HTTPS deployment.
+     with _client(start_background=False, settings=_settings()) as client:
+-        response = client.post("/optimize", data={"yaml_content": "apiVersion: alpha"})
++        response = _create(client)  # v2 P5: the cookie is set only for an admitted job
+         assert "secure" not in response.headers["set-cookie"].lower()
+ 
+     with _client(start_background=False, settings=_settings(cookie_secure=True)) as client:
+-        response = client.post("/optimize", data={"yaml_content": "apiVersion: alpha"})
++        response = _create(client)
+         assert "; Secure" in response.headers["set-cookie"]
+ 
+ 
+@@ -2101,9 +2106,12 @@ def test_file_input_uses_configured_limit_above_multipart_text_default():
+     max_yaml_bytes = 1024 * 1024 + 1
+     settings = _settings(max_yaml_bytes=max_yaml_bytes)
+     with _client(start_background=False, settings=settings) as client:
++        # v2 (P5): the accepted file must be a valid scenario, padded to the limit.
++        scenario = MINIMAL_SCENARIO.encode("utf-8")
++        padded = scenario + b"#" * (max_yaml_bytes - len(scenario))
+         accepted = client.post(
+             "/optimize",
+-            files={"file": ("schedule.yaml", b"x" * max_yaml_bytes, "application/x-yaml")},
++            files={"file": ("schedule.yaml", padded, "application/x-yaml")},
+         )
+         assert accepted.status_code == 202
+ 
+@@ -2174,7 +2182,7 @@ def test_protected_routes_accept_the_configured_shared_token():
+ 
+         created = client.post(
+             "/optimize",
+-            data={"yaml_content": "apiVersion: alpha\n"},
++            data={"yaml_content": MINIMAL_SCENARIO},
+             headers=_auth_header(),
+         )
+         assert created.status_code == 202

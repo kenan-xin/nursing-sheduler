@@ -80,12 +80,13 @@ def _client_with_committed_container(container_bytes: bytes) -> tuple[TestClient
         timeout_seconds=60,
         input_bytes=b"apiVersion: alpha\n",
     )
-    controller.claim_next_job("worker")
+    lease = controller.register_worker("worker")
+    controller.claim_next_job(lease)
     controller.complete_job(
         created.id,
         OptimizationResult(OptimizationOutcome.OPTIMAL, 42, "OPTIMAL", "optimality_proven"),
         StoredArtifact(name=ARTIFACT_NAME, media_type=CONTAINER_MEDIA_TYPE, content=container_bytes),
-        worker_id="worker",
+        lease=lease,
     )
     return TestClient(app), created.id
 

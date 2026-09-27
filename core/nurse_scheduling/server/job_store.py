@@ -21,7 +21,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime
 from typing import Protocol
 
-from .jobs.models import EventReplayWindow, Job, JobEvent, StoredArtifact, StoreLimits
+from .jobs.models import EventReplayWindow, Job, JobEvent, ServerActivity, StoredArtifact, StoreLimits, WorkerLease
 from .queue_state import QueueStateSnapshot
 
 
@@ -45,8 +45,8 @@ class JobStore(Protocol):
         Raises:
             StoreWriteConflictError: If the job ID already exists.
             JobCapacityError: If pending or retained capacity is exhausted.
-            DiagnosticCapacityError: If only the reserved ordinary slots remain (T09).
-            QueueInvariantError: If the job is not admissible as a queued job.
+            DiagnosticCapacityError: If only the reserved ordinary slots remain (v2 P9).
+            QueueInvariantError: If the job is not admissible as a queued job (v2 P9).
         """
         ...
 
@@ -76,39 +76,58 @@ class JobStore(Protocol):
         """
         ...
 
-    def claim_next(
+    def claim_next_job(
         self,
-        worker_id: str,
+        lease: WorkerLease,
         started_at: datetime,
-        claim_expires_at: datetime,
         runtime_identity: Mapping[str, str] | None = None,
     ) -> Job | None:
-        """Atomically claim the effective head of the priority queues for a worker.
-
-        The ordinary queue is drained before any diagnostic, and only a QUEUED
-        member is ever removed, so ordinary work overtakes queued diagnostics while
-        a running solve of either purpose is never pre-empted (T09).
+        """Atomically claim the next queued job for a worker.
 
         Include runtime identity in the running event when supplied.
-        Return the claimed running job, or `None` when both queues are empty.
+        Return the claimed running job, or `None` when the queue is empty.
         """
         ...
 
-    def save(
+    def register_worker(self, lease: WorkerLease, registered_at: datetime) -> bool:
+        """Register an idle worker unless its unresolved prior lease prevents it."""
+        ...
+
+    def renew_worker(self, lease: WorkerLease, renewed_at: datetime, lease_expires_at: datetime) -> bool:
+        """Renew an unexpired worker lease without resurrecting an expired lease."""
+        ...
+
+    def unregister_worker(self, lease: WorkerLease) -> None:
+        """Remove a matching worker lease and its active-job association."""
+        ...
+
+    def live_worker_owns_job(self, worker_id: str, job_id: str, observed_at: datetime) -> bool:
+        """Return whether a live worker lease is associated with the job."""
+        ...
+
+    def lease_owns_job(self, lease: WorkerLease, job_id: str, observed_at: datetime) -> bool:
+        """Return whether this exact live lease is associated with the job."""
+        ...
+
+    def get_activity(self, observed_at: datetime) -> ServerActivity:
+        """Return aggregate current job states and live workers."""
+        ...
+
+    def update_job(
         self,
         job: Job,
         expected_revision: int,
         events: Sequence[JobEvent],
         artifact: StoredArtifact | None = None,
         *,
-        worker_id: str | None = None,
-        expected_claim_expires_at: datetime | None = None,
+        worker_lease: WorkerLease | None = None,
+        worker_lease_observed_at: datetime | None = None,
     ) -> Job:
-        """Save a job update only if no concurrent update has occurred.
+        """Update a job if its revision and optional worker lease still match.
 
-        Worker-originated writes supply their owner and observed claim deadline.
-        The store must reject the save unless both still match and that deadline
-        remains active at the persistence boundary.
+        Omit `worker_lease` only for server-authorized API or maintenance
+        transitions. Worker-originated updates must include the lease and its
+        observation time.
 
         Raises:
             JobNotFoundError: If the job does not exist.
@@ -117,19 +136,19 @@ class JobStore(Protocol):
         ...
 
     def prepare_event_replay(self, job_id: str, requested_cursor: str | None) -> EventReplayWindow:
-        """Atomically validate a public cursor and snapshot the initial replay batch.
+        """v2 P6: validate a public cursor and snapshot the initial replay batch atomically."""
+        ...
 
-        This owns shared-codec version/job-binding validation and native-ID
-        comparison, then returns the initial retained batch, the native
-        continuation cursor, and the oldest retained public cursor as one
-        consistency boundary so a concurrent trim cannot drop an event between
-        validation and the first replay read.
+    def describe_queue_state(self) -> QueueStateSnapshot:
+        """v2 P9: return one atomic snapshot of the complete queue state (T09)."""
+        ...
 
-        Raises:
-            JobNotFoundError: If the job does not exist.
-            EventCursorExpired: If the cursor is valid but older than the retained floor.
-            EventCursorInvalid: If the cursor is malformed, foreign, future, or non-exact.
-        """
+    def repair_queue_residue(self, occurred_at: datetime | None = None) -> list[str]:
+        """v2 P9: atomically remove index entries no job record justifies (T09)."""
+        ...
+
+    def recent_invariant_errors(self) -> list[dict[str, str]]:
+        """v2 P9: return the bounded record of defensive repairs, oldest first (T09)."""
         ...
 
     def stream_events(
@@ -141,8 +160,6 @@ class JobStore(Protocol):
         """Yield new job events, using `None` as a keepalive signal.
 
         Iteration blocks up to the keepalive interval when no newer event exists.
-        `after_id` is a native store cursor supplied by `prepare_event_replay`,
-        never a raw client header.
 
         Raises:
             JobNotFoundError: If the job does not exist or is deleted while streaming.
@@ -156,36 +173,15 @@ class JobStore(Protocol):
         """
         ...
 
-    def find_claimed_before(self, cutoff: datetime) -> list[Job]:
-        """Return active jobs whose worker claim expired by the cutoff.
+    def find_jobs_without_live_workers(self, observed_at: datetime) -> list[Job]:
+        """Return active jobs without a matching live worker lease.
 
         Maintenance terminates them because their worker is presumed lost.
         """
         ...
 
-    def describe_queue_state(self) -> QueueStateSnapshot:
-        """Return one atomic snapshot of the complete queue state (T09).
-
-        The snapshot MUST come from a single store consistency boundary. It exists
-        so the invariants can be asserted against what the store actually persisted,
-        rather than against whatever a transition reported about itself.
-        """
-        ...
-
-    def repair_queue_residue(self, occurred_at: datetime | None = None) -> list[str]:
-        """Atomically remove index entries no job record justifies (T09).
-
-        Residue is removed, never claimed and never counted as capacity. Return the
-        stable kind of each repair performed.
-        """
-        ...
-
-    def recent_invariant_errors(self) -> list[dict[str, str]]:
-        """Return the bounded record of defensive repairs, oldest first (T09).
-
-        Each record carries a stable code, a job ID, and a timestamp — never any
-        part of a submitted document.
-        """
+    def remove_expired_worker_leases(self, observed_at: datetime) -> list[str]:
+        """Remove expired worker leases and return their worker IDs."""
         ...
 
     def check_health(self) -> None:

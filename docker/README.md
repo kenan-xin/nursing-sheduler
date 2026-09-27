@@ -110,7 +110,7 @@ requires it to be **HTTPS** and requires the tunnel secret file to be non-empty.
 ## Redis job store
 
 The backend runs with `JOB_BACKEND=redis`, `JOB_REDIS_URL=redis://redis:6379/0`
-and a versioned key prefix (`JOB_REDIS_KEY_PREFIX=nurse_scheduling:jobs:v0` — bump
+and a versioned key prefix (`JOB_REDIS_KEY_PREFIX=nurse_scheduling:jobs:v2` — bump
 the trailing schema version on any incompatible job-record change). Redis is
 pinned by digest (`redis:8.8.0-alpine@sha256:9d317178…`), persists to the named
 `redis-data` volume with default RDB snapshots, and answers a `redis-cli ping`
@@ -127,7 +127,7 @@ client; the child only computes.
 
 ```
 backend (uvicorn, 1 worker) ─ lease-owning worker ─▶ spawned executor child ─▶ CP-SAT + descendants
-        │  events/results/failures/cancellations (worker-ID + observed-deadline fenced)
+        │  events/results/failures/cancellations (lease-token + revision fenced)
         ▼
       Redis JobStore
 ```
@@ -151,11 +151,19 @@ backend (uvicorn, 1 worker) ─ lease-owning worker ─▶ spawned executor chil
   feasible incumbent, which completes with `termination_reason="user_requested"`.
   If no incumbent exists yet, it still produces a structured failure — never a
   guaranteed roster.
-- **Worker shutdown / lease loss ≠ cancellation.** On ordinary shutdown or a lost
-  claim, the worker aborts the child and **writes nothing**; the maintenance loop
-  later owns the `worker_lost` transition after the lease expires. Every event,
-  result, failure, and cancellation commit carries the worker identity and passes
-  the owner/revision/observed-deadline lease fence (T19).
+- **Worker shutdown / lease loss ≠ cancellation.** The worker holds one shared
+  lease in the genie worker lease registry and renews it from an always-on
+  heartbeat (`JOB_WORKER_LEASE_SECONDS`, default 90s). On ordinary shutdown or a
+  lost lease, the worker aborts the child and **writes nothing**; the maintenance
+  loop later commits `worker_lost` after the lease expires. Every event, result,
+  failure, and cancellation commit is fenced by the lease token and the job
+  revision. Accepted gap (v1 sync W6): expiry is checked against the worker's
+  clock before commit, so a write can still land between lease expiry and the
+  `worker_lost` commit. The worker runs in the API process, so there is no clock
+  skew; after `worker_lost` every stale write is refused.
+- **Cutover to the `v2` key prefix.** Deploy W6 in a quiet window. Old
+  `nurse_scheduling:jobs:v1:*` keys are ignored. To delete them, run
+  `redis-cli --scan --pattern 'nurse_scheduling:jobs:v1:*' | xargs -r redis-cli del`.
 - Retained legacy jobs may still report `limit_or_stop`; clients accept it during
   the retention window. Running execution is still not checkpointed or
   auto-restarted.

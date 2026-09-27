@@ -19,9 +19,9 @@
 
 This module owns the RULES; the stores own the ATOMICITY. Two independent
 implementations must agree on ordering, admission, and the invariants: the memory
-store under its single lock, and the Redis Lua state machine, which re-expresses
-these same rules in Lua because a script cannot import Python. This file is
-therefore the normative statement both are checked against, and the parity suite
+store under its single lock, and the Redis store's WATCH/MULTI transactions (v1
+sync W6 replaced the Lua state machine). Both call `queue_sort_key` and
+`validate_transition` from here. This file is therefore the normative statement both are checked against, and the parity suite
 asserts these invariants against BOTH backends after every transition rather
 than trusting either implementation's own bookkeeping.
 
@@ -36,7 +36,7 @@ from datetime import datetime
 from .jobs.models import JobPurpose, JobState
 
 
-QUEUE_STATE_MACHINE_VERSION = "v1"
+QUEUE_STATE_MACHINE_VERSION = "v2"
 """Version of the queue state-machine protocol shared by both store backends.
 
 Bumped together with the Redis key-namespace version whenever the persisted queue
@@ -185,6 +185,29 @@ def admission_decision(
     if purpose != JobPurpose.ORDINARY and pending_count >= max_pending - ordinary_reserved_slots:
         return ADMISSION_ORDINARY_RESERVED
     return ADMISSION_OK
+
+
+def queue_sort_key(purpose: JobPurpose, created_at: datetime, job_id: str) -> tuple[bool, datetime, str]:
+    """Return the effective claim order key: ordinary first, then FIFO `(created_at, job_id)`."""
+    return (purpose != JobPurpose.ORDINARY, created_at, job_id)
+
+
+def validate_transition(current_state: JobState, current_purpose: JobPurpose, replacement) -> None:
+    """Reject a saved transition the queue state machine does not define.
+
+    Raises:
+        QueueInvariantError: If the transition would break an invariant.
+    """
+    from .errors import QueueInvariantError
+
+    if current_state.terminal and replacement.state != current_state:
+        raise QueueInvariantError("A terminal job cannot change state")
+    if replacement.request.purpose != current_purpose:
+        raise QueueInvariantError("A job purpose is immutable")
+    if replacement.state in {JobState.RUNNING, JobState.CANCELLING} and replacement.worker_id is None:
+        raise QueueInvariantError("An active job must name the worker holding its claim")
+    if replacement.state == JobState.QUEUED and current_state != JobState.QUEUED:
+        raise QueueInvariantError("A job cannot return to the queue")
 
 
 def check_queue_invariants(snapshot: QueueStateSnapshot) -> list[str]:
