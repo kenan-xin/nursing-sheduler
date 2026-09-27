@@ -4,6 +4,8 @@ import {
   LONG_PROSE,
   LONG_TOKEN,
   expectNoHorizontalOverflow,
+  jsonResponse,
+  withFetchRoutes,
   withNarrowFrame,
 } from "./story-helpers";
 
@@ -44,5 +46,34 @@ export const OverflowIsCaught: Story = {
   render: () => <p className="whitespace-nowrap">{LONG_TOKEN}</p>,
   play: async ({ canvas }) => {
     await expect(expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame"))).rejects.toThrow();
+  },
+};
+
+// Fetch router self-checks (bead w0e.6).
+export const FetchRouted: Story = {
+  render: () => <p>fetch</p>,
+  beforeEach: withFetchRoutes([["/api/info", () => jsonResponse(200, { status: "ready" })]]),
+  play: async () => {
+    const response = await fetch("/api/info");
+    await expect(response.status).toBe(200);
+    await expect(await response.json()).toEqual({ status: "ready" });
+  },
+};
+
+export const FetchUnrouted: Story = {
+  render: () => <p>fetch</p>,
+  beforeEach: withFetchRoutes([]),
+  play: async () => {
+    await expect(fetch("/api/optimize")).rejects.toThrow(
+      "unexpected fetch in story: /api/optimize",
+    );
+  },
+};
+
+// Declared AFTER the two above: proves the previous story's router was removed.
+export const FetchRestored: Story = {
+  render: () => <p>fetch</p>,
+  play: async () => {
+    await expect(globalThis.fetch).not.toHaveProperty("mock");
   },
 };

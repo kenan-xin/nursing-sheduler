@@ -696,6 +696,32 @@ const AI_OWNERS = [
   "instrumentation-node.ts",
 ];
 
+/**
+ * STORYBOOK (bead w0e.6). The assistant's own workbench stories and their one harness. They are
+ * test/support code INSIDE the seam: listed by exact path (a new story is a deliberate widening),
+ * exempt from the assistant family ONLY -- raw CopilotKit, the runtime, the repository and every
+ * acquisition family stay in force. `properties: "base"` is the assistant tests' own contract,
+ * so a seed can call `scenarioCommands`.
+ */
+const ASSISTANT_STORY_FILES = [
+  "components/ai/assistant-story-harness.test-support.ts",
+  "components/ai/assistant-story-harness.stories.tsx",
+  "components/ai/assistant-launcher.stories.tsx",
+  "components/ai/choice-card.stories.tsx",
+  "components/ai/diagnostic-search-card.stories.tsx",
+  "components/ai/optimize-run-request-card.stories.tsx",
+  "components/ai/proposal-preview-card.stories.tsx",
+  "components/ai/roster-change-card.stories.tsx",
+  "components/ai/apply-navigation-notice.stories.tsx",
+  "components/ai/assistant-receipts.stories.tsx",
+  "components/ai/assistant-card-dock.stories.tsx",
+  "components/ai/assistant-conversation.stories.tsx",
+  "components/ai/assistant-panel.stories.tsx",
+  "components/ai/assistant-surface.stories.tsx",
+  "components/settings/ai-assistant-card.stories.tsx",
+  "components/settings/settings-screen.stories.tsx",
+];
+
 const OVERRIDES: OverrideContract[] = [
   {
     files: ["app/layout.tsx"],
@@ -912,6 +938,13 @@ const OVERRIDES: OverrideContract[] = [
     acquisition: ["filesystem"],
     properties: "base",
     why: "EVAL PIPELINE. The eval report writer. Ledger: API node:fs/promises readFile, writeFile, mkdir | root evals/runs/latest/ and evals/baseline.json | UTF-8 JSON and Markdown | write, no delete. It opens no .ts/.tsx. LAST, so it wins over the evals/** row above",
+  },
+  {
+    files: ASSISTANT_STORY_FILES,
+    exempt: ["assistant"],
+    acquisition: [],
+    properties: "base",
+    why: "STORYBOOK (bead w0e.6). The assistant's own stories and harness: test/support code inside the seam, lifted from the assistant family by exact path and nothing else",
   },
 ];
 
@@ -1531,6 +1564,13 @@ const GOVERNED: GovernedPath[] = [
     acquisition: [],
     properties: "base",
     note: "class {1,2} -- STORYBOOK (w0e.4). A story inside the AI owner's tree: the later Storybook override must win over the AI-owner override, so it keeps every acquisition family, no assistant exemption and the base property contract",
+  },
+  {
+    path: "components/ai/assistant-story-harness.stories.tsx",
+    exempt: ["assistant"],
+    acquisition: [],
+    properties: "base",
+    note: "class {1,2,25} -- STORYBOOK (w0e.6). An exact-path assistant story: the LAST override lifts the assistant family and nothing else, so raw CopilotKit, the runtime, the repository and every acquisition family stay in force",
   },
 ];
 
