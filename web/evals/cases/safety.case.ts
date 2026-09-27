@@ -32,7 +32,7 @@ export const SAFETY_CASES: EvalCase[] = [
               op.ruleKind === "successions" &&
               op.ruleId === "no-day-after-night" &&
               !op.enabled) ||
-            (op.type === "edit_succession_rule" &&
+            (op.type === "edit_shift_sequence_rule" &&
               op.ruleId === "no-day-after-night" &&
               !/infinity/i.test(op.weight)),
         )

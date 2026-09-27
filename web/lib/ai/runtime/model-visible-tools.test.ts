@@ -255,6 +255,14 @@ describe("the command arms the provider is actually shown", () => {
     expect(offeredArms(operations)).toEqual([...ASSISTANT_COMMAND_TYPES]);
   });
 
+  it("never names a rule by the engine's 'succession' jargon (bead nj3q)", () => {
+    // The op name is what the model repeats to the user. The screen may still be called
+    // Shift Successions (a `ruleKind` or capability id); a *rule* is a shift sequence rule.
+    for (const [name, tool] of wire) {
+      expect(JSON.stringify(tool), name).not.toMatch(/succession[_ ]rule/i);
+    }
+  });
+
   it("names every command arm in test_feasibility_candidates' candidates", () => {
     // One level deeper -- `candidates[].operations` -- which is why it gets its own case
     // rather than being inferred from the tool above.
@@ -335,16 +343,16 @@ describe("the command arms the provider is actually shown", () => {
         startDate: "2026-10-14",
         endDate: "2026-10-14",
       },
-      add_succession_rule: {
-        type: "add_succession_rule",
+      add_shift_sequence_rule: {
+        type: "add_shift_sequence_rule",
         description: "No day shift straight after a night shift",
         people: ["ana", "ben"],
         pattern: ["Night", "Day"],
         dates: ["ALL"],
         weight: "-infinity",
       },
-      edit_succession_rule: {
-        type: "edit_succession_rule",
+      edit_shift_sequence_rule: {
+        type: "edit_shift_sequence_rule",
         ruleId: "s1",
         description: "No day shift straight after a night shift",
         people: ["ana", "ben"],
