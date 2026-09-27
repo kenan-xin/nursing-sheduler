@@ -16,6 +16,7 @@
 #   browser abort real `/about` navigation, baselined BFF audit, ids-only handoff cleanup
 #   ward roster   the G5 real-Ward-8 roster journey through the PRODUCTION routes,
 #                 twice consecutively, plus an owned-Redis-residue audit
+#   cover         d582 temporary cover on the real solver (INFEASIBLE -> solved)
 #
 # At every stage boundary, ANY assertion, command, authority or cleanup failure
 # releases every id it can safely release, tears Compose down, runs all five residue
@@ -929,6 +930,20 @@ else
     bad "the ward journey left durable job-store residue ($(count_job_keys "$REDIS_BASELINE") before, $(count_job_keys "$REDIS_FINAL") after)"
     diff "$REDIS_BASELINE" "$REDIS_FINAL" | head -n 20
   fi
+fi
+boundary
+
+# d582: one short night is INFEASIBLE on the real solver, one temporary cover makes
+# it solvable, and her row survives the raw and edited XLSX and the roster file.
+stage "assembled browser temporary cover: real solver, production routes"
+if (cd "$ROOT/web" && \
+    ASSEMBLED_BASE_URL="$BASE" \
+    CI=1 \
+    pnpm exec playwright test --config playwright.assembled.config.ts \
+      --reporter=line --grep "temporary cover" 2>&1); then
+  ok "temporary cover journey passed"
+else
+  bad "temporary cover journey FAILED"
 fi
 boundary
 

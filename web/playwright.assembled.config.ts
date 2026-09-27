@@ -16,6 +16,8 @@ import { defineConfig, devices } from "@playwright/test";
 //   roster-real-ward-assembled  the G5 real-Ward-8 roster journey, through the
 //                               PRODUCTION routes only — no fixture page, no
 //                               seeded storage, no fabricated roster.
+//   temporary-cover-real-ward   d582: one short night is INFEASIBLE, one cover
+//                               solves it, and cover survives Excel + roster file.
 //
 // Workers is fixed at 1 — the assembled gate is serialized against the single
 // backend solver worker.
@@ -24,7 +26,8 @@ const baseURL = process.env.ASSEMBLED_BASE_URL ?? "http://127.0.0.1:3000";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: /(optimize-assembled-stream|roster-real-ward-assembled)\.spec\.ts/,
+  testMatch:
+    /(optimize-assembled-stream|roster-real-ward-assembled|temporary-cover-real-ward)\.spec\.ts/,
   fullyParallel: false,
   workers: 1,
   forbidOnly: true,
