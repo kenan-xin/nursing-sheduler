@@ -26,6 +26,7 @@ import {
   FaTriangleExclamation,
 } from "@/components/icons";
 import { WeightPill } from "@/components/card-editor/weight-field";
+import { hasUnsupportedExpression } from "@/components/card-editor/expression-model";
 import type { CountCard } from "@/lib/scenario";
 import { changeKeys } from "@/lib/change-highlight/keys";
 import {
@@ -47,6 +48,10 @@ import { formatHalfHours, formatHalfHourRange } from "./half-hour-codec";
 /** The YAML-first explanation shown on a disabled Convert for an advanced-array
  *  count — its shape can only be edited through Save & Load first. */
 const CONVERT_ADVANCED_REASON = "Edit via Save & Load (YAML) first.";
+
+/** wa46: a count whose expression core rejects (e.g. imported "x >= 0"). */
+const UNSUPPORTED_EXPRESSION_NOTE =
+  "This expression isn't supported. Edit this rule before optimising.";
 
 interface CountCardListProps {
   counts: CountCard[];
@@ -183,6 +188,10 @@ export function CountCardList({
         // (FR-PR-55a) stays read-only here — YAML is its only edit path.
         const showEdit = !advanced;
         const coefficients = card.countShiftTypeCoefficients ?? [];
+        const unsupported = hasUnsupportedExpression(card.expression);
+        const expressionText = contractedHours
+          ? describeContractedTarget(card.target)
+          : describeCountExpressionTarget(card.expression, card.target);
 
         return (
           <CardListItem
@@ -225,6 +234,16 @@ export function CountCardList({
                     Leave not credited
                   </Badge>
                 )}
+                {unsupported && (
+                  <Badge
+                    variant="warn"
+                    data-testid={`count-unsupported-badge-${index}`}
+                    title={UNSUPPORTED_EXPRESSION_NOTE}
+                  >
+                    <FaTriangleExclamation />
+                    Unsupported expression
+                  </Badge>
+                )}
                 {!contractedHours && advanced && (
                   <Badge variant="neutral" data-testid={`count-advanced-badge-${index}`}>
                     Advanced (list)
@@ -240,10 +259,13 @@ export function CountCardList({
               {
                 label: "Expression",
                 value: (
-                  <code className="font-mono">
-                    {contractedHours
-                      ? describeContractedTarget(card.target)
-                      : describeCountExpressionTarget(card.expression, card.target)}
+                  // Imported expressions are arbitrary text: truncate, full value on hover.
+                  <code
+                    className="block truncate font-mono"
+                    title={expressionText}
+                    data-testid={`count-expression-${index}`}
+                  >
+                    {expressionText}
                   </code>
                 ),
               },
@@ -327,14 +349,25 @@ export function CountCardList({
               </>
             }
             footer={
-              contractedHours && convertToGenericUid === card.uid ? (
-                <ConvertToGenericConfirm
-                  card={card}
-                  index={index}
-                  onConfirm={() => onConfirmConvertToGeneric(card.uid)}
-                  onCancel={onCancelConvertToGeneric}
-                />
-              ) : undefined
+              <>
+                {unsupported && (
+                  <p
+                    className="mt-3 flex items-center gap-1.5 text-meta font-semibold text-warnink"
+                    data-testid={`count-unsupported-note-${index}`}
+                  >
+                    <FaTriangleExclamation className="size-3 flex-none text-warn" />
+                    {UNSUPPORTED_EXPRESSION_NOTE}
+                  </p>
+                )}
+                {contractedHours && convertToGenericUid === card.uid && (
+                  <ConvertToGenericConfirm
+                    card={card}
+                    index={index}
+                    onConfirm={() => onConfirmConvertToGeneric(card.uid)}
+                    onCancel={onCancelConvertToGeneric}
+                  />
+                )}
+              </>
             }
           />
         );

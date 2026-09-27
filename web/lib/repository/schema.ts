@@ -252,6 +252,19 @@ export class NurseSchedulerDb extends Dexie {
     this.roster = this.table("roster");
     this.snapshot = this.table("snapshot");
     this.meta = this.table("meta");
+
+    // An envelope written before d582 (production b3b8903) has no `temporaryCover`,
+    // and its readers index it — Staff and Optimise & Export crashed on
+    // `undefined.map` (jyz2). A pre-d582 scenario held no covers, so
+    // defaulting on READ is lossless and needs no version bump or row rewrite; the
+    // next commit persists the slice. Legacy `staff[].temporary` flags are kept as-is:
+    // the canonical projection ignores them and dropping them would lose user data.
+    this.scenarioEnvelopes.hook("reading", (row: ScenarioEnvelopeV3 | undefined) =>
+      row?.scenario &&
+      (row.scenario as Partial<ScenarioEnvelopeV3["scenario"]>).temporaryCover === undefined
+        ? { ...row, scenario: { ...row.scenario, temporaryCover: [] } }
+        : row,
+    );
   }
 }
 

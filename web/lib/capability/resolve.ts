@@ -222,3 +222,15 @@ export function resolveNavigationTarget(
     }),
   );
 }
+
+/**
+ * The sidebar's own name for a capability's screen — the ONE user-facing name for a
+ * destination, so the assistant's prepare result and the Apply notice cannot call the
+ * same place two different things. Null when the capability has no screen or cannot be
+ * opened in this context, so a caller says nothing rather than falling back to a word
+ * that is not a screen name.
+ */
+export function resolveScreenName(capabilityId: string, context: CapabilityContext): string | null {
+  const target = resolveNavigationTarget(capabilityId, context);
+  return target.status === "ok" ? target.value.screenName : null;
+}

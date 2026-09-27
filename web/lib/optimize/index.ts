@@ -133,6 +133,7 @@ export {
 
 export {
   deriveOptimizeReadiness,
+  UNSUPPORTED_EXPRESSION_REASON,
   type OptimizeReadiness,
   type OptimizeReadinessIssue,
   type OptimizeReadinessSource,
