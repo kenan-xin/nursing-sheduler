@@ -49,6 +49,16 @@ describe("targetKeyFor", () => {
   it("has no target for the export layout", () => {
     expect(targetKeyFor(entry("export:layout", "export-layout", "changed"))).toBeNull();
   });
+  it("points a cover row at itself, and leaves its warnings untargeted", () => {
+    // The row key is the Staff row's own change key (d582).
+    expect(targetKeyFor(entry("cover:Haseena (Ward 3)|2026-11-05|N", "staff-list"))).toBe(
+      "cover:Haseena (Ward 3)|2026-11-05|N",
+    );
+    // A warning restates the count line above it; there is no row of its own to outline.
+    expect(
+      targetKeyFor(entry("cover-note:extra|night|2026-11-05|N", "staffing-requirements")),
+    ).toBeNull();
+  });
 });
 
 describe("planChangeHighlight", () => {
@@ -135,5 +145,34 @@ describe("planChangeHighlight", () => {
       "advanced",
     );
     expect(plan).toEqual({ primary: null, others: [] });
+  });
+
+  it("announces a booked cover on the Staff screen, and its warnings as consequences", () => {
+    const plan = planChangeHighlight(
+      {
+        direct: [
+          entry("cover:Haseena (Ward 3)|2026-11-05|N", "staff-list"),
+          entry("cover:night|2026-11-05|N", "staffing-requirements", "changed"),
+        ],
+        cascade: [entry("cover-note:extra|night|2026-11-05|N", "staffing-requirements")],
+      },
+      "advanced",
+    );
+    // The Staff screen owns the command: one direct entry each, and setup order breaks
+    // the tie. Its own announcement is the row.
+    expect(plan.primary).toMatchObject({
+      capabilityId: "staff-list",
+      label: "Staff",
+      directCount: 1,
+      keys: ["cover:Haseena (Ward 3)|2026-11-05|N"],
+      announcement: "1 temporary cover added",
+    });
+    // The count line is a requested change too; the warning is not a second cover.
+    expect(plan.others[0]).toMatchObject({
+      capabilityId: "staffing-requirements",
+      directCount: 1,
+      keys: ["cover:night|2026-11-05|N"],
+      announcement: "1 temporary cover changed",
+    });
   });
 });

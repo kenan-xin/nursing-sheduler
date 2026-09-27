@@ -26,6 +26,7 @@ import type {
   SuccessionCard,
   UiRequestCell,
   UiShiftType,
+  UiTemporaryCover,
 } from "@/lib/scenario";
 import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
 import { calendarSpan } from "./assumptions";
@@ -373,6 +374,116 @@ function shiftNameOf(state: ScenarioUiState, shiftId: string): string {
   return state.shifts.find((shift) => String(shift.id) === shiftId)?.description?.trim() || shiftId;
 }
 
+/** A cover's identity, exactly as the Staff row states it as its own change key. */
+function coverIdentity(cover: Pick<UiTemporaryCover, "name" | "date" | "shiftType">): string {
+  return `${cover.name}|${cover.date}|${String(cover.shiftType)}`;
+}
+
+/** A cover as a value in a Preview: "Night, 5 Nov". */
+function coverValue(after: ScenarioUiState, cover: UiTemporaryCover): string {
+  return `${shiftNameOf(after, String(cover.shiftType))}, ${formatShortDate(cover.date)}`;
+}
+
+/**
+ * The cover ROWS themselves (d582): "Temporary cover “Haseena (Ward 3)”  Nothing → Night,
+ * 5 Nov". A cover is stored apart from the cards, so without these the Preview would state
+ * what a cover did to the counts and never that the cover itself was booked or taken
+ * away. The key is the one the Staff row carries as its change key, so Apply can outline
+ * the row it is about.
+ */
+function coverRowEntries(before: ScenarioUiState, after: ScenarioUiState): Entry[] {
+  const had = new Set(before.temporaryCover.map(coverIdentity));
+  const has = new Set(after.temporaryCover.map(coverIdentity));
+  const entries: Entry[] = [];
+  for (const cover of after.temporaryCover) {
+    if (had.has(coverIdentity(cover))) continue;
+    entries.push({
+      key: `cover:${coverIdentity(cover)}`,
+      scope: "staff-list",
+      label: `Temporary cover “${cover.name}”`,
+      before: null,
+      after: coverValue(after, cover),
+      kind: "created",
+    });
+  }
+  for (const cover of before.temporaryCover) {
+    if (has.has(coverIdentity(cover))) continue;
+    entries.push({
+      key: `cover:${coverIdentity(cover)}`,
+      scope: "staff-list",
+      label: `Temporary cover “${cover.name}”`,
+      before: coverValue(after, cover),
+      after: null,
+      kind: "removed",
+    });
+  }
+  return entries;
+}
+
+/**
+ * What a NEWLY booked cover does not do (F1, F4), said next to the count lines it does
+ * draw. The count lines state the arithmetic; these state where it did not happen:
+ *
+ *   • F1 -- a card restricted to groups she is not in is not lowered by her at all, so
+ *     her credit on that date is nothing where a manager may expect it to count.
+ *   • F4 -- credit landing on a slot that is already covered is EXTRA: the ward need is
+ *     clamped at 0, so the count cannot go below it and the surplus is stated instead.
+ *
+ * These are CONSEQUENCES, not requests -- nobody asks for a surplus -- so they are
+ * cascade entries, and `directKeys` does not name them.
+ *
+ * ADD SIDE ONLY: taking a cover away restores exactly what the count line already says
+ * ("exactly 2 → 3"), so the reverse has nothing it could hide.
+ */
+function coverWarningEntries(before: ScenarioUiState, after: ScenarioUiState): Entry[] {
+  const had = new Set(before.temporaryCover.map(coverIdentity));
+  const statuses = new Map(coverStatuses(after).map((status) => [status.index, status]));
+  // F4 is a fact about a SLOT, not about one cover: three covers on a two-slot rule are
+  // one surplus, whoever booked the last one. So the slots are collected first and the
+  // note is stated once, however many new covers reach it.
+  const surplus = new Map<string, { cardUid: string; iso: string; shiftId: string }>();
+  const entries: Entry[] = [];
+  after.temporaryCover.forEach((cover, index) => {
+    if (had.has(coverIdentity(cover))) return;
+    const status = statuses.get(index);
+    if (status === undefined) return;
+    const { name } = cover;
+    const shiftId = String(cover.shiftType);
+    for (const rule of status.restrictedBy) {
+      entries.push({
+        key: `cover-note:${coverIdentity(cover)}|restricted|${rule.group}`,
+        scope: "staffing-requirements",
+        label: `Temporary cover “${name}” does not count for “${rule.label}”`,
+        before: null,
+        after: `Under ${rule.label}, only ${rule.group} work ${shiftId}. ${name} is not in ${rule.group}.`,
+        kind: "created",
+      });
+    }
+    for (const effect of status.effects) {
+      surplus.set(`${effect.cardUid}|${effect.iso}|${effect.shiftId}`, effect);
+    }
+  });
+  for (const effect of surplus.values()) {
+    const card = after.cardsByKind.requirements.find(
+      (candidate) => candidate.uid === effect.cardUid,
+    );
+    if (card === undefined) continue;
+    const need = cardNeedOn(after, card, effect.iso, effect.shiftId);
+    if (need.extra === 0) continue;
+    entries.push({
+      key: `cover-note:extra|${effect.cardUid}|${effect.iso}|${effect.shiftId}`,
+      scope: "staffing-requirements",
+      label: `${shiftNameOf(after, effect.shiftId)} on ${formatShortDate(effect.iso)}`,
+      before: null,
+      after: `${need.credit} covers are booked, so ${need.extra} ${
+        need.extra === 1 ? "is" : "are"
+      } extra.`,
+      kind: "created",
+    });
+  }
+  return entries;
+}
+
 /**
  * The count lines a temporary cover draws: one per card, date and shift her credit
  * reaches, stating the effective count on each side (d582). `coverStatuses` names exactly
@@ -612,7 +723,11 @@ export function diffScenarioDocuments(
     );
   }
 
+  entries.push(...coverRowEntries(before, after));
+
   entries.push(...coverCountEntries(before, after));
+
+  entries.push(...coverWarningEntries(before, after));
 
   entries.push(...compareRequestMatrix(before, after));
 
@@ -957,6 +1072,27 @@ function directKeys(
       case "remove_people_group":
         keys.add(`peoplegroup:${command.groupId}`);
         break;
+      case "add_temporary_cover":
+      case "remove_temporary_cover": {
+        // The row, and every count line her credit draws. The host trims names (the Staff
+        // form does), so the key must too. An ADD is compared in `after` -- that is the
+        // document holding her -- and a REMOVE in `before`, the one that still does.
+        const named = {
+          name: command.name.trim(),
+          date: command.date,
+          shiftType: String(command.shiftType),
+        };
+        const state = command.type === "add_temporary_cover" ? after : before;
+        keys.add(`cover:${coverIdentity(named)}`);
+        const at = state.temporaryCover.findIndex(
+          (cover) => coverIdentity(cover) === coverIdentity(named),
+        );
+        for (const effect of coverStatuses(state).find((status) => status.index === at)?.effects ??
+          []) {
+          keys.add(`cover:${effect.cardUid}|${effect.iso}|${effect.shiftId}`);
+        }
+        break;
+      }
     }
   }
   return keys;

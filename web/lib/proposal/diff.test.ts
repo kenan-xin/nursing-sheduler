@@ -13,6 +13,7 @@ import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from 
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
 import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
+import type { AssistantCommandV1 } from "./commands";
 
 describe("deriveProposalDiff", () => {
   it("separates what was asked for from what the app will do as a result", () => {
@@ -959,18 +960,30 @@ describe("temporary cover in the Preview (d582)", () => {
     makeTemporaryCover({ date: "2026-11-05", shiftType: "N", ...overrides });
   const line = (
     entry: { label: string; before: string | null; after: string | null } | undefined,
-  ) => `${entry?.label}: ${entry?.before} → ${entry?.after}`;
+  ) => `${entry?.label}: ${entry?.before ?? "Nothing"} → ${entry?.after ?? "Removed"}`;
 
   it("shows the effective count change for a cover", () => {
     const entries = diffScenarioDocuments(covered([]), covered([haseena()]));
-    expect(entries.map((entry) => entry.key)).toEqual(["cover:night|2026-11-05|N"]);
-    expect(entries[0].scope).toBe("staffing-requirements");
-    expect(line(entries[0])).toBe("Night on 5 Nov: exactly 3 → 2 (Night cover)");
+    expect(entries.map((entry) => entry.key)).toEqual([
+      "cover:Haseena (Ward 3)|2026-11-05|N",
+      "cover:night|2026-11-05|N",
+    ]);
+    // The row first, on the screen that owns it...
+    expect(entries[0].scope).toBe("staff-list");
+    expect(line(entries[0])).toBe("Temporary cover “Haseena (Ward 3)”: Nothing → Night, 5 Nov");
+    // ...then what her credit did to the count, on the rule she lowered.
+    expect(entries[1].scope).toBe("staffing-requirements");
+    expect(line(entries[1])).toBe("Night on 5 Nov: exactly 3 → 2 (Night cover)");
   });
 
   it("shows the reverse line when the cover goes", () => {
     const entries = diffScenarioDocuments(covered([haseena()]), covered([]));
-    expect(line(entries[0])).toBe("Night on 5 Nov: exactly 2 → 3 (Night cover)");
+    expect(entries.map((entry) => entry.key)).toEqual([
+      "cover:Haseena (Ward 3)|2026-11-05|N",
+      "cover:night|2026-11-05|N",
+    ]);
+    expect(line(entries[0])).toBe("Temporary cover “Haseena (Ward 3)”: Night, 5 Nov → Removed");
+    expect(line(entries[1])).toBe("Night on 5 Nov: exactly 2 → 3 (Night cover)");
   });
 
   it("never shows a count below 0", () => {
@@ -981,14 +994,152 @@ describe("temporary cover in the Preview (d582)", () => {
       haseena({ name: "Moss (Bank)" }),
     ];
     const entries = diffScenarioDocuments(covered([haseena()]), covered(three));
-    expect(entries).toHaveLength(1);
-    expect(line(entries[0])).toBe("Night on 5 Nov: exactly 2 → 0 (Night cover)");
+    // Two rows were booked (Haseena's was already there), and the one count line.
+    expect(entries.map((entry) => entry.key)).toEqual([
+      "cover:Priya (Ward 5)|2026-11-05|N",
+      "cover:Moss (Bank)|2026-11-05|N",
+      "cover:night|2026-11-05|N",
+    ]);
+    expect(line(entries[2])).toBe("Night on 5 Nov: exactly 2 → 0 (Night cover)");
+    // Three covers on three slots is exactly covered, so nothing is extra.
+    expect(entries.map((entry) => entry.key).some((key) => key.startsWith("cover-note:"))).toBe(
+      false,
+    );
   });
 
-  it("says nothing for a cover the ward cannot resolve", () => {
-    expect(diffScenarioDocuments(covered([]), covered([haseena({ date: "2026-12-01" })]))).toEqual(
-      [],
+  it("draws no count line for a cover the ward cannot resolve", () => {
+    // Out of period, so her credit reaches no card and no count moves. The ROW is still
+    // stated: the cover was booked, and a cover that lowers nothing is exactly what a
+    // manager needs to see rather than a Preview that says nothing happened.
+    const entries = diffScenarioDocuments(covered([]), covered([haseena({ date: "2026-12-01" })]));
+    expect(entries.map((entry) => entry.key)).toEqual(["cover:Haseena (Ward 3)|2026-12-01|N"]);
+    expect(entries[0].scope).toBe("staff-list");
+    expect(entries[0].after).toBe("Night, 1 Dec");
+  });
+});
+
+describe("the temporary-cover commands in the Preview (d582)", () => {
+  // A ward with one open night rule of 3, so one cover draws exactly one count line.
+  const night = (over: Partial<ScenarioUiState> = {}): ScenarioUiState => ({
+    ...ward({
+      staff: people("ana", "ben"),
+      cardsByKind: cards({
+        requirements: [
+          requirement("night", "N", 3, { date: ["2026-11-05"], description: "Night cover" }),
+        ],
+      }),
+    }),
+    temporaryCover: [],
+    ...over,
+  });
+  const add = {
+    type: "add_temporary_cover" as const,
+    name: "Haseena (Ward 3)",
+    date: "2026-11-05",
+    shiftType: "N",
+    groups: [],
+  };
+  const remove = {
+    type: "remove_temporary_cover" as const,
+    name: "Haseena (Ward 3)",
+    date: "2026-11-05",
+    shiftType: "N",
+  };
+  const applied = (before: ScenarioUiState, ...commands: AssistantCommandV1[]) => {
+    const result = applyAssistantCommands(before, commands);
+    if (!result.ok) throw new Error(result.rejection.message);
+    return deriveProposalDiff(before, result.next, commands);
+  };
+  const rows = (
+    entries: { key: string; label: string; before: string | null; after: string | null }[],
+  ) =>
+    entries.map(
+      (entry) => `${entry.label}: ${entry.before ?? "Nothing"} → ${entry.after ?? "Removed"}`,
     );
+
+  it("add diff line and effect", () => {
+    const diff = applied(night(), add);
+    // Direct: the row and the count it moved, in that order.
+    expect(diff.direct.map((entry) => entry.key)).toEqual([
+      "cover:Haseena (Ward 3)|2026-11-05|N",
+      "cover:night|2026-11-05|N",
+    ]);
+    expect(rows(diff.direct)).toEqual([
+      "Temporary cover “Haseena (Ward 3)”: Nothing → Night, 5 Nov",
+      "Night on 5 Nov: exactly 3 → 2 (Night cover)",
+    ]);
+    expect(diff.direct.map((entry) => entry.scope)).toEqual([
+      "staff-list",
+      "staffing-requirements",
+    ]);
+    // Nothing else was said, and nothing about her is a cascade.
+    expect(diff.cascade.filter((entry) => entry.key.startsWith("cover"))).toEqual([]);
+  });
+
+  it("remove diff line", () => {
+    const before = night({
+      temporaryCover: [makeTemporaryCover({ date: "2026-11-05", shiftType: "N" })],
+    });
+    const diff = applied(before, remove);
+    expect(rows(diff.direct)).toEqual([
+      "Temporary cover “Haseena (Ward 3)”: Night, 5 Nov → Removed",
+      "Night on 5 Nov: exactly 2 → 3 (Night cover)",
+    ]);
+  });
+
+  it("says when the cover lands on a rule it is not allowed to lower (F1)", () => {
+    // The rule is restricted to RN; a cover with no groups lowers nothing there.
+    const before: ScenarioUiState = {
+      ...night(),
+      cardsByKind: cards({
+        requirements: [
+          requirement("night", "N", 3, {
+            date: ["2026-11-05"],
+            description: "Night cover",
+            qualifiedPeople: ["RN"],
+          }),
+        ],
+      }),
+    };
+    const diff = applied(before, add);
+    // The row is the only direct line: her credit reached no card, so no count line.
+    expect(diff.direct.map((entry) => entry.key)).toEqual(["cover:Haseena (Ward 3)|2026-11-05|N"]);
+    expect(diff.cascade.map((entry) => entry.key)).toEqual([
+      "cover-note:Haseena (Ward 3)|2026-11-05|N|restricted|RN",
+    ]);
+    expect(rows(diff.cascade)).toEqual([
+      "Temporary cover “Haseena (Ward 3)” does not count for “Night cover”: Nothing → " +
+        "Under Night cover, only RN work N. Haseena (Ward 3) is not in RN.",
+    ]);
+  });
+
+  it("says when cover credit is past the requirement (F4), once per slot", () => {
+    // The rule needs 2 and one cover is booked; two more are booked in this change, so
+    // three covers are on a two-slot rule: ONE surplus, said once.
+    const before: ScenarioUiState = {
+      ...night(),
+      cardsByKind: cards({
+        requirements: [
+          requirement("night", "N", 2, { date: ["2026-11-05"], description: "Night cover" }),
+        ],
+      }),
+      temporaryCover: [makeTemporaryCover({ date: "2026-11-05", shiftType: "N" })],
+    };
+    const diff = applied(
+      before,
+      { ...add, name: "Priya (Ward 5)" },
+      { ...add, name: "Moss (Bank)" },
+    );
+    expect(diff.cascade.map((entry) => entry.key)).toEqual(["cover-note:extra|night|2026-11-05|N"]);
+    expect(rows(diff.cascade)).toEqual([
+      "Night on 5 Nov: Nothing → 3 covers are booked, so 1 is extra.",
+    ]);
+    // The count line floors at 0, never below.
+    expect(rows(diff.direct)).toEqual([
+      "Temporary cover “Priya (Ward 5)”: Nothing → Night, 5 Nov",
+      "Temporary cover “Moss (Bank)”: Nothing → Night, 5 Nov",
+      "Night on 5 Nov: exactly 1 → 0 (Night cover)",
+    ]);
   });
 });
 

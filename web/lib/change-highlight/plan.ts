@@ -54,6 +54,7 @@ const NOUNS: readonly (readonly [string, string, string])[] = [
   ["narrowed:", "shift count rule", "shift count rules"],
   ["cell:", "leave or request day", "leave or request days"],
   ["offrun:", "days-off request", "days-off requests"],
+  ["cover:", "temporary cover", "temporary covers"],
 ];
 
 const VERB: Record<ProposalDiffEntry["kind"], string> = {
@@ -76,6 +77,9 @@ export function targetKeyFor(entry: ProposalDiffEntry): string | null {
   if (entry.kind === "removed") return null;
   const { key } = entry;
   if (key === "export:layout") return null;
+  // A cover warning restates the count line above it; the count line is the thing to
+  // outline, and the warning has no row of its own to point at.
+  if (key.startsWith("cover-note:")) return null;
   // offrun:<person>|<start>|<end>; the person is already stableStringified and may hold "|".
   const offrun = /^offrun:(.*)\|[^|]*\|[^|]*$/.exec(key);
   if (offrun) return `person:${offrun[1]}`;

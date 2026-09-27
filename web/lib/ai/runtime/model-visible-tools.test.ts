@@ -433,6 +433,19 @@ describe("the command arms the provider is actually shown", () => {
         members: ["ana"],
       },
       remove_people_group: { type: "remove_people_group", groupId: "Seniors" },
+      add_temporary_cover: {
+        type: "add_temporary_cover",
+        name: "Haseena (Ward 3)",
+        date: "2026-10-14",
+        shiftType: "N",
+        groups: ["RN"],
+      },
+      remove_temporary_cover: {
+        type: "remove_temporary_cover",
+        name: "Haseena (Ward 3)",
+        date: "2026-10-14",
+        shiftType: "N",
+      },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
     // The only optional wire fields: advertised, present in the payload, not `required`.
