@@ -172,6 +172,8 @@ else
   BACKEND_SOURCE="repo-core"
   BACKEND_DIR="$CORE_DIR"
   BACKEND_START=""
+  # v2 capacity; core now carries the upstream default.
+  export JOB_MAX_PENDING="${JOB_MAX_PENDING:-8}"
   if resolve_local_bind "$BACKEND_API_URL"; then
     BACKEND_CMD="$(resolve_python) -m uvicorn $BACKEND_MODULE --host $LOCAL_BIND_HOST --port $LOCAL_BIND_PORT --reload --no-access-log"
   else

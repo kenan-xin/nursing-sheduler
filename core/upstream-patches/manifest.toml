@@ -3,7 +3,7 @@
 upstream = "j3soon/nurse-scheduling feature/genie"
 upstream_commit = "1bf4b85"
 # Oldest first. The check reverse-applies them newest first.
-patch_order = ["P0-fixture-restamp.patch", "P1-person-temporary.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch", "W2-server-maintenance.patch", "W2-server-errors.patch", "W2-server-jobs-runner.patch", "W2-server-diagnostic.patch"]
+patch_order = ["P0-fixture-restamp.patch", "P1-person-temporary.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch", "W2-server-maintenance.patch", "W2-server-errors.patch", "W2-server-jobs-runner.patch", "W2-server-diagnostic.patch", "W2-server-config.patch"]
 
 [[file]]
 path = "nurse_scheduling/cli.py"
@@ -317,3 +317,24 @@ patches = ["W2-server-diagnostic.patch"]
 path = "nurse_scheduling/version.py"
 class = "verbatim"
 upstream_blob = "8a848d24ced79048a6fde4ca6db2d4e64072feab"
+
+[[file]]
+path = "nurse_scheduling/server/request_limits.py"
+class = "verbatim"
+upstream_blob = "b258b13f6e80f99a0ad7a6e41065b6b88694f7f7"
+
+[[file]]
+path = "nurse_scheduling/server/solver_capabilities.py"
+class = "verbatim"
+upstream_blob = "f8c0f5f5c94d61cb41080aa2a95bcfc74406750c"
+
+[[file]]
+path = "nurse_scheduling/server/solver_options.py"
+class = "verbatim"
+upstream_blob = "6e098779587b910019f53a75627b11be524bee2b"
+
+[[file]]
+path = "nurse_scheduling/server/config.py"
+class = "patched"
+upstream_blob = "8f517ab71b5a2a9f86f5331f99a79c9f1c7ae59e"
+patches = ["W2-server-config.patch"]
