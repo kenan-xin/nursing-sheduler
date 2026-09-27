@@ -33,6 +33,8 @@ export async function compactHistory(
     scenarioId: string;
     history: readonly AssistantMessageV1[];
     generations: AssistantGenerationPair;
+    /** Called just before a summary request goes out, and only then. */
+    onSummarising?: () => void;
   },
   overrides: Partial<CompactHistoryDeps> = {},
 ): Promise<CompactedHistory> {
@@ -50,6 +52,7 @@ export async function compactHistory(
   if (plan === null) return kept;
   const settings = await deps.readSettings();
   if (!isAssistantReady(settings)) return kept;
+  input.onSummarising?.();
   try {
     const response = await deps.fetchImpl(AI_SUMMARY_URL, {
       method: "POST",

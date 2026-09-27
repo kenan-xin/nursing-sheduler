@@ -170,6 +170,8 @@ export interface BuildContextInput {
   now?: Date;
   /** Unapplied cards still on screen. Omitted: none. */
   pending?: Pending;
+  /** bead ypo: the stored summary of older messages the hop no longer carries. */
+  earlierSummary?: string | null;
 }
 
 /** An unapplied card: `stopped` once the turn that showed it is over, which disables Apply. */
@@ -242,7 +244,10 @@ export function describeToday(now: Date): string {
   return `${iso} (${weekday} ${now.getDate()} ${month} ${now.getFullYear()})`;
 }
 
-/** The complete context set attached to a turn. Deliberately only these five. */
+/**
+ * The complete context set attached to a turn. Deliberately only these five, plus the
+ * summary of older messages once a long thread has one (bead ypo).
+ */
 export function buildAssistantContext(input: BuildContextInput): AssistantContextEntry[] {
   return [
     {
@@ -275,5 +280,15 @@ export function buildAssistantContext(input: BuildContextInput): AssistantContex
       description: "What the user has been shown and has not applied yet.",
       value: describePending(input.pending),
     },
+    ...(input.earlierSummary
+      ? [
+          {
+            description:
+              "A summary of the earlier part of this conversation. Those older messages are " +
+              "not included below; rely on this summary for what was said and decided there.",
+            value: input.earlierSummary,
+          },
+        ]
+      : []),
   ];
 }

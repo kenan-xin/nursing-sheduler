@@ -83,6 +83,22 @@ describe("the attached turn context", () => {
     expect(context[0].description).toBe(ASSISTANT_AUTHORITY_STATEMENT);
   });
 
+  it("adds the earlier-conversation summary as its own context entry (ypo)", () => {
+    const base = {
+      scenario: wardScenario(),
+      scenarioId: "scenario-a",
+      documentRevision: 12,
+      routePath: "/",
+      routeLabel: null,
+    };
+    const isSummary = (e: { description: string }) =>
+      /earlier part of this conversation/.test(e.description);
+    expect(buildAssistantContext(base).some(isSummary)).toBe(false);
+    const withSummary = buildAssistantContext({ ...base, earlierSummary: "Ana wants 3 Nov off." });
+    expect(withSummary).toHaveLength(6);
+    expect(withSummary.find(isSummary)?.value).toBe("Ana wants 3 Nov off.");
+  });
+
   it("tells the model to propose supported changes via Preview, never to apply them itself", () => {
     // Regression: the old read-only text denied the propose-then-Apply path, so
     // the model refused changes prepare_scenario_change supports.

@@ -95,7 +95,12 @@ Ready, the following may be sent through OpenRouter to the model you chose:
 - anything you type, including staff names, leave, dates and local policy;
 - the complete relevant schedule — dates, people, shift types, rules, requests,
   identifiers and descriptions;
-- which screen you are on, and the conversation so far for that schedule.
+- which screen you are on, and the conversation so far for that schedule;
+- in a long conversation, the older messages once more, so the model can write a short
+  summary of them. After that the summary is sent instead of those messages, and the panel
+  says "Earlier messages were summarised to keep this conversation going." Your own copy of
+  the conversation keeps every message until you clear it, and clearing deletes the summary
+  too.
 
 There is no per-message consent step and no local filter that promises to spot
 sensitive text first. OpenRouter may route your request to different downstream

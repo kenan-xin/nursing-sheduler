@@ -34,19 +34,24 @@ describe("compactHistory", () => {
   it("summarises an over-budget thread once and stores it", async () => {
     const save = vi.fn(async () => "accepted" as const);
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true, summary: "S" })));
-    const out = await compactHistory(input(big(20)), {
-      readThread: async () => ({ summary: null }) as never,
-      readSettings: async () => ready,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-      saveThreadSummary: save,
-      now: () => new Date("2026-09-27T01:00:00.000Z"),
-    });
+    const onSummarising = vi.fn();
+    const out = await compactHistory(
+      { ...input(big(20)), onSummarising },
+      {
+        readThread: async () => ({ summary: null }) as never,
+        readSettings: async () => ready,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        saveThreadSummary: save,
+        now: () => new Date("2026-09-27T01:00:00.000Z"),
+      },
+    );
     expect(out.compactedNow).toBe(true);
     expect(out.summary).toMatchObject({ text: "S", throughSeq: 11 });
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect((init.headers as Record<string, string>)[AI_KEY_HEADER]).toBe("sk-or-TEST");
     expect(String(init.body)).not.toContain("sk-or-TEST");
     expect(save).toHaveBeenCalledOnce();
+    expect(onSummarising).toHaveBeenCalledOnce();
   });
 
   it("keeps the old summary when the call fails, throws or the write is fenced", async () => {
@@ -86,10 +91,12 @@ describe("compactHistory", () => {
       readSettings: async () => ready,
       fetchImpl: fetchImpl as unknown as typeof fetch,
     };
-    expect(await compactHistory(input(big(3)), deps)).toEqual({
+    const onSummarising = vi.fn();
+    expect(await compactHistory({ ...input(big(3)), onSummarising }, deps)).toEqual({
       summary: null,
       compactedNow: false,
     });
+    expect(onSummarising).not.toHaveBeenCalled();
     expect(
       await compactHistory(input(big(20)), {
         ...deps,
