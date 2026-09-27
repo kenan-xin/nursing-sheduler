@@ -101,7 +101,13 @@ export function DiagnosticSearchCard() {
           : []
       }
     >
-      <div className="flex max-h-60 min-h-0 flex-col gap-3 overflow-y-auto px-1">
+      {/* Text-only, so the scroller itself takes focus for keyboard scrolling. */}
+      <div
+        role="region"
+        aria-label="Test details"
+        tabIndex={0}
+        className="flex max-h-60 min-h-0 flex-col gap-3 overflow-y-auto px-1 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand"
+      >
         {/* Never a cause. The solver ships no deterministic infeasibility diagnosis,
             so this baseline is stated up front rather than left to be inferred. */}
         <p className="text-meta text-ink2" data-testid="diagnostic-cause-note">

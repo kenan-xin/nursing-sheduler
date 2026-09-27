@@ -283,7 +283,10 @@ export function AiAssistantCard() {
   return (
     <Card data-testid="ai-assistant-card">
       <CardHeader>
-        <CardTitle>AI assistant</CardTitle>
+        <CardTitle>
+          {/* h2 under the page h1, so "Local AI data" (h3) keeps the outline in order. */}
+          <h2>AI assistant</h2>
+        </CardTitle>
         <CardDescription>
           Optional. Off by default. When it is on, what you type and the whole of this schedule —
           including real names, leave and dates — are sent to the OpenRouter model you choose.

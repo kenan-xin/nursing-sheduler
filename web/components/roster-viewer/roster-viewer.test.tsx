@@ -364,6 +364,14 @@ describe("RosterViewer", () => {
     expect(screen.queryByTestId("roster-day")).toBeNull();
   });
 
+  it("makes the read-only grid scroller a named, keyboard-focusable region", async () => {
+    const document = await makeDocument();
+    render(<Viewer document={document} />);
+    const grid = screen.getByTestId("roster-grid");
+    expect(screen.getByRole("region", { name: "Roster grid" })).toBe(grid);
+    expect(grid).toHaveAttribute("tabindex", "0");
+  });
+
   it("renders the lens toggle with Grid, Coverage, and Day options", async () => {
     const document = await makeDocument();
     render(<Viewer document={document} />);
