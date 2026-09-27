@@ -279,3 +279,8 @@ path = "nurse_scheduling/server/maintenance.py"
 class = "patched"
 upstream_blob = "2adb7af1de57ae88706e9a8aeba00ba640a0a324"
 patches = ["W2-server-maintenance.patch"]
+
+[[file]]
+path = "nurse_scheduling/server/jobs/process_tree.py"
+class = "verbatim"
+upstream_blob = "8d5d3687550ea51aec412868da224e7d9c72ea0f"
