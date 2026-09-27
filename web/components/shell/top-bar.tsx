@@ -61,6 +61,10 @@ function useCrumb(): string {
 export function TopBar() {
   const crumb = useCrumb();
   const scenarioName = useScenarioStore((s) => s.meta.description);
+  // The slot is `max-w-[36ch] truncate`, so a realistic ward name is clipped. The
+  // `title` carries the full value so the clipped text stays readable (bd memory
+  // `long-user-text-no-overflow`).
+  const scenarioLabel = scenarioName || "Untitled schedule";
 
   return (
     <header
@@ -110,8 +114,9 @@ export function TopBar() {
         <span
           data-testid="scenario-context"
           className="hidden max-w-[36ch] truncate text-label uppercase tracking-[0.03em] text-ink3 sm:inline"
+          title={scenarioLabel}
         >
-          {scenarioName || "Untitled schedule"}
+          {scenarioLabel}
         </span>
         <PersistenceStatus />
         {/* Renders nothing until AI is enabled and Ready (T04). */}
