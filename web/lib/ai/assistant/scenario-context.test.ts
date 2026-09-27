@@ -303,6 +303,10 @@ describe("what the assistant knows about the ward and the solver", () => {
   it("sends a one-off roster change through the whole cover ladder, not only swaps", () => {
     expect(KNOWLEDGE_LINES.join(" ")).toMatch(/cover steps above/);
   });
+  it("answers a ratio question in one line and offers the ward's own numbers on a card", () => {
+    // bead 7xw: 'If you'd like, I can help set that up. Would that be helpful?' in text.
+    expect(KNOWLEDGE_LINES[0]).toMatch(/in one sentence.*offer_choices.*ask nothing in text/);
+  });
   it("does not repeat the rest-number ban in the no-law line", () => {
     expect(KNOWLEDGE_LINES[0]).not.toMatch(/rest/);
   });
