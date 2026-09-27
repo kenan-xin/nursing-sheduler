@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchOptimizeTimeoutOptions, LEGACY_OPTIMIZE_TIMEOUT } from "@/lib/query/optimize-options";
+import {
+  clampTimeoutSeconds,
+  fetchOptimizeTimeoutOptions,
+  LEGACY_OPTIMIZE_TIMEOUT,
+} from "@/lib/query/optimize-options";
 
 const originalFetch = globalThis.fetch;
 
@@ -52,5 +56,21 @@ describe("fetchOptimizeTimeoutOptions", () => {
       throw new TypeError("offline");
     }) as typeof fetch;
     expect((await fetchOptimizeTimeoutOptions(signal)).source).toBe("legacy");
+  });
+});
+
+describe("clampTimeoutSeconds", () => {
+  it("raises a fixed timeout to the deployment's minimum when the bounds exclude it", () => {
+    expect(clampTimeoutSeconds(90, { default: 120, minimum: 120, maximum: 600 })).toBe(120);
+  });
+
+  it("lowers a fixed timeout to the deployment's maximum when the bounds exclude it", () => {
+    expect(clampTimeoutSeconds(90, { default: 60, minimum: 1, maximum: 60 })).toBe(60);
+  });
+
+  it("keeps a fixed timeout that the legacy default range admits", () => {
+    expect(clampTimeoutSeconds(90, LEGACY_OPTIMIZE_TIMEOUT)).toBe(90);
+    // No answer yet: the legacy bounds apply, so the fixed value survives.
+    expect(clampTimeoutSeconds(90, undefined)).toBe(90);
   });
 });
