@@ -65,6 +65,8 @@ services:
       # admission below seven, so an ordinary Optimize run is always still accepted
       # while assistant diagnostics saturate the queue.
       JOB_ORDINARY_RESERVED_SLOTS: ${JOB_ORDINARY_RESERVED_SLOTS:-1}
+      # The one-worker deployment's pending capacity (upstream default 32).
+      JOB_MAX_PENDING: ${JOB_MAX_PENDING:-8}
       # Forced-termination grace after a solver's native timeout. The watchdog
       # kills the supervised optimization child tree at `timeout + grace`. Defaults
       # to the backend's own 90s (config.py) — override via docker/.env only if

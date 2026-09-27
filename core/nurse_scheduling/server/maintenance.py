@@ -23,17 +23,17 @@ import time
 from collections.abc import Callable
 
 from .jobs.controller import JobController
-
+from .retry import RepeatedFailure
 
 server_logger = logging.getLogger("nurse_scheduling.server")
 
 MaintenanceClock = Callable[[], float]
-LIVENESS_INTERVAL_FACTOR = 3.0
-"""Missed-pass allowance before maintenance is considered unhealthy."""
+LIVENESS_INTERVAL_FACTOR = 5.0
+"""Missed-pass allowance before maintenance is considered unhealthy; above the 4x outage backoff cap."""
 
 
 class JobMaintenance:
-    """Periodically expire lost-worker claims and retained job history."""
+    """Periodically expire lost-worker jobs, leases, and retained history."""
 
     def __init__(
         self,
@@ -44,7 +44,7 @@ class JobMaintenance:
     ):
         """Configure periodic job cleanup without starting its thread."""
         self._controller = controller
-        """Controller that expires lost-worker claims and retained job history."""
+        """Controller that expires lost-worker jobs, leases, and retained history."""
         self._interval_seconds = interval_seconds
         """Delay between maintenance passes."""
         self._clock = clock
@@ -61,6 +61,8 @@ class JobMaintenance:
         """Monotonic time the current loop started, before any pass completes."""
         self._last_success_at: float | None = None
         """Monotonic time of the most recent fully successful maintenance pass."""
+        self._failures = RepeatedFailure(base_delay_seconds=interval_seconds, max_delay_seconds=interval_seconds * 4)
+        """Quiets and slows repeated passes while the store is unavailable."""
 
     def start(self) -> None:
         """Start the daemon maintenance loop unless it is already running."""
@@ -104,12 +106,11 @@ class JobMaintenance:
         return (self._clock() - reference) <= self._liveness_timeout_seconds
 
     def _run(self) -> None:
-        """Apply claim expiry, retention cleanup, and queue repair at each interval.
+        """Apply worker lease and retention cleanup at each interval.
 
-        A fully successful pass records its completion time for liveness. Failures
-        are logged without terminating future maintenance passes.
+        Failures are logged without terminating future maintenance passes.
         """
-        while not self._stop.wait(self._interval_seconds):
+        while not self._stop.wait(self._failures.delay_seconds()):
             try:
                 self._controller.expire_worker_claims()
                 self._controller.expire_jobs()
@@ -120,7 +121,14 @@ class JobMaintenance:
                 # no record that residue had existed at all.
                 self._controller.repair_queue_residue()
             except Exception:
-                server_logger.exception("[server:maintenance] job retention check failed")
-            else:
-                with self._progress_lock:
-                    self._last_success_at = self._clock()
+                if self._failures.report():
+                    server_logger.exception("[server:maintenance] job retention check failed")
+                continue
+            with self._progress_lock:
+                self._last_success_at = self._clock()
+            ended_failures = self._failures.recovered()
+            if ended_failures:
+                server_logger.warning(
+                    "[server:maintenance] resumed after %d failed passes",
+                    ended_failures,
+                )

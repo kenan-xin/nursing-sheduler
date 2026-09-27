@@ -612,10 +612,11 @@ def test_store_limits_refuse_a_reserve_that_leaves_no_diagnostic_slot(reserve):
         StoreLimits(max_pending=8, max_retained=32, ordinary_reserved_slots=reserve)
 
 
-def test_server_settings_default_reserves_one_of_eight_slots():
+def test_server_settings_env_reserves_one_slot(monkeypatch):
     """The shipped deployment reserves exactly one ordinary slot."""
-    settings = ServerSettings()
-    assert settings.max_pending_jobs == 8
+    monkeypatch.delenv("JOB_ORDINARY_RESERVED_SLOTS", raising=False)
+    monkeypatch.delenv("JOB_REDIS_KEY_PREFIX", raising=False)
+    settings = ServerSettings.from_env()
     assert settings.ordinary_reserved_slots == 1
     # The Redis namespace version moved with the queue layout, so a v0 namespace's
     # single-queue entries can never be misread by the new state machine.

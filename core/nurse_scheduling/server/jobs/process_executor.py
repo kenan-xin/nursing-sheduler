@@ -43,11 +43,9 @@ from enum import Enum
 from multiprocessing.connection import Connection, wait
 from typing import Any
 
-from ..errors import OptimizationExecutionError
-from .models import Job, JobFailure
 from . import process_tree
+from .models import Job, JobFailure
 from .runner import EventCallback, OptimizationRunner, RunOutput
-
 
 server_logger = logging.getLogger("nurse_scheduling.server")
 PROCESS_POLL_SECONDS = 1.0
@@ -126,13 +124,7 @@ def _run_child(
                 should_stop=finish_now_event.is_set if finish_now_enabled else None,
             )
             message = ("result", result)
-        except OptimizationExecutionError as error:
-            # The rebuild runner raises structured expected failures rather than
-            # returning them. Deliver them as a buffered terminal JobFailure so
-            # the supervisor settles a FAILED result instead of an unexpected
-            # child error.
-            message = ("result", JobFailure(code=error.code, message=str(error)))
-        except BaseException as error:
+        except BaseException as error:  # noqa: BLE001
             message = (
                 "unexpected_error",
                 type(error).__name__,
@@ -226,7 +218,7 @@ def run_optimization_process(
             raise ChildOptimizationError(
                 "ChildProcessCommunicationError",
                 (
-                    "Optimisation process closed its result channel without "
+                    "Optimization process closed its result channel without "
                     f"a terminal message. Exit code: {process.exitcode}"
                 ),
                 "",
@@ -242,7 +234,7 @@ def run_optimization_process(
                 return ProcessResult(status=ProcessStatus.COMPLETED, output=result)
             if isinstance(result, JobFailure):
                 return ProcessResult(status=ProcessStatus.FAILED, failure=result)
-            raise RuntimeError(f"Unknown optimisation runner result: {type(result).__name__}")
+            raise RuntimeError(f"Unknown optimization runner result: {type(result).__name__}")
         if message_type == "unexpected_error":
             _, exception_type, error_message, child_traceback = message
             server_logger.error(
@@ -252,7 +244,7 @@ def run_optimization_process(
                 child_traceback,
             )
             raise ChildOptimizationError(exception_type, error_message, child_traceback)
-        raise RuntimeError(f"Unknown optimisation child message: {message_type}")
+        raise RuntimeError(f"Unknown optimization child message: {message_type}")
 
     try:
         while True:
@@ -264,7 +256,7 @@ def run_optimization_process(
                 and requested_control is not ProcessControl.FINISH
                 and requested_control is not ProcessControl.ABORT
             ):
-                raise RuntimeError(f"Unknown optimisation process control: {requested_control}")
+                raise RuntimeError(f"Unknown optimization process control: {requested_control}")
             if requested_control is ProcessControl.FINISH and not finish_now_enabled:
                 raise RuntimeError("Finish-now was requested for an unsupported solver")
 
@@ -278,7 +270,7 @@ def run_optimization_process(
             if process_tree_guard.sentinel in buffered_ready:
                 raise ChildOptimizationError(
                     "ProcessTreeGuardExit",
-                    (f"Optimisation process-tree guard exited unexpectedly with code {process_tree_guard.exitcode}"),
+                    (f"Optimization process-tree guard exited unexpectedly with code {process_tree_guard.exitcode}"),
                     "",
                 )
             if receive_connection in buffered_ready:
@@ -299,7 +291,7 @@ def run_optimization_process(
                     failure=JobFailure(
                         code="process_timeout",
                         message=(
-                            "The optimisation process did not return within the requested "
+                            "The optimization process did not return within the requested "
                             f"{job.request.timeout_seconds:g}-second timeout and "
                             f"{timeout_grace_seconds:g}-second timeout grace period. "
                             "The server terminated the process."
@@ -320,7 +312,7 @@ def run_optimization_process(
             if process_tree_guard.sentinel in ready:
                 raise ChildOptimizationError(
                     "ProcessTreeGuardExit",
-                    (f"Optimisation process-tree guard exited unexpectedly with code {process_tree_guard.exitcode}"),
+                    (f"Optimization process-tree guard exited unexpectedly with code {process_tree_guard.exitcode}"),
                     "",
                 )
             if receive_connection in ready:
@@ -334,7 +326,7 @@ def run_optimization_process(
                     continue
                 raise ChildOptimizationError(
                     "ChildProcessExit",
-                    f"Optimisation process exited with code {process.exitcode}",
+                    f"Optimization process exited with code {process.exitcode}",
                     "",
                 )
     finally:

@@ -1008,7 +1008,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
       controls: { cancellable: true, early_completion_available: true },
       runtime: {
         service_name: "nurse-scheduling-api",
-        api_version: "alpha",
+        api_version: "0.2.0",
         app_version: "v-test",
         deployment_id: "deployment-test",
         instance_id: "instance-test",
