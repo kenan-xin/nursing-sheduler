@@ -328,7 +328,7 @@ preferences:
     countDates: ALL
     countShiftTypes:
       - D
-    expression: x >= 0
+    expression: x >= T
     target: 0
     weight: 3
   - workspaceId: a1
@@ -447,7 +447,7 @@ async function hydrateThroughStore(fixture: string) {
   expect(prepared.issues).toEqual([]);
   expect(prepared.target).not.toBeNull();
   await resetScenarioForTest();
-  loadScenario(prepared.target!);
+  await loadScenario(prepared.target!);
   return useScenarioStore.getState();
 }
 
@@ -491,7 +491,7 @@ describe.skipIf(!AVAILABLE)(
             person: "ALL",
             countDates: "ALL",
             countShiftTypes: ["D"],
-            expression: "x >= 0",
+            expression: "x >= T",
             target: 0,
           },
         ]);
