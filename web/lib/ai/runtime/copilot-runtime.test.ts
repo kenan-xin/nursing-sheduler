@@ -3,12 +3,16 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import {
   AI_DETACH_REASON_INSTANCE_MISMATCH,
   AI_ERROR_CREDENTIALS_REQUIRED,
+  AI_ERROR_MESSAGE_PART_REJECTED,
+  AI_ERROR_REQUEST_TOO_LARGE,
   AI_KEY_HEADER,
   COPILOT_AGENT_ID,
+  MAX_RUN_REQUEST_BYTES,
   OPENROUTER_BASE_URL,
   RUNTIME_INSTANCE_HEADER,
 } from "./containment";
 import { createSchedulerCopilotRuntime, type SchedulerCopilotRuntime } from "./handler";
+import { createOpenRouterAgent } from "./openrouter-agent";
 import {
   SENTINEL_KEY,
   TEST_MODEL,
@@ -20,6 +24,7 @@ import {
   readSseUntil,
   recordingOpenRouter,
   routeUrl,
+  runAgentInput,
   runRequest,
   stopRequest,
   textCompletion,
@@ -35,10 +40,17 @@ import {
 
 // Any egress that is not the injected OpenRouter fixture is a containment failure
 // (telemetry, license check, Scarf). Failing loudly beats a silently-networked suite.
+// Every attempt is also recorded, so a test can assert that NO server-side fetch was
+// even tried (t0c9: the AI SDK downloads URL-sourced file parts from this server).
 const realFetch = globalThis.fetch;
+const egress: string[] = [];
+beforeEach(() => {
+  egress.length = 0;
+});
 beforeAll(() => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    egress.push(url);
     throw new Error(`unexpected network egress from the AI runtime: ${url}`);
   }) as typeof globalThis.fetch;
 });
@@ -247,6 +259,194 @@ describe("run", () => {
 
     const tools = provider.calls[0].body.tools as { function: { name: string } }[];
     expect(tools.map((t) => t.function.name)).toEqual(["previewStaffingChange"]);
+  });
+});
+
+/** Cloud instance metadata: the classic server-side request forgery target. */
+const METADATA_URL = "http://169.254.169.254/latest/meta-data/";
+
+// t0c9: CopilotKit turns audio, video, legacy binary and URL-sourced parts into AI SDK
+// file/image parts, and ai@6 DOWNLOADS a URL it cannot pass through -- from this server.
+// main has no attachments, so only text parts are legitimate on any message.
+const BYPASS_PARTS: [string, unknown][] = [
+  [
+    "an audio part by URL",
+    { type: "audio", source: { type: "url", value: METADATA_URL, mimeType: "audio/wav" } },
+  ],
+  [
+    "a video part by URL",
+    { type: "video", source: { type: "url", value: METADATA_URL, mimeType: "video/mp4" } },
+  ],
+  [
+    "a legacy binary part by URL",
+    { type: "binary", mimeType: "application/pdf", url: METADATA_URL },
+  ],
+  [
+    "a legacy binary part with data",
+    { type: "binary", mimeType: "application/pdf", data: "JVBERg==" },
+  ],
+  [
+    "an image by URL",
+    { type: "image", source: { type: "url", value: METADATA_URL, mimeType: "image/png" } },
+  ],
+  [
+    "image data that is really a URL",
+    { type: "image", source: { type: "data", value: METADATA_URL, mimeType: "image/png" } },
+  ],
+  [
+    "a document by URL",
+    { type: "document", source: { type: "url", value: METADATA_URL, mimeType: "application/pdf" } },
+  ],
+  ["an unknown part type", { type: "file", url: METADATA_URL }],
+  ["a text part whose text is not a string", { type: "text", text: { url: METADATA_URL } }],
+];
+
+describe("message parts (t0c9)", () => {
+  it.each(BYPASS_PARTS)(
+    "refuses %s with a 400, no fetch, no provider call",
+    async (_label, part) => {
+      const { runtime, provider } = launch();
+      const response = await runtime.handler(
+        runRequest({
+          threadId: "t-part",
+          messages: [{ id: "m1", role: "user", content: [{ type: "text", text: "see" }, part] }],
+        }),
+      );
+      expect(egress).toEqual([]);
+      expect(response.status).toBe(400);
+      assertContained(response);
+      expect(await response.json()).toEqual({ error: AI_ERROR_MESSAGE_PART_REJECTED });
+      expect(provider.calls).toHaveLength(0);
+      expect(JSON.stringify(consoleOutput)).not.toContain(METADATA_URL);
+    },
+  );
+
+  it.each(["assistant", "tool", "system", "developer"])(
+    "refuses a media part on a %s message",
+    async (role) => {
+      const { runtime, provider } = launch();
+      const response = await runtime.handler(
+        runRequest({
+          threadId: `t-${role}-part`,
+          messages: [
+            { id: "m1", role: "user", content: "hi" },
+            {
+              id: "m2",
+              role,
+              toolCallId: "c1",
+              content: [{ type: "binary", mimeType: "application/pdf", url: METADATA_URL }],
+            },
+          ],
+        }),
+      );
+      expect(egress).toEqual([]);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: AI_ERROR_MESSAGE_PART_REJECTED });
+      expect(provider.calls).toHaveLength(0);
+    },
+  );
+
+  it("still runs a text-only multi-part user message", async () => {
+    const { runtime, provider } = launch();
+    const response = await runtime.handler(
+      runRequest({
+        threadId: "t-text-parts",
+        messages: [{ id: "m1", role: "user", content: [{ type: "text", text: "hello" }] }],
+      }),
+    );
+    expect(response.status).toBe(200);
+    const { events } = await readSse(response);
+    expect(eventTypes(events)).toContain("RUN_FINISHED");
+    expect(provider.calls).toHaveLength(1);
+  });
+
+  it("refuses in the agent factory too, on the exact messages the converter receives", async () => {
+    // The handler's check is the clean 400; this is the one the converter cannot skip.
+    const provider = recordingOpenRouter();
+    const agent = createOpenRouterAgent(runRequest({ threadId: "t-factory" }), {
+      fetch: provider.fetch,
+    });
+    const input = runAgentInput({
+      threadId: "t-factory",
+      messages: [{ id: "m1", role: "user", content: [BYPASS_PARTS[0][1]] }],
+    });
+    const events = await new Promise<{ type: string; message?: string }[]>((resolve) => {
+      const seen: { type: string; message?: string }[] = [];
+      agent.run(input as Parameters<typeof agent.run>[0]).subscribe({
+        next: (event) => seen.push(event as { type: string; message?: string }),
+        error: () => resolve(seen),
+        complete: () => resolve(seen),
+      });
+    });
+    expect(egress).toEqual([]);
+    expect(provider.calls).toHaveLength(0);
+    expect(events.find((e) => e.type === "RUN_ERROR")?.message).toBe(
+      AI_ERROR_MESSAGE_PART_REJECTED,
+    );
+  });
+});
+
+describe("run request ceiling (t0c9)", () => {
+  it("refuses a declared length over the ceiling before reading the body", async () => {
+    const { runtime, provider } = launch();
+    const response = await runtime.handler(
+      runRequest(
+        { threadId: "t-declared" },
+        credentialHeaders({ "content-length": String(MAX_RUN_REQUEST_BYTES + 1) }),
+      ),
+    );
+    expect(response.status).toBe(413);
+    assertContained(response);
+    expect(await response.json()).toEqual({ error: AI_ERROR_REQUEST_TOO_LARGE });
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("refuses an undeclared streamed body once it passes the ceiling, and stops reading", async () => {
+    const { runtime, provider } = launch();
+    const chunk = new Uint8Array(256 * 1024).fill(0x20);
+    let sent = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        // Endless: only the ceiling can stop this read.
+        sent += chunk.length;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const response = await runtime.handler(
+      new Request(routeUrl(`/agent/${COPILOT_AGENT_ID}/run`), {
+        method: "POST",
+        headers: credentialHeaders(),
+        body,
+        duplex: "half",
+      } as RequestInit),
+    );
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: AI_ERROR_REQUEST_TOO_LARGE });
+    expect(cancelled).toBe(true);
+    expect(sent).toBeLessThanOrEqual(MAX_RUN_REQUEST_BYTES + 2 * chunk.length);
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("runs a body just under the ceiling, read once", async () => {
+    const { runtime, provider } = launch();
+    const filler = "x".repeat(MAX_RUN_REQUEST_BYTES - 4096);
+    const response = await runtime.handler(
+      runRequest({
+        threadId: "t-under",
+        messages: [
+          { id: "m0", role: "user", content: filler },
+          { id: "m1", role: "user", content: "hello" },
+        ],
+      }),
+    );
+    expect(response.status).toBe(200);
+    const { events } = await readSse(response);
+    expect(eventTypes(events)).toContain("RUN_FINISHED");
+    expect(provider.calls).toHaveLength(1);
   });
 });
 

@@ -43,6 +43,19 @@ export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 /** Stable app error codes. These are the ONLY strings that reach a client body. */
 export const AI_ERROR_CREDENTIALS_REQUIRED = "ai_credentials_required";
+/** t0c9: a message carried a part other than text (the server would download its URL). */
+export const AI_ERROR_MESSAGE_PART_REJECTED = "ai_message_part_rejected";
+/** t0c9: a run request over `MAX_RUN_REQUEST_BYTES`; refused before it is buffered. */
+export const AI_ERROR_REQUEST_TOO_LARGE = "ai_request_too_large";
+
+/**
+ * t0c9: the run request ceiling. Measured 2026-09-27 on main: a 12-person month ward's
+ * whole run body is ~0.1-0.3 MiB even at 40 turns; a synthetic 60-person, 31-day ward
+ * with a request on every cell, 40 turns and 10 full request-grid tool reads is 2.4 MiB
+ * (~700K tokens, past most models' context). 4 MiB is roughly the largest body any
+ * common model could accept at all.
+ */
+export const MAX_RUN_REQUEST_BYTES = 4 * 1024 * 1024;
 export const AI_DETACH_REASON_INSTANCE_MISMATCH = "runtime_instance_mismatch";
 
 /**

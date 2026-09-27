@@ -1,5 +1,6 @@
 import {
   AI_ERROR_CREDENTIALS_REQUIRED,
+  AI_ERROR_MESSAGE_PART_REJECTED,
   AI_KEY_HEADER,
   AI_MODEL_HEADER,
   COPILOT_AGENT_ID,
@@ -64,6 +65,29 @@ export class AiRuntimeError extends Error {
   }
 }
 
+/**
+ * t0c9: true when every message's content is a string or a list of text parts only.
+ *
+ * CopilotKit converts audio, video, legacy `binary`, and any URL-sourced part into an
+ * AI SDK file or image part, and the AI SDK DOWNLOADS a URL it cannot pass through --
+ * from this server, with no private-address check. This app sends no media at all, so
+ * anything but text is refused, on every role.
+ */
+export function hasOnlyTextParts(messages: readonly unknown[]): boolean {
+  return messages.every((message) => {
+    const content = (message as { content?: unknown } | null)?.content;
+    if (content === undefined || content === null || typeof content === "string") return true;
+    return (
+      Array.isArray(content) &&
+      content.every(
+        (part: unknown) =>
+          (part as { type?: unknown } | null)?.type === "text" &&
+          typeof (part as { text?: unknown }).text === "string",
+      )
+    );
+  });
+}
+
 export function createOpenRouterAgent(
   request: Request,
   options: OpenRouterAgentOptions = {},
@@ -76,6 +100,11 @@ export function createOpenRouterAgent(
       // Defence in depth. `handler.ts` already rejects a keyless /run at the HTTP
       // boundary; this keeps the invariant true for any other caller of the factory.
       if (!credentials) throw new AiRuntimeError(AI_ERROR_CREDENTIALS_REQUIRED);
+      // t0c9: checked on the exact objects the converter receives. `handler.ts` gives
+      // the same refusal a clean 400 first.
+      if (!hasOnlyTextParts(input.messages)) {
+        throw new AiRuntimeError(AI_ERROR_MESSAGE_PART_REJECTED);
+      }
 
       const openrouter = createOpenAI({
         apiKey: credentials.apiKey,

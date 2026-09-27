@@ -1,8 +1,11 @@
 import {
   AI_DETACH_REASON_INSTANCE_MISMATCH,
   AI_ERROR_CREDENTIALS_REQUIRED,
+  AI_ERROR_MESSAGE_PART_REJECTED,
+  AI_ERROR_REQUEST_TOO_LARGE,
   AI_KEY_HEADER,
   COPILOT_RUNTIME_BASE_PATH,
+  MAX_RUN_REQUEST_BYTES,
   RUNTIME_INSTANCE_HEADER,
 } from "./containment";
 
@@ -19,6 +22,7 @@ import { assertSingleWebInstance } from "./deployment";
 import { getRuntimeInstanceId } from "./instance-identity";
 import {
   createAgentsFactory,
+  hasOnlyTextParts,
   readAiCredentials,
   type OpenRouterAgentOptions,
 } from "./openrouter-agent";
@@ -63,12 +67,15 @@ export function createSchedulerCopilotRuntime(
     basePath: COPILOT_RUNTIME_BASE_PATH,
     mode: "multi-route",
     hooks: {
-      onBeforeHandler: ({ request, route }) => {
+      onBeforeHandler: async ({ request, route }) => {
         const rejection = guardRoute(request, route, instanceId);
         // A thrown Response is CopilotKit's documented short-circuit: it still runs
         // the onResponse hook, so these bodies get the same containment headers.
         if (rejection) throw rejection;
-        return request;
+        if (route.method !== "agent/run") return request;
+        const checked = await guardRunBody(request);
+        if (checked instanceof Response) throw checked;
+        return checked;
       },
       onResponse: ({ response, route }) => containResponse(response, route, instanceId),
     },
@@ -102,6 +109,66 @@ function guardRoute(request: Request, route: RouteInfo, instanceId: string): Res
   // A mismatched `connect` is handled inside the runner, which answers it with the
   // same empty non-leaking stream as an unknown thread.
   return null;
+}
+
+/**
+ * t0c9: the run body, read ONCE through a byte ceiling, then its message parts checked.
+ *
+ * Over {@link MAX_RUN_REQUEST_BYTES} -- by declared length, or by bytes counted as they
+ * stream when none is declared -- the run is refused before anything past the ceiling is
+ * buffered. A message part other than text is refused with a 400 (the agent factory
+ * checks again on the converted input). CopilotKit then gets a new Request over the same
+ * bytes. A body that is not JSON is CopilotKit's to reject. Responses carry codes only.
+ */
+async function guardRunBody(request: Request): Promise<Request | Response> {
+  const tooLarge = () => jsonResponse({ error: AI_ERROR_REQUEST_TOO_LARGE }, 413);
+  if (Number(request.headers.get("content-length")) > MAX_RUN_REQUEST_BYTES) return tooLarge();
+  const bytes = await readCapped(request.body, MAX_RUN_REQUEST_BYTES);
+  if (bytes === null) return tooLarge();
+
+  let messages: unknown;
+  try {
+    messages = (JSON.parse(new TextDecoder().decode(bytes)) as { messages?: unknown })?.messages;
+  } catch {
+    messages = null;
+  }
+  if (Array.isArray(messages) && !hasOnlyTextParts(messages)) {
+    return jsonResponse({ error: AI_ERROR_MESSAGE_PART_REJECTED }, 400);
+  }
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: bytes,
+    signal: request.signal,
+  });
+}
+
+/** The whole stream, or null (and the stream cancelled) once it passes `limit` bytes. */
+async function readCapped(
+  body: ReadableStream<Uint8Array> | null,
+  limit: number,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!body) return new Uint8Array();
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
 }
 
 /**
