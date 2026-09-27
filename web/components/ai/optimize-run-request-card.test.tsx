@@ -44,6 +44,8 @@ describe("OptimizeRunRequestCard", () => {
     expect(navigate).toHaveBeenCalledWith("generate-roster");
     await waitFor(() => expect(useRunRequestStore.getState().pending).not.toBeNull());
     expect(useAssistantStore.getState().activeRunRequest).toBeNull();
+    // Marks the run as the assistant's, so its roster opens when it finishes.
+    expect(useAssistantStore.getState().runFollowUp).toBe("requested");
   });
 
   it("asks for nothing when the Optimise screen cannot be opened", async () => {
@@ -71,6 +73,7 @@ describe("OptimizeRunRequestCard", () => {
     expect(useRunRequestStore.getState().pending).toBeNull();
     expect(screen.queryByTestId("run-request-failed")).not.toBeInTheDocument();
     expect(useAssistantStore.getState().activeRunRequest).not.toBeNull();
+    expect(useAssistantStore.getState().runFollowUp).toBeNull();
   });
 
   it("shows a stopped card with no Run control after the turn moved on", () => {

@@ -37,6 +37,7 @@ import { CardDockContext, DockedComposer } from "./assistant-card-dock";
 import { AssistantReceipts } from "./assistant-receipts";
 import { ApplyNavigationNotice } from "./apply-navigation-notice";
 import { useAssistantRetry } from "./use-assistant-retry";
+import { useOpenRosterAfterRun } from "./use-open-roster-after-run";
 import { useComposerAttachments } from "./use-composer-attachments";
 import { useModelImageInput } from "./use-model-image-input";
 import { Button } from "@/components/ui/button";
@@ -255,6 +256,8 @@ export function AssistantLiveConversation({
     },
     [ready, consume, sendMessage],
   );
+  // Live only, like the run card that starts the run it follows.
+  useOpenRosterAfterRun();
   // The failed turn's Retry, through the SESSION'S OWN send -- the same function the
   // composer's path calls, given the failed turn's id so the gate replaces it. Deliberately
   // not wrapped in another adapter: an adapter here is one more place a send option could
