@@ -27,6 +27,8 @@
 // The rule arms (`add_/edit_shift_sequence_rule`, and the count, requirement and remove
 // arms after them) widen the set the same way: each one fills the rule editor's own
 // form draft and runs that editor's own validator and builder in `operations.ts`.
+// `add_/edit_pairing_rule` (the Affinities screen) and `add_/edit_supervision_rule`
+// (the Shift Type Coverings screen) do too, named in plain words (bead 31og).
 //
 // The Staff-screen arms (`add_person`, `edit_person`, `remove_person`,
 // `add_people_group`, `edit_people_group`, `remove_people_group`) compile to the
@@ -298,7 +300,55 @@ export type AssistantCommandV1 =
       groups: string[];
     }
   /** Remove one temporary cover, named by its three identity fields -- the Staff row's Delete. */
-  | { type: "remove_temporary_cover"; name: string; date: string; shiftType: string };
+  | { type: "remove_temporary_cover"; name: string; date: string; shiftType: string }
+  /**
+   * Add one pairing rule -- the Affinities screen's Add form: `people` and `withPeople` on
+   * the same shifts on the same date, encouraged (positive weight) or kept apart
+   * (negative). `weight` is the text the Weight box would hold.
+   */
+  | {
+      type: "add_pairing_rule";
+      description: string;
+      people: PersonRef[];
+      withPeople: PersonRef[];
+      shiftTypes: string[];
+      dates: string[];
+      weight: string;
+    }
+  /** Replace every field of one pairing rule -- the Affinities screen's Edit form. */
+  | {
+      type: "edit_pairing_rule";
+      ruleId: string;
+      description: string;
+      people: PersonRef[];
+      withPeople: PersonRef[];
+      shiftTypes: string[];
+      dates: string[];
+      weight: string;
+    }
+  /**
+   * Add one supervision rule -- the Shift Type Coverings screen's Add form: whenever one
+   * of `supervisedPeople` works one of the shifts, one of `supervisors` works it too.
+   * Always a hard rule, so it has no weight. `dates: []` means every date.
+   */
+  | {
+      type: "add_supervision_rule";
+      description: string;
+      supervisors: PersonRef[];
+      supervisedPeople: PersonRef[];
+      shiftTypes: string[];
+      dates: string[];
+    }
+  /** Replace every field of one supervision rule -- that screen's Edit form. */
+  | {
+      type: "edit_supervision_rule";
+      ruleId: string;
+      description: string;
+      supervisors: PersonRef[];
+      supervisedPeople: PersonRef[];
+      shiftTypes: string[];
+      dates: string[];
+    };
 
 /** A request strength: a finite number, or a hard pin. JSON cannot carry an infinity, so the pins are words. */
 export type RequestWeight = number | "must" | "never";
@@ -334,6 +384,10 @@ export const ASSISTANT_COMMAND_TYPES = [
   "remove_people_group",
   "add_temporary_cover",
   "remove_temporary_cover",
+  "add_pairing_rule",
+  "edit_pairing_rule",
+  "add_supervision_rule",
+  "edit_supervision_rule",
 ] as const satisfies readonly AssistantCommandType[];
 
 // EXHAUSTIVE IN BOTH DIRECTIONS. `satisfies` above proves every listed name is a real
@@ -524,6 +578,72 @@ function requirementFields() {
         "The exact number of people on that shift on each date, e.g. 2 (a hard rule), " +
           "unless the requirement already has a preferred count, which makes it the lowest " +
           "allowed. It cannot go below the requirement's skill mix.",
+      ),
+  };
+}
+
+function pairingFields() {
+  const side = (which: string) =>
+    z
+      .array(refSchema)
+      .describe(
+        `${which}: person ids and staff group ids exactly as in the schedule. A group means ` +
+          'any one of its members. "ALL" is not accepted.',
+      );
+  return {
+    description: ruleDescriptionSchema(),
+    people: side('One side of the pair, e.g. ["Ana"] or a group of new nurses'),
+    withPeople: side('The other side, e.g. ["Ben"] or a group of seniors'),
+    shiftTypes: z
+      .array(z.string())
+      .describe(
+        "The shifts it is about: shift codes, shift group ids, OFF, LEAVE or ALL. Someone " +
+          "from each side on any of these shifts on the same date counts as together.",
+      ),
+    dates: ruleDatesSchema(),
+    weight: z
+      .string()
+      .describe(
+        "How strongly, written as you would type it in the Weight box. On each date where " +
+          "someone from people and someone from withPeople both work one of these shifts, the " +
+          'solver gains the weight: a positive number such as "5" = together where possible, ' +
+          'a negative number such as "-10" = apart where possible, "-infinity" = never ' +
+          'together (hard rule). Never send "infinity": it forces both sides onto those ' +
+          "shifts on every date. The schedule shows hard weights as .inf / -.inf: send them " +
+          "as infinity / -infinity. Ask the user whether a new rule is a must or a preference " +
+          "when they did not say.",
+      ),
+  };
+}
+
+function supervisionFields() {
+  return {
+    description: ruleDescriptionSchema(),
+    supervisors: z
+      .array(refSchema)
+      .describe(
+        'Who can supervise, e.g. ["Seniors"]: person ids and staff group ids exactly as in ' +
+          'the schedule. One of them on the shift is enough. "ALL" is not accepted.',
+      ),
+    supervisedPeople: z
+      .array(refSchema)
+      .describe(
+        "Who needs a supervisor on shift with them, e.g. a new nurse or a student: person " +
+          "ids and staff group ids. Whenever one of them works one of the shifts, at least " +
+          "one supervisor works it too. Always a hard rule.",
+      ),
+    shiftTypes: z
+      .array(z.string())
+      .describe(
+        "The shifts it applies to: shift codes or shift group ids. OFF and LEAVE are not " +
+          "allowed, and neither is ALL: list every worked shift it applies to.",
+      ),
+    dates: z
+      .array(z.string())
+      .describe(
+        'Which dates. [] = every date. Otherwise EITHER exactly one of "ALL", "WEEKDAY", ' +
+          '"WEEKEND", a weekday name such as "MONDAY", or an existing date group id -- OR ' +
+          "one or more roster dates written YYYY-MM-DD.",
       ),
   };
 }
@@ -865,6 +985,18 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     shiftType: z
       .string()
       .describe("That cover's shift-type id. All three fields must match one cover."),
+  }),
+  z.strictObject({ type: z.enum(["add_pairing_rule"]), ...pairingFields() }),
+  z.strictObject({
+    type: z.enum(["edit_pairing_rule"]),
+    ruleId: ruleIdSchema(),
+    ...pairingFields(),
+  }),
+  z.strictObject({ type: z.enum(["add_supervision_rule"]), ...supervisionFields() }),
+  z.strictObject({
+    type: z.enum(["edit_supervision_rule"]),
+    ruleId: ruleIdSchema(),
+    ...supervisionFields(),
   }),
 ]);
 

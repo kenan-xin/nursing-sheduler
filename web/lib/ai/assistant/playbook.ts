@@ -38,7 +38,7 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-27.4";
+export const PLAYBOOK_VERSION = "2026-09-27.5";
 
 /** Said on the Preview and in the reply whenever a change relaxes a rest rule. */
 export const REST_PRACTICE_WARNING =
@@ -143,12 +143,15 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
       "The rest rules the ward uses. Many wards use no day shift straight after a night as a must, and a day off after nights as a preference.",
       "Limits such as the most nights one nurse may work in the period, and whether to balance nights and weekends across the team.",
       "Suggest a rule giving each nurse at least 1 rest day a week, which the Employment Act sets: a shift sequence rule of ALL 7 days in a row at -infinity (no 7 working days in a row), not a total over the period.",
+      "Anyone who should work together or apart, such as two nurses never on the same night: add_pairing_rule, -infinity for never, a negative number for apart where possible. And any new nurse or student who must always have a named senior or group on shift with them: add_supervision_rule, always a must.",
     ],
     proposeWith: [
       "add_staffing_requirement",
       "set_skill_mix",
       "add_shift_sequence_rule",
       "add_count_rule",
+      "add_pairing_rule",
+      "add_supervision_rule",
     ],
   },
   {

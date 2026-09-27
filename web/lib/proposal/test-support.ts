@@ -162,6 +162,42 @@ export function ruleWardScenario(): ScenarioUiState {
 }
 
 /**
+ * `ruleWardScenario()` plus one pairing rule (Ana and Ben kept apart on nights) and one
+ * supervision rule (a Senior on every Day shift Ben works), for the Affinities and Shift
+ * type coverings arms.
+ */
+export function pairingWardScenario(): ScenarioUiState {
+  const base = ruleWardScenario();
+  return {
+    ...base,
+    cardsByKind: {
+      ...base.cardsByKind,
+      affinities: [
+        {
+          uid: "aff-apart",
+          description: "Ana and Ben apart on nights",
+          people1: [["ana"]],
+          people2: [["ben"]],
+          shiftTypes: [["Night"]],
+          date: ["ALL"],
+          weight: -10,
+        },
+      ],
+      coverings: [
+        {
+          uid: "cov-ben",
+          description: "Ben needs a senior on Day",
+          preceptors: [["Senior"]],
+          preceptees: [["ben"]],
+          shiftTypes: [["Day"]],
+          weight: 1,
+        },
+      ],
+    },
+  };
+}
+
+/**
  * A ward for the people arms. It is `proposalScenario()` moved to October 2026 (a
  * one-month range, so date ids stay two-digit `DD`), plus:
  *
