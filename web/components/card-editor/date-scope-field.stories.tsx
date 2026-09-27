@@ -1,7 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { expect, fn } from "storybook/test";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
-import { LONG_TOKEN, withNarrowFrame } from "../../.storybook/story-helpers";
+import {
+  expectNoHorizontalOverflow,
+  LONG_TOKEN,
+  withNarrowFrame,
+} from "../../.storybook/story-helpers";
 import { DateScopeField, type DateScopeItem, type DateScopeOption } from "./date-scope-field";
 
 // Auto-derived scope chips come from the repo's own group derivation; the
@@ -82,8 +86,9 @@ export const LongText: Story = {
     dateGroups: [{ id: "LongGroup", label: LONG_TOKEN }],
     value: ["LongGroup"],
   },
-  play: async () => {
-    // KNOWN OVERFLOW nursing-sheduler-w0e.9: restore expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame")) and expect(canvas.getByTitle(LONG_TOKEN)).toBeVisible() when fixed
+  play: async ({ canvas }) => {
+    await expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame"));
+    await expect(canvas.getByTitle(LONG_TOKEN)).toBeVisible();
   },
 };
 

@@ -61,9 +61,8 @@ function Demo({
 export const Open: Story = {
   render: (args) => <Demo defaultOpen onOpenChange={args.onOpenChange} />,
   play: async ({ args, userEvent }) => {
-    await expect(
-      await screen.findByRole("alertdialog", { name: "Disable this card?" }),
-    ).toBeVisible();
+    const dialog = await screen.findByRole("alertdialog", { name: "Disable this card?" });
+    await waitFor(() => expect(dialog).toBeVisible());
     await userEvent.click(screen.getByRole("button", { name: "Keep enabled" }));
     await expect(args.onOpenChange).toHaveBeenCalledWith(false, expect.anything());
   },

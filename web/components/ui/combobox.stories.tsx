@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
-import { expect, fn, screen } from "storybook/test";
+import { expect, fn, screen, waitFor } from "storybook/test";
 import { LONG_TOKEN, expectNoHorizontalOverflow } from "../../.storybook/story-helpers";
 import {
   Combobox,
@@ -50,7 +50,8 @@ export const Default: Story = {
 export const NoMatch: Story = {
   play: async ({ canvas, userEvent }) => {
     await userEvent.type(canvas.getByRole("combobox", { name: "Shift" }), "zzz");
-    await expect(await screen.findByText("No shifts match that search.")).toBeVisible();
+    const empty = await screen.findByText("No shifts match that search.");
+    await waitFor(() => expect(empty).toBeVisible());
   },
 };
 

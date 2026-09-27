@@ -1,6 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { expect } from "storybook/test";
-import { LONG_TOKEN, withNarrowFrame } from "../../.storybook/story-helpers";
+import {
+  expectNoHorizontalOverflow,
+  LONG_TOKEN,
+  withNarrowFrame,
+} from "../../.storybook/story-helpers";
 import { CurrentRequestsTable, type CurrentRequestRow } from "./current-requests-table";
 
 // Purely presentational (FR-SR-39): the orchestrator hands in pre-formatted rows; the
@@ -85,10 +89,8 @@ export const LongText: Story = {
     rows: [{ ...rows[0], key: "r-long", person: LONG_TOKEN, shiftLabel: LONG_TOKEN }],
   },
   play: async ({ canvas }) => {
-    // KNOWN OVERFLOW nursing-sheduler-w0e.15: restore
-    // `await expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame"));` when fixed.
-    // KNOWN OVERFLOW nursing-sheduler-w0e.15: restore
-    // `await expect(canvas.getByTitle(LONG_TOKEN)).toBeVisible();` when fixed.
+    await expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame"));
+    await expect(canvas.getAllByTitle(LONG_TOKEN)).toHaveLength(2);
     await expect(canvas.getByTestId("current-requests-table")).toBeVisible();
   },
 };

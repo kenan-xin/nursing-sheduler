@@ -84,8 +84,6 @@ export const Edit: Story = {
 };
 
 export const Invalid: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.17; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   play: async ({ args, canvas, userEvent }) => {
     await userEvent.click(canvas.getByTestId("card-editor-submit"));
     await expect(
@@ -96,8 +94,6 @@ export const Invalid: Story = {
 };
 
 export const LongText: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.17; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   decorators: [withNarrowFrame],
   args: { state: { ...STATE, staff: [{ id: LONG_TOKEN }, { id: "Bob" }] } },
   play: async ({ canvas }) => {

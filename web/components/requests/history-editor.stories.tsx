@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { expect, fn, screen, waitFor } from "storybook/test";
-import { LONG_TOKEN } from "../../.storybook/story-helpers";
+import { expectNoHorizontalOverflow, LONG_TOKEN } from "../../.storybook/story-helpers";
 import { HistoryEditor, type HistoryOption } from "./history-editor";
 
 // Worked items + OFF + LEAVE only — history carries no groups (spec 04).
@@ -65,9 +65,8 @@ export const LongText: Story = {
     options: [{ id: "long", label: LONG_TOKEN }, ...OPTIONS],
   },
   play: async () => {
-    // KNOWN OVERFLOW nursing-sheduler-w0e.16: restore
-    // `await expectNoHorizontalOverflow(await screen.findByTestId("history-editor"));` when fixed.
     await waitFor(() => expect(screen.getByTestId("history-editor")).toBeVisible());
+    await expectNoHorizontalOverflow(screen.getByTestId("history-editor"));
   },
 };
 

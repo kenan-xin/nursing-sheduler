@@ -136,7 +136,7 @@ export const LongText: Story = {
   play: async ({ canvas }) => {
     // The description is prose and must wrap without overflowing the frame.
     await expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame"));
-    // KNOWN OVERFLOW nursing-sheduler-w0e.22: restore expect(canvas.getByTitle(LONG_TOKEN)).toBeVisible() when fixed
+    await expect(canvas.getByTitle(LONG_TOKEN)).toBeVisible();
   },
 };
 

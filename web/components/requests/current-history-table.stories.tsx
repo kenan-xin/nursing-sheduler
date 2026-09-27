@@ -69,8 +69,7 @@ export const LongText: Story = {
   },
   play: async ({ canvas }) => {
     await expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame"));
-    // KNOWN OVERFLOW nursing-sheduler-w0e.14: restore
-    // `await expect(canvas.getByTitle(LONG_TOKEN)).toBeVisible();` when fixed.
+    await expect(canvas.getByTitle(LONG_TOKEN)).toBeVisible();
   },
 };
 

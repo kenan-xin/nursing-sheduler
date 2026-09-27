@@ -30,8 +30,6 @@ export const WithError: Story = {
 
 // Last on purpose: the next light story would prove the theme reset.
 export const Dark: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.11; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   args: { ...WithError.args },
   globals: { theme: "dark" },
 };

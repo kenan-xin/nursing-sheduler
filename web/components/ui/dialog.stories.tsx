@@ -44,7 +44,8 @@ export const Open: Story = {
   play: async () => {
     // The accessible name comes from `DialogTitle`, so this also pins the wiring
     // that the portal a11y proof below removes.
-    await expect(await screen.findByRole("dialog", { name: "Edit shift type" })).toBeVisible();
+    const dialog = await screen.findByRole("dialog", { name: "Edit shift type" });
+    await waitFor(() => expect(dialog).toBeVisible());
   },
 };
 

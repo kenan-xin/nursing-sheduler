@@ -83,8 +83,6 @@ export const Edit: Story = {
 };
 
 export const Invalid: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.17; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   play: async ({ args, canvas, userEvent }) => {
     await userEvent.click(canvas.getByTestId("card-editor-submit"));
     await expect(canvas.getByText("At least one preceptor must be selected")).toBeVisible();
@@ -93,8 +91,6 @@ export const Invalid: Story = {
 };
 
 export const HardRuleNote: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.17; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   play: async ({ canvas }) => {
     // A covering is always a hard rule — the dial is replaced by the locked note.
     await expect(canvas.getByTestId("card-editor-hard-note")).toHaveTextContent(
@@ -104,8 +100,6 @@ export const HardRuleNote: Story = {
 };
 
 export const LongText: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.17; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   decorators: [withNarrowFrame],
   args: { state: { ...STATE, staff: [{ id: LONG_TOKEN }, { id: "Bob" }] } },
   play: async ({ canvas }) => {

@@ -80,10 +80,6 @@ export const Populated: Story = {
 
 export const LongText: Story = {
   decorators: [withNarrowFrame],
-  // a11y violation tracked in nursing-sheduler-w0e.12; restore "error" when fixed.
-  // Once the log actually overflows, the `max-h-80 overflow-y-auto` region is
-  // scrollable but not keyboard-focusable (`scrollable-region-focusable`).
-  parameters: { a11y: { test: "todo" } },
   args: {
     active: true,
     log: [

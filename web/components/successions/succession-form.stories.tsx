@@ -62,8 +62,6 @@ export const Edit: Story = {
 };
 
 export const Invalid: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.17; restore "error" when fixed.
-  parameters: { a11y: { test: "todo" } },
   args: { initialForm: emptySuccessionForm() },
   play: async ({ args, canvas, userEvent }) => {
     await userEvent.click(canvas.getByTestId("card-editor-submit"));

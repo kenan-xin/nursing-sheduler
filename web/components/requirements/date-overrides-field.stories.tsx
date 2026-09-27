@@ -1,6 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { expect, fn } from "storybook/test";
-import { LONG_TOKEN, withNarrowFrame } from "../../.storybook/story-helpers";
+import {
+  expectNoHorizontalOverflow,
+  LONG_TOKEN,
+  withNarrowFrame,
+} from "../../.storybook/story-helpers";
 import { DateOverridesField, type OverrideDateOption } from "./date-overrides-field";
 
 const DATES: OverrideDateOption[] = [
@@ -46,8 +50,7 @@ export const LongText: Story = {
     rows: [{ date: "2026-10-14", requiredNumPeople: 2 }],
   },
   play: async ({ canvas }) => {
-    // KNOWN OVERFLOW nursing-sheduler-w0e.21: restore expectNoHorizontalOverflow when fixed.
-    await expect(canvas.getByTestId("narrow-frame")).toBeVisible();
+    await expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame"));
   },
 };
 

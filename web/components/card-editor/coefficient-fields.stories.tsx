@@ -96,8 +96,6 @@ export const DerivedHints: Story = {
 };
 
 export const WithErrors: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.10; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   args: {
     errorsById: { D: "Coefficient for D must be an integer of at least 1" },
     aggregateError: "Shift type coefficients overlap: D, Seniors include D",

@@ -56,10 +56,6 @@ export const LeaveSelected: Story = {
 };
 
 export const NoMatch: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.13; restore "error" when fixed.
-  // While the picker popup is open, Base UI marks the bar's own focusable siblings
-  // (OFF/LV, Cancel) `aria-hidden`, which axe reports as `aria-hidden-focus`.
-  parameters: { a11y: { test: "todo" } },
   play: async ({ userEvent }) => {
     await userEvent.click(screen.getByTestId("roster-shift-picker"));
     await userEvent.type(screen.getByTestId("roster-shift-picker"), "zzz");
