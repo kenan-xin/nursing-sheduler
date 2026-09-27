@@ -11,6 +11,7 @@ import {
   RUNTIME_INSTANCE_HEADER,
 } from "./containment";
 import { MAX_IMAGE_BYTES, MAX_RUN_REQUEST_BYTES } from "@/lib/ai/assistant/attachment-rules";
+import { MAX_STOP_REQUEST_BYTES } from "./containment";
 import { createSchedulerCopilotRuntime, type SchedulerCopilotRuntime } from "./handler";
 import {
   SENTINEL_KEY,
@@ -23,6 +24,7 @@ import {
   readSseUntil,
   recordingOpenRouter,
   routeUrl,
+  runAgentInput,
   runRequest,
   stopRequest,
   textCompletion,
@@ -522,6 +524,86 @@ describe("run", () => {
 
     const tools = provider.calls[0].body.tools as { function: { name: string } }[];
     expect(tools.map((t) => t.function.name)).toEqual(["previewStaffingChange"]);
+  });
+});
+
+describe("route allowlist (t0c9)", () => {
+  // The app's client calls only info, agent/run, agent/connect and agent/stop. Every
+  // other CopilotKit route is closed, including ones a future CopilotKit adds.
+  it.each([
+    ["agent/suggest", `/agent/${COPILOT_AGENT_ID}/suggest`, "POST"],
+    ["transcribe", "/transcribe", "POST"],
+    ["cpk-debug-events", "/cpk-debug-events", "GET"],
+    ["threads/list", "/threads", "GET"],
+    ["threads/clear", "/threads/clear", "POST"],
+    ["annotate", "/annotate", "POST"],
+  ])("answers %s with a 404 and never runs the agent", async (_label, path, method) => {
+    const { runtime, provider } = launch();
+    const response = await runtime.handler(
+      new Request(routeUrl(path), {
+        method,
+        headers: credentialHeaders(),
+        ...(method === "POST"
+          ? { body: JSON.stringify(runAgentInput({ threadId: "t-closed" })) }
+          : {}),
+      }),
+    );
+    expect(response.status).toBe(404);
+    assertContained(response);
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("refuses a connect over the run ceiling", async () => {
+    const { runtime } = launch();
+    const response = await runtime.handler(
+      new Request(routeUrl(`/agent/${COPILOT_AGENT_ID}/connect`), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(MAX_RUN_REQUEST_BYTES + 1),
+        },
+        body: JSON.stringify(runAgentInput({ threadId: "t-big-connect" })),
+      }),
+    );
+    expect(response.status).toBe(413);
+    assertContained(response);
+    expect(await response.json()).toEqual({ error: AI_ERROR_REQUEST_TOO_LARGE });
+  });
+
+  it("still connects with a long thread's body (connect resends the whole input)", async () => {
+    const { runtime } = launch();
+    const response = await runtime.handler(
+      connectRequest({
+        threadId: "t-long-connect",
+        messages: [{ id: "m1", role: "user", content: "x".repeat(1024 * 1024) }],
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect((await readSse(response)).events).toEqual([]);
+  });
+
+  it("refuses a stop body over its ceiling, declared or streamed", async () => {
+    const { runtime } = launch();
+    const declared = await runtime.handler(
+      new Request(routeUrl(`/agent/${COPILOT_AGENT_ID}/stop/t-big-stop`), {
+        method: "POST",
+        headers: { "content-length": String(MAX_STOP_REQUEST_BYTES + 1) },
+        body: "{}",
+      }),
+    );
+    expect(declared.status).toBe(413);
+    expect(await declared.json()).toEqual({ error: AI_ERROR_REQUEST_TOO_LARGE });
+
+    const chunk = new Uint8Array(64 * 1024).fill(0x20);
+    const streamed = await runtime.handler(
+      new Request(routeUrl(`/agent/${COPILOT_AGENT_ID}/stop/t-big-stop`), {
+        method: "POST",
+        body: new ReadableStream<Uint8Array>({ pull: (c) => c.enqueue(chunk) }),
+        duplex: "half",
+      } as RequestInit),
+    );
+    expect(streamed.status).toBe(413);
+    assertContained(streamed);
   });
 });
 

@@ -47,6 +47,8 @@ export const AI_ERROR_CREDENTIALS_REQUIRED = "ai_credentials_required";
 export const AI_ERROR_ATTACHMENT_REJECTED = "ai_attachment_rejected";
 /** 2by.10: a run request over `MAX_RUN_REQUEST_BYTES`; refused before it is buffered. */
 export const AI_ERROR_REQUEST_TOO_LARGE = "ai_request_too_large";
+/** t0c9: the stop ceiling. The client sends a stop with no body at all. */
+export const MAX_STOP_REQUEST_BYTES = 16 * 1024;
 export const AI_DETACH_REASON_INSTANCE_MISMATCH = "runtime_instance_mismatch";
 
 /**
