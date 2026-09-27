@@ -23,7 +23,8 @@ import { ApplyNavigationNotice } from "./apply-navigation-notice";
 import { useAssistantProposals } from "./use-assistant-proposals";
 
 const push = vi.fn((path: string) => {
-  setTimeout(() => window.history.replaceState({}, "", path), 20);
+  // A timer still pending when the file ends fires after jsdom is torn down.
+  setTimeout(() => globalThis.window?.history.replaceState({}, "", path), 20);
 });
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn() }),

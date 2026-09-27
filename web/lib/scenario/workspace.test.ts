@@ -20,7 +20,7 @@ import {
   WORKSPACE_VERSION,
 } from "./workspace";
 import { prepareScenarioLoad } from "./prepare-scenario-load";
-import { makeValidUiState } from "./test-fixtures";
+import { makeTemporaryCover, makeValidUiState } from "./test-fixtures";
 import { PREFERENCE_TYPE } from "./types";
 
 // A minimal, optimize-ready Workspace document mirroring the T19 Python fixture,
@@ -501,5 +501,59 @@ describe("workspace serialization wire form", () => {
     expect(yaml).not.toContain("\r");
     // No YAML anchors (`&name`) or aliases (`*name`) — repeated values by value.
     expect(yaml).not.toMatch(/[&*][A-Za-z0-9]/);
+  });
+});
+
+describe("workspace temporary cover (d582)", () => {
+  // The cover applied by the web app (spec §1/§2): an optional top-level list that
+  // only ever rides in a Workspace backup. An empty list is omitted so every
+  // cover-free file stays byte-identical and loadable in every build.
+  const cover = makeTemporaryCover({
+    _k: "cover-row-1",
+    name: "Haseena (Ward 3)",
+    date: "2026-05-14",
+    shiftType: "D",
+    groups: ["Seniors"],
+  });
+
+  it("serializes no temporaryCover key when empty (bytes unchanged)", () => {
+    const state = makeValidUiState();
+    const yaml = serializeWorkspace(state);
+    expect(yaml).not.toMatch(/temporaryCover/);
+    // An explicit empty slice serializes identically to an absent one: the key is
+    // omitted, never emitted empty.
+    expect(serializeWorkspace({ ...state, temporaryCover: [] })).toBe(yaml);
+  });
+
+  it("round-trips covers through the workspace", () => {
+    const state = makeValidUiState();
+    state.temporaryCover = [cover];
+
+    // Emission carries the four authored fields and never the F2 React key.
+    const document = buildWorkspaceDocument(state);
+    expect(document.temporaryCover).toEqual([
+      { name: "Haseena (Ward 3)", date: "2026-05-14", shiftType: "D", groups: ["Seniors"] },
+    ]);
+
+    // Hydration restores the covers into authoring state (an optimize-ready backup:
+    // the strict projection later rejects the non-empty list, but a LOAD is fine).
+    const loaded = prepareScenarioLoad(serializeWorkspace(state));
+    expect(loaded.issues).toEqual([]);
+    expect(loaded.target?.temporaryCover).toEqual([
+      { name: "Haseena (Ward 3)", date: "2026-05-14", shiftType: "D", groups: ["Seniors"] },
+    ]);
+  });
+
+  it("strict projection rejects a non-empty cover at temporaryCover", () => {
+    const state = makeValidUiState();
+    state.temporaryCover = [cover];
+    const result = convert(serializeWorkspace(state));
+    expect(result.status).toBe("invalid");
+    if (result.status !== "invalid") return;
+    expect(result.issues).toContainEqual({
+      path: ["temporaryCover"],
+      code: "invalid_value",
+      message: "Temporary cover is applied by the web app. Submit the strict document it produces.",
+    });
   });
 });
