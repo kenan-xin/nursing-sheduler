@@ -118,6 +118,28 @@ export interface LiveProposalBasis {
   registryStamp: CapabilityRegistryStamp;
 }
 
+/**
+ * Whether the document is still the one the proposal was prepared on: the check Apply
+ * makes. Exported so a form-driven Apply (d582 Task 17) can make it before it opens a
+ * form, instead of animating an edit the store would then refuse.
+ */
+export function proposalBasisBlock(
+  proposal: Pick<PreparedProposalV1, "scenarioId" | "baseDocumentRevision" | "baseCommitId">,
+  live: Pick<LiveProposalBasis, "scenarioId" | "documentRevision" | "topCommitId">,
+): "scenario_changed" | "document_changed" | null {
+  if (live.scenarioId !== proposal.scenarioId) return "scenario_changed";
+  // BOTH are compared. The revision catches an ordinary edit; the commit id also
+  // catches an Undo-then-redo path that arrives back at the same revision number
+  // through different content.
+  if (
+    live.documentRevision !== proposal.baseDocumentRevision ||
+    (proposal.baseCommitId !== null && live.topCommitId !== proposal.baseCommitId)
+  ) {
+    return "document_changed";
+  }
+  return null;
+}
+
 /** Why Apply is not available. Each one is a comparison that failed. */
 export type ProposalBlock =
   | { code: "settled"; message: string }
@@ -173,18 +195,13 @@ export function describeProposalReadiness(
       message: "This schedule is being edited in another tab, so nothing can be applied here.",
     });
   }
-  if (live.scenarioId !== proposal.scenarioId) {
+  const basis = proposalBasisBlock(proposal, live);
+  if (basis === "scenario_changed") {
     blocks.push({
       code: "scenario_changed",
       message: "A different schedule is open now, so this change no longer applies.",
     });
-  } else if (
-    live.documentRevision !== proposal.baseDocumentRevision ||
-    (proposal.baseCommitId !== null && live.topCommitId !== proposal.baseCommitId)
-  ) {
-    // BOTH are compared. The revision catches an ordinary edit; the commit id also
-    // catches an Undo-then-redo path that arrives back at the same revision number
-    // through different content.
+  } else if (basis === "document_changed") {
     blocks.push({
       code: "document_changed",
       message: "This schedule changed after the change was prepared, so it is out of date.",

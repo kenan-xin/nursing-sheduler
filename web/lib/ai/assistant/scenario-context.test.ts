@@ -173,6 +173,44 @@ describe("the attached turn context", () => {
   });
 });
 
+describe("temporary covers reach the model (d582)", () => {
+  const contextFor = (scenario: ScenarioUiState) =>
+    buildAssistantContext({
+      scenario,
+      scenarioId: "scenario-a",
+      documentRevision: 12,
+      routePath: "/people",
+      routeLabel: "Staff",
+      now: new Date(2026, 8, 24, 9, 30),
+    })[1].value;
+
+  it("context lists covers", () => {
+    // The cover lives apart from the backend-facing document (Workspace V1 gains the
+    // field later), so it has to be put in the context JSON deliberately. The `_k` React
+    // key never leaves the app, as everywhere else this state is serialized.
+    const scenario: ScenarioUiState = {
+      ...wardScenario(),
+      temporaryCover: [
+        { _k: "tc1", name: "Haseena (Ward 3)", date: "2026-09-15", shiftType: "N", groups: ["RN"] },
+      ],
+    };
+    const document = JSON.parse(contextFor(scenario)) as Record<string, unknown>;
+    expect(document.temporaryCover).toEqual([
+      { name: "Haseena (Ward 3)", date: "2026-09-15", shiftType: "N", groups: ["RN"] },
+    ]);
+    // She is not a person: the people list carries the one real nurse, and no more.
+    expect(document.people).toMatchObject({ items: [{ id: "alice" }] });
+    expect(JSON.stringify(document.people)).not.toContain("Haseena");
+  });
+
+  it("sends nothing about covers when none is booked", () => {
+    // The key is omitted rather than sent empty, so a ward with no covers sends exactly
+    // the document it sent before this feature.
+    const document = JSON.parse(contextFor(wardScenario())) as Record<string, unknown>;
+    expect(document).not.toHaveProperty("temporaryCover");
+  });
+});
+
 describe("host-derived summary", () => {
   it("counts each domain from the document rather than from the conversation", () => {
     const summary = summarizeScenario(wardScenario(), {

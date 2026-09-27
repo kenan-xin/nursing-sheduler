@@ -30,7 +30,11 @@ import {
   type ProposalReadiness,
 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
+import { CAPABILITY_UNAVAILABLE } from "@/lib/capability/resolve";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
+import { awaitCoverEditOutcome, requestCoverEdit } from "@/lib/scenario/cover-edit-request";
+import { applyThroughStaffForm, coverEditsOf } from "./staff-form-apply";
+import { useCapabilityNavigation } from "./use-capability-navigation";
 
 /** How the last Apply ended, in the terms the host may honestly state. */
 export type ApplyOutcomeView =
@@ -113,6 +117,7 @@ export function useAssistantProposals(): AssistantProposalController {
   const [receipts, setReceipts] = useState<ReceiptStanding[]>([]);
   const [applying, setApplying] = useState(false);
   const [outcome, setOutcome] = useState<ApplyOutcomeView | null>(null);
+  const navigate = useCapabilityNavigation();
 
   // ASYNC TAILS ABANDON THEIR WORK ON UNMOUNT. Every continuation below runs behind an
   // `await`, and a consumer can be gone before it resumes: the panel closes, the route
@@ -247,10 +252,39 @@ export function useAssistantProposals(): AssistantProposalController {
     setApplying(true);
     setOutcome(null);
     try {
-      const result = await assistantProposalCommands.apply({
-        proposalId,
-        receiptId: crypto.randomUUID(),
-      });
+      const durable = () =>
+        assistantProposalCommands.apply({ proposalId, receiptId: crypto.randomUUID() });
+      let result: Awaited<ReturnType<typeof durable>>;
+      if (coverEditsOf(proposal.commands).length > 0) {
+        // A temporary cover is booked on the Staff form, in view: its Save runs the
+        // same one durable Apply (d582 Task 17).
+        const box: { result: typeof result | null } = { result: null };
+        const refused = await applyThroughStaffForm(
+          proposal,
+          async () => {
+            box.result = await durable();
+            return box.result.ok
+              ? { ok: true }
+              : { ok: false, message: describeApplyFailure(box.result.reason) };
+          },
+          {
+            readBasis: () => assistantProposalCommands.readScenarioBasis(),
+            navigate: async (capabilityId) =>
+              (await navigate(capabilityId, { reveal: false })).status !== CAPABILITY_UNAVAILABLE,
+            requestCoverEdit,
+            awaitCoverEditOutcome: () => awaitCoverEditOutcome(),
+          },
+        );
+        if (box.result === null) {
+          if (mounted.current) {
+            setOutcome({ kind: "failed", message: refused ?? describeApplyFailure("unknown") });
+          }
+          return;
+        }
+        result = box.result;
+      } else {
+        result = await durable();
+      }
       // The transaction settled durably either way. With no consumer left to narrate it
       // to, clear what it settled and stop: the outcome, and the reread below, both belong
       // to a host that is still on screen.
@@ -281,7 +315,7 @@ export function useAssistantProposals(): AssistantProposalController {
         await refresh();
       }
     }
-  }, [proposalId, proposal, applying, refresh]);
+  }, [proposalId, proposal, applying, refresh, navigate]);
 
   const undo = useCallback(
     async (receiptId: string) => {

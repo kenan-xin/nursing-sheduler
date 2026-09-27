@@ -35,12 +35,27 @@ export interface AssistantContextEntry {
  * representations describe the same value.
  */
 export function stringifyScenario(scenario: ScenarioUiState): string {
-  return JSON.stringify(toCanonicalScenarioDocument(scenario), (_key, value: unknown) => {
-    if (typeof value === "number" && !Number.isFinite(value)) {
-      return Number.isNaN(value) ? "nan" : value > 0 ? ".inf" : "-.inf";
-    }
-    return value;
-  });
+  const document = toCanonicalScenarioDocument(scenario);
+  // TEMPORARY COVERS ARE NOT IN THE BACKEND DOCUMENT (Workspace V1 gains the field in a
+  // later step) but the model must still be told about them: a cover is a staffing credit
+  // on one date, booked from another ward, and never a person the solver can roster. The
+  // `_k` React key is dropped, as it is everywhere else this state is serialized. Omitted
+  // when empty, so a schedule with no covers sends exactly what it sent before.
+  const covers = scenario.temporaryCover.map(({ name, date, shiftType, groups }) => ({
+    name,
+    date,
+    shiftType,
+    groups,
+  }));
+  return JSON.stringify(
+    covers.length === 0 ? document : { ...document, temporaryCover: covers },
+    (_key, value: unknown) => {
+      if (typeof value === "number" && !Number.isFinite(value)) {
+        return Number.isNaN(value) ? "nan" : value > 0 ? ".inf" : "-.inf";
+      }
+      return value;
+    },
+  );
 }
 
 /** A compact, host-derived overview. The model gets it without asking. */
@@ -177,7 +192,10 @@ export function buildAssistantContext(input: BuildContextInput): AssistantContex
     {
       description:
         "The complete current scheduling scenario, as the backend-facing document. " +
-        "Weights of `.inf` / `-.inf` are HARD constraints; numeric weights are soft preferences.",
+        "Weights of `.inf` / `-.inf` are HARD constraints; numeric weights are soft preferences. " +
+        "`temporaryCover` lists the temporary covers booked on the Staff screen: each is a nurse " +
+        "from another ward covering ONE shift on ONE date, and each lowers that date's need for " +
+        "that shift by one. They are not staff: no rule, request or roster row names them.",
       value: stringifyScenario(input.scenario),
     },
     {

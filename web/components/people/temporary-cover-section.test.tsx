@@ -14,6 +14,12 @@ import { rosterStorage, scenarioCommands, useScenarioStore } from "@/lib/store";
 import type { RosterDocument } from "@/lib/roster";
 import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
 import { drainScenarioCommands, resetScenarioForTest, undoDepth } from "@/lib/store/test-authority";
+import { clearChangeHighlight } from "@/lib/change-highlight/store";
+import {
+  awaitCoverEditOutcome,
+  requestCoverEdit,
+  useCoverEditStore,
+} from "@/lib/scenario/cover-edit-request";
 import { PeopleTable } from "./people-table";
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
@@ -255,5 +261,148 @@ describe("Temporary cover section — re-optimize callout", () => {
     expect(run).toHaveAttribute("href", "/optimize-and-export");
     fireEvent.click(run);
     expect(pushMock).toHaveBeenCalledWith("/optimize-and-export");
+  });
+});
+
+describe("Temporary cover section — the assistant's Apply fills the form in view", () => {
+  /** A commit that stands in for the proposal's durable Apply: one write, one undo step. */
+  function writingCommit(next: () => ScenarioUiState["temporaryCover"]) {
+    return vi.fn(async () => {
+      await scenarioCommands.mutate(() => ({ temporaryCover: next() }));
+      return { ok: true as const };
+    });
+  }
+
+  afterEach(() => {
+    clearChangeHighlight();
+    useCoverEditStore.setState({ pending: null, taken: false, last: null });
+  });
+
+  it("opens the prefilled editor, presses its own Save, then highlights and announces the row", async () => {
+    await seed(coverState());
+    render(<PeopleTable />);
+    const base = await undoDepth();
+    const commit = writingCommit(() => [COVER]);
+
+    const outcome = awaitCoverEditOutcome();
+    await act(async () => {
+      requestCoverEdit({ edits: [{ kind: "add", entry: COVER }], commit });
+    });
+
+    await expect(outcome).resolves.toBe("applied");
+    await act(async () => drainScenarioCommands());
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(await undoDepth()).toBe(base + 1);
+    expect(screen.queryByTestId("temporary-cover-editor")).toBeNull();
+    expect(screen.getByTestId("temporary-cover-row-0")).toHaveAttribute(
+      "data-change-highlight",
+      "true",
+    );
+    expect(screen.getByTestId("temporary-cover-status")).toHaveTextContent(
+      "Added temporary cover Haseena (Ward 3).",
+    );
+  });
+
+  it("fills the fields one by one in view when motion is allowed", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: true, media: query }));
+    try {
+      await seed(coverState());
+      render(<PeopleTable />);
+      const outcome = awaitCoverEditOutcome();
+      act(() => {
+        requestCoverEdit({
+          edits: [{ kind: "add", entry: COVER }],
+          commit: writingCommit(() => [COVER]),
+        });
+      });
+      // The name lands before the date: the user watches the form being filled.
+      expect(await screen.findByTestId("temporary-cover-name")).toHaveValue("Haseena (Ward 3)");
+      expect(screen.getByTestId("temporary-cover-date")).toHaveValue("");
+      await act(async () => {
+        await expect(outcome).resolves.toBe("applied");
+      });
+      expect(screen.queryByTestId("temporary-cover-editor")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a validation failure leaves the editor open and writes nothing", async () => {
+    await seed(coverState({ temporaryCover: [COVER] }));
+    render(<PeopleTable />);
+    const commit = writingCommit(() => [COVER, COVER]);
+
+    const outcome = awaitCoverEditOutcome();
+    await act(async () => {
+      requestCoverEdit({ edits: [{ kind: "add", entry: COVER }], commit });
+    });
+
+    await expect(outcome).resolves.toBe("rejected");
+    expect(commit).not.toHaveBeenCalled();
+    expect(screen.getByTestId("temporary-cover-editor")).toBeInTheDocument();
+    expect(screen.getByTestId("temporary-cover-name")).toHaveValue("Haseena (Ward 3)");
+    expect(screen.getByTestId("temporary-cover-error")).toHaveTextContent(
+      "Haseena (Ward 3) already covers N on 14 Oct.",
+    );
+    expect(useScenarioStore.getState().temporaryCover).toHaveLength(1);
+  });
+
+  it("a refused Save (a stale Preview) leaves the editor open with the reason", async () => {
+    await seed(coverState());
+    render(<PeopleTable />);
+    const commit = vi.fn(async () => ({
+      ok: false as const,
+      message: "The schedule changed while you were reviewing, so nothing was applied.",
+    }));
+
+    const outcome = awaitCoverEditOutcome();
+    await act(async () => {
+      requestCoverEdit({ edits: [{ kind: "add", entry: COVER }], commit });
+    });
+
+    await expect(outcome).resolves.toBe("rejected");
+    expect(screen.getByTestId("temporary-cover-error")).toHaveTextContent(
+      "The schedule changed while you were reviewing",
+    );
+    expect(useScenarioStore.getState().temporaryCover).toHaveLength(0);
+  });
+
+  it("remove_temporary_cover Apply deletes in the form", async () => {
+    await seed(coverState({ temporaryCover: [COVER] }));
+    render(<PeopleTable />);
+    const commit = writingCommit(() => []);
+
+    const outcome = awaitCoverEditOutcome();
+    await act(async () => {
+      requestCoverEdit({
+        edits: [{ kind: "remove", name: COVER.name, date: COVER.date, shiftType: "N" }],
+        commit,
+      });
+    });
+
+    await expect(outcome).resolves.toBe("applied");
+    await act(async () => drainScenarioCommands());
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(useScenarioStore.getState().temporaryCover).toHaveLength(0);
+    expect(screen.getByTestId("temporary-cover-status")).toHaveTextContent(
+      "Removed temporary cover Haseena (Ward 3).",
+    );
+  });
+
+  it("does not overwrite a cover the user is still editing", async () => {
+    await seed(coverState());
+    render(<PeopleTable />);
+    fireEvent.click(screen.getByTestId("temporary-cover-add"));
+    fireEvent.change(screen.getByTestId("temporary-cover-name"), { target: { value: "Mine" } });
+    const commit = writingCommit(() => [COVER]);
+
+    const outcome = awaitCoverEditOutcome();
+    await act(async () => {
+      requestCoverEdit({ edits: [{ kind: "add", entry: COVER }], commit });
+    });
+
+    await expect(outcome).resolves.toBe("rejected");
+    expect(commit).not.toHaveBeenCalled();
+    expect(screen.getByTestId("temporary-cover-name")).toHaveValue("Mine");
   });
 });

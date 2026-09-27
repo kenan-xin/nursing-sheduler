@@ -7,7 +7,8 @@
 // detail -- so the CODE is asserted, not the prose.
 
 import { describe, expect, it } from "vitest";
-import type { ScenarioUiState } from "@/lib/scenario";
+import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
+import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
 import type { AssistantCommandV1 } from "./commands";
 import { applyAssistantCommand, applyAssistantCommands } from "./operations";
 import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
@@ -2081,5 +2082,115 @@ describe("set_staffing_requirement_on_date", () => {
     expect(result.ok && dayCard(result.next).requiredNumPeopleOverrides).toEqual([
       ["2026-04-14", 1],
     ]);
+  });
+});
+
+describe("temporary-cover arms (d582)", () => {
+  const cover = (over: Partial<UiTemporaryCover> = {}): UiTemporaryCover =>
+    makeTemporaryCover({ date: "2026-04-14", shiftType: "Day", ...over });
+  const withCovers = (...covers: UiTemporaryCover[]): ScenarioUiState => ({
+    ...ruleWardScenario(),
+    temporaryCover: covers,
+  });
+  const add = (over: Record<string, unknown> = {}) =>
+    ({
+      type: "add_temporary_cover" as const,
+      name: "Haseena (Ward 3)",
+      date: "2026-04-14",
+      shiftType: "Day",
+      groups: ["RN"],
+      ...over,
+    }) as AssistantCommandV1;
+
+  it("adds a cover, trimming the name as the Staff form does, and adds no person", () => {
+    const state = ruleWardScenario();
+    const result = applyAssistantCommand(state, add({ name: "  Haseena (Ward 3)  " }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.temporaryCover).toEqual([
+      { name: "Haseena (Ward 3)", date: "2026-04-14", shiftType: "Day", groups: ["RN"] },
+    ]);
+    // She is never a solver person or a staff row: only the cover slice moved.
+    expect(result.next.staff).toEqual(state.staff);
+    expect(result.next.staffGroups).toEqual(state.staffGroups);
+    expect(result.next.cardsByKind).toEqual(state.cardsByKind);
+  });
+
+  it("duplicate cover refused", () => {
+    const result = applyAssistantCommand(withCovers(cover()), add());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // The form's own sentence, and the host's: the same one the Staff screen shows.
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toBe("Haseena (Ward 3) already covers Day on 14 Apr.");
+  });
+
+  it("refuses a second shift for the same nurse on one date", () => {
+    const result = applyAssistantCommand(withCovers(cover()), add({ shiftType: "Night" }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toBe("Haseena (Ward 3) can only cover one shift a day.");
+  });
+
+  it("refuses what the Staff form refuses: the name, the date, the shift and the groups", () => {
+    const cases: [string, AssistantCommandV1, string][] = [
+      ["name", add({ name: "   " }), "Enter the nurse's name."],
+      ["date", add({ date: "14 Apr" }), "Pick a date."],
+      ["shift", add({ shiftType: "OFF" }), "Pick a shift she works."],
+      ["group", add({ groups: ["Agency"] }), "A selected group no longer exists."],
+    ];
+    for (const [field, command, message] of cases) {
+      const result = applyAssistantCommand(withCovers(), command);
+      expect(result.ok, field).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.code, field).toBe("invalid_value");
+      expect(result.rejection.message, field).toBe(message);
+    }
+  });
+
+  it("removes a cover by its name, date and shift", () => {
+    const result = applyAssistantCommand(withCovers(cover(), cover({ name: "Priya (Ward 5)" })), {
+      type: "remove_temporary_cover",
+      name: "Haseena (Ward 3)",
+      date: "2026-04-14",
+      shiftType: "Day",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.temporaryCover.map((entry) => entry.name)).toEqual(["Priya (Ward 5)"]);
+  });
+
+  it("refuses a removal that names no cover, exactly", () => {
+    for (const command of [
+      {
+        type: "remove_temporary_cover" as const,
+        name: "Haseena (Ward 3)",
+        date: "2026-04-15",
+        shiftType: "Day",
+      },
+      {
+        type: "remove_temporary_cover" as const,
+        name: "Haseena (Ward 3)",
+        date: "2026-04-14",
+        shiftType: "Night",
+      },
+    ]) {
+      const result = applyAssistantCommand(withCovers(cover()), command);
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.code).toBe("unknown_target");
+      expect(result.rejection.message).toContain("Haseena (Ward 3)");
+      expect(result.rejection.message).toContain("temporary cover");
+    }
+  });
+
+  it("leaves the rest of the document byte-identical", () => {
+    const state = withCovers();
+    const added = applyAssistantCommand(state, add());
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    const { temporaryCover: _added, ...rest } = added.next;
+    const { temporaryCover: _before, ...untouched } = state;
+    expect(rest).toEqual(untouched);
   });
 });
