@@ -48,6 +48,8 @@ export interface TrialRecord {
   ms: number;
   /** Turns that settled; a timed-out turn is in `error`, not here. */
   turns?: TurnLatency[];
+  /** The assistant model's own spend; `usage` adds the judge and the simulated user. */
+  assistantUsd?: number;
   error: string | null;
 }
 export interface GateResult {
