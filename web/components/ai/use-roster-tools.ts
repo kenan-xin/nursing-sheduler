@@ -54,7 +54,13 @@ import {
   type TradeVariant,
 } from "@/lib/roster-viewer/swap";
 import type { PersonRef } from "@/lib/scenario";
-import { assistantProposalCommands, pickScenario, useScenarioStore } from "@/lib/store";
+import { isRosterSaved } from "@/lib/optimize/roster-generated";
+import {
+  assistantProposalCommands,
+  pickScenario,
+  useHotStore,
+  useScenarioStore,
+} from "@/lib/store";
 import { assertTurnAuthority, SUPERSEDED } from "./turn-authority";
 
 const DATE_HELP = "A roster date as YYYY-MM-DD.";
@@ -271,6 +277,25 @@ function showCard(
 
 const NO_ROSTER =
   "There is no saved roster yet. If the user wants one, offer a run with request_optimize_run.";
+
+/**
+ * Why there is no roster to read. After a run that made one (bead pu5), "offer a run" is the
+ * wrong steer for a change to a roster staff may already work from. Says only what is known:
+ * the XLSX only when the download is recorded.
+ */
+function noRoster(): string {
+  const view = useHotStore.getState().runView;
+  const made =
+    view.lifecycle === "completed" && (view.outcome === "optimal" || view.outcome === "feasible");
+  if (!made || isRosterSaved(view)) return NO_ROSTER;
+  return (
+    "The last optimiser run made a roster, but no copy of it is saved in the app, so you cannot " +
+    "see who works when; say so, and never guess it. " +
+    (view.download.status === "downloaded" ? "The user downloaded it as an XLSX file. " : "") +
+    "For a change to a roster staff already work from, such as a swap or someone off sick, tell " +
+    "the user a new run can change everyone's shifts, and use the cover steps instead of offering one."
+  );
+}
 const UNREADABLE =
   "The saved roster cannot be read in this browser right now, and nothing was changed. Tell the " +
   "user, and suggest they open the Roster screen.";
@@ -297,7 +322,7 @@ function resolveSwap(
 ): Resolved {
   if (read.status === "unavailable") return { ok: false, message: UNREADABLE };
   if (read.status === "none") {
-    return { ok: false, message: read.newerRunWaiting ? LOAD_FIRST : NO_ROSTER };
+    return { ok: false, message: read.newerRunWaiting ? LOAD_FIRST : noRoster() };
   }
   if (read.newerRunWaiting) return { ok: false, message: LOAD_FIRST };
   const { document } = read;
@@ -353,7 +378,7 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         const late = assertTurnAuthority(token, signal);
         if (late) return late;
         if (read.status === "unavailable") return UNREADABLE;
-        if (read.status === "none") return read.newerRunWaiting ? LOAD_FIRST : NO_ROSTER;
+        if (read.status === "none") return read.newerRunWaiting ? LOAD_FIRST : noRoster();
         const summary = summarizeRoster(
           read.document,
           args,

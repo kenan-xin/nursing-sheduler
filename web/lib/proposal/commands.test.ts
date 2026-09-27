@@ -89,6 +89,16 @@ describe("the rule arms' text states what the solver enforces", () => {
     expect(rest).toContain("copy the break of an existing shift of similar length");
   });
 
+  it("a count is a total over the dates, and days in a row is a shift sequence rule", () => {
+    // bead 3ew: 'at most 5 days in a row' became a count x <= 5 over the whole period.
+    for (const type of ["add_count_rule", "edit_count_rule"]) {
+      const text = arm(type).expression.description ?? "";
+      expect(text).toContain("never days in a row");
+      expect(text).toContain("add_succession_rule");
+      expect(text).toContain('"ALL" 6 times at "-infinity"');
+    }
+  });
+
   it("a count's weight rewards the expression holding", () => {
     const weight = arm("add_count_rule").weight.description ?? "";
     expect(weight).toContain("works against");

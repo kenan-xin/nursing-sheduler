@@ -7,6 +7,8 @@ import {
   useAssistantStore,
 } from "@/lib/ai/assistant/store";
 import { generateDateItems } from "@/lib/dates/date-id";
+import { INITIAL_OPTIMIZE_RUN_VIEW } from "@/lib/optimize/run-view";
+import { useHotStore } from "@/lib/store";
 import { useRosterChangeStore } from "@/lib/roster/change-request";
 import { fixtureSubmission } from "@/lib/roster/test-fixtures";
 import { PREFERENCE_TYPE, type CanonicalScenarioDocument } from "@/lib/scenario";
@@ -220,6 +222,64 @@ describe("find_swap_partners", () => {
         {},
       ),
     ).toMatch(/outside this roster/);
+  });
+
+  describe("with no saved roster, the answer follows what the last run did (bead pu5)", () => {
+    // pu5: the one no-roster answer said 'offer a run', which sent an MC cover on a run's
+    // roster to a new run with no word that it can change everyone's shifts.
+    const runEnded = (outcome: "optimal" | "infeasible", downloaded = false) =>
+      useHotStore.getState().setRunView({
+        ...INITIAL_OPTIMIZE_RUN_VIEW,
+        lifecycle: "completed",
+        jobId: "job-unsaved",
+        outcome,
+        download: {
+          status: downloaded ? "downloaded" : "idle",
+          artifactAvailable: downloaded,
+          filename: null,
+        },
+      });
+    const bothTools = async () => [
+      String(await tool("find_swap_partners").handler(PRIYA_NIGHTS, {})),
+      String(await tool("get_roster").handler({}, {})),
+    ];
+    beforeEach(() => {
+      fixture.working = null;
+      fixture.pointer = null;
+    });
+    afterEach(() => useHotStore.getState().setRunView(INITIAL_OPTIMIZE_RUN_VIEW));
+
+    it("offers a run when no run has made a roster", async () => {
+      for (const outcome of [null, "infeasible"] as const) {
+        if (outcome) runEnded(outcome);
+        for (const answer of await bothTools()) {
+          expect(answer).toMatch(/request_optimize_run/);
+          expect(answer).not.toMatch(/made a roster/);
+        }
+      }
+    });
+
+    it("after a run made a roster the app has no copy of, warns instead of offering a run", async () => {
+      runEnded("optimal");
+      for (const answer of await bothTools()) {
+        expect(answer).toMatch(/made a roster/);
+        expect(answer).toMatch(/can change everyone's shifts/);
+        expect(answer).not.toMatch(/request_optimize_run/);
+        // Nothing says the file reached the user, so the answer does not either.
+        expect(answer).not.toMatch(/XLSX/);
+      }
+    });
+
+    it("names the XLSX only when the download is known to have happened", async () => {
+      runEnded("optimal", true);
+      for (const answer of await bothTools()) expect(answer).toMatch(/XLSX/);
+    });
+
+    it("asks for Load first when a newer run waits, whatever the last run did", async () => {
+      runEnded("optimal");
+      fixture.pointer = { jobId: "job-2", candidateVersion: 1, submissionOrdinal: 2 };
+      for (const answer of await bothTools()) expect(answer).toMatch(/press Load/);
+    });
   });
 
   it("refuses to swap while a newer run waits", async () => {

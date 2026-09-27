@@ -66,6 +66,31 @@ describe("judge", () => {
     expect(text).not.toContain("offer_choices");
   });
 
+  it("shows what the app said about a finished run, so a true 'not saved' is not a false claim", () => {
+    // bead pu5: the judge failed 'the roster wasn't saved in the app', which the app had said.
+    const call = (result: string | null) =>
+      ({
+        ...r,
+        transcript: [
+          {
+            role: "assistant",
+            text: "",
+            toolCalls: [{ toolCallId: "1", name: "get_optimize_result", args: {}, result }],
+          },
+        ],
+      }) as TrialRecord;
+    const read = JSON.stringify({
+      heading: "Optimal roster found",
+      guidance: "Its XLSX file downloads in the browser. No copy was saved to open in the app.",
+    });
+    expect(renderTranscript(call(read))).toBe(
+      "App run result: Optimal roster found. Its XLSX file downloads in the browser. No copy was saved to open in the app.",
+    );
+    expect(renderTranscript(call("not json"))).toBe("");
+    // A run still going (or never started) has no heading: nothing to show.
+    expect(renderTranscript(call(JSON.stringify({ heading: null, guidance: "x" })))).toBe("");
+  });
+
   it("renders offer_choices safely when options is not an array", () => {
     const bad: TrialRecord = {
       ...r,
@@ -110,7 +135,7 @@ describe("judge", () => {
   });
 
   it("keeps short and suggests_default from failing a reply that follows the app (rubric .3)", () => {
-    expect(RUBRIC_VERSION).toBe("2026-09-24.5");
+    expect(RUBRIC_VERSION).toBe("2026-09-27.6");
     expect(STANDARD_ITEMS.short).toMatch(/the app tells/);
     expect(STANDARD_ITEMS.suggests_default).toMatch(/legal or regulatory/);
     expect(STANDARD_ITEMS.suggests_default).toMatch(/choice between repair/);
