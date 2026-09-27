@@ -128,14 +128,19 @@ describe("repair catalogue", () => {
   });
 
   it("softens a rest rule only through its own repair, and never turns one off or deletes it", () => {
-    const soften = REPAIRS.filter((repair) => repair.opTypes.includes("edit_succession_rule"));
+    const soften = REPAIRS.filter((repair) => repair.opTypes.includes("edit_shift_sequence_rule"));
     expect(soften.map((repair) => repair.id)).toEqual(["soften_rest_rule"]);
-    expect(soften[0].opTypes).toEqual(["edit_succession_rule"]);
+    expect(soften[0].opTypes).toEqual(["edit_shift_sequence_rule"]);
     expect(soften[0].guardrail).toMatch(/warning/);
   });
 
+  it("never shows the model the 'succession rule' jargon (bead nj3q)", () => {
+    const shown = JSON.stringify([SETUP_STEPS, SETUP_INSTRUCTIONS, REPAIRS]);
+    expect(shown).not.toMatch(/succession[_ ]rule/i);
+  });
+
   it("never lists a turn-off, add-rest or rule-removal operation", () => {
-    const banned = ["set_rule_enabled", "remove_rule", "add_succession_rule"];
+    const banned = ["set_rule_enabled", "remove_rule", "add_shift_sequence_rule"];
     for (const repair of REPAIRS) {
       for (const op of repair.opTypes) expect(banned, `${repair.id}: ${op}`).not.toContain(op);
     }
@@ -170,7 +175,7 @@ describe("rest rules are guidance, not law", () => {
 
   it("spots a change that turns off, deletes or softens a rest rule", () => {
     const edit = (weight: string) => ({
-      type: "edit_succession_rule" as const,
+      type: "edit_shift_sequence_rule" as const,
       ruleId: "r",
       description: "",
       people: ["ALL"],
@@ -270,6 +275,6 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS[0]).not.toMatch(/all at once, in plain words/);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-27.3");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-27.4");
   });
 });
