@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
+import { stringify } from "yaml";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import {
   formatUncreditedLeaveWarning,
+  serializeScenario,
+  toCanonicalScenarioDocument,
+  type CanonicalScenarioDocument,
   type ImportNormalizationTarget,
   type PrepareScenarioLoadResult,
 } from "@/lib/scenario";
+import { UNSUPPORTED_EXPRESSION_REASON } from "@/lib/optimize/optimize-readiness";
 
 // Keep the real scenario library (detector, adapters, formatter) — only the
 // inbound `prepareScenarioLoad` is stubbed so a marked contract can be staged
@@ -60,7 +65,7 @@ const MARKED_CONTRACT = {
   person: "ALL",
   countDates: "ALL",
   countShiftTypes: "D",
-  expression: "==",
+  expression: "x = T",
   target: 1,
   weight: -1,
 };
@@ -197,5 +202,48 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     expect(result.current.warnings).toBeNull();
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalled();
+  });
+});
+
+describe("useScenarioImport — unsupported shift-count expression (wa46)", () => {
+  /** A real file through the REAL `prepareScenarioLoad`, one extra count appended. */
+  async function importYaml(raw: string) {
+    const actual = await vi.importActual<typeof import("@/lib/scenario")>("@/lib/scenario");
+    prepareMock.mockImplementation(actual.prepareScenarioLoad);
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleFile(raw));
+    return result;
+  }
+
+  function yamlWithCount(expression: string): string {
+    const doc = toCanonicalScenarioDocument(makeValidUiState());
+    doc.preferences.push({
+      type: "shift count",
+      person: "Alice",
+      countDates: "ALL",
+      countShiftTypes: "D",
+      expression,
+      target: 1,
+      weight: 1,
+    } as CanonicalScenarioDocument["preferences"][number]);
+    return stringify(doc, { version: "1.2" });
+  }
+
+  it('loads a file whose count uses "x >= 0" and warns it must be edited before Optimize', async () => {
+    const result = await importYaml(yamlWithCount("x >= 0"));
+
+    expect(result.current.issues).toBeNull();
+    expect(loadScenarioMock).toHaveBeenCalledTimes(1);
+    expect(result.current.warnings).toContain(UNSUPPORTED_EXPRESSION_REASON);
+  });
+
+  it("a supported expression adds no such warning", async () => {
+    const result = await importYaml(yamlWithCount("x >= T"));
+    expect(loadScenarioMock).toHaveBeenCalledTimes(1);
+    expect(result.current.warnings ?? []).not.toContain(UNSUPPORTED_EXPRESSION_REASON);
+    await act(async () => result.current.clearImportState());
+
+    const plain = await importYaml(serializeScenario(makeValidUiState()));
+    expect(plain.current.warnings ?? []).not.toContain(UNSUPPORTED_EXPRESSION_REASON);
   });
 });

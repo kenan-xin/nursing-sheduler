@@ -9,11 +9,12 @@
 // still runs the authoritative strict-projection gate; this only surfaces the
 // missing-data reasons early.
 
+import { hasUnsupportedExpression } from "@/components/card-editor/expression-model";
 import type { ScenarioUiState } from "@/lib/scenario/types";
 
 /** One required-data gap, rendered as "<before><link><after>" with a tab link. */
 export interface OptimizeReadinessIssue {
-  kind: "dates" | "people" | "shift-types";
+  kind: "dates" | "people" | "shift-types" | "shift-counts";
   before: string;
   linkLabel: string;
   href: string;
@@ -30,7 +31,13 @@ export interface OptimizeReadiness {
 export type OptimizeReadinessSource = Pick<
   ScenarioUiState,
   "staff" | "shifts" | "shiftGroups" | "rangeStart" | "rangeEnd"
->;
+> & { counts: readonly ReadinessCount[] };
+
+/** The count-card fields the unsupported-expression gate reads. */
+export interface ReadinessCount {
+  expression: string | readonly string[];
+  disabled?: boolean;
+}
 
 const DATES_ISSUE: OptimizeReadinessIssue = {
   kind: "dates",
@@ -58,11 +65,30 @@ const SHIFT_TYPES_ISSUE: OptimizeReadinessIssue = {
   after: " tab.",
 };
 
+const UNSUPPORTED_EXPRESSION_ISSUE: OptimizeReadinessIssue = {
+  kind: "shift-counts",
+  before: "A shift count rule uses an expression that isn't supported. Edit it on the ",
+  linkLabel: "Shift Counts",
+  href: "/shift-counts",
+  after: " page before optimising.",
+};
+
+/** The one sentence for an unsupported count expression: the import warning, the
+ *  readiness banner line and the Optimize disabled reason all read exactly this. */
+export const UNSUPPORTED_EXPRESSION_REASON = `${UNSUPPORTED_EXPRESSION_ISSUE.before}${UNSUPPORTED_EXPRESSION_ISSUE.linkLabel}${UNSUPPORTED_EXPRESSION_ISSUE.after}`;
+
+/** Whether an ENABLED count uses an expression core rejects (a disabled card is
+ *  dropped from the submission, so it cannot fail the run). */
+export function hasBlockingUnsupportedExpression(counts: readonly ReadinessCount[]): boolean {
+  return counts.some((card) => !card.disabled && hasUnsupportedExpression(card.expression));
+}
+
 /**
  * Derive the required-data readiness of a scenario. Dates are missing when either
  * range endpoint is blank; people are missing when there are no staff; shift types
  * are missing when there are neither shift types nor shift-type groups. Issues are
- * returned in the old app's priority order (dates → people → shift types).
+ * returned in the old app's priority order (dates → people → shift types), then an
+ * enabled shift count with an expression core does not support (wa46).
  */
 export function deriveOptimizeReadiness(source: OptimizeReadinessSource): OptimizeReadiness {
   const issues: OptimizeReadinessIssue[] = [];
@@ -72,6 +98,7 @@ export function deriveOptimizeReadiness(source: OptimizeReadinessSource): Optimi
   if (source.shifts.length === 0 && source.shiftGroups.length === 0) {
     issues.push(SHIFT_TYPES_ISSUE);
   }
+  if (hasBlockingUnsupportedExpression(source.counts)) issues.push(UNSUPPORTED_EXPRESSION_ISSUE);
 
   return { ready: issues.length === 0, issues };
 }
