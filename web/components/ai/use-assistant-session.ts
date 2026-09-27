@@ -32,7 +32,13 @@ import {
   setTurnState,
   settleTurnIfUnsettled,
 } from "@/lib/ai/assistant/history-repo";
-import { completeToolPairs, freezeMessages, toTransportThread } from "@/lib/ai/assistant/messages";
+import {
+  completeToolPairs,
+  freezeMessages,
+  toTransportThread,
+  toUserContent,
+} from "@/lib/ai/assistant/messages";
+import type { AssistantAttachmentV1 } from "@/lib/ai/assistant/records";
 import { readAssistantSettings } from "@/lib/ai/assistant/settings-repo";
 import { omittedMessageIds } from "@/lib/ai/assistant/compaction";
 import { compactHistory } from "./compact-history";
@@ -171,6 +177,8 @@ function describeTurnActivity(messages: readonly Message[]): AssistantActivity {
 export interface AssistantSendOptions {
   /** The failed or interrupted turn whose own messages this send replaces. */
   replaceTurnId?: string;
+  /** 2by.10: the composer's ready attachments. Sent only through the gate, like the text. */
+  attachments?: readonly AssistantAttachmentV1[];
 }
 
 export interface AssistantSession {
@@ -473,7 +481,11 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
       // on this provider ingress too: `plan.history` is read straight from Dexie, so
       // this is the last point before a dangling call would be sent.
       publishVisible(agent, completeToolPairs(toTransportThread(plan.history)));
-      const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: plan.text };
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: toUserContent(plan.text, options?.attachments ?? null),
+      };
       agent.addMessage(userMessage);
       await persistThreadMessages([userMessage], {
         ...writeContext,

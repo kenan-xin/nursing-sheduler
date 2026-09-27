@@ -25,7 +25,11 @@ import { COMPACTION_NOTICE } from "@/lib/ai/assistant/compaction";
 import { describeInterruptionPhase, describeSettlement } from "@/lib/ai/assistant/lifecycle";
 import { describeRefusal } from "@/lib/ai/assistant/send-gate";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
-import { useAssistantSession, type AssistantActivity } from "./use-assistant-session";
+import {
+  useAssistantSession,
+  type AssistantActivity,
+  type AssistantSendOptions,
+} from "./use-assistant-session";
 import { useAssistantProposals } from "./use-assistant-proposals";
 import { useAssistantFollowUps } from "./use-assistant-follow-ups";
 import { CardDockContext, DockedComposer } from "./assistant-card-dock";
@@ -218,9 +222,9 @@ export function AssistantLiveConversation({
   const sendMessage = useAssistantFollowUps(
     running || session.sending,
     proposals.outcome,
-    (text: string) => {
+    (text: string, options?: AssistantSendOptions) => {
       assistantActions.clearChoices();
-      return session.send(text);
+      return options ? session.send(text, options) : session.send(text);
     },
   );
   const dock = useMemo(

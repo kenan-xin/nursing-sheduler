@@ -23,12 +23,14 @@ import { useCallback, useEffect, useState } from "react";
 import { readLatestTurn, readThreadMessages } from "@/lib/ai/assistant/history-repo";
 import { isRetryableSettlement } from "@/lib/ai/assistant/lifecycle";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
+import type { AssistantAttachmentV1 } from "@/lib/ai/assistant/records";
 import type { AssistantSendOptions } from "./use-assistant-session";
 
 /** The settled turn a retry would replace, and the question it left behind. */
 export interface RetryTarget {
   turnId: string;
   text: string;
+  attachments: AssistantAttachmentV1[] | null;
 }
 
 export interface AssistantRetry {
@@ -84,7 +86,13 @@ export function useAssistantRetry(input: AssistantRetryInput): AssistantRetry {
         const question = records.find(
           (record) => record.turnId === turn.turnId && record.role === "user",
         );
-        return question ? { turnId: turn.turnId, text: question.content } : null;
+        return question
+          ? {
+              turnId: turn.turnId,
+              text: question.content,
+              attachments: question.attachments ?? null,
+            }
+          : null;
       })
       // A read that failed is not a failed turn: it means only that no retry can be
       // offered from what is known.
@@ -108,7 +116,10 @@ export function useAssistantRetry(input: AssistantRetryInput): AssistantRetry {
     // the conversation's own send, so the text, the options and every gate the gate
     // owns arrive at the same call site as the composer's.
     assistantActions.clearChoices();
-    void send(target.text, { replaceTurnId: target.turnId }).then((accepted) => {
+    void send(target.text, {
+      replaceTurnId: target.turnId,
+      ...(target.attachments ? { attachments: target.attachments } : {}),
+    }).then((accepted) => {
       // Refused before preparing, so nothing left the panel and the control is owed
       // back to the user.
       if (!accepted) setSent(false);
