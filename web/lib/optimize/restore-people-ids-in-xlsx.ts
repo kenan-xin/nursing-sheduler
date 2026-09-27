@@ -5,6 +5,13 @@
 // people-id column, per Contract C5 [CON-OUT-41]: the FIRST worksheet (resolved
 // by workbook order, not by name), 1-based rows `[3, 3 + peopleCount)`, column A.
 //
+// d582 F6 adds the temporary-cover rows to the SAME transform: a cover nurse is
+// never a solver person, so she is never in the solver's workbook — her display
+// rows are inserted under the staff window at download time (`applyCoverSheet`),
+// and her credit is added to the submission's count rows. Restoration therefore
+// runs FIRST, on the core bytes, and the insert shifts the `Score`/`Status`
+// boundary down afterwards.
+//
 // Mechanism mirrors the old application (`restorePeopleIdsInXlsx` in
 // `web-frontend/src/utils`): the real backend C5 producer (openpyxl via
 // `exporter.export_to_excel`, always with `prettify=True` for the downloaded
@@ -30,6 +37,8 @@
 // touches are preserved on real C5 output.
 
 import type ExcelJS from "exceljs";
+
+import { applyCoverSheet, type CoverSheetPlan } from "@/lib/roster/cover-sheet";
 
 import {
   validatePeopleReverseMap,
@@ -165,7 +174,7 @@ function assertLeadingHeaderBlank(sheet: ExcelJS.Worksheet): void {
 /** Find the first column at or after B whose row-1 + row-2 headers look like a
  *  real C5 schedule column (date serial / `Date` in row 1, non-empty weekday
  *  string in row 2). Returns the column index or throws. */
-function assertScheduleColumnPresent(sheet: ExcelJS.Worksheet): number {
+function findFirstScheduleColumn(sheet: ExcelJS.Worksheet): number {
   const columnCount = Math.max(sheet.columnCount, FIRST_SCHEDULE_COL);
   for (let col = FIRST_SCHEDULE_COL; col <= columnCount; col += 1) {
     const dateValue = sheet.getCell(1, col).value;
@@ -219,7 +228,7 @@ function assertHeaderRows(sheet: ExcelJS.Worksheet): void {
     );
   }
   assertLeadingHeaderBlank(sheet);
-  assertScheduleColumnPresent(sheet);
+  findFirstScheduleColumn(sheet);
   assertFreezeBoundary(sheet);
 }
 
@@ -300,6 +309,45 @@ function restoreScheduleCells(
 }
 
 /**
+ * The 1-based worksheet columns carrying the dates, derived from the WORKBOOK
+ * (d582, F6). C5 lays the dates on consecutive columns from the first schedule
+ * column — the first column at or after B whose row 1 is a date serial and whose
+ * row 2 is a weekday label, which is exactly the exporter's
+ * `leadingCols + historyCols + 1` without needing the container's coordinate map.
+ * The plan's per-date arrays fix how many dates there are, so the two can never
+ * disagree about the span.
+ */
+function deriveDateColumns(sheet: ExcelJS.Worksheet, plan: CoverSheetPlan): number[] {
+  const dateCount = plan.rows[0]?.cells.length ?? 0;
+  if (dateCount === 0) return [];
+  const first = findFirstScheduleColumn(sheet);
+  return Array.from({ length: dateCount }, (_, index) => first + index);
+}
+
+/** Parse a download into a workbook, failing closed on anything ExcelJS refuses. */
+async function loadWorkbook(ExcelJs: typeof ExcelJS, xlsxBlob: Blob): Promise<ExcelJS.Workbook> {
+  const workbook = new ExcelJs.Workbook();
+  const arrayBuffer = await xlsxBlob.arrayBuffer();
+  try {
+    await workbook.xlsx.load(arrayBuffer as unknown as ArrayBuffer);
+  } catch (cause) {
+    throw new XlsxRestorationError("incompatible workbook: ExcelJS could not parse it", { cause });
+  }
+  return workbook;
+}
+
+/** Re-serialize a mutated workbook into the download blob. */
+async function serializeWorkbook(workbook: ExcelJS.Workbook): Promise<Blob> {
+  let outputBuffer: ExcelJS.Buffer;
+  try {
+    outputBuffer = await workbook.xlsx.writeBuffer();
+  } catch (cause) {
+    throw new XlsxRestorationError("failed to re-serialize restored workbook", { cause });
+  }
+  return new Blob([outputBuffer as BlobPart], { type: RESTORED_XLSX_MIME_TYPE });
+}
+
+/**
  * Restore original people ids into an anonymized XLSX download.
  *
  * Loads the workbook with ExcelJS, mutates only the first worksheet's column-A
@@ -319,31 +367,16 @@ export async function restorePeopleIdsInXlsx(
   const lookup = indexReverseMap(reverseMap, peopleCount);
   const ExcelJs = await loadExcelJs();
 
-  const workbook = new ExcelJs.Workbook();
-  const arrayBuffer = await xlsxBlob.arrayBuffer();
-  try {
-    await workbook.xlsx.load(arrayBuffer as unknown as ArrayBuffer);
-  } catch (cause) {
-    throw new XlsxRestorationError("incompatible workbook: ExcelJS could not parse it", { cause });
-  }
-
-  const sheet = getFirstWorksheet(workbook);
-  restoreScheduleCells(sheet, lookup, peopleCount);
-
-  let outputBuffer: ExcelJS.Buffer;
-  try {
-    outputBuffer = await workbook.xlsx.writeBuffer();
-  } catch (cause) {
-    throw new XlsxRestorationError("failed to re-serialize restored workbook", { cause });
-  }
-
-  return new Blob([outputBuffer as BlobPart], { type: RESTORED_XLSX_MIME_TYPE });
+  const workbook = await loadWorkbook(ExcelJs, xlsxBlob);
+  restoreScheduleCells(getFirstWorksheet(workbook), lookup, peopleCount);
+  return serializeWorkbook(workbook);
 }
 
 /**
  * What a download caller (T16e) knows about a completed run's workbook: whether
  * it was anonymized, and — if so — the reverse map and people count needed to
- * restore it. Mirrors the co-derived fields of T16q's `OptimizeSubmissionPrep`.
+ * restore it, plus the temporary-cover rows the download must carry.
+ * Mirrors the co-derived fields of T16q's `OptimizeSubmissionPrep`.
  */
 export interface PeopleIdRestorationInput {
   /** Whether the submission applied people-id anonymization. */
@@ -352,20 +385,54 @@ export interface PeopleIdRestorationInput {
   readonly reverseMap: PeopleReverseMap;
   /** People-item count of the submitted document (the restoration row window). */
   readonly peopleCount: number;
+  /**
+   * The temporary-cover rows this download must write (d582, F6), or `null` when
+   * the run carries no cover. Built from the SUBMITTED document, so the count
+   * rows are the submission's own `export.extraRows`.
+   */
+  readonly cover: CoverSheetPlan | null;
 }
 
 /**
  * The download seam T16e wires the "Download" action to. It keeps the
- * non-anonymized BYPASS out of the pure transform: a plain download returns the
- * SAME blob, never parsed or re-serialized, so its bytes stay exactly as the
- * backend produced them. Only an anonymized download runs the ExcelJS
- * restoration. Exposed (and tested) directly so T16e can rely on the bypass
- * decision without owning it.
+ * non-anonymized, cover-less BYPASS out of the pure transform: such a download
+ * returns the SAME blob, never parsed or re-serialized, so its bytes stay exactly
+ * as the backend produced them. Every other download runs the ExcelJS transform —
+ * id restoration for an anonymized run, then the cover insert.
+ *
+ * The ORDER is load-bearing (spec F6): restoration asserts the people window and
+ * the `Score`/`Status` boundary on the CORE bytes, so it runs BEFORE the insert
+ * moves that boundary down; and it never runs on an already-exported workbook,
+ * whose column A holds real ids rather than `P#`.
  */
 export async function applyPeopleIdRestoration(
   xlsxBlob: Blob,
   input: PeopleIdRestorationInput,
 ): Promise<Blob> {
-  if (!input.anonymized) return xlsxBlob;
-  return restorePeopleIdsInXlsx(xlsxBlob, input.reverseMap, input.peopleCount);
+  if (!input.anonymized && input.cover === null) return xlsxBlob;
+  if (!Number.isInteger(input.peopleCount) || input.peopleCount <= 0) {
+    throw new XlsxRestorationError(`invalid people count: ${input.peopleCount}`);
+  }
+
+  const lookup = input.anonymized ? indexReverseMap(input.reverseMap, input.peopleCount) : null;
+  const ExcelJs = await loadExcelJs();
+  const workbook = await loadWorkbook(ExcelJs, xlsxBlob);
+  const sheet = getFirstWorksheet(workbook);
+
+  if (lookup !== null) restoreScheduleCells(sheet, lookup, input.peopleCount);
+
+  if (input.cover !== null) {
+    // A cover-only run never restored ids, so the people-window checks above did
+    // not run; the layout still has to be the C5 one before anything is written.
+    if (lookup === null) {
+      assertHeaderRows(sheet);
+      assertBoundary(sheet, input.peopleCount);
+    }
+    applyCoverSheet(workbook, input.cover, {
+      lastPersonRow: FIRST_PEOPLE_ROW + input.peopleCount - 1,
+      dateColumns: deriveDateColumns(sheet, input.cover),
+    });
+  }
+
+  return serializeWorkbook(workbook);
 }

@@ -50,6 +50,7 @@ describe("restorePeopleIdsInXlsx — runs in a browser-like environment", () => 
       anonymized: false,
       reverseMap: [],
       peopleCount: PLAIN.peopleCount,
+      cover: null,
     });
     expect(result).toBe(blob);
   });

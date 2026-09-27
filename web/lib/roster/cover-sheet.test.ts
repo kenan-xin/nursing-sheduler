@@ -11,7 +11,12 @@ import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 
 import { parseSubmissionDocument } from "./context";
-import { applyCoverSheet, buildCoverSheetPlan, type CoverSheetPlan } from "./cover-sheet";
+import {
+  applyCoverSheet,
+  buildCoverSheetPlan,
+  toCoverEntries,
+  type CoverSheetPlan,
+} from "./cover-sheet";
 import type { RosterCoverEntry } from "./types";
 
 /** A producer-valid scenario: 3 dates, 3 worked shifts, two overlapping groups. */
@@ -74,6 +79,43 @@ const HASSEENA: RosterCoverEntry = {
   shiftId: "N",
   groups: ["Ward 3"],
 };
+
+describe("toCoverEntries", () => {
+  it("renames the UI's date/shiftType onto the submission's iso/shiftId", () => {
+    expect(
+      toCoverEntries([
+        {
+          _k: "cover-1",
+          name: "Haseena (Ward 3)",
+          date: "2023-08-20",
+          shiftType: "N",
+          groups: ["Ward 3"],
+        },
+        {
+          _k: "cover-2",
+          name: "Haseena (Ward 3)",
+          date: "2023-08-21",
+          shiftType: "E",
+          groups: [],
+        },
+      ]),
+    ).toEqual([
+      { name: "Haseena (Ward 3)", iso: "2023-08-20", shiftId: "N", groups: ["Ward 3"] },
+      { name: "Haseena (Ward 3)", iso: "2023-08-21", shiftId: "E", groups: [] },
+    ]);
+  });
+
+  it("feeds the plan builder exactly the entries the workbook will carry", () => {
+    // The projection's whole job is that the submission and the download agree:
+    // the same cards must produce the same plan through either path.
+    const covers = [
+      { name: "Haseena (Ward 3)", date: "2023-08-20", shiftType: "N", groups: ["Ward 3"] },
+    ];
+    expect(buildCoverSheetPlan(scenarioDocument(), toCoverEntries(covers))).toEqual(
+      buildCoverSheetPlan(scenarioDocument(), [HASSEENA]),
+    );
+  });
+});
 
 describe("buildCoverSheetPlan", () => {
   it("returns null when there are no covers", () => {

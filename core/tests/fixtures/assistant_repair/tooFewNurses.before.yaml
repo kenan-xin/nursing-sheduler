@@ -7,11 +7,12 @@ people:
   items:
     - id: ana
     - id: ben
-    - id: cara
 shiftTypes:
   items:
     - id: D
       description: Day
+    - id: E
+      description: Evening
     - id: N
       description: Night
 preferences:
@@ -27,20 +28,22 @@ preferences:
       - ALL
     weight: -1
   - type: shift type requirement
-    description: 2 on every night
+    description: eve
     shiftType:
-      - N
-    requiredNumPeople: 2
+      - E
+    requiredNumPeople: 1
     qualifiedPeople:
       - ALL
-    requiredNumPeopleOverrides:
-      - - 2026-11-05
-        - 1
     date:
       - ALL
     weight: -1
-  - type: shift request
-    person: cara
-    date: 2026-11-05
-    shiftType: LEAVE
-    weight: .inf
+  - type: shift type requirement
+    description: night
+    shiftType:
+      - N
+    requiredNumPeople: 1
+    qualifiedPeople:
+      - ALL
+    date:
+      - ALL
+    weight: -1

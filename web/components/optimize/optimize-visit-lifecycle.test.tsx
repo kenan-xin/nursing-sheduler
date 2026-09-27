@@ -213,6 +213,7 @@ function priorRunRecord(ownerId = "owner-prior", jobId = "opt_prior"): string {
     peopleCount: 0,
     reverseMap: [],
     capture: { status: "staged", snapshotRef: ownerId, submissionOrdinal: 1 },
+    coverSheet: null,
   });
 }
 

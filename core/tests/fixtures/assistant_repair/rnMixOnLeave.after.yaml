@@ -10,14 +10,11 @@ people:
     - id: en1
     - id: en2
     - id: en3
-    - id: Borrowed nurse 1
-      history: []
   groups:
     - id: RN
       members:
         - rn1
         - rn2
-        - Borrowed nurse 1
 shiftTypes:
   items:
     - id: D
@@ -47,45 +44,28 @@ preferences:
       - people: RN
         minNumPeople: 2
     date:
+      - 2026-11-01
+      - 2026-11-02
+      - 2026-11-04
+      - 2026-11-05
+      - 2026-11-06
+      - 2026-11-07
+    weight: -1
+  - type: shift type requirement
+    description: "Night: 2, both RNs"
+    shiftType:
+      - N
+    requiredNumPeople: 1
+    qualifiedPeople:
       - ALL
+    skillMix:
+      - people: RN
+        minNumPeople: 1
+    date:
+      - 2026-11-03
     weight: -1
   - type: shift request
     person: rn2
     date: 2026-11-03
     shiftType: LEAVE
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-01
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-02
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-04
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-05
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-06
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-07
-    shiftType: OFF
-    weight: .inf
-  - type: shift request
-    person: Borrowed nurse 1
-    date: 2026-11-03
-    shiftType: N
     weight: .inf
