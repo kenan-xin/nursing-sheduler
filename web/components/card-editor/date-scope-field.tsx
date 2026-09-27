@@ -234,13 +234,19 @@ function Chip({
       size="sm"
       aria-pressed={active}
       onClick={onClick}
+      // A long authored group id is arbitrary user input (bd memory
+      // `long-user-text-no-overflow`): cap the chip at its container and let the
+      // label ellipsize rather than growing past the field's width.
+      className="min-w-0 max-w-full"
     >
       {group ? (
         <FaLayerGroup className="size-2.5 opacity-70" />
       ) : (
         <FaCalendarDay className="size-2.5 opacity-70" />
       )}
-      {label}
+      <span className="truncate" title={label}>
+        {label}
+      </span>
     </Button>
   );
 }
