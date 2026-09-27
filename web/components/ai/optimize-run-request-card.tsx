@@ -40,6 +40,8 @@ export function OptimizeRunRequestCard() {
         return;
       }
       requestOptimizeRun();
+      // Its roster opens on the Roster page when it finishes (use-open-roster-after-run).
+      assistantActions.setRunFollowUp("requested");
       assistantActions.clearRunRequest();
     } finally {
       setOpening(false);
@@ -85,7 +87,8 @@ export function OptimizeRunRequestCard() {
             This sends the schedule as it is now to the optimiser, exactly as pressing Optimize on
             the Optimise screen does. It changes nothing in your set-up. It uses that screen&apos;s
             settings (up to 5 minutes by default) and downloads an XLSX file when it finishes. Stay
-            on that screen while it runs: leaving it stops the run.
+            on that screen while it runs: leaving it stops the run. If it makes a roster, the Roster
+            page opens.
           </p>
           {runLive ? (
             <p className="px-1 text-meta text-ink2" data-testid="run-request-live">

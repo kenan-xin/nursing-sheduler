@@ -22,7 +22,7 @@ import { terminalHeading } from "@/lib/optimize/run-display";
 import type { OptimizeRunView } from "@/lib/optimize/run-view";
 import { isRunLive, useRunRequestStore, type RunRequestOutcome } from "@/lib/optimize/run-request";
 import { isRosterSaved } from "@/lib/optimize/roster-generated";
-import { assistantActions } from "@/lib/ai/assistant/store";
+import { assistantActions, useAssistantStore, type RunFollowUp } from "@/lib/ai/assistant/store";
 import { assertTurnAuthority, SUPERSEDED } from "./turn-authority";
 
 /** What the model reads about the run on the Optimise screen. Compact on purpose. */
@@ -40,6 +40,8 @@ export interface OptimizeRunSummary {
   finishedAt: string | null;
   downloaded: boolean;
   rosterSaved: boolean;
+  /** The app opened the Roster page for the roster of the run the user started from the run card. */
+  rosterOpened: boolean;
   /** The run was built from an earlier version of the schedule than the one now open. */
   stale: boolean;
   guidance: string;
@@ -64,7 +66,19 @@ function guidanceFor(
   rosterSaved: boolean,
   lastRequest: RunRequestOutcome | null,
   stale: boolean,
+  followUp: RunFollowUp,
 ): string {
+  // cvkv: opening the Roster page leaves the Optimise screen, which clears the run there.
+  if (!isRunLive(view.lifecycle) && (followUp === "opening" || followUp === "opened")) {
+    return (
+      "The run the user started from the run card made a roster, and it is saved in the app. " +
+      (followUp === "opened"
+        ? "The app has opened it on the Roster page, where the user can look it over and " +
+          "change it. Tell them it is open there."
+        : "The app is opening it on the Roster page for the user now.") +
+      " Its XLSX file also downloads in the browser, as for any run."
+    );
+  }
   // 2vtv: after an Apply the screen still shows the old run until the user presses Run.
   if (stale && !isRunLive(view.lifecycle)) {
     return (
@@ -95,9 +109,16 @@ function guidanceFor(
         return (
           "The schedule can be built now: a roster was produced. Its XLSX file downloads in the browser, as for any run; if " +
           "it did not, the user can press Download again on the Optimise screen. " +
-          (rosterSaved
-            ? "It is also saved in the app: the user can open it with Open & adjust roster."
-            : "No copy was saved to open in the app; the downloaded file is the result.")
+          (!rosterSaved
+            ? "No copy was saved to open in the app; the downloaded file is the result."
+            : followUp === "stayed"
+              ? "It is also saved in the app. The app went to open it on the Roster page, but " +
+                "the user chose to stay here to keep an unsaved edit; they can open it with " +
+                "Open & adjust roster."
+              : followUp === "failed"
+                ? "It is also saved in the app, but the Roster page could not be opened for " +
+                  "them; they can open it with Open & adjust roster."
+                : "It is also saved in the app: the user can open it with Open & adjust roster.")
         );
       case "infeasible":
         return (
@@ -126,6 +147,7 @@ export function summarizeOptimizeRun(
   rosterSaved: boolean,
   lastRequest: RunRequestOutcome | null,
   stale = false,
+  followUp: RunFollowUp = null,
 ): OptimizeRunSummary {
   return {
     status: view.lifecycle,
@@ -140,8 +162,9 @@ export function summarizeOptimizeRun(
     finishedAt: view.finishedAt,
     downloaded: view.download.status === "downloaded",
     rosterSaved,
+    rosterOpened: followUp === "opened",
     stale,
-    guidance: guidanceFor(view, rosterSaved, lastRequest, stale),
+    guidance: guidanceFor(view, rosterSaved, lastRequest, stale, followUp),
   };
 }
 
@@ -192,8 +215,8 @@ export function useOptimizeTools(agentId: string, turnEpoch: number): void {
           "The user now sees a card asking whether to run the optimiser. Nothing has started, " +
           "and only the user can start it by pressing Run. Do not say a run has started, and " +
           "say the card is there for them to press Run, never that you set it up. Tell " +
-          "them it uses the Optimise screen's settings, downloads an XLSX when it finishes, and " +
-          "stops if they leave that screen. Once they have pressed Run, use get_optimize_result " +
+          "them it uses the Optimise screen's settings, downloads an XLSX when it finishes, " +
+          "opens the Roster page if it makes a roster, and stops if they leave that screen. Once they have pressed Run, use get_optimize_result " +
           "to see how it is going."
         );
       },
@@ -217,7 +240,13 @@ export function useOptimizeTools(agentId: string, turnEpoch: number): void {
           view.lifecycle !== "idle" &&
           runRevision !== null &&
           runRevision !== useAuthorityStore.getState().documentRevision;
-        return summarizeOptimizeRun(view, isRosterSaved(view), last, stale);
+        return summarizeOptimizeRun(
+          view,
+          isRosterSaved(view),
+          last,
+          stale,
+          useAssistantStore.getState().runFollowUp,
+        );
       },
     },
     [agentId, turnEpoch],

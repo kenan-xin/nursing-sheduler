@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { useModelVisibleTool } from "./register-model-visible-tool";
 import { assistantActions } from "@/lib/ai/assistant/store";
+import { CHOICE_OPTION_RULES } from "@/lib/ai/assistant/playbook";
 import { SUPERSEDED } from "./turn-authority";
 
 const questionFields = {
@@ -14,7 +15,12 @@ const questionFields = {
   options: z
     .array(
       z.object({
-        label: z.string().describe("The answer as the user would say it, e.g. 'Ben Tan'."),
+        label: z
+          .string()
+          .describe(
+            "The answer as the user would say it, e.g. 'Ben Tan' or '2 seniors every " +
+              "night'. A complete answer, never a placeholder like 'Set a number'.",
+          ),
         detail: z.string().describe("One short line that tells options apart, or ''."),
       }),
     )
@@ -43,6 +49,68 @@ export const choiceParameters = z.object({
     ),
 });
 
+/** The offer shape the handler receives, after the host parses it. */
+export type ChoiceOffer = z.infer<typeof choiceParameters>;
+
+/**
+ * Option labels that name an action rather than an answer (bead tpt2). A FIXED list,
+ * matched exactly after trimming and lower-casing: no fuzzy matching, no synonyms beyond
+ * these phrases. Widened only from real transcripts, never guessed.
+ */
+export const PLACEHOLDER_OPTION_LABELS: readonly string[] = [
+  "set a number",
+  "set a value",
+  "set the number",
+  "set the value",
+  "choose a number",
+  "choose a value",
+  "pick a number",
+  "pick a value",
+  "select a number",
+  "select a value",
+  "enter a number",
+  "enter a value",
+  "type a number",
+  "type a value",
+  "custom",
+  "custom value",
+  "custom amount",
+  "custom number",
+  "other",
+  "other value",
+  "other amount",
+  "other number",
+];
+
+/** True when an option label is a bare placeholder, not a concrete answer. */
+export function isPlaceholderOptionLabel(label: string): boolean {
+  return PLACEHOLDER_OPTION_LABELS.includes(label.trim().toLowerCase());
+}
+
+/** The first placeholder label in an offer (its questions and any moreQuestions), or null. */
+export function firstPlaceholderLabel(offer: ChoiceOffer): string | null {
+  const questions = [offer, ...(offer.moreQuestions ?? [])];
+  for (const question of questions) {
+    for (const option of question.options) {
+      if (isPlaceholderOptionLabel(option.label)) return option.label;
+    }
+  }
+  return null;
+}
+
+/**
+ * The refusal for a card whose options are placeholders. A tool result, never a throw, so
+ * the model sees it in the same JSON shape as every other answer and can correct itself
+ * once. Tells the model the concrete-value rule rather than just naming the bad label.
+ */
+const PLACEHOLDER_OPTION_REFUSAL =
+  "An option label must be the answer itself, not an action or a prompt for more, so " +
+  "'Set a number' and similar placeholders are not answers and the card was not shown. " +
+  "When the question needs a number, offer the concrete numbers with their unit as the " +
+  "options, for example '1 senior every night' and '2 seniors every night'; the card's " +
+  "free-text box already carries any other answer. Call this tool again once with " +
+  "concrete option labels.";
+
 export function useChoiceTools(agentId: string, turnEpoch: number): void {
   useModelVisibleTool(
     {
@@ -55,7 +123,8 @@ export function useChoiceTools(agentId: string, turnEpoch: number): void {
         "whenever a name the user gave fits more than one person: never pick one yourself. " +
         "A yes/no offer is a pick too: instead of ending a reply on 'Would you like me to " +
         "prepare that?', offer 'Prepare it' and 'Not now' here. " +
-        "The card also lets them type another answer. Their answer arrives as their next " +
+        CHOICE_OPTION_RULES.join(" ") +
+        " The card also lets them type another answer. Their answer arrives as their next " +
         "message. Keep the question in this tool rather than repeating it at length in text. " +
         "You may batch up to four related questions in one card with moreQuestions, for " +
         "example a few set-up questions in a row; the user answers them one at a time and " +
@@ -64,6 +133,9 @@ export function useChoiceTools(agentId: string, turnEpoch: number): void {
       handler: async (offer, { token }) => {
         // Narrowing only; the wrapper already refused a null token.
         if (token === null) return SUPERSEDED;
+        // A placeholder label names an action, not an answer (bead tpt2). Refuse before the
+        // card is shown, so the model corrects itself instead of the user reading "Set a number".
+        if (firstPlaceholderLabel(offer) !== null) return PLACEHOLDER_OPTION_REFUSAL;
         assistantActions.showChoices(offer, token.turnEpoch);
         return (
           "The user now sees the options. Their answer will come as their next message; " +
