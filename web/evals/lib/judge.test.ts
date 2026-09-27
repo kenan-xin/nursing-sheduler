@@ -253,6 +253,25 @@ describe("judge", () => {
     expect(text).toContain("Preview shown to the user.");
   });
 
+  it("shows a roster tool's card only when the app showed one (bead 20wo)", () => {
+    const call = (name: string, result: string) => ({
+      role: "assistant" as const,
+      text: "",
+      toolCalls: [{ toolCallId: name, name, args: {}, result }],
+    });
+    const text = renderTranscript({
+      transcript: [
+        call("prepare_borrowed_cover", "There is no saved roster yet."),
+        call(
+          "prepare_borrowed_cover",
+          "A preview ... Nothing has changed yet; only the user can apply it.",
+        ),
+      ],
+      appliedByHarness: 0,
+    } as unknown as TrialRecord);
+    expect(text.match(/Preview shown to the user\./g)).toHaveLength(1);
+  });
+
   it("fails an item the judge left out", () => {
     const items = normalizeJudgeItems(
       ["short", "plain"],

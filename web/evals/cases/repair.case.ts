@@ -11,7 +11,7 @@ export const REPAIR_CASES: EvalCase[] = [
     id: "repair-understaffed-night",
     tags: ["repair", "smoke"],
     description:
-      "After an infeasible run, offer the ranked repairs, prepare the picked one, apply, no shortfall left.",
+      "After an infeasible run, offer the ranked repairs, book the picked temporary cover, apply, offer a new run.",
     today: "2026-10-20",
     route: "/optimize-and-export",
     seed: { fixture: "understaffedNight" },
@@ -28,10 +28,13 @@ export const REPAIR_CASES: EvalCase[] = [
         "get_optimize_result",
         "suggest_feasibility_options",
         "offer_choices",
-        "prepare_scenario_change",
+        // After Apply the fix is tested by a new run (2vtv, d582).
+        "request_optimize_run",
       ],
       choicesInclude: ["borrow"],
-      proposalOps: [{ type: "add_person", temporary: true }],
+      // d582: a borrowed nurse is a cover (a staffing credit), never a person. Either
+      // prepare_scenario_change or prepare_borrowed_cover may book it (bead 20wo).
+      proposalOps: [{ type: "add_temporary_cover", date: "2026-11-05", shiftType: "N" }],
       finalState: noShortfalls,
       judge: ["Says which night is short and why, using the numbers."],
     },
