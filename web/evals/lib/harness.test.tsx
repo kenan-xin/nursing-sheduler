@@ -184,8 +184,9 @@ describe("runTrial", () => {
     expect(r.error).toBeNull();
     const pending = (c: RunAgentInput["context"]) => c.at(-1)?.value ?? "";
     expect(pending(contexts[0]!)).toBe("Nothing.");
-    // The send claims a new epoch first, so the turn-1 Preview is already stopped.
-    expect(pending(contexts.at(-1)!)).toMatch(/Preview .*stopped/);
+    // A follow-up keeps the turn-1 Preview open (0f0r): still not applied, nothing changed.
+    expect(pending(contexts.at(-1)!)).toMatch(/Preview .*not applied/);
+    expect(pending(contexts.at(-1)!)).toMatch(/Nothing in it has changed yet/);
     expect(pending(contexts.at(-1)!)).not.toMatch(/press Apply/);
   }, 20_000);
 

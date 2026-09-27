@@ -298,17 +298,40 @@ describe("what still waits on the user's Apply (dt9)", () => {
     })[4];
 
   it("reads a card stamped before this turn as stopped: the rule the Preview and roster cards use", () => {
-    // Stop moves the epoch (closeGate), and the send claims the next one before the
-    // context is built, so a Preview from turn 3 is stopped at launch of turn 5.
+    // Stop moves the epoch (closeGate) and nothing carries the card, so a Preview from
+    // epoch 3 is stopped at launch of turn 5. A send carries a live card (0f0r).
     const card = { turnEpoch: 3 };
-    expect(pendingAtLaunch({ activeProposal: card, activeRosterChange: null }, 5)).toEqual({
+    expect(pendingAtLaunch({ activeProposal: card, activeRosterChange: null }, 5, 12)).toEqual({
       preview: "stopped",
       rosterChange: null,
     });
-    expect(pendingAtLaunch({ activeProposal: null, activeRosterChange: card }, 3)).toEqual({
+    expect(pendingAtLaunch({ activeProposal: null, activeRosterChange: card }, 3, 12)).toEqual({
       preview: null,
       rosterChange: "open",
     });
+  });
+
+  it("reads a live Preview prepared on another schedule revision as out of date (0f0r)", () => {
+    const preview = (baseDocumentRevision: number) => ({ turnEpoch: 3, baseDocumentRevision });
+    const at = (revision: number, base: number) =>
+      pendingAtLaunch({ activeProposal: preview(base), activeRosterChange: null }, 3, revision)
+        .preview;
+    expect(at(12, 12)).toBe("open");
+    expect(at(13, 12)).toBe("stale");
+  });
+
+  it("tells the model a live card from an earlier message can still be applied (0f0r)", () => {
+    const entry = waiting({ preview: "open", rosterChange: null });
+    expect(entry.value).toMatch(/Preview from an earlier message/);
+    expect(entry.value).toMatch(/can still apply it/);
+    expect(entry.value).not.toMatch(/prepare it again/);
+  });
+
+  it("tells the model an out-of-date Preview cannot be applied (0f0r)", () => {
+    const entry = waiting({ preview: "stale", rosterChange: null });
+    expect(entry.value).toMatch(/schedule changed after it was prepared/);
+    expect(entry.value).toMatch(/cannot be applied/);
+    expect(entry.value).toMatch(/prepare it again/);
   });
 
   it("after Stop, says the Preview cannot be applied any more and never points at Apply", () => {

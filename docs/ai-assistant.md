@@ -133,7 +133,7 @@ immediately:
 
 | Action | Effect |
 | --- | --- |
-| **Stop** (in the panel) | Ends the current answer. Anything already written stays, labelled as stopped. |
+| **Stop** (in the panel) | Ends the current answer. Anything already written stays, labelled as stopped. An unapplied Preview or roster change card stops with it; asking a follow-up question does not stop one. |
 | **Remove key** | Deletes the key at once. History and preferences are kept; the assistant becomes unavailable. |
 | **Replace key or model** | Stops current work first, then tests the new configuration. |
 | **Clear conversation history** | Deletes this schedule's messages, previews and receipts. Key, preferences and the schedule itself are kept. |

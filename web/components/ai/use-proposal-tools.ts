@@ -195,7 +195,11 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
         // The token is the SAME authority `assertTurnAuthority` validates above and carries
         // the authorised turn's own epoch, so the stamp agrees with the live value during the
         // turn and still diverges the moment an interruption bumps it.
-        assistantActions.showProposal(outcome.proposal.proposalId, token.turnEpoch);
+        assistantActions.showProposal(
+          outcome.proposal.proposalId,
+          token.turnEpoch,
+          outcome.proposal.baseDocumentRevision,
+        );
         const waiting = outcome.proposal.assumptions.length;
         return (
           "A preview of this change is now shown to the user, with the exact before and " +

@@ -831,6 +831,33 @@ describe("the shipped session over the real core and a real failing agent", () =
     expect(screen.queryByTestId("assistant-settlement")).toBeNull();
   });
 
+  it("puts a Yes/No card under a reply that ends on a yes/no question (09x8)", async () => {
+    agent.behaviour = "succeed";
+    agent.answerBody = "The 15th is short. Want me to prepare a fix?";
+
+    await send();
+
+    await waitFor(() =>
+      expect(useAssistantStore.getState().activeChoices?.question).toBe(
+        "Want me to prepare a fix?",
+      ),
+    );
+    expect(useAssistantStore.getState().activeChoices?.options.map((o) => o.label)).toEqual([
+      "Yes",
+      "No",
+    ]);
+  });
+
+  it("adds no card under an open question (09x8)", async () => {
+    agent.behaviour = "succeed";
+    agent.answerBody = "Which day should it start?";
+
+    await send();
+
+    await waitFor(async () => expect((await lastTurn())?.terminalReason).toBe("completed"));
+    expect(useAssistantStore.getState().activeChoices).toBeNull();
+  });
+
   it("counts only THIS turn's waiting card, option or run", () => {
     expect(turnAwaitsUserOnCard(7)).toBe(false);
     assistantActions.showRunRequest(7);
