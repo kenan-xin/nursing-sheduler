@@ -1,6 +1,7 @@
 import type { AssistantCommandV1 } from "@/lib/proposal";
 import type { ScenarioName } from "@/lib/rules/ward-fixtures.test-support";
 import type { ScenarioUiState } from "@/lib/scenario";
+import type { SavedRosterRows } from "./saved-roster";
 
 export interface UserPolicy {
   /** Sent in order, one per settled turn with no card waiting. */
@@ -47,6 +48,8 @@ export interface EvalCase {
   today: string;
   route: string;
   seed: Seed;
+  /** A roster the last run made and the app saved, as a successful Optimize run leaves it. */
+  savedRoster?: SavedRosterRows;
   optimizer?: { outcome: "infeasible" | "optimal" };
   afterRunFinished?: boolean;
   user: UserPolicy | { simulated: SimulatedUser };
