@@ -1,0 +1,148 @@
+diff --git a/floating-ui-react/utils/markOthers.js b/floating-ui-react/utils/markOthers.js
+index c813f114e8b5fa6f2cd9076170b4c26354a9e404..be664192f96157fb19076e609c742ebf059d9fdd 100644
+--- a/floating-ui-react/utils/markOthers.js
++++ b/floating-ui-react/utils/markOthers.js
+@@ -20,6 +20,51 @@ const uncontrolledElementsSets = {
+ };
+ let markerCounterMap = new WeakMap();
+ let lockCount = 0;
++
++// `aria-hidden` does not remove elements from the tab order, so an element hidden this way that
++// stays user-focusable is an interop bug: DOM focus can land where assistive tech sees nothing
++// (axe: aria-hidden-focus). Mirror the `inertOthers` behavior of the `aria-hidden` package this
++// file is ported from: alongside `aria-hidden="true"`, take focusable descendants out of the tab
++// order with `tabindex="-1"` and restore them on cleanup. The `inert` attribute is not usable
++// here because it also blocks pointer interaction, which non-modal popups must keep allowed.
++const focusableSelector = ['a[href]', 'area[href]', 'input:not([disabled])', 'select:not([disabled])', 'textarea:not([disabled])', 'button:not([disabled])', 'iframe', 'audio[controls]', 'video[controls]', '[contenteditable]:not([contenteditable="false"])', '[tabindex]'].join(',');
++const focusRestoreMap = new WeakMap();
++function removeFromTabOrder(node) {
++  const targets = [];
++  if (node.matches?.(focusableSelector)) {
++    targets.push(node);
++  }
++  if (node.querySelectorAll) {
++    targets.push(...node.querySelectorAll(focusableSelector));
++  }
++  const restore = [];
++  targets.forEach(element => {
++    const tabIndex = element.getAttribute('tabindex');
++    if (tabIndex === '-1') {
++      return;
++    }
++    restore.push([element, tabIndex]);
++    element.setAttribute('tabindex', '-1');
++  });
++  return restore;
++}
++function restoreTabOrder(node) {
++  const restore = focusRestoreMap.get(node);
++  if (!restore) {
++    return;
++  }
++  focusRestoreMap.delete(node);
++  restore.forEach(([element, tabIndex]) => {
++    if (element.getAttribute('tabindex') !== '-1') {
++      return;
++    }
++    if (tabIndex === null) {
++      element.removeAttribute('tabindex');
++    } else {
++      element.setAttribute('tabindex', tabIndex);
++    }
++  });
++}
+ function getUncontrolledElementsSet(controlAttribute) {
+   return uncontrolledElementsSets[controlAttribute];
+ }
+@@ -105,6 +150,9 @@ function applyAttributeToOthers(uncorrectedAvoidElements, body, ariaHidden, iner
+       if (!alreadyHidden) {
+         node.setAttribute(controlAttribute, controlAttribute === 'inert' ? '' : 'true');
+       }
++      if (controlAttribute === 'aria-hidden' && counterValue === 1 && !alreadyHidden) {
++        focusRestoreMap.set(node, removeFromTabOrder(node));
++      }
+     });
+   }
+   if (mark) {
+@@ -129,6 +177,7 @@ function applyAttributeToOthers(uncorrectedAvoidElements, body, ariaHidden, iner
+             element.removeAttribute(controlAttribute);
+           }
+           uncontrolledElementsSet?.delete(element);
++          restoreTabOrder(element);
+         }
+       });
+     }
+diff --git a/floating-ui-react/utils/markOthers.mjs b/floating-ui-react/utils/markOthers.mjs
+index 2c7e806b36fa33782c61adf58cd6aa420e69374d..289d6d173fb9ed461945ad5ad9cfbb30df3a76f9 100644
+--- a/floating-ui-react/utils/markOthers.mjs
++++ b/floating-ui-react/utils/markOthers.mjs
+@@ -13,6 +13,51 @@ const uncontrolledElementsSets = {
+ };
+ let markerCounterMap = new WeakMap();
+ let lockCount = 0;
++
++// `aria-hidden` does not remove elements from the tab order, so an element hidden this way that
++// stays user-focusable is an interop bug: DOM focus can land where assistive tech sees nothing
++// (axe: aria-hidden-focus). Mirror the `inertOthers` behavior of the `aria-hidden` package this
++// file is ported from: alongside `aria-hidden="true"`, take focusable descendants out of the tab
++// order with `tabindex="-1"` and restore them on cleanup. The `inert` attribute is not usable
++// here because it also blocks pointer interaction, which non-modal popups must keep allowed.
++const focusableSelector = ['a[href]', 'area[href]', 'input:not([disabled])', 'select:not([disabled])', 'textarea:not([disabled])', 'button:not([disabled])', 'iframe', 'audio[controls]', 'video[controls]', '[contenteditable]:not([contenteditable="false"])', '[tabindex]'].join(',');
++const focusRestoreMap = new WeakMap();
++function removeFromTabOrder(node) {
++  const targets = [];
++  if (node.matches?.(focusableSelector)) {
++    targets.push(node);
++  }
++  if (node.querySelectorAll) {
++    targets.push(...node.querySelectorAll(focusableSelector));
++  }
++  const restore = [];
++  targets.forEach(element => {
++    const tabIndex = element.getAttribute('tabindex');
++    if (tabIndex === '-1') {
++      return;
++    }
++    restore.push([element, tabIndex]);
++    element.setAttribute('tabindex', '-1');
++  });
++  return restore;
++}
++function restoreTabOrder(node) {
++  const restore = focusRestoreMap.get(node);
++  if (!restore) {
++    return;
++  }
++  focusRestoreMap.delete(node);
++  restore.forEach(([element, tabIndex]) => {
++    if (element.getAttribute('tabindex') !== '-1') {
++      return;
++    }
++    if (tabIndex === null) {
++      element.removeAttribute('tabindex');
++    } else {
++      element.setAttribute('tabindex', tabIndex);
++    }
++  });
++}
+ function getUncontrolledElementsSet(controlAttribute) {
+   return uncontrolledElementsSets[controlAttribute];
+ }
+@@ -98,6 +143,9 @@ function applyAttributeToOthers(uncorrectedAvoidElements, body, ariaHidden, iner
+       if (!alreadyHidden) {
+         node.setAttribute(controlAttribute, controlAttribute === 'inert' ? '' : 'true');
+       }
++      if (controlAttribute === 'aria-hidden' && counterValue === 1 && !alreadyHidden) {
++        focusRestoreMap.set(node, removeFromTabOrder(node));
++      }
+     });
+   }
+   if (mark) {
+@@ -122,6 +170,7 @@ function applyAttributeToOthers(uncorrectedAvoidElements, body, ariaHidden, iner
+             element.removeAttribute(controlAttribute);
+           }
+           uncontrolledElementsSet?.delete(element);
++          restoreTabOrder(element);
+         }
+       });
+     }

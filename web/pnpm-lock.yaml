@@ -7,6 +7,9 @@ settings:
 overrides:
   uuid: 11.1.1
 
+patchedDependencies:
+  '@base-ui/react@1.6.0': 2a4ad9a62642a833cd1711caf188a0d053e7ddcf44603945c9d81552806dc73c
+
 importers:
 
   .:
@@ -19,7 +22,7 @@ importers:
         version: 3.0.36(zod@4.4.3)
       '@base-ui/react':
         specifier: ^1.6.0
-        version: 1.6.0(@types/react@19.2.17)(date-fns@4.4.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        version: 1.6.0(patch_hash=2a4ad9a62642a833cd1711caf188a0d053e7ddcf44603945c9d81552806dc73c)(@types/react@19.2.17)(date-fns@4.4.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@copilotkit/react-core':
         specifier: 1.66.2
         version: 1.66.2(@types/mdast@4.0.4)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(graphql@16.14.2)(micromark-util-types@2.0.2)(micromark@4.0.2(supports-color@7.2.0))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(supports-color@7.2.0)(zod@4.4.3)
@@ -7204,7 +7207,7 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@base-ui/react@1.6.0(@types/react@19.2.17)(date-fns@4.4.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@base-ui/react@1.6.0(patch_hash=2a4ad9a62642a833cd1711caf188a0d053e7ddcf44603945c9d81552806dc73c)(@types/react@19.2.17)(date-fns@4.4.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
       '@babel/runtime': 7.29.7
       '@base-ui/utils': 0.3.1(@types/react@19.2.17)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
