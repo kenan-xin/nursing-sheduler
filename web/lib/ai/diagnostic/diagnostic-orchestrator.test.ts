@@ -9,6 +9,8 @@
 // search row's final state without IndexedDB.
 
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
+import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
 import { proposalScenario } from "@/lib/proposal/test-support";
 import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 import type { InfoSemanticProfile } from "@/app/api/info/types";
@@ -86,6 +88,8 @@ interface FakeRuntime extends DiagnosticRuntime {
   unregistered: string[];
   /** The basis claim submitted for each candidate, in submission order. */
   submitted: BasisSubmissionFields[];
+  /** The YAML submitted for each candidate, in submission order. */
+  yamls: string[];
 }
 
 function makeFakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
@@ -94,6 +98,7 @@ function makeFakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
   const registered: string[] = [];
   const unregistered: string[] = [];
   const submitted: BasisSubmissionFields[] = [];
+  const yamls: string[] = [];
   /** jobId -> the basis the browser actually claimed for it. */
   const claimed = new Map<string, BasisSubmissionFields>();
   let submitIndex = 0;
@@ -167,6 +172,7 @@ function makeFakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
       input: SubmitCandidateTransport,
     ): Promise<SubmitCandidateTransportResult> {
       submitted.push(input.basis);
+      yamls.push(input.yaml);
       const results = options.submit ?? [];
       const result =
         results[Math.min(submitIndex++, results.length - 1)] ??
@@ -197,7 +203,7 @@ function makeFakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
       unregistered.push(jobId);
     },
   };
-  return { ...runtime, writes, cancelled, registered, unregistered, submitted };
+  return { ...runtime, writes, cancelled, registered, unregistered, submitted, yamls };
 }
 
 /**
@@ -379,6 +385,41 @@ describe("runDiagnosticSearch — open gating", () => {
     );
     expect(result.search.stopReason).toBe("recovery_blocked");
     expect(result.search.failureReason).toMatch(/out of date/i);
+  });
+});
+
+describe("runDiagnosticSearch — temporary cover (d582)", () => {
+  it("diagnostic rerun submits the covered counts", async () => {
+    const scenario: ScenarioUiState = {
+      ...proposalScenario(),
+      temporaryCover: [makeTemporaryCover({ date: "2026-04-10", shiftType: "Day" })],
+    };
+    const rt = makeFakeRuntime({
+      scenario,
+      submit: [accepted(makeJob("completed", "feasible"))],
+      poll: { job_cand_1: makeJob("completed", "feasible") },
+    });
+    await runDiagnosticSearch(
+      {
+        searchId: "s1",
+        threadId: null,
+        turnId: null,
+        turnEpoch: 1,
+        leaseEpoch: 1,
+        compare: false,
+        parent: PARENT,
+        parentExpiresAt: null,
+        proposed: proposed(1),
+      },
+      rt,
+    );
+    // The candidate relaxes Day cover to 1; her Day shift on the 10th lowers it to 0.
+    const preferences = (parse(rt.yamls[0]!) as { preferences: Record<string, unknown>[] })
+      .preferences;
+    expect(preferences.find((p) => p.description === "Day cover")).toMatchObject({
+      requiredNumPeople: 1,
+      requiredNumPeopleOverrides: [["2026-04-10", 0]],
+    });
   });
 });
 

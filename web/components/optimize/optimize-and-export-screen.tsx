@@ -28,6 +28,7 @@ import { Surface, surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 import { rangeDayCount } from "@/lib/dates";
 import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
+import { withCoverOverrides } from "@/lib/scenario/temporary-cover";
 import { countEnabledRules } from "@/lib/scenario";
 import {
   drainScenarioCommands,
@@ -69,6 +70,7 @@ import {
 } from "@/lib/optimize";
 import { CaptureNotice } from "./capture-notice";
 import { Callout } from "./callout";
+import { CoverPreflight } from "./cover-preflight";
 import { ReadinessBanner } from "./readiness-banner";
 import { RunEventLog } from "./run-event-log";
 import { RunOptionsForm } from "./run-options-form";
@@ -459,7 +461,7 @@ export function OptimizeAndExportScreen({
       );
       return null;
     }
-    const document = toCanonicalScenarioDocument(useScenarioStore.getState());
+    const document = toCanonicalScenarioDocument(withCoverOverrides(useScenarioStore.getState()));
     return {
       document,
       anonymize,
@@ -661,6 +663,7 @@ export function OptimizeAndExportScreen({
       </div>
 
       <ReadinessBanner issues={readiness.issues} />
+      <CoverPreflight />
       {startFailed ? (
         <Callout tone="error" placement="page" data-testid="optimize-start-failed" alert>
           Optimisation could not start. Click Optimize to try again. If it keeps happening, start a
