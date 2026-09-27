@@ -77,6 +77,7 @@ export function runCases(cases: EvalCase[], seams: Seams): void {
               usage: { inputTokens: 0, outputTokens: 0, usd: 0, estimated: false },
               hops: 0,
               ms: 0,
+              turns: [],
               error: null,
               gates: [],
               judge: [],
