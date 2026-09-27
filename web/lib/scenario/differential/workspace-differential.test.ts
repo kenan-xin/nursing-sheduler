@@ -753,6 +753,46 @@ preferences:
       ).toBe("invalid_scheduling_data");
     },
   );
+
+  it(
+    "a non-empty temporary cover is rejected on both sides at temporaryCover",
+    { timeout: oracleBudget(1) },
+    () => {
+      // The cover is a Workspace-only authoring field (d582): the web app applies it
+      // before solving, so a non-empty list is not a convertible solver document on
+      // either side. Both reject it with the same category and the same located path.
+      const fixture = `workspaceVersion: 1
+apiVersion: alpha
+dates:
+  range:
+    startDate: 2025-01-01
+    endDate: 2025-01-01
+people:
+  items:
+    - id: alice
+shiftTypes:
+  items:
+    - id: day
+preferences:
+  - workspaceId: r1
+    enabled: true
+    type: at most one shift per day
+temporaryCover:
+  - name: Haseena (Ward 3)
+    date: 2025-01-01
+    shiftType: day
+    groups:
+      - Seniors
+`;
+      const converted = convertWorkspaceForOptimize(fixture);
+      expect(converted.status).toBe("invalid");
+      const tsIssues = "issues" in converted ? converted.issues : undefined;
+      expect(hasIssueAtPath(tsIssues, ["temporaryCover"])).toBe(true);
+      const oracle = callOracle({ op: "workspace_canonical", yaml: fixture }, "temporary cover");
+      expect(oracle.errorCode).toBe("invalid_scheduling_data");
+      expect(hasIssueAtPath(oracle.issues, ["temporaryCover"])).toBe(true);
+    },
+  );
 });
 
 // --- Workspace identity rejection parity (T17r review P1) -----------------------

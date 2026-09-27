@@ -6,16 +6,19 @@
 // newly authored field must be added here to stay visible to dirty detection. These
 // tests pin that the temporary-cover slice (d582) is one of those fields.
 //
-// NOTE (d582 Task 3): the hash-based `computeScenarioFingerprint` hashes the
-// Workspace V1 projection, and the temporary-cover slice is only WRITTEN into that
-// document by Task 4 (its `buildWorkspaceDocument` emission). Until then a cover
-// change is visible at the slice level below — which is what marks the scenario
-// dirty — and becomes hash-visible when the Workspace document carries it.
+// `computeScenarioFingerprint` hashes the Workspace V1 projection. Task 3 added the
+// slice; Task 4 made `buildWorkspaceDocument` emit a non-empty `temporaryCover`, so
+// a cover change is now visible at the HASH level too (not only at the slice level).
 
 import { describe, expect, it } from "vitest";
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
-import { pickScenario, SCENARIO_KEYS, scenarioShallowEqual } from "./fingerprint";
+import {
+  computeScenarioFingerprint,
+  pickScenario,
+  SCENARIO_KEYS,
+  scenarioShallowEqual,
+} from "./fingerprint";
 
 const cover = makeTemporaryCover();
 
@@ -45,5 +48,13 @@ describe("temporaryCover in the scenario slice", () => {
         { ...without, temporaryCover: covers },
       ),
     ).toBe(true);
+  });
+
+  it("a cover change changes the fingerprint hash", () => {
+    // The Workspace V1 projection carries `temporaryCover` (d582 Task 4), so the
+    // backup-freshness hash moves when a cover is added or removed.
+    expect(computeScenarioFingerprint(emptyWithCovers([cover]))).not.toBe(
+      computeScenarioFingerprint(emptyWithCovers([])),
+    );
   });
 });
