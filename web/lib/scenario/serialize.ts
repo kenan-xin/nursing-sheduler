@@ -150,8 +150,10 @@ export function validateScenario(document: CanonicalScenarioDocument): ScenarioV
 }
 
 /** YAML 1.2 dump options. `yaml` defaults to 1.2; `.inf`/`-.inf` and reserved
- *  keywords (`ALL`/`OFF`/`LEAVE`) round-trip through the vendored ruamel loader. */
-const YAML_OPTIONS = { version: "1.2" as const };
+ *  keywords (`ALL`/`OFF`/`LEAVE`) round-trip through the vendored ruamel loader.
+ *  No anchors/aliases: users read exported YAML, so a shared ref (e.g. a split
+ *  requirement's copies, d582) prints in full, as in workspace.ts. */
+const YAML_OPTIONS = { version: "1.2" as const, aliasDuplicateObjects: false };
 
 /**
  * Stamp the current build version as the **last** top-level key (FR-SL-02),
