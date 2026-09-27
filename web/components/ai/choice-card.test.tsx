@@ -586,4 +586,107 @@ describe("offer_choices", () => {
         .success,
     ).toBe(false);
   });
+
+  it("refuses a placeholder option label and shows no card (tpt2)", async () => {
+    render(
+      <>
+        <Host />
+        <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />
+      </>,
+    );
+    const tool = captured.find((candidate) => candidate.name === "offer_choices")!;
+    const offer = {
+      question: "How many seniors on call each night?",
+      options: [
+        { label: "Set a number", detail: "" },
+        { label: "No senior on call", detail: "" },
+      ],
+      multiple: false,
+    };
+
+    const result = await act(() => tool.handler(offer, {}));
+
+    expect(screen.queryByRole("group", { name: offer.question })).toBeNull();
+    expect(JSON.stringify(result)).toMatch(/concrete numbers/);
+    expect(JSON.stringify(result)).toMatch(/free-text box/);
+  });
+
+  it("refuses a placeholder matched case-insensitively and trimmed (tpt2)", async () => {
+    render(
+      <>
+        <Host />
+        <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />
+      </>,
+    );
+    const tool = captured.find((candidate) => candidate.name === "offer_choices")!;
+    const offer = {
+      question: "How many nights?",
+      options: [
+        { label: "  choose a value  ", detail: "" },
+        { label: "Three", detail: "" },
+      ],
+      multiple: false,
+    };
+
+    const result = await act(() => tool.handler(offer, {}));
+
+    expect(screen.queryByRole("group", { name: offer.question })).toBeNull();
+    expect(JSON.stringify(result)).toMatch(/concrete numbers/);
+  });
+
+  it("refuses a placeholder in a later question of the same card (tpt2)", async () => {
+    render(
+      <>
+        <Host />
+        <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />
+      </>,
+    );
+    const tool = captured.find((candidate) => candidate.name === "offer_choices")!;
+    const offer = {
+      question: "First?",
+      options: [
+        { label: "One", detail: "" },
+        { label: "Two", detail: "" },
+      ],
+      multiple: false,
+      moreQuestions: [
+        {
+          question: "Second?",
+          options: [
+            { label: "Custom", detail: "" },
+            { label: "Two", detail: "" },
+          ],
+          multiple: false,
+        },
+      ],
+    };
+
+    const result = await act(() => tool.handler(offer, {}));
+
+    expect(screen.queryByRole("group", { name: offer.question })).toBeNull();
+    expect(JSON.stringify(result)).toMatch(/concrete numbers/);
+  });
+
+  it("accepts a numeric question written with concrete values and units (tpt2)", async () => {
+    render(
+      <>
+        <Host />
+        <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />
+      </>,
+    );
+    const tool = captured.find((candidate) => candidate.name === "offer_choices")!;
+    const offer = {
+      question: "How many seniors on call each night?",
+      options: [
+        { label: "1 senior every night", detail: "" },
+        { label: "2 seniors every night", detail: "" },
+      ],
+      multiple: false,
+    };
+
+    const result = await act(() => tool.handler(offer, {}));
+
+    expect(JSON.stringify(result)).not.toMatch(/concrete numbers/);
+    expect(screen.getByRole("group", { name: offer.question })).toBeInTheDocument();
+  });
 });
