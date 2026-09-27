@@ -77,6 +77,7 @@ export function runCases(cases: EvalCase[], seams: Seams): void {
               usage: { inputTokens: 0, outputTokens: 0, usd: 0, estimated: false },
               hops: 0,
               ms: 0,
+              turns: [],
               error: null,
               gates: [],
               judge: [],
@@ -119,6 +120,7 @@ export function runCases(cases: EvalCase[], seams: Seams): void {
                   judgeError: true,
                 }));
           const judge = judgeOutcome.items;
+          record.assistantUsd = record.usage.usd;
           record.usage = plus(
             record.usage,
             plus(await userRec.settled(), await judgeRec.settled()),

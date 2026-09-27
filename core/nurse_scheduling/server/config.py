@@ -178,7 +178,7 @@ class ServerSettings:
     """Persistence backend selected for this process: `memory` or `redis`."""
     redis_url: str = "redis://localhost:6379/0"
     """Connection URL used by the Redis job store."""
-    redis_key_prefix: str = "nurse_scheduling:jobs:v1"
+    redis_key_prefix: str = "nurse_scheduling:jobs:v2"
     """Namespace and schema version prepended to every Redis key.
 
     Bumped v0 to v1 by T09: the single queue index was replaced by one index per
@@ -186,6 +186,9 @@ class ServerSettings:
     queued entries would be invisible to the new state machine, so the version
     bump is what makes that incompatibility explicit instead of silent. Jobs are
     transient computation state, so no migration of in-flight work is implied.
+
+    Bumped v1 to v2 by v1 sync W6 (X13): the genie worker lease registry replaced the
+    T19 claim keys and the Lua queue script. v1 keys are ignored, not migrated.
     """
     max_pending_jobs: int = 32
     """Maximum number of queued, running, or cancelling jobs."""
@@ -204,8 +207,8 @@ class ServerSettings:
     """Maximum replayable events retained for each job."""
     claim_poll_seconds: float = 1.0
     """Worker delay between attempts to claim a queued job."""
-    claim_lease_seconds: float = 90.0
-    """Time a worker claim remains valid without renewal (renamed worker_lease_seconds by W6)."""
+    worker_lease_seconds: float = 90.0
+    """Time a worker remains online without renewing its shared lease."""
     maintenance_interval_seconds: float = 30.0
     """Delay between worker-expiry and retention maintenance passes."""
     sse_keepalive_seconds: float = 10.0
@@ -271,7 +274,7 @@ class ServerSettings:
             raise ValueError(f"usage_metrics_retention_days must be at least {MIN_USAGE_METRICS_RETENTION_DAYS}")
         for name in (
             "claim_poll_seconds",
-            "claim_lease_seconds",
+            "worker_lease_seconds",
             "maintenance_interval_seconds",
             "sse_keepalive_seconds",
             "timeout_grace_seconds",
@@ -336,14 +339,14 @@ class ServerSettings:
         return cls(
             job_backend=job_backend,
             redis_url=os.getenv("JOB_REDIS_URL", "redis://localhost:6379/0"),
-            redis_key_prefix=os.getenv("JOB_REDIS_KEY_PREFIX", "nurse_scheduling:jobs:v1"),
+            redis_key_prefix=os.getenv("JOB_REDIS_KEY_PREFIX", "nurse_scheduling:jobs:v2"),
             max_pending_jobs=_positive_int("JOB_MAX_PENDING", 32),
             ordinary_reserved_slots=_non_negative_int("JOB_ORDINARY_RESERVED_SLOTS", 1),
             max_retained_jobs=_positive_int("JOB_MAX_RETAINED", DEFAULT_MAX_RETAINED_JOBS),
             job_retention_seconds=_positive_int("JOB_RETENTION_SECONDS", DEFAULT_JOB_RETENTION_SECONDS),
             max_events_per_job=_positive_int("JOB_MAX_EVENTS_PER_JOB", DEFAULT_MAX_EVENTS_PER_JOB),
             claim_poll_seconds=_positive_float("JOB_CLAIM_POLL_SECONDS", 1.0),
-            claim_lease_seconds=_positive_float("JOB_CLAIM_LEASE_SECONDS", 90.0),
+            worker_lease_seconds=_positive_float("JOB_WORKER_LEASE_SECONDS", 90.0),
             maintenance_interval_seconds=_positive_float("JOB_MAINTENANCE_INTERVAL_SECONDS", 30.0),
             sse_keepalive_seconds=_positive_float("JOB_SSE_KEEPALIVE_SECONDS", 10.0),
             max_yaml_bytes=_positive_int("OPTIMIZE_MAX_YAML_BYTES", 2 * 1024 * 1024),

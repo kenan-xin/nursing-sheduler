@@ -1,358 +1,591 @@
-# Origin of each core/ file that tracks upstream. Paths are relative to core/.
-# Read by core/scripts/check_upstream_sync.py. See docs/T19-upstream-backend-source-manifest.md.
+# Origin of every core/ file. Paths are relative to core/. One row per file.
+# Classes: verbatim (same bytes as upstream), patched (upstream plus the named patches),
+# v2-only (no upstream file; note says why), excluded (upstream glob v2 does not vendor).
+# Read by core/scripts/check_upstream_sync.py and core/scripts/sync_upstream.py.
+# See docs/T19-upstream-backend-source-manifest.md.
 upstream = "j3soon/nurse-scheduling feature/genie"
 upstream_commit = "1bf4b85"
 # Oldest first. The check reverse-applies them newest first.
-patch_order = ["P0-fixture-restamp.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch", "W2-server-maintenance.patch", "W2-server-errors.patch", "W2-server-jobs-runner.patch", "W2-server-diagnostic.patch", "W2-server-config.patch", "W2-server-api-schemas.patch", "W2-server-api-optimize.patch", "W2-server-app.patch"]
-
-[[file]]
-path = "nurse_scheduling/cli.py"
-class = "verbatim"
-upstream_blob = "8a204b863f7e697a6929dd631d26a75a8807cb87"
-
-[[file]]
-path = "nurse_scheduling/constants.py"
-class = "verbatim"
-upstream_blob = "9fdcc4a54b1c50ab7cf756df60ac73c20b06a290"
-
-[[file]]
-path = "nurse_scheduling/context.py"
-class = "verbatim"
-upstream_blob = "0242cfd9a79b553b6ef5b7a5aba6cba12ee71a53"
-
-[[file]]
-path = "nurse_scheduling/exporter.py"
-class = "verbatim"
-upstream_blob = "1b1eb7f5192a326981da79b9f221c4d5afec4ff2"
-
-[[file]]
-path = "nurse_scheduling/group_map.py"
-class = "verbatim"
-upstream_blob = "c619776c64206e012aad48ac82f6b8469c04ca7b"
-
-[[file]]
-path = "nurse_scheduling/loader.py"
-class = "verbatim"
-upstream_blob = "308e2076a5790a946c52a133900a6509aa309595"
-
-[[file]]
-path = "nurse_scheduling/model_build_stats.py"
-class = "verbatim"
-upstream_blob = "77640eb47261f11a6501e11dddfafdb18de97d73"
-
-[[file]]
-path = "nurse_scheduling/models.py"
-class = "patched"
-upstream_blob = "edcdab1503ea2ca11977d1693b259a53449d5245"
-patches = ["P2-P3-skillmix-overrides.patch"]
-
-[[file]]
-path = "nurse_scheduling/preference_types.py"
-class = "patched"
-upstream_blob = "51f7cb3570bd74af8e2e7d50d3eb7d1b64509b8f"
-patches = ["P2-P3-skillmix-overrides.patch"]
-
-[[file]]
-path = "nurse_scheduling/report.py"
-class = "verbatim"
-upstream_blob = "8cff02666faf52b60c86256f70e3049991ba8574"
-
-[[file]]
-path = "nurse_scheduling/scheduler.py"
-class = "patched"
-upstream_blob = "7867e7d1b1591456fc637ec342a140ba37f8afde"
-patches = ["P4-on-roster.patch"]
-
-[[file]]
-path = "nurse_scheduling/serve.py"
-class = "verbatim"
-upstream_blob = "8a844abe3b79c6028740e4598cc225f231f6e064"
-
-[[file]]
-path = "nurse_scheduling/solver_interface.py"
-class = "verbatim"
-upstream_blob = "63db2a420257b3ee09a28add74253f722a2061f6"
-
-[[file]]
-path = "nurse_scheduling/solver_ortools_cp_sat.py"
-class = "verbatim"
-upstream_blob = "346f334d671384e11d4ffdc0473ef7f7d45842dc"
-
-[[file]]
-path = "nurse_scheduling/solver_ortools_linear.py"
-class = "verbatim"
-upstream_blob = "36c4d411e7ae69af9cb96d301590035d3b540426"
-
-[[file]]
-path = "nurse_scheduling/solver_ortools_mathopt.py"
-class = "verbatim"
-upstream_blob = "b2a2cf0db5477154d3f1fbb82b3445b1d75180fa"
-
-[[file]]
-path = "nurse_scheduling/solver_pulp.py"
-class = "verbatim"
-upstream_blob = "a796fcb7e6846b9cce9dcda88695e86ef65c25ba"
-
-[[file]]
-path = "nurse_scheduling/solver_pulp_glpk.py"
-class = "verbatim"
-upstream_blob = "1a489f7b6b6744b1f8e45ca380027d96d1905026"
-
-[[file]]
-path = "nurse_scheduling/solver_pulp_python.py"
-class = "verbatim"
-upstream_blob = "b3c028f4f84d0e1eae2066d5069ea7885d3ff61f"
-
-[[file]]
-path = "nurse_scheduling/utils.py"
-class = "verbatim"
-upstream_blob = "28f99473b6c579beeb39474ddc8952a06a429c8d"
-
-[[file]]
-path = "tests/export_test_helper.py"
-class = "verbatim"
-upstream_blob = "78cd8e94575a5ad47e39de87dce93dd037634293"
-
-[[file]]
-path = "tests/schedule_test_helper.py"
-class = "verbatim"
-upstream_blob = "cd35d2b02d5ff416716b176e8a9a64d8c6e74312"
-
-[[file]]
-path = "tests/real/assignment_fixture.py"
-class = "verbatim"
-upstream_blob = "60caf55255a2189a1adc25d3af563eb1913614ad"
-
-[[file]]
-path = "tests/real/schedule_real_helper.py"
-class = "verbatim"
-upstream_blob = "b7b7e8f8c943dc0565637579cff430ba5823031a"
-
-[[file]]
-path = "tests/real/schedule_score_ground_truth.py"
-class = "verbatim"
-upstream_blob = "b5c8445ce63c962006c7ee44e35b91e26495a1e2"
-
-[[file]]
-path = "tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json"
-class = "patched"
-upstream_blob = "4221af315e071497f8be6dc42c7c5f4d46bf9925"
-patches = ["P0-fixture-restamp.patch"]
-
-[[file]]
-path = "tests/test_cli.py"
-class = "verbatim"
-upstream_blob = "75d0d16b66dcf559972d21d2c59aac6dce873d66"
-
-[[file]]
-path = "tests/test_exporter.py"
-class = "verbatim"
-upstream_blob = "f974c0e0018f814887d3dd3ef1bfd3e525d3e52a"
-
-[[file]]
-path = "tests/test_export_xlsx_ortools_cp_sat.py"
-class = "verbatim"
-upstream_blob = "45d8278a04b2af877f9d9991a6d56f5f000feb87"
-
-[[file]]
-path = "tests/test_hours_contract_validation.py"
-class = "verbatim"
-upstream_blob = "53b75c6d1a869458f681b5c6d1658999935828f1"
-
-[[file]]
-path = "tests/test_loader.py"
-class = "verbatim"
-upstream_blob = "52e8a5289bd25b6a839c19f16eb28816ec7283a9"
-
-[[file]]
-path = "tests/test_models_validation.py"
-class = "verbatim"
-upstream_blob = "7a3bc9fb4c3f84409d011fa5e46ff9bd1f0acf3d"
-
-[[file]]
-path = "tests/test_preference_validation.py"
-class = "verbatim"
-upstream_blob = "8ab8e8de5fc81612b566c41c252ec3b203e30151"
-
-[[file]]
-path = "tests/test_scheduler.py"
-class = "verbatim"
-upstream_blob = "d82103a534ad5750cbf47449c45bcfdcdefe0cf5"
-
-[[file]]
-path = "tests/test_solver_interface.py"
-class = "verbatim"
-upstream_blob = "523fc735d17e16dc7e4ac9cb956f7e9ef312bce8"
-
-[[file]]
-path = "tests/test_utils.py"
-class = "verbatim"
-upstream_blob = "0850cbb2d6aa03bb69c4cf41b285be2eb6e83e1c"
-
-[[file]]
-path = "tests/test_schedule_ortools_cp_sat.py"
-class = "verbatim"
-upstream_blob = "18d0697bddd43e2cf01b8067f896ee88b02340b3"
-
-[[file]]
-path = "tests/test_schedule_ortools_mathopt_cp_sat.py"
-class = "verbatim"
-upstream_blob = "81d13a3ecb779b18151c8513c0b5d2499a94aa2c"
-
-[[file]]
-path = "tests/test_schedule_ortools_mathopt_gscip.py"
-class = "verbatim"
-upstream_blob = "6d31e03ae6287d58204c6053b16a3bc680d9c544"
-
-[[file]]
-path = "tests/test_schedule_ortools_mathopt_highs.py"
-class = "verbatim"
-upstream_blob = "6f0b66c440126deea32c3300b243e819c3bab8ac"
-
-[[file]]
-path = "tests/test_schedule_ortools_mpsolver_bop.py"
-class = "verbatim"
-upstream_blob = "1fda1bb6934e4782cca1464e9f7b655c0bd37bb2"
-
-[[file]]
-path = "tests/test_schedule_ortools_mpsolver_cbc.py"
-class = "verbatim"
-upstream_blob = "7c5292150b21eb1635379d033fea6460fa06979e"
-
-[[file]]
-path = "tests/test_schedule_ortools_mpsolver_cp_sat.py"
-class = "verbatim"
-upstream_blob = "7eff3b47430f1481e69dc540507a996f49f2c361"
-
-[[file]]
-path = "tests/test_schedule_ortools_mpsolver_scip.py"
-class = "verbatim"
-upstream_blob = "56c2c9353b9050aca399a22570de9a89ae0b4994"
-
-[[file]]
-path = "tests/test_schedule_pulp_glpk.py"
-class = "verbatim"
-upstream_blob = "a4b4ae59afd58313d1f0bc66118863f4dd21feb0"
-
-[[file]]
-path = "tests/test_schedule_pulp_highs.py"
-class = "verbatim"
-upstream_blob = "e232c450b15a1eb9c13175543f8704c98d03eb1e"
-
-[[file]]
-path = "tests/test_schedule_pulp_scip.py"
-class = "verbatim"
-upstream_blob = "2920bc5a6e5fab059a6d95b56198b8d2460c8dc6"
-
-[[file]]
-path = "tests/test_solver_ortools_linear.py"
-class = "verbatim"
-upstream_blob = "ad85c5496d0f0d8a3e8eb690cec281b1fa50f7fa"
-
-[[file]]
-path = "tests/test_solver_ortools_mathopt.py"
-class = "verbatim"
-upstream_blob = "5dd68e6d1afe72a2e236016f299ff8a97e0697b9"
-
-[[file]]
-path = "tests/test_solver_pulp_glpk.py"
-class = "verbatim"
-upstream_blob = "be94ac4ce248247bc6ae498261a46768ed39a852"
-
-[[file]]
-path = "tests/test_solver_pulp_python.py"
-class = "verbatim"
-upstream_blob = "9d25e7b5690fb8b7b64e045c104e37d83cc70438"
-
-[[file]]
-path = "nurse_scheduling/server/retry.py"
-class = "verbatim"
-upstream_blob = "89d82ba6bd2b8b4aeddfc777e80dbfaa57ae9314"
-
-[[file]]
-path = "tests/test_retry.py"
-class = "verbatim"
-upstream_blob = "724b206e00958bedf7d33877e50819a713ab55a6"
-
-[[file]]
-path = "nurse_scheduling/server/maintenance.py"
-class = "patched"
-upstream_blob = "2adb7af1de57ae88706e9a8aeba00ba640a0a324"
-patches = ["W2-server-maintenance.patch"]
-
-[[file]]
-path = "nurse_scheduling/server/jobs/process_tree.py"
-class = "verbatim"
-upstream_blob = "8d5d3687550ea51aec412868da224e7d9c72ea0f"
-
-[[file]]
-path = "nurse_scheduling/server/jobs/process_executor.py"
-class = "verbatim"
-upstream_blob = "183712393bfc33af9a987cc9c33b233d8abe6884"
-
-[[file]]
-path = "nurse_scheduling/server/errors.py"
-class = "patched"
-upstream_blob = "a1c4eb810f1a66e8ad091decdd279a3b637136a7"
-patches = ["W2-server-errors.patch"]
-
-[[file]]
-path = "nurse_scheduling/server/jobs/runner.py"
-class = "patched"
-upstream_blob = "0ebde2edb9c456f12757f7282a05e658b08f953c"
-patches = ["W2-server-jobs-runner.patch"]
-
-[[file]]
-path = "nurse_scheduling/server/auth.py"
-class = "verbatim"
-upstream_blob = "f292e5c6cae46bb4c866a9178c6559cd0dd02854"
-
-[[file]]
-path = "nurse_scheduling/server/diagnostic.py"
-class = "patched"
-upstream_blob = "e09e2002eead50f3c4e46807a613063b0e4f191e"
-patches = ["W2-server-diagnostic.patch"]
-
-[[file]]
-path = "nurse_scheduling/version.py"
-class = "verbatim"
-upstream_blob = "8a848d24ced79048a6fde4ca6db2d4e64072feab"
-
-[[file]]
-path = "nurse_scheduling/server/request_limits.py"
-class = "verbatim"
-upstream_blob = "b258b13f6e80f99a0ad7a6e41065b6b88694f7f7"
-
-[[file]]
-path = "nurse_scheduling/server/solver_capabilities.py"
-class = "verbatim"
-upstream_blob = "f8c0f5f5c94d61cb41080aa2a95bcfc74406750c"
-
-[[file]]
-path = "nurse_scheduling/server/solver_options.py"
-class = "verbatim"
-upstream_blob = "6e098779587b910019f53a75627b11be524bee2b"
-
-[[file]]
-path = "nurse_scheduling/server/config.py"
-class = "patched"
-upstream_blob = "8f517ab71b5a2a9f86f5331f99a79c9f1c7ae59e"
-patches = ["W2-server-config.patch"]
-
-[[file]]
-path = "nurse_scheduling/server/api/schemas.py"
-class = "patched"
-upstream_blob = "c0ed76c4fe7fa5ec5984ec9add9a077c02e0c2ab"
-patches = ["W2-server-api-schemas.patch"]
-
-[[file]]
-path = "nurse_scheduling/server/api/optimize.py"
-class = "patched"
-upstream_blob = "5da18e2b4951e7acc93ac1ce4cdba97616f6c8fc"
-patches = ["W2-server-api-optimize.patch"]
-
-[[file]]
-path = "nurse_scheduling/server/app.py"
-class = "patched"
-upstream_blob = "31e62ad1cfc5556db9e0400487dc44002af7ddcb"
-patches = ["W2-server-app.patch"]
+patch_order = [
+  "P0-fixture-restamp.patch",
+  "P2-P3-skillmix-overrides.patch",
+  "P4-on-roster.patch",
+  "W2-server-maintenance.patch",
+  "W2-server-errors.patch",
+  "W2-server-jobs-runner.patch",
+  "W2-server-diagnostic.patch",
+  "W2-server-config.patch",
+  "W2-server-api-schemas.patch",
+  "W2-server-api-optimize.patch",
+  "W2-server-app.patch",
+  "W6-server-job_store.patch",
+  "W6-server-jobs-models.patch",
+  "W6-server-jobs-controller.patch",
+  "W6-server-jobs-worker.patch",
+  "W6-server-stores-memory.patch",
+  "W6-server-stores-redis.patch",
+  "W6-tests-test_serve.patch",
+  "W0-pyproject.patch",
+  "W0-requirements.patch",
+  "W2-tests-test_process_executor.patch",
+  "W2-tests-test_public_diagnostic.patch",
+  "W5-tests-real-README.patch",
+  "W5-AGENTS.patch",
+]
+
+file = [
+  { path = "AGENTS.md", class = "patched", upstream_blob = "1a5ca4f2565fa86960c7b6f55f56eb3ca848c81b", patches = ["W5-AGENTS.patch"] },
+  { path = "nurse_scheduling/__init__.py", class = "verbatim", upstream_blob = "f95dc39cacc687c53bc1c5ad966ee3ea007c8882" },
+  { path = "nurse_scheduling/ai/*", class = "excluded", note = "X5: v1 Python AI package. v2 has its own web assistant" },
+  { path = "nurse_scheduling/ai_serve.py", class = "excluded", note = "X5: AI service entry" },
+  { path = "nurse_scheduling/cli.py", class = "verbatim", upstream_blob = "8a204b863f7e697a6929dd631d26a75a8807cb87" },
+  { path = "nurse_scheduling/constants.py", class = "verbatim", upstream_blob = "9fdcc4a54b1c50ab7cf756df60ac73c20b06a290" },
+  { path = "nurse_scheduling/context.py", class = "verbatim", upstream_blob = "0242cfd9a79b553b6ef5b7a5aba6cba12ee71a53" },
+  { path = "nurse_scheduling/exporter.py", class = "verbatim", upstream_blob = "1b1eb7f5192a326981da79b9f221c4d5afec4ff2" },
+  { path = "nurse_scheduling/frontend_validation.py", class = "excluded", note = "X5: used only by the v1 AI package" },
+  { path = "nurse_scheduling/group_map.py", class = "verbatim", upstream_blob = "c619776c64206e012aad48ac82f6b8469c04ca7b" },
+  { path = "nurse_scheduling/loader.py", class = "verbatim", upstream_blob = "308e2076a5790a946c52a133900a6509aa309595" },
+  { path = "nurse_scheduling/model_build_stats.py", class = "verbatim", upstream_blob = "77640eb47261f11a6501e11dddfafdb18de97d73" },
+  { path = "nurse_scheduling/models.py", class = "patched", upstream_blob = "edcdab1503ea2ca11977d1693b259a53449d5245", patches = ["P2-P3-skillmix-overrides.patch"] },
+  { path = "nurse_scheduling/preference_types.py", class = "patched", upstream_blob = "51f7cb3570bd74af8e2e7d50d3eb7d1b64509b8f", patches = ["P2-P3-skillmix-overrides.patch"] },
+  { path = "nurse_scheduling/report.py", class = "verbatim", upstream_blob = "8cff02666faf52b60c86256f70e3049991ba8574" },
+  { path = "nurse_scheduling/scheduler.py", class = "patched", upstream_blob = "7867e7d1b1591456fc637ec342a140ba37f8afde", patches = ["P4-on-roster.patch"] },
+  { path = "nurse_scheduling/serve.py", class = "verbatim", upstream_blob = "8a844abe3b79c6028740e4598cc225f231f6e064" },
+  { path = "nurse_scheduling/server/__init__.py", class = "verbatim", upstream_blob = "7b3119b1236edca1dfd0ce39d50c31d0abfbad36" },
+  { path = "nurse_scheduling/server/api/__init__.py", class = "verbatim", upstream_blob = "10c7354468e847bbc5c9514b3ab1b7cef88eb3a3" },
+  { path = "nurse_scheduling/server/api/optimize.py", class = "patched", upstream_blob = "5da18e2b4951e7acc93ac1ce4cdba97616f6c8fc", patches = ["W2-server-api-optimize.patch"] },
+  { path = "nurse_scheduling/server/api/schemas.py", class = "patched", upstream_blob = "c0ed76c4fe7fa5ec5984ec9add9a077c02e0c2ab", patches = ["W2-server-api-schemas.patch"] },
+  { path = "nurse_scheduling/server/api/sse.py", class = "verbatim", upstream_blob = "7b5e8dfa6fe4bd42d6c64bae4952cc3709f914c0" },
+  { path = "nurse_scheduling/server/app.py", class = "patched", upstream_blob = "31e62ad1cfc5556db9e0400487dc44002af7ddcb", patches = ["W2-server-app.patch"] },
+  { path = "nurse_scheduling/server/auth.py", class = "verbatim", upstream_blob = "f292e5c6cae46bb4c866a9178c6559cd0dd02854" },
+  { path = "nurse_scheduling/server/basis_admission.py", class = "v2-only", note = "P8 basis admission: checks a basis claim before a job is created" },
+  { path = "nurse_scheduling/server/canonical.py", class = "v2-only", note = "P5 canonical strict YAML dumper" },
+  { path = "nurse_scheduling/server/config.py", class = "patched", upstream_blob = "8f517ab71b5a2a9f86f5331f99a79c9f1c7ae59e", patches = ["W2-server-config.patch"] },
+  { path = "nurse_scheduling/server/diagnostic.py", class = "patched", upstream_blob = "e09e2002eead50f3c4e46807a613063b0e4f191e", patches = ["W2-server-diagnostic.patch"] },
+  { path = "nurse_scheduling/server/errors.py", class = "patched", upstream_blob = "a1c4eb810f1a66e8ad091decdd279a3b637136a7", patches = ["W2-server-errors.patch"] },
+  { path = "nurse_scheduling/server/event_cursor.py", class = "v2-only", note = "P6 opaque job-bound event cursors" },
+  { path = "nurse_scheduling/server/job_store.py", class = "patched", upstream_blob = "fb656a30e27b8cf78d411d1cb10125ffdc921845", patches = ["W6-server-job_store.patch"] },
+  { path = "nurse_scheduling/server/jobs/__init__.py", class = "verbatim", upstream_blob = "ec33f2782dcba7bbfb8e0585a93528fa105719dd" },
+  { path = "nurse_scheduling/server/jobs/controller.py", class = "patched", upstream_blob = "a18fb0bd1a343e87f79a104dcfce2ad13f0558a0", patches = ["W6-server-jobs-controller.patch"] },
+  { path = "nurse_scheduling/server/jobs/models.py", class = "patched", upstream_blob = "1b358ba153420a1181df70e57a6f070cd75eca74", patches = ["W6-server-jobs-models.patch"] },
+  { path = "nurse_scheduling/server/jobs/process_executor.py", class = "verbatim", upstream_blob = "183712393bfc33af9a987cc9c33b233d8abe6884" },
+  { path = "nurse_scheduling/server/jobs/process_tree.py", class = "verbatim", upstream_blob = "8d5d3687550ea51aec412868da224e7d9c72ea0f" },
+  { path = "nurse_scheduling/server/jobs/runner.py", class = "patched", upstream_blob = "0ebde2edb9c456f12757f7282a05e658b08f953c", patches = ["W2-server-jobs-runner.patch"] },
+  { path = "nurse_scheduling/server/jobs/worker.py", class = "patched", upstream_blob = "ff808a06deffe8c600dd2fc963dd9bcb11c5095e", patches = ["W6-server-jobs-worker.patch"] },
+  { path = "nurse_scheduling/server/maintenance.py", class = "patched", upstream_blob = "2adb7af1de57ae88706e9a8aeba00ba640a0a324", patches = ["W2-server-maintenance.patch"] },
+  { path = "nurse_scheduling/server/optimize_basis.py", class = "v2-only", note = "P8 optimize basis: the basis fields a job records" },
+  { path = "nurse_scheduling/server/queue_state.py", class = "v2-only", note = "P9 queue snapshot for describe_queue_state()" },
+  { path = "nurse_scheduling/server/request_limits.py", class = "verbatim", upstream_blob = "b258b13f6e80f99a0ad7a6e41065b6b88694f7f7" },
+  { path = "nurse_scheduling/server/retry.py", class = "verbatim", upstream_blob = "89d82ba6bd2b8b4aeddfc777e80dbfaa57ae9314" },
+  { path = "nurse_scheduling/server/roster_container.py", class = "v2-only", note = "P7 roster container artifact" },
+  { path = "nurse_scheduling/server/runtime_identity.py", class = "verbatim", upstream_blob = "d4ff822cb69e8aa9646c48d991de422be0d4bfa7" },
+  { path = "nurse_scheduling/server/scheduling_errors.py", class = "v2-only", note = "P5 the 422 scheduling-content envelope" },
+  { path = "nurse_scheduling/server/scheduling_input.py", class = "v2-only", note = "P5 parse-once submit boundary, CP-SAT only (X4)" },
+  { path = "nurse_scheduling/server/semantic_profile.py", class = "v2-only", note = "P8 solver semantic profile (X12)" },
+  { path = "nurse_scheduling/server/solver_capabilities.py", class = "verbatim", upstream_blob = "f8c0f5f5c94d61cb41080aa2a95bcfc74406750c" },
+  { path = "nurse_scheduling/server/solver_options.py", class = "verbatim", upstream_blob = "6e098779587b910019f53a75627b11be524bee2b" },
+  { path = "nurse_scheduling/server/stores/__init__.py", class = "verbatim", upstream_blob = "538df653cb118ee17d4132fc26d465d66f79b099" },
+  { path = "nurse_scheduling/server/stores/memory.py", class = "patched", upstream_blob = "076668c1005f16920a3abbb805ccc17db0a6857d", patches = ["W6-server-stores-memory.patch"] },
+  { path = "nurse_scheduling/server/stores/redis.py", class = "patched", upstream_blob = "a5892b30866808521a06a556218f9606b73ae414", patches = ["W6-server-stores-redis.patch"] },
+  { path = "nurse_scheduling/server/usage_metrics.py", class = "verbatim", upstream_blob = "9dcd9e84c6d36b7b3ddea5d6dbbdd74511d201f0" },
+  { path = "nurse_scheduling/server/usage_report.py", class = "excluded", note = "X6: no usage telemetry" },
+  { path = "nurse_scheduling/server/workspace.py", class = "v2-only", note = "P5 Workspace V1 input and located errors (X14)" },
+  { path = "nurse_scheduling/solver_interface.py", class = "verbatim", upstream_blob = "63db2a420257b3ee09a28add74253f722a2061f6" },
+  { path = "nurse_scheduling/solver_ortools_cp_sat.py", class = "verbatim", upstream_blob = "346f334d671384e11d4ffdc0473ef7f7d45842dc" },
+  { path = "nurse_scheduling/solver_ortools_linear.py", class = "verbatim", upstream_blob = "36c4d411e7ae69af9cb96d301590035d3b540426" },
+  { path = "nurse_scheduling/solver_ortools_mathopt.py", class = "verbatim", upstream_blob = "b2a2cf0db5477154d3f1fbb82b3445b1d75180fa" },
+  { path = "nurse_scheduling/solver_pulp.py", class = "verbatim", upstream_blob = "a796fcb7e6846b9cce9dcda88695e86ef65c25ba" },
+  { path = "nurse_scheduling/solver_pulp_glpk.py", class = "verbatim", upstream_blob = "1a489f7b6b6744b1f8e45ca380027d96d1905026" },
+  { path = "nurse_scheduling/solver_pulp_python.py", class = "verbatim", upstream_blob = "b3c028f4f84d0e1eae2066d5069ea7885d3ff61f" },
+  { path = "nurse_scheduling/utils.py", class = "verbatim", upstream_blob = "28f99473b6c579beeb39474ddc8952a06a429c8d" },
+  { path = "nurse_scheduling/version.py", class = "verbatim", upstream_blob = "8a848d24ced79048a6fde4ca6db2d4e64072feab" },
+  { path = "pyproject.toml", class = "patched", upstream_blob = "da988b91d33d69fc29b0bba2cc8bc4fc3354a772", patches = ["W0-pyproject.patch"] },
+  { path = "requirements-optional.txt", class = "patched", upstream_blob = "edfeae4e5dcd1c4fdb30b8bb6ecfd012ba0a02d1", patches = ["W0-requirements.patch"] },
+  { path = "requirements.txt", class = "patched", upstream_blob = "8d39f8b82f67a91b0fd14aeb4e74b87f91f7cfa6", patches = ["W0-requirements.patch"] },
+  { path = "scripts/__init__.py", class = "v2-only", note = "sync tooling" },
+  { path = "scripts/check_upstream_sync.py", class = "v2-only", note = "sync tooling: checks this manifest" },
+  { path = "scripts/sync_upstream.py", class = "v2-only", note = "sync tooling: the sync recipe" },
+  { path = "tests/__init__.py", class = "verbatim", upstream_blob = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391" },
+  { path = "tests/ai_eval/*", class = "excluded", note = "X5: v1 AI evals (studied in W4)" },
+  { path = "tests/ai_test_helper.py", class = "excluded", note = "X5: AI test helper" },
+  { path = "tests/catalogue_oracle.py", class = "v2-only", note = "CP-SAT oracle for the web conflict catalogue" },
+  { path = "tests/conftest.py", class = "v2-only", note = "v2 test setup. UPSTREAM_DEVIATIONS skips 9 genie tests in test_serve.py that v2 changes on purpose (P5, P6, P7, P8, X4), each with the v2 test that replaces it" },
+  { path = "tests/export_test_helper.py", class = "verbatim", upstream_blob = "78cd8e94575a5ad47e39de87dce93dd037634293" },
+  { path = "tests/fixtures/assistant_repair/busyNightsWithRestRule.after.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/busyNightsWithRestRule.before.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/busyNightsWithRestRule.run_one_short.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/conflictingRequirements.after.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/conflictingRequirements.before.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/onlyRnOnLeave.after.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/onlyRnOnLeave.before.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/personalCapsTooLow.after.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/personalCapsTooLow.before.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/rnMixOnLeave.after.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/rnMixOnLeave.before.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/ruleTooStrict.after.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/ruleTooStrict.before.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/shortOnLeaveDay.after.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/shortOnLeaveDay.before.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/shortOnLeaveDay.run_one_short.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/tooFewNurses.after.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/tooFewNurses.before.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/understaffedNight.after.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/assistant_repair/understaffedNight.before.yaml", class = "v2-only", note = "assistant repair fixture" },
+  { path = "tests/fixtures/temporary_cover/date_split.after.yaml", class = "v2-only", note = "temporary cover fixture" },
+  { path = "tests/fixtures/temporary_cover/date_split.before.yaml", class = "v2-only", note = "temporary cover fixture" },
+  { path = "tests/fixtures/temporary_cover/rn_cover.after.yaml", class = "v2-only", note = "temporary cover fixture" },
+  { path = "tests/fixtures/temporary_cover/rn_cover.before.yaml", class = "v2-only", note = "temporary cover fixture" },
+  { path = "tests/fixtures/temporary_cover/shift_split.after.yaml", class = "v2-only", note = "temporary cover fixture" },
+  { path = "tests/fixtures/temporary_cover/shift_split.before.yaml", class = "v2-only", note = "temporary cover fixture" },
+  { path = "tests/real/README.md", class = "patched", upstream_blob = "af19df716ceb6b619268a9337e41bb1c3b37c102", patches = ["W5-tests-real-README.patch"] },
+  { path = "tests/real/__init__.py", class = "verbatim", upstream_blob = "6c79a45cde2e3f99d65a53beeb569914c730ed59" },
+  { path = "tests/real/assignment_fixture.py", class = "verbatim", upstream_blob = "60caf55255a2189a1adc25d3af563eb1913614ad" },
+  { path = "tests/real/performance_benchmark.py", class = "excluded", note = "Docker performance benchmark not adopted (lane 05 D5)" },
+  { path = "tests/real/run_schedule.py", class = "verbatim", upstream_blob = "fe8b19714a229dcc10ca57ae4802e1ea8ebca860" },
+  { path = "tests/real/schedule_ortools_cp_sat.py", class = "verbatim", upstream_blob = "3b090ba6d5013fc3f677ccfebb597ef704942eca" },
+  { path = "tests/real/schedule_real_helper.py", class = "verbatim", upstream_blob = "b7b7e8f8c943dc0565637579cff430ba5823031a" },
+  { path = "tests/real/schedule_score_ground_truth.py", class = "verbatim", upstream_blob = "b5c8445ce63c962006c7ee44e35b91e26495a1e2" },
+  { path = "tests/real/solver_capabilities.py", class = "verbatim", upstream_blob = "e713cdbaf7e3870fb04cead718cd5e5726ec83dc" },
+  { path = "tests/real/solver_capabilities_residue.py", class = "v2-only", note = "Linux /proc solver-process residue audit kept from the retired v2 probe (r6g)" },
+  { path = "tests/schedule_test_helper.py", class = "verbatim", upstream_blob = "cd35d2b02d5ff416716b176e8a9a64d8c6e74312" },
+  { path = "tests/server_support.py", class = "v2-only", note = "helpers for the v2 test_server_* suites" },
+  { path = "tests/solver_test_utils.py", class = "verbatim", upstream_blob = "e22d07ca2dd4e098a6bcb2d960647542dfca659b" },
+  { path = "tests/test_ai_*.py", class = "excluded", note = "X5: AI tests" },
+  { path = "tests/test_assistant_repair_fixtures.py", class = "v2-only", note = "assistant repair fixtures solve as expected" },
+  { path = "tests/test_catalogue_oracle_g7.py", class = "v2-only", note = "proves web catalogue check G7 is sound" },
+  { path = "tests/test_check_upstream_sync.py", class = "v2-only", note = "runs the sync check in the core suite" },
+  { path = "tests/test_cli.py", class = "verbatim", upstream_blob = "75d0d16b66dcf559972d21d2c59aac6dce873d66" },
+  { path = "tests/test_export_formatting.py", class = "verbatim", upstream_blob = "0c773e90a93d908365be132953cbcdab63938b21" },
+  { path = "tests/test_export_xlsx_ortools_cp_sat.py", class = "verbatim", upstream_blob = "45d8278a04b2af877f9d9991a6d56f5f000feb87" },
+  { path = "tests/test_exporter.py", class = "verbatim", upstream_blob = "f974c0e0018f814887d3dd3ef1bfd3e525d3e52a" },
+  { path = "tests/test_frontend_validation.py", class = "excluded", note = "X5: tests frontend_validation.py" },
+  { path = "tests/test_hours_contract_field.py", class = "verbatim", upstream_blob = "a493c596f0954b8a0a6df27fd2b627e5a02a02ab" },
+  { path = "tests/test_hours_contract_validation.py", class = "verbatim", upstream_blob = "53b75c6d1a869458f681b5c6d1658999935828f1" },
+  { path = "tests/test_job_response_contract.py", class = "v2-only", note = "pins the job response contract golden" },
+  { path = "tests/test_leave_daystate.py", class = "verbatim", upstream_blob = "c2367ad6ecfd589bfd584dc37af3a676c79c3d14" },
+  { path = "tests/test_loader.py", class = "verbatim", upstream_blob = "52e8a5289bd25b6a839c19f16eb28816ec7283a9" },
+  { path = "tests/test_models_validation.py", class = "verbatim", upstream_blob = "7a3bc9fb4c3f84409d011fa5e46ff9bd1f0acf3d" },
+  { path = "tests/test_optimize_basis.py", class = "v2-only", note = "P8 basis" },
+  { path = "tests/test_optimize_basis_admission.py", class = "v2-only", note = "P8 basis admission" },
+  { path = "tests/test_optimize_job_backends.py", class = "verbatim", upstream_blob = "c6586bafd54abe1c9424d1fa771c6936c3a44f71" },
+  { path = "tests/test_performance_benchmark.py", class = "excluded", note = "Docker performance benchmark not adopted (lane 05 D5)" },
+  { path = "tests/test_person_temporary.py", class = "v2-only", note = "temporary staff in Workspace input (P1 retired, bead pknr)" },
+  { path = "tests/test_preference_validation.py", class = "verbatim", upstream_blob = "8ab8e8de5fc81612b566c41c252ec3b203e30151" },
+  { path = "tests/test_process_executor.py", class = "patched", upstream_blob = "2fe233743b2b59e5a074c887da5341bec757f526", patches = ["W2-tests-test_process_executor.patch"] },
+  { path = "tests/test_public_diagnostic.py", class = "patched", upstream_blob = "b45cadd611877b5dcc530e861baae9536bb8d507", patches = ["W2-tests-test_public_diagnostic.patch"] },
+  { path = "tests/test_real_run_schedule.py", class = "verbatim", upstream_blob = "2c3b74aa224632f02974999b87360f9ff51454af" },
+  { path = "tests/test_real_schedule_helper.py", class = "verbatim", upstream_blob = "86f0202bb4c9c50000558031eaa5e99d45375d13" },
+  { path = "tests/test_real_solver_capabilities.py", class = "verbatim", upstream_blob = "dcd4f9c7272329d9af5ed4833d9e8b334ef607c2" },
+  { path = "tests/test_requirement_overrides.py", class = "v2-only", note = "P3 per-date overrides" },
+  { path = "tests/test_retry.py", class = "verbatim", upstream_blob = "724b206e00958bedf7d33877e50819a713ab55a6" },
+  { path = "tests/test_roster_container.py", class = "v2-only", note = "P7 roster container" },
+  { path = "tests/test_roster_routes.py", class = "v2-only", note = "P7 /xlsx and /roster routes" },
+  { path = "tests/test_runner_inconclusive.py", class = "v2-only", note = "P8 INCONCLUSIVE outcome" },
+  { path = "tests/test_runner_real_inconclusive.py", class = "v2-only", note = "P8 real scheduler reaches INCONCLUSIVE" },
+  { path = "tests/test_runner_termination.py", class = "v2-only", note = "P7 roster handoff on each termination" },
+  { path = "tests/test_schedule_ortools_cp_sat.py", class = "verbatim", upstream_blob = "18d0697bddd43e2cf01b8067f896ee88b02340b3" },
+  { path = "tests/test_schedule_ortools_mathopt_cp_sat.py", class = "verbatim", upstream_blob = "81d13a3ecb779b18151c8513c0b5d2499a94aa2c" },
+  { path = "tests/test_schedule_ortools_mathopt_gscip.py", class = "verbatim", upstream_blob = "6d31e03ae6287d58204c6053b16a3bc680d9c544" },
+  { path = "tests/test_schedule_ortools_mathopt_highs.py", class = "verbatim", upstream_blob = "6f0b66c440126deea32c3300b243e819c3bab8ac" },
+  { path = "tests/test_schedule_ortools_mpsolver_bop.py", class = "verbatim", upstream_blob = "1fda1bb6934e4782cca1464e9f7b655c0bd37bb2" },
+  { path = "tests/test_schedule_ortools_mpsolver_cbc.py", class = "verbatim", upstream_blob = "7c5292150b21eb1635379d033fea6460fa06979e" },
+  { path = "tests/test_schedule_ortools_mpsolver_cp_sat.py", class = "verbatim", upstream_blob = "7eff3b47430f1481e69dc540507a996f49f2c361" },
+  { path = "tests/test_schedule_ortools_mpsolver_scip.py", class = "verbatim", upstream_blob = "56c2c9353b9050aca399a22570de9a89ae0b4994" },
+  { path = "tests/test_schedule_pulp_glpk.py", class = "verbatim", upstream_blob = "a4b4ae59afd58313d1f0bc66118863f4dd21feb0" },
+  { path = "tests/test_schedule_pulp_highs.py", class = "verbatim", upstream_blob = "e232c450b15a1eb9c13175543f8704c98d03eb1e" },
+  { path = "tests/test_schedule_pulp_scip.py", class = "verbatim", upstream_blob = "2920bc5a6e5fab059a6d95b56198b8d2460c8dc6" },
+  { path = "tests/test_scheduler.py", class = "verbatim", upstream_blob = "d82103a534ad5750cbf47449c45bcfdcdefe0cf5" },
+  { path = "tests/test_scheduler_on_roster.py", class = "v2-only", note = "P4 on_roster callback" },
+  { path = "tests/test_serve.py", class = "patched", upstream_blob = "00598907deac001747f53dda4c328da5edee36d4", patches = ["W6-tests-test_serve.patch"], note = "conftest.py UPSTREAM_DEVIATIONS skips 9 of its genie tests" },
+  { path = "tests/test_serve_curl.sh", class = "verbatim", upstream_blob = "6eedfbee5736086f1d124a8c40e44ec48bb4d6f3" },
+  { path = "tests/test_server_api.py", class = "v2-only", note = "v2 HTTP API suite (P5 to P9, P11)" },
+  { path = "tests/test_server_backend_parity.py", class = "v2-only", note = "memory, fakeredis and real Redis behave the same" },
+  { path = "tests/test_server_controller_retry.py", class = "v2-only", note = "controller retry paths" },
+  { path = "tests/test_server_identity.py", class = "v2-only", note = "runtime identity in /info" },
+  { path = "tests/test_server_lifecycle_gates.py", class = "v2-only", note = "job lifecycle gates, rewritten onto the W6 lease API" },
+  { path = "tests/test_server_priority_queue.py", class = "v2-only", note = "P9 purpose queues. W6: the memory variant of 5 residue tests skips (the genie memory store has no queue index), and the 2-line hash-tag test was deleted (Lua only)" },
+  { path = "tests/test_server_replay.py", class = "v2-only", note = "P6 event replay" },
+  { path = "tests/test_server_scheduling_input.py", class = "v2-only", note = "P5 submit boundary" },
+  { path = "tests/test_server_store_contract.py", class = "v2-only", note = "store contract on every backend" },
+  { path = "tests/test_server_worker_loss.py", class = "v2-only", note = "worker loss recovery. W6 deleted the claim_expires_at and worker_id equality lines (Lua only)" },
+  { path = "tests/test_server_worker_loss_multiprocess.py", class = "v2-only", note = "real-Redis SIGKILL worker-loss gate" },
+  { path = "tests/test_sg_compliance_roster.py", class = "v2-only", note = "SG 28-day compliance ward case (upstream candidate)" },
+  { path = "tests/test_shift_type_covering_preference.py", class = "verbatim", upstream_blob = "ebe0c2d46e3a7bf77c15b98a45ef44d99a30f8bf" },
+  { path = "tests/test_shift_type_working_time.py", class = "verbatim", upstream_blob = "8c8caf53830a87a18565573ddf6af216c7a1fdea" },
+  { path = "tests/test_skill_mix.py", class = "v2-only", note = "P2 skillMix" },
+  { path = "tests/test_solver_interface.py", class = "verbatim", upstream_blob = "523fc735d17e16dc7e4ac9cb956f7e9ef312bce8" },
+  { path = "tests/test_solver_ortools_cp_sat.py", class = "verbatim", upstream_blob = "794aad1fceb468ef595bb48ea1bd7601a5aa6c7b" },
+  { path = "tests/test_solver_ortools_linear.py", class = "verbatim", upstream_blob = "ad85c5496d0f0d8a3e8eb690cec281b1fa50f7fa" },
+  { path = "tests/test_solver_ortools_mathopt.py", class = "verbatim", upstream_blob = "5dd68e6d1afe72a2e236016f299ff8a97e0697b9" },
+  { path = "tests/test_solver_pulp_glpk.py", class = "verbatim", upstream_blob = "be94ac4ce248247bc6ae498261a46768ed39a852" },
+  { path = "tests/test_solver_pulp_python.py", class = "verbatim", upstream_blob = "9d25e7b5690fb8b7b64e045c104e37d83cc70438" },
+  { path = "tests/test_temporary_cover_equivalence.py", class = "v2-only", note = "temporary cover fixtures solve alike" },
+  { path = "tests/test_usage_metrics.py", class = "excluded", note = "X6: tests telemetry that v2 keeps off" },
+  { path = "tests/test_utils.py", class = "verbatim", upstream_blob = "0850cbb2d6aa03bb69c4cf41b285be2eb6e83e1c" },
+  { path = "tests/test_version.py", class = "v2-only", note = "v2 version stamping" },
+  { path = "tests/test_ward_shift_patterns_roster.py", class = "v2-only", note = "8-shift-pattern ward case" },
+  { path = "tests/test_workspace_temporary_cover.py", class = "v2-only", note = "P5 temporary cover in Workspace input" },
+  { path = "tests/test_yaml_bound.py", class = "v2-only", note = "coded 400 for the YAML expansion bound" },
+  { path = "tests/testcases/artificial/ortools/README.md", class = "verbatim", upstream_blob = "8e5bfb197203764acfcddd2376851b6aae86ea75" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution.csv", class = "verbatim", upstream_blob = "dc543f5000cf93ba940a347dbf73fff2921d765e" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution.prettify.xlsx", class = "verbatim", upstream_blob = "bc51fc0fb6cdf2f592559ac2951270519520527d" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution.xlsx", class = "verbatim", upstream_blob = "5177485d86901e98f96fc6d3ce883d9f7c9cb016" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution.yaml", class = "verbatim", upstream_blob = "7b9e14f90ed1003d1c70f3bb188e2ca912fbd62e" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_all_mse.csv", class = "verbatim", upstream_blob = "a3a6a6b03ce3295fc486d27b00a6bd5ee6021658" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_all_mse.prettify.xlsx", class = "verbatim", upstream_blob = "cfeecb04a986720bd0847b4d69df702bb322bb7a" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_all_mse.xlsx", class = "verbatim", upstream_blob = "3fdd37a78da74602b980280d0ef03a079e2d115b" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_all_mse.yaml", class = "verbatim", upstream_blob = "fc4332bf1fd5c25be87e8e7c98c60cf597ae6c10" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_nested.csv", class = "verbatim", upstream_blob = "dc543f5000cf93ba940a347dbf73fff2921d765e" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_nested.prettify.xlsx", class = "verbatim", upstream_blob = "bc51fc0fb6cdf2f592559ac2951270519520527d" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_nested.xlsx", class = "verbatim", upstream_blob = "5177485d86901e98f96fc6d3ce883d9f7c9cb016" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_nested.yaml", class = "verbatim", upstream_blob = "75771eb8a21394a074e2f8ed783d1c4b6693eda8" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_offs.csv", class = "verbatim", upstream_blob = "dc543f5000cf93ba940a347dbf73fff2921d765e" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_offs.prettify.xlsx", class = "verbatim", upstream_blob = "bc51fc0fb6cdf2f592559ac2951270519520527d" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_offs.xlsx", class = "verbatim", upstream_blob = "5177485d86901e98f96fc6d3ce883d9f7c9cb016" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_offs.yaml", class = "verbatim", upstream_blob = "43c701d9b28bd0d79c3cfe676a92e2a3caea30ca" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_penalty.csv", class = "verbatim", upstream_blob = "dc543f5000cf93ba940a347dbf73fff2921d765e" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_penalty.prettify.xlsx", class = "verbatim", upstream_blob = "bc51fc0fb6cdf2f592559ac2951270519520527d" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_penalty.xlsx", class = "verbatim", upstream_blob = "5177485d86901e98f96fc6d3ce883d9f7c9cb016" },
+  { path = "tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_penalty.yaml", class = "verbatim", upstream_blob = "9edfc09acc40d6e543543b28acf5e82f30b915a5" },
+  { path = "tests/testcases/artificial/ortools/ex2_multiple_date_formats.csv", class = "verbatim", upstream_blob = "e5864cc021c66f43e29e0f67e1790b2a1429cdf6" },
+  { path = "tests/testcases/artificial/ortools/ex2_multiple_date_formats.prettify.xlsx", class = "verbatim", upstream_blob = "41e8a7121ba09872700bddc0c47d3b25e8c3a23a" },
+  { path = "tests/testcases/artificial/ortools/ex2_multiple_date_formats.xlsx", class = "verbatim", upstream_blob = "5774fb00bd08a01be33b3a3dfd1dcffdcad39fdb" },
+  { path = "tests/testcases/artificial/ortools/ex2_multiple_date_formats.yaml", class = "verbatim", upstream_blob = "6e090e1b95d4d05cc5a14c9ddfcab13794f8e51b" },
+  { path = "tests/testcases/artificial/ortools/ex2_multiple_shift_requests.csv", class = "verbatim", upstream_blob = "99392c859a1ff1be6830a5e49cf3f4825ca2dfb8" },
+  { path = "tests/testcases/artificial/ortools/ex2_multiple_shift_requests.prettify.xlsx", class = "verbatim", upstream_blob = "bcdcb911b2b8aa444cad1d9308568e3eec3e14e3" },
+  { path = "tests/testcases/artificial/ortools/ex2_multiple_shift_requests.xlsx", class = "verbatim", upstream_blob = "fc09d55d7f22c40d9d363832f7c48ac582d23151" },
+  { path = "tests/testcases/artificial/ortools/ex2_multiple_shift_requests.yaml", class = "verbatim", upstream_blob = "d820b695ca02f949f122ea5342499661604dd226" },
+  { path = "tests/testcases/artificial/ortools/ex2_shorthand_dates.csv", class = "verbatim", upstream_blob = "e5864cc021c66f43e29e0f67e1790b2a1429cdf6" },
+  { path = "tests/testcases/artificial/ortools/ex2_shorthand_dates.prettify.xlsx", class = "verbatim", upstream_blob = "8e0ba7230fe90cffb688207d0b09fa6b046aa2c3" },
+  { path = "tests/testcases/artificial/ortools/ex2_shorthand_dates.xlsx", class = "verbatim", upstream_blob = "5774fb00bd08a01be33b3a3dfd1dcffdcad39fdb" },
+  { path = "tests/testcases/artificial/ortools/ex2_shorthand_dates.yaml", class = "verbatim", upstream_blob = "91c531f3b0b5013787624a04ab3275ef99fceb34" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_12day_fix_shift_count_penalty_ortools_9.12_bug.csv", class = "verbatim", upstream_blob = "3f842aeba9dc6c0798bd269961ac3c416a7c2384" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_12day_fix_shift_count_penalty_ortools_9.12_bug.prettify.xlsx", class = "verbatim", upstream_blob = "bbd40c6696ca577f2e0b1d8a0c85730c30736126" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_12day_fix_shift_count_penalty_ortools_9.12_bug.xlsx", class = "verbatim", upstream_blob = "81138d60d0c825d37354bdcd1a32d48f3be23beb" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_12day_fix_shift_count_penalty_ortools_9.12_bug.yaml", class = "verbatim", upstream_blob = "5916e2c8155027f909f4a46040678113989b767f" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day.csv", class = "verbatim", upstream_blob = "012778dd0614e737952d0154438f0d75dd6ec6bc" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day.prettify.xlsx", class = "verbatim", upstream_blob = "39609182f76d74284aed3b7d2d481777485fe5d8" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day.xlsx", class = "verbatim", upstream_blob = "a3b222a61f1063fa3576a0a287768d9db221cabe" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day.yaml", class = "verbatim", upstream_blob = "bbafd44288b89d887923fda10ba76f9026e4a4d3" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_all_prefs.csv", class = "verbatim", upstream_blob = "6379882a616d89d5fa826794cdb9462e84b21959" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_all_prefs.prettify.xlsx", class = "verbatim", upstream_blob = "e6bb40889d227bdcac0805eedaf10a41d7b9b5b1" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_all_prefs.xlsx", class = "verbatim", upstream_blob = "c70edc72dfc91d0fdcee621e256d3d2c668c48a6" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_all_prefs.yaml", class = "verbatim", upstream_blob = "bbf99ad75f54833e6432a3903bd293757047600e" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_all_error.txt", class = "verbatim", upstream_blob = "29047bcabe13e5f9563885997975be3eab0459c2" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_all_error.yaml", class = "verbatim", upstream_blob = "d676ff52eb76c9723b4b5132b9d11657e1cecbbd" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_monday_error.txt", class = "verbatim", upstream_blob = "3bda98421cc23cc0fe01e972f5284f6bd74b4ac5" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_monday_error.yaml", class = "verbatim", upstream_blob = "1f1815867affac7909e38f674bfd0a8d81d5617a" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_weekday_error.txt", class = "verbatim", upstream_blob = "6d04a7b3218fe3e1b30cd3ffbce702336ed97b20" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_weekday_error.yaml", class = "verbatim", upstream_blob = "e1d9296c43bd426369a21203d0dbe2b42e73b0af" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_extra_parameter_error.txt", class = "verbatim", upstream_blob = "91e3e902491edf80de6ec676ab202b82333929d4" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_extra_parameter_error.yaml", class = "verbatim", upstream_blob = "5d124a388ee5cede487a46a4adcdbc012e6ee108" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_infeasible.csv", class = "verbatim", upstream_blob = "d7580c7303f60c3900657528bd8480f67548d018" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_infeasible.yaml", class = "verbatim", upstream_blob = "0b672883c947231982bbe1ab35299c6026cb324c" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_pattern_not_list_error.txt", class = "verbatim", upstream_blob = "d8addb71b627f12d6cb1acfa3cb0035479bf273d" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_pattern_not_list_error.yaml", class = "verbatim", upstream_blob = "f03a7b45fa4cdfc51497ef66d13f0a9d0cc16bcf" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_people_group_keyword_all_error.txt", class = "verbatim", upstream_blob = "1057b856318d60b2429f556c9f20f21b341ad70c" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_people_group_keyword_all_error.yaml", class = "verbatim", upstream_blob = "b1004fa01e65441783e3133d68e6b1fda64b16ae" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_shift_type_requirement_off_error.txt", class = "verbatim", upstream_blob = "59627852ed8d5181f30f19e412a1db88d2a5457b" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_shift_type_requirement_off_error.yaml", class = "verbatim", upstream_blob = "492ad4bc3590169e4c4eaee6cdfef5c5e79631ab" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_shift_types_group_keyword_all_error.txt", class = "verbatim", upstream_blob = "35521dac3200e0270749b5e44a7d71261d07d7a9" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_shift_types_group_keyword_all_error.yaml", class = "verbatim", upstream_blob = "b0a12100a34e3e2bc763ce2f121840bd82433db8" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_weight_floating_point_error.txt", class = "verbatim", upstream_blob = "a98fa7fcf705be73cff3a3dc76e68d9ea5b22b94" },
+  { path = "tests/testcases/basics/01_1nurse_1shift_1day_weight_floating_point_error.yaml", class = "verbatim", upstream_blob = "767c3f6e266455a28bf8e40ede30e4f3f85c92a9" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_aggregate.csv", class = "verbatim", upstream_blob = "4b07e8a62e4f18b0179daddeae507d9a046e4d98" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_aggregate.prettify.xlsx", class = "verbatim", upstream_blob = "f5bf578f86985669a017615f592440d45fc88950" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_aggregate.xlsx", class = "verbatim", upstream_blob = "cc0f1a834698b607bd0f14492af0a68af184456f" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_aggregate.yaml", class = "verbatim", upstream_blob = "5cd2d95614d84ff7cf85c68cc5037406147622a6" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_duplicate.csv", class = "verbatim", upstream_blob = "d87429f07541acafce5ac59663b932d153aa3dcb" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_duplicate.prettify.xlsx", class = "verbatim", upstream_blob = "47dc91d4d9338c05f8d758889d298eb55c171ef5" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_duplicate.xlsx", class = "verbatim", upstream_blob = "fa595661d3982b63cfdeb4ded377ff9828be9203" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_duplicate.yaml", class = "verbatim", upstream_blob = "ab45d832f098c2d272f1f8b445d1b58266e0d8b9" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_group_aggregate.csv", class = "verbatim", upstream_blob = "41b282f21f0f44101d91cd4ee605c113f968f529" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_group_aggregate.prettify.xlsx", class = "verbatim", upstream_blob = "bc995deee44e2c26384ed1e84d5d94b38c8bfc60" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_group_aggregate.xlsx", class = "verbatim", upstream_blob = "56d927426e9575f2e91b7e0088acdf3113ffe59d" },
+  { path = "tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_group_aggregate.yaml", class = "verbatim", upstream_blob = "f05b754cbade494279a539dc0ca97982a2a452c9" },
+  { path = "tests/testcases/basics/02_2nurses_2shifts_1day_shift_type_requirement_flat_list_independent.csv", class = "verbatim", upstream_blob = "efc5158665f18bef0e9ed017c45d849fcfcb84ed" },
+  { path = "tests/testcases/basics/02_2nurses_2shifts_1day_shift_type_requirement_flat_list_independent.prettify.xlsx", class = "verbatim", upstream_blob = "ab87ce680469775b552d8a3a234e41f21f1ee0f8" },
+  { path = "tests/testcases/basics/02_2nurses_2shifts_1day_shift_type_requirement_flat_list_independent.xlsx", class = "verbatim", upstream_blob = "806202e41d8eeade10e400c0fa3bee9172eaa90a" },
+  { path = "tests/testcases/basics/02_2nurses_2shifts_1day_shift_type_requirement_flat_list_independent.yaml", class = "verbatim", upstream_blob = "cfd4e1330a23ef21d424bcec4e17635eecc58340" },
+  { path = "tests/testcases/basics/02_2nurses_2shifts_6days_shift_count_coefficients_balance.csv", class = "verbatim", upstream_blob = "d8042f04fac6d56e7afe6059a926c806e9218f88" },
+  { path = "tests/testcases/basics/02_2nurses_2shifts_6days_shift_count_coefficients_balance.prettify.xlsx", class = "verbatim", upstream_blob = "64fc2e7eb845ef870be990d25694dfcbf4a6e0fb" },
+  { path = "tests/testcases/basics/02_2nurses_2shifts_6days_shift_count_coefficients_balance.xlsx", class = "verbatim", upstream_blob = "f92bae30fac9d23e72d547aabd1d90023adf2352" },
+  { path = "tests/testcases/basics/02_2nurses_2shifts_6days_shift_count_coefficients_balance.yaml", class = "verbatim", upstream_blob = "1932ee869fc9deb2fc0508b71d344cebb367ec29" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day.csv", class = "verbatim", upstream_blob = "5c27dfda5f005aafd600d1b16ae9559b26ad4b47" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day.prettify.xlsx", class = "verbatim", upstream_blob = "4799c3218cc3a468a56e8e18b56068d593328b68" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day.xlsx", class = "verbatim", upstream_blob = "dbf922d73e8fe0ceb2b4f33729cd9cdf761ed6e8" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day.yaml", class = "verbatim", upstream_blob = "9da77055e63345b19bb15036b6f85b385e5edc05" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract.csv", class = "verbatim", upstream_blob = "e508d123e20c5e8b67b6a3e8424e66ac97d2bb9f" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract.prettify.xlsx", class = "verbatim", upstream_blob = "cb681b9bdef0af8a21882344c563bc35761efc8f" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract.xlsx", class = "verbatim", upstream_blob = "c14196a521303d1dbad801b953f906712296f570" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract.yaml", class = "verbatim", upstream_blob = "a8424e31c65bce3be2be27af3de45ab533cdcbc3" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract_off.csv", class = "verbatim", upstream_blob = "19eb8767957562d91114de9c4b556e1f909cdb57" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract_off.prettify.xlsx", class = "verbatim", upstream_blob = "cea0678aca6e931f804ec1581a6662d4ace3f67b" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract_off.xlsx", class = "verbatim", upstream_blob = "e09fcbd9fd6f5ec3f5f585909b487d5ce0c9d4b9" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract_off.yaml", class = "verbatim", upstream_blob = "3414fe8b30db3f096261a0679ab383d93e094185" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_repel.csv", class = "verbatim", upstream_blob = "80e726b884221005c399b6f612480af95e216216" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_repel.prettify.xlsx", class = "verbatim", upstream_blob = "a5d60f4f4de48e17f4425c25e7a0c79b7c9bf029" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_repel.xlsx", class = "verbatim", upstream_blob = "de03e639e943aa8108bf258e4565e78f2af50b4c" },
+  { path = "tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_repel.yaml", class = "verbatim", upstream_blob = "1dc71f7b4aa389070ce91b9b0f6a435192439b1e" },
+  { path = "tests/testcases/basics/02_3nurses_2shifts_5days_shift_type_requirement_coefficients_balance_weighted.csv", class = "verbatim", upstream_blob = "422f7bcd21cc7c2472f8e220aae394c1dea19cc1" },
+  { path = "tests/testcases/basics/02_3nurses_2shifts_5days_shift_type_requirement_coefficients_balance_weighted.prettify.xlsx", class = "verbatim", upstream_blob = "5b1ab79b559a9498ab970b7fd115f5cfaf5452c4" },
+  { path = "tests/testcases/basics/02_3nurses_2shifts_5days_shift_type_requirement_coefficients_balance_weighted.xlsx", class = "verbatim", upstream_blob = "a0735f8f49e7b06b217a00af8e05cd2d5d874699" },
+  { path = "tests/testcases/basics/02_3nurses_2shifts_5days_shift_type_requirement_coefficients_balance_weighted.yaml", class = "verbatim", upstream_blob = "2976bca2991429d14a07d9c81f852a13bfd599ea" },
+  { path = "tests/testcases/basics/02_3nurses_2shifts_6days_shift_type_requirement_coefficients_balance_all.csv", class = "verbatim", upstream_blob = "7cf60e46c0bc452065652f68bc4aa7c5a2826412" },
+  { path = "tests/testcases/basics/02_3nurses_2shifts_6days_shift_type_requirement_coefficients_balance_all.prettify.xlsx", class = "verbatim", upstream_blob = "ac3bb28e7cf0a131bae1a7610a19b4030688cedc" },
+  { path = "tests/testcases/basics/02_3nurses_2shifts_6days_shift_type_requirement_coefficients_balance_all.xlsx", class = "verbatim", upstream_blob = "5b39d97eb31808d94f50ea4128b3d50678c91537" },
+  { path = "tests/testcases/basics/02_3nurses_2shifts_6days_shift_type_requirement_coefficients_balance_all.yaml", class = "verbatim", upstream_blob = "1eafd0a5900c112eff7ef8853c7d4037b32018ca" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days.csv", class = "verbatim", upstream_blob = "21b46ee70bbf510bed52929951422df0ff3b79aa" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days.prettify.xlsx", class = "verbatim", upstream_blob = "e3ee89eecb2412a711b12162f505d80811683a33" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days.xlsx", class = "verbatim", upstream_blob = "ccce1b961c831eb66f453e66df02955c587bede8" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days.yaml", class = "verbatim", upstream_blob = "732dbbde7c51d57d77d656330ba29dbd58be8230" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_dates_group_odd.csv", class = "verbatim", upstream_blob = "4e649ef8c168ca8de2d47a474acaa5b21eabc373" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_dates_group_odd.prettify.xlsx", class = "verbatim", upstream_blob = "53f2a33453db3367d1d83df2c2835d68b29a438a" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_dates_group_odd.xlsx", class = "verbatim", upstream_blob = "ffba2a5108e31f0456e237cd7418fc99aa5ff0f5" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_dates_group_odd.yaml", class = "verbatim", upstream_blob = "a38159d2268f3ba670a4ff41b4158cfb237e5f38" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_monday_blue.csv", class = "verbatim", upstream_blob = "37d378463aab86b94276c4f3e77c8b6f0661e710" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_monday_blue.prettify.xlsx", class = "verbatim", upstream_blob = "8314e12286ca094d13788ab253250094f50ff03e" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_monday_blue.xlsx", class = "verbatim", upstream_blob = "f04d2975296edc9512f829730e245f6ecb6b6b82" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_monday_blue.yaml", class = "verbatim", upstream_blob = "b2954833afbe919a77f0c85d0640c7c6790f3749" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_equals.csv", class = "verbatim", upstream_blob = "01dd1efced8a0eca0a890a24ee397f1e171cf63b" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_equals.prettify.xlsx", class = "verbatim", upstream_blob = "0c3ae87503713dd7989ca58b0619ad08c6fd05b5" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_equals.xlsx", class = "verbatim", upstream_blob = "f20ea088ea9d81f2135263e1a0b5ad462c10a672" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_equals.yaml", class = "verbatim", upstream_blob = "719c7b313bf22f233faffbe1eb869707ca023f40" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_mse.csv", class = "verbatim", upstream_blob = "01dd1efced8a0eca0a890a24ee397f1e171cf63b" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_mse.prettify.xlsx", class = "verbatim", upstream_blob = "0c3ae87503713dd7989ca58b0619ad08c6fd05b5" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_mse.xlsx", class = "verbatim", upstream_blob = "f20ea088ea9d81f2135263e1a0b5ad462c10a672" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_mse.yaml", class = "verbatim", upstream_blob = "9d4cc36f3c4ede47cd554cc51ca794ac8594f960" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all.csv", class = "verbatim", upstream_blob = "e83ceca3227e5fd94aac3453b7d001493c60a44f" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all.prettify.xlsx", class = "verbatim", upstream_blob = "38c5536d42f830d84e758e0df260383868c73b39" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all.xlsx", class = "verbatim", upstream_blob = "711a45d0d42545aa0341b1d1dbc7b4c775dc7528" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all.yaml", class = "verbatim", upstream_blob = "9e234ebf8ab60bb777ac05831a6bd30eca254dd7" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all_with_shift_request_off.csv", class = "verbatim", upstream_blob = "985eb190b9f81ee2da44fba0c8e92300de5dc567" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all_with_shift_request_off.prettify.xlsx", class = "verbatim", upstream_blob = "5ac78a50f27edb2f9fcb46c213d74c00158a78e4" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all_with_shift_request_off.xlsx", class = "verbatim", upstream_blob = "f27966dfc41aa647685f79b7373bf50646cb960d" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all_with_shift_request_off.yaml", class = "verbatim", upstream_blob = "9ef4d769235823ac2dce1617e372b883b18df433" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off.csv", class = "verbatim", upstream_blob = "4684c7a57c20ec0b4e879c3dd642a00ec4204345" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off.prettify.xlsx", class = "verbatim", upstream_blob = "74731d3a2268fc2b40c38019aaad662d19d59b3a" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off.xlsx", class = "verbatim", upstream_blob = "737f684b8d7527bcc48553529f712624555d9290" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off.yaml", class = "verbatim", upstream_blob = "410a43beba2cd39b5111fad2e70b08ed1b27dc0e" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off_with_history.csv", class = "verbatim", upstream_blob = "dc543f5000cf93ba940a347dbf73fff2921d765e" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off_with_history.prettify.xlsx", class = "verbatim", upstream_blob = "bd6ecaf929e74f65ee17bfe48d678d3347c760e9" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off_with_history.xlsx", class = "verbatim", upstream_blob = "c44c2a7d8f93a1be025ed56b5eb554e3a288f3c2" },
+  { path = "tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off_with_history.yaml", class = "verbatim", upstream_blob = "88ea86960c245f86dc68a7475abd19ff18e372d5" },
+  { path = "tests/testcases/basics/03_3nurses_3shifts_8days_shift_type_requirement_coefficients_balance_weighted.csv", class = "verbatim", upstream_blob = "d8418416069fb95320b9ee2466ea55cf118d1bdc" },
+  { path = "tests/testcases/basics/03_3nurses_3shifts_8days_shift_type_requirement_coefficients_balance_weighted.prettify.xlsx", class = "verbatim", upstream_blob = "9a8619b9f7d82cb2d790c4d27a9bec78c3f2cee6" },
+  { path = "tests/testcases/basics/03_3nurses_3shifts_8days_shift_type_requirement_coefficients_balance_weighted.xlsx", class = "verbatim", upstream_blob = "124a004f7ee93a86f0b861d47c7465b0929bd0d0" },
+  { path = "tests/testcases/basics/03_3nurses_3shifts_8days_shift_type_requirement_coefficients_balance_weighted.yaml", class = "verbatim", upstream_blob = "c91ffcd3c7745be754c9ef328394beeefef7fd1a" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts.csv", class = "verbatim", upstream_blob = "4eda085fc651b8d3c98174a30b007f4512811b8f" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts.prettify.xlsx", class = "verbatim", upstream_blob = "fcc5bd6896085ed91311b2a02975e91d559cb45f" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts.xlsx", class = "verbatim", upstream_blob = "89885d8c27fb7df57fc14943d5a93f390cba1a21" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts.yaml", class = "verbatim", upstream_blob = "4f9a46ca6d33ce9d235428ea632369ac36cf392c" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer.csv", class = "verbatim", upstream_blob = "f6c6bc9cd1f7445b229865ccf3e8a2d292e8238e" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer.prettify.xlsx", class = "verbatim", upstream_blob = "f26ada52619565497ed659602368607b8999f015" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer.xlsx", class = "verbatim", upstream_blob = "2d9ebca40e1da1329fed132fb463291a09cf5b45" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer.yaml", class = "verbatim", upstream_blob = "606cda39449e21c25b73b3da43ac21436577352e" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer_with_dates.csv", class = "verbatim", upstream_blob = "34b2556d94b0d8644190a8876f6ade15eb0bb326" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer_with_dates.prettify.xlsx", class = "verbatim", upstream_blob = "3ebf0fc23114c2706a7eb8f82a2275e40eab6643" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer_with_dates.xlsx", class = "verbatim", upstream_blob = "d24e04c172f8d240bc7504b2d965784429408c6d" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer_with_dates.yaml", class = "verbatim", upstream_blob = "f37a31fea6733556642b33306585357b3e80ad06" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days.csv", class = "verbatim", upstream_blob = "770b36448a2a45fa1ee2e12701361a463115231f" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days.prettify.xlsx", class = "verbatim", upstream_blob = "72278ac8240bc131fa6e11d6591cc8319b21c632" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days.xlsx", class = "verbatim", upstream_blob = "12e660501e0fba0a76bff2131b580419a45d64d6" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days.yaml", class = "verbatim", upstream_blob = "918226af1d9c104708b6e020b7e5a42781b1409b" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_avoid_night_shifts.csv", class = "verbatim", upstream_blob = "899bd6c5d4ce5f344f38c0e6a8750ecf1accde94" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_avoid_night_shifts.prettify.xlsx", class = "verbatim", upstream_blob = "37cc713dcea34ac008934db14ddb851ed15e2186" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_avoid_night_shifts.xlsx", class = "verbatim", upstream_blob = "35ab65945635c403cd1ca8b2eb9a69edb16c40e3" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_avoid_night_shifts.yaml", class = "verbatim", upstream_blob = "1d04cbb8f03cdd5c63b19aa198d0d4eb573cd3df" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_person_list_dates_range.csv", class = "verbatim", upstream_blob = "899bd6c5d4ce5f344f38c0e6a8750ecf1accde94" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_person_list_dates_range.prettify.xlsx", class = "verbatim", upstream_blob = "9053f3dbb6d5afe088654c08cbd490044891d914" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_person_list_dates_range.xlsx", class = "verbatim", upstream_blob = "4c76ee8b99a4d48bb3eab3a27f75c1b396f5e67a" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_person_list_dates_range.yaml", class = "verbatim", upstream_blob = "698c65e9fe57d584218e73aa79b73d3a532a179b" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group.csv", class = "verbatim", upstream_blob = "603a715f186c5dbd48ec340316a510dcdf527cad" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group.prettify.xlsx", class = "verbatim", upstream_blob = "ec6df09201a27fe2f3da99408181abd73d221dfc" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group.xlsx", class = "verbatim", upstream_blob = "018ad3afc343ddbb80d7d3d10511388355a1d97c" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group.yaml", class = "verbatim", upstream_blob = "7c1d55d7da532114a01a12f142db328814f62609" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group_nested.csv", class = "verbatim", upstream_blob = "603a715f186c5dbd48ec340316a510dcdf527cad" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group_nested.prettify.xlsx", class = "verbatim", upstream_blob = "ec6df09201a27fe2f3da99408181abd73d221dfc" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group_nested.xlsx", class = "verbatim", upstream_blob = "018ad3afc343ddbb80d7d3d10511388355a1d97c" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group_nested.yaml", class = "verbatim", upstream_blob = "f1fbc467c8b3b908ad52056b01b3f130da88447a" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_length_1.csv", class = "verbatim", upstream_blob = "899bd6c5d4ce5f344f38c0e6a8750ecf1accde94" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_length_1.prettify.xlsx", class = "verbatim", upstream_blob = "9053f3dbb6d5afe088654c08cbd490044891d914" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_length_1.xlsx", class = "verbatim", upstream_blob = "35ab65945635c403cd1ca8b2eb9a69edb16c40e3" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_length_1.yaml", class = "verbatim", upstream_blob = "7322166d34fc12bcddff17672c58b3a713dca28f" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty.csv", class = "verbatim", upstream_blob = "603a715f186c5dbd48ec340316a510dcdf527cad" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty.prettify.xlsx", class = "verbatim", upstream_blob = "d7fbe00cece8e64030c65ac95b846950000f6647" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty.xlsx", class = "verbatim", upstream_blob = "61811caffceae4fdf349777afef1d679bf3bc714" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty.yaml", class = "verbatim", upstream_blob = "3e1c4449b6688728fc37bfece2628100502eb034" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty_infinite.csv", class = "verbatim", upstream_blob = "603a715f186c5dbd48ec340316a510dcdf527cad" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty_infinite.prettify.xlsx", class = "verbatim", upstream_blob = "d7fbe00cece8e64030c65ac95b846950000f6647" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty_infinite.xlsx", class = "verbatim", upstream_blob = "6ec479eb3ad602f802afeacdf962057ec692ccea" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty_infinite.yaml", class = "verbatim", upstream_blob = "ceab37ed80665891e9100c62d9adb5b3ace0d6c1" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_people_all.csv", class = "verbatim", upstream_blob = "bc7d6e5ff74677341f9279ac56517b64074fcada" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_people_all.prettify.xlsx", class = "verbatim", upstream_blob = "37240308493226ca313892e1ba30afd1d27398b4" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_people_all.xlsx", class = "verbatim", upstream_blob = "1fd36dc962aa50c5d6c635f752d3a941d4dcd42a" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_people_all.yaml", class = "verbatim", upstream_blob = "6eb35ae2dbc26de39643f2268b7ea17eddca11a6" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_qualified_people.csv", class = "verbatim", upstream_blob = "8f0bfefc51f621d80d09aa42efd6dc50081618c6" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_qualified_people.prettify.xlsx", class = "verbatim", upstream_blob = "b38514e05ad2e996b1ac0fc39e60876d1024e554" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_qualified_people.xlsx", class = "verbatim", upstream_blob = "a0bb5ccb8298a4ba54c5a73468cb8788a560822b" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_qualified_people.yaml", class = "verbatim", upstream_blob = "8af819c57e39f5164ab6390955af56c1828f1108" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_shift_type_all.csv", class = "verbatim", upstream_blob = "33e417540aea90a4de0ff39e54112d99c6be146b" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_shift_type_all.prettify.xlsx", class = "verbatim", upstream_blob = "497cd1c160b9398014e1dcf31ebcdf143e5cc298" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_shift_type_all.xlsx", class = "verbatim", upstream_blob = "ca1f51111f8d953deecc13e07fcef3382c4eb02f" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_shift_type_all.yaml", class = "verbatim", upstream_blob = "cbfb859b23b3fea4ef618f5a863347b86b79f871" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history.csv", class = "verbatim", upstream_blob = "5fc0f24247037f3d643d98ca4a88d2e76822c3ec" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history.prettify.xlsx", class = "verbatim", upstream_blob = "ea6a05ea4682fe941d34f95141a57652263240ea" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history.xlsx", class = "verbatim", upstream_blob = "a7da1b01ffe35a7aa13ca3c0d2548eb00f6274b2" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history.yaml", class = "verbatim", upstream_blob = "aeefe297b3b7c61a00ee824433093969e1c914bb" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history_shift_request_must_violate.csv", class = "verbatim", upstream_blob = "0641411254787eacdadafe5d02115e9774db13f4" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history_shift_request_must_violate.prettify.xlsx", class = "verbatim", upstream_blob = "77464bf79a70f5797fbfea0dcb04839c8101d4ea" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history_shift_request_must_violate.xlsx", class = "verbatim", upstream_blob = "fa656ce3c2bbd38b35bb967f7b6f979e733c687f" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history_shift_request_must_violate.yaml", class = "verbatim", upstream_blob = "f8f33cb44c8c796142c90eb689f19a2d5107fc1d" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_inf.csv", class = "verbatim", upstream_blob = "899bd6c5d4ce5f344f38c0e6a8750ecf1accde94" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_inf.prettify.xlsx", class = "verbatim", upstream_blob = "9053f3dbb6d5afe088654c08cbd490044891d914" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_inf.xlsx", class = "verbatim", upstream_blob = "4c76ee8b99a4d48bb3eab3a27f75c1b396f5e67a" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_inf.yaml", class = "verbatim", upstream_blob = "b60a56f042721b3f899127739d55f08bf658e3b6" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_ninf.csv", class = "verbatim", upstream_blob = "899bd6c5d4ce5f344f38c0e6a8750ecf1accde94" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_ninf.prettify.xlsx", class = "verbatim", upstream_blob = "9053f3dbb6d5afe088654c08cbd490044891d914" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_ninf.xlsx", class = "verbatim", upstream_blob = "4c76ee8b99a4d48bb3eab3a27f75c1b396f5e67a" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_ninf.yaml", class = "verbatim", upstream_blob = "4e18bea1eb114bcb210de6dbd682c027b8ae37af" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups.csv", class = "verbatim", upstream_blob = "899bd6c5d4ce5f344f38c0e6a8750ecf1accde94" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups.prettify.xlsx", class = "verbatim", upstream_blob = "02010b16ec57303a98205c0f53e01cf794556527" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups.xlsx", class = "verbatim", upstream_blob = "4c76ee8b99a4d48bb3eab3a27f75c1b396f5e67a" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups.yaml", class = "verbatim", upstream_blob = "3a140c418753c930f818a1c160af98a457cdc085" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups_nested.csv", class = "verbatim", upstream_blob = "899bd6c5d4ce5f344f38c0e6a8750ecf1accde94" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups_nested.prettify.xlsx", class = "verbatim", upstream_blob = "02010b16ec57303a98205c0f53e01cf794556527" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups_nested.xlsx", class = "verbatim", upstream_blob = "4c76ee8b99a4d48bb3eab3a27f75c1b396f5e67a" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups_nested.yaml", class = "verbatim", upstream_blob = "01019269bff6551edb91b3764e67b7da204c944a" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_reversed.csv", class = "verbatim", upstream_blob = "60b385b050d335f82b4a781bdde1f179c626ce62" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_reversed.prettify.xlsx", class = "verbatim", upstream_blob = "8844bba189ede8a08076dd7c2b72fd9985879e30" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_reversed.xlsx", class = "verbatim", upstream_blob = "0f339f63da21088f1ec931590488b32c4a80f306" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_reversed.yaml", class = "verbatim", upstream_blob = "a9d46a20bd5e0d3d5875e7893a1308db17df51ab" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_string.csv", class = "verbatim", upstream_blob = "6516d79fef9086193911ec2499f4e55cb9f037e7" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_string.prettify.xlsx", class = "verbatim", upstream_blob = "00bd2512d2f04776e1e41c2b3850aa54e3aebb60" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_string.xlsx", class = "verbatim", upstream_blob = "a05b1de451f152d174242c7e4261f7e70ad30b8d" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_string.yaml", class = "verbatim", upstream_blob = "78b0eb6a7d67c429ac66337254fec6896e611449" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns.csv", class = "verbatim", upstream_blob = "555d8cd74f8c76b80ba76d750c837dfe793cb2c0" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns.prettify.xlsx", class = "verbatim", upstream_blob = "ee3cfed902173dc2f86d9782a4cf36ed48bc34e3" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns.xlsx", class = "verbatim", upstream_blob = "37f210b687f4f54e5f94515529562c78f13799e3" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns.yaml", class = "verbatim", upstream_blob = "236e1c8591b33d7ea8e6b9cf8ad421e5da5d31d0" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_2.csv", class = "verbatim", upstream_blob = "555d8cd74f8c76b80ba76d750c837dfe793cb2c0" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_2.prettify.xlsx", class = "verbatim", upstream_blob = "19dd6270041161abf01ec1cc2852502b8db115fb" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_2.xlsx", class = "verbatim", upstream_blob = "6faab3029f2276e45a40a75119a94ea2ab223893" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_2.yaml", class = "verbatim", upstream_blob = "cb6226f97b4dd05454d90f8f093f4730c44a7f56" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_nested.csv", class = "verbatim", upstream_blob = "555d8cd74f8c76b80ba76d750c837dfe793cb2c0" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_nested.prettify.xlsx", class = "verbatim", upstream_blob = "19dd6270041161abf01ec1cc2852502b8db115fb" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_nested.xlsx", class = "verbatim", upstream_blob = "e5997b1040b527b6fd23a7d36290233469cf23cb" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_nested.yaml", class = "verbatim", upstream_blob = "ab40d5db2eb57292d80bd0ae37eab3b73126570e" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_single_shift.csv", class = "verbatim", upstream_blob = "899bd6c5d4ce5f344f38c0e6a8750ecf1accde94" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_single_shift.prettify.xlsx", class = "verbatim", upstream_blob = "37cc713dcea34ac008934db14ddb851ed15e2186" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_single_shift.xlsx", class = "verbatim", upstream_blob = "c7f65dc3f6815a264ab46636cdf0f7e3d90a2f79" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_single_shift.yaml", class = "verbatim", upstream_blob = "0b03310fbb22f520d11eea4373f00eb00074abd3" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_consecutive_shifts.csv", class = "verbatim", upstream_blob = "ae6a4aa9a96077c5fde5dbd684675d52bf9cd3f9" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_consecutive_shifts.prettify.xlsx", class = "verbatim", upstream_blob = "62ab70caf1a7af30c582c7386b327bc35cc0958f" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_consecutive_shifts.xlsx", class = "verbatim", upstream_blob = "2471978b1d39700e795d649c57e48a9fab4a9404" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_consecutive_shifts.yaml", class = "verbatim", upstream_blob = "0f71c753409820ae707bfdd8ba31726ecd38f389" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_nurses.csv", class = "verbatim", upstream_blob = "899bd6c5d4ce5f344f38c0e6a8750ecf1accde94" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_nurses.prettify.xlsx", class = "verbatim", upstream_blob = "9053f3dbb6d5afe088654c08cbd490044891d914" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_nurses.xlsx", class = "verbatim", upstream_blob = "4c76ee8b99a4d48bb3eab3a27f75c1b396f5e67a" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_nurses.yaml", class = "verbatim", upstream_blob = "012f5345ad0b28859c449ab4323715e4611ad95e" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_weighted.csv", class = "verbatim", upstream_blob = "8533b98aa0ea033712c8034d6d8355e11029ea7d" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_weighted.prettify.xlsx", class = "verbatim", upstream_blob = "c409cfd747304a7afc0adcf68419db26866031dc" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_weighted.xlsx", class = "verbatim", upstream_blob = "065dfdf2fd872ddd49c04b04c474f2686ccb803e" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_weighted.yaml", class = "verbatim", upstream_blob = "507399e5fce9b41c812cab146e995a7fe69f0205" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_patterns_all_all_all_with_history.csv", class = "verbatim", upstream_blob = "3809ce0813e7b0a839edb777ff153b0d18a0107e" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_patterns_all_all_all_with_history.prettify.xlsx", class = "verbatim", upstream_blob = "20c9d111519bbf98880efd1b21199d33588c3c90" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_patterns_all_all_all_with_history.xlsx", class = "verbatim", upstream_blob = "5d420aa8d122b9ce78a528ae3a54f63f21c421f5" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_patterns_all_all_all_with_history.yaml", class = "verbatim", upstream_blob = "2099cd70ccc2f5caae16d07038c11e74bdd044c4" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_9days_fix_dates_range_modified_during_date_parsing_bug.csv", class = "verbatim", upstream_blob = "049d2db1a2ede3a8d6f9bb8ab206d905c28806cd" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_9days_fix_dates_range_modified_during_date_parsing_bug.prettify.xlsx", class = "verbatim", upstream_blob = "fe19a1b092011418171919486e75a2a2ab37769b" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_9days_fix_dates_range_modified_during_date_parsing_bug.xlsx", class = "verbatim", upstream_blob = "53527dbf739e868274b76edff24358e1a437d779" },
+  { path = "tests/testcases/basics/03_4nurses_3shifts_9days_fix_dates_range_modified_during_date_parsing_bug.yaml", class = "verbatim", upstream_blob = "3a5ea07d156d6ecc33fc55715cece243481774ed" },
+  { path = "tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_range.csv", class = "verbatim", upstream_blob = "46f324d02cf9d46f07592a166ca25d0dcbbeed14" },
+  { path = "tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_range.prettify.xlsx", class = "verbatim", upstream_blob = "184a3e21e9a28f4b01aa3162161677db2f7ed8c2" },
+  { path = "tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_range.xlsx", class = "verbatim", upstream_blob = "d861e64c01278c97c8826c748268eba24384cf03" },
+  { path = "tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_range.yaml", class = "verbatim", upstream_blob = "8b0287a9571348dd458d5b66bc9ca82d95570326" },
+  { path = "tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_weekday.csv", class = "verbatim", upstream_blob = "e9bdfbf1997832876814b5a860ca48bac807740d" },
+  { path = "tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_weekday.prettify.xlsx", class = "verbatim", upstream_blob = "bdd3cdfd6e6d1146411b3432f752ddf4c1852599" },
+  { path = "tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_weekday.xlsx", class = "verbatim", upstream_blob = "b0176ca27717387dd02faf0370c54d49c8580d33" },
+  { path = "tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_weekday.yaml", class = "verbatim", upstream_blob = "fd88549c89c76d0789e6a4848fc87a58d8d0a281" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days.csv", class = "verbatim", upstream_blob = "273fabaaad97b1c094ba70cb79b2f9f59942a496" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days.prettify.xlsx", class = "verbatim", upstream_blob = "0fdc68b1126a101bbd18a422faa9ccf00a0a5d8d" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days.xlsx", class = "verbatim", upstream_blob = "95f14611e6a19979261e9fd569b292ab8caa4c37" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days.yaml", class = "verbatim", upstream_blob = "0ad116987cb0ac457319de826416d05d5e09d2a0" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_date.csv", class = "verbatim", upstream_blob = "c0d268ab24989daabb30a01557e85e21b6716a06" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_date.prettify.xlsx", class = "verbatim", upstream_blob = "0f99df7245c618566dc327a08790645116cab6e3" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_date.xlsx", class = "verbatim", upstream_blob = "fc769882143ffbc66859c16c5ada8f7186f0be2c" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_date.yaml", class = "verbatim", upstream_blob = "fa0b1778bc044645613b8ff842688795402f8a09" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1.csv", class = "verbatim", upstream_blob = "a48042a773ec4aa108e4488f9517229fa264f9c1" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1.prettify.xlsx", class = "verbatim", upstream_blob = "83fbb208213afd96448700f338f7e8bb80baeece" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1.xlsx", class = "verbatim", upstream_blob = "401113309383c4c1f33e35b7b2c8b77b4e82c680" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1.yaml", class = "verbatim", upstream_blob = "1e135127d27112a74f3f8cf034dd885cc678c150" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1_nested.csv", class = "verbatim", upstream_blob = "a48042a773ec4aa108e4488f9517229fa264f9c1" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1_nested.prettify.xlsx", class = "verbatim", upstream_blob = "ca8513f314813a5e712d2c7709d7ba93cd2301ff" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1_nested.xlsx", class = "verbatim", upstream_blob = "74b85e96756432f2e16ce2a9add8e119f5300448" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1_nested.yaml", class = "verbatim", upstream_blob = "898ea5af1d9f88635cb65a60b23f7e6a4e75cc68" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2.csv", class = "verbatim", upstream_blob = "05940877042150cb9b75bdcea1c2ce5da74fb162" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2.prettify.xlsx", class = "verbatim", upstream_blob = "c9f342351bd95bc6c5159ffff8770a6d294910b5" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2.xlsx", class = "verbatim", upstream_blob = "7e502ddc9802aa0bd89a6b0deabf9c1d98041dcf" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2.yaml", class = "verbatim", upstream_blob = "5791c354ef4affad7e384f1830599c97d29b2824" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested.csv", class = "verbatim", upstream_blob = "05940877042150cb9b75bdcea1c2ce5da74fb162" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested.prettify.xlsx", class = "verbatim", upstream_blob = "683bab43b638473f647e12e472caaf323bf96a24" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested.xlsx", class = "verbatim", upstream_blob = "b146173793ffa60da4ff15985cfc7febdbf0f031" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested.yaml", class = "verbatim", upstream_blob = "bbb7a6eea9fb0accb3168b2080ac57fbbbd82ad4" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested_nested.csv", class = "verbatim", upstream_blob = "05940877042150cb9b75bdcea1c2ce5da74fb162" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested_nested.prettify.xlsx", class = "verbatim", upstream_blob = "c9f342351bd95bc6c5159ffff8770a6d294910b5" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested_nested.xlsx", class = "verbatim", upstream_blob = "7e502ddc9802aa0bd89a6b0deabf9c1d98041dcf" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested_nested.yaml", class = "verbatim", upstream_blob = "623c5f6c95867328a4fb831361f1034fa3ea5ac9" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_type_requirement_preferred_num_people.csv", class = "verbatim", upstream_blob = "273fabaaad97b1c094ba70cb79b2f9f59942a496" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_type_requirement_preferred_num_people.prettify.xlsx", class = "verbatim", upstream_blob = "0fdc68b1126a101bbd18a422faa9ccf00a0a5d8d" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_type_requirement_preferred_num_people.xlsx", class = "verbatim", upstream_blob = "95f14611e6a19979261e9fd569b292ab8caa4c37" },
+  { path = "tests/testcases/basics/03_6nurses_3shifts_7days_shift_type_requirement_preferred_num_people.yaml", class = "verbatim", upstream_blob = "e954544deab75bb2577e06eb53668355fa029125" },
+  { path = "tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types.csv", class = "verbatim", upstream_blob = "db2a1afca74196f8217aa94c08bf6c4605011a4f" },
+  { path = "tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types.prettify.xlsx", class = "verbatim", upstream_blob = "69d6d6984925424701278cf65ca8ec312dad93b0" },
+  { path = "tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types.xlsx", class = "verbatim", upstream_blob = "7e1a87d508443c238c7c24837ff40d100ad600fa" },
+  { path = "tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types.yaml", class = "verbatim", upstream_blob = "19199611e2228616ddc4037a4ff79a1e06716290" },
+  { path = "tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types_expand.csv", class = "verbatim", upstream_blob = "db2a1afca74196f8217aa94c08bf6c4605011a4f" },
+  { path = "tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types_expand.prettify.xlsx", class = "verbatim", upstream_blob = "835d89d0083ab875315601e9a548b794a0143914" },
+  { path = "tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types_expand.xlsx", class = "verbatim", upstream_blob = "22ecc4d39b136753f8a1f20d4d71ba7176ef9874" },
+  { path = "tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types_expand.yaml", class = "verbatim", upstream_blob = "5158c9cff365e0cfb97698c3407f75f27899734b" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2023.csv", class = "verbatim", upstream_blob = "594ce8847d97ea0a125c8cd4531aadcd6650adb3" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2023.prettify.xlsx", class = "verbatim", upstream_blob = "89a594da4fd439e77f136e2e17a1c0a62273cf64" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2023.xlsx", class = "verbatim", upstream_blob = "33d025043df5cc3849e8920b815663b2bfc7ed7d" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2024.csv", class = "verbatim", upstream_blob = "d2d3bced72e95a1ac2e804adf296ed2ae3e522b0" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2024.prettify.xlsx", class = "verbatim", upstream_blob = "52a5eab2d0c52f1b4c6171157a970bd9fb43b5ae" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2024.xlsx", class = "verbatim", upstream_blob = "63d986eb461b72b7ae69d6bc2c298bd6b4021af0" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025.csv", class = "verbatim", upstream_blob = "a2e62d1bb00f414e90f486cdd9760091de5c27ec" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025.prettify.xlsx", class = "verbatim", upstream_blob = "3651ba9d0e7fdb68dafa1e3c29ad703b7c0d09ca" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025.xlsx", class = "verbatim", upstream_blob = "4bcb505999b2dcbeb3b935c4dd63acc820bd2085" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025_labor.csv", class = "verbatim", upstream_blob = "f01275ca988bf962f42d026c4d3e212fd4ece907" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025_labor.prettify.xlsx", class = "verbatim", upstream_blob = "938d7f6e87670d0f49e89ae86fcb8c04083d8b34" },
+  { path = "tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025_labor.xlsx", class = "verbatim", upstream_blob = "97d61fd2fc79f7d95036747c778b987f10ccec10" },
+  { path = "tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json", class = "patched", upstream_blob = "4221af315e071497f8be6dc42c7c5f4d46bf9925", patches = ["P0-fixture-restamp.patch"] },
+  { path = "tests/testcases/real/large-ward-with-87-people-2025-11.yaml", class = "verbatim", upstream_blob = "8ec166c666d570b49c1b2cc888be6598772c24b4" },
+  { path = "tests/testcases/real/sg-28day-160h-compliance-14-nurses.yaml", class = "v2-only", note = "SG compliance ward case" },
+  { path = "tests/testcases/real/ward-8-shift-patterns-senior-on-every-shift.yaml", class = "v2-only", note = "8-shift-pattern ward case" },
+  { path = "upstream-patches/P0-fixture-restamp.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/P2-P3-skillmix-overrides.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/P4-on-roster.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W0-pyproject.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W0-requirements.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W2-server-api-optimize.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W2-server-api-schemas.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W2-server-app.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W2-server-config.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W2-server-diagnostic.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W2-server-errors.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W2-server-jobs-runner.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W2-server-maintenance.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W2-tests-test_process_executor.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W2-tests-test_public_diagnostic.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W5-AGENTS.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W5-tests-real-README.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W6-server-job_store.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W6-server-jobs-controller.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W6-server-jobs-models.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W6-server-jobs-worker.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W6-server-stores-memory.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W6-server-stores-redis.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/W6-tests-test_serve.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/manifest.toml", class = "v2-only", note = "sync patch or manifest" },
+]

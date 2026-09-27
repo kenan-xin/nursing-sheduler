@@ -60,14 +60,19 @@ export const SINGAPORE_CASES: EvalCase[] = [
   {
     id: "sg-ratio",
     tags: ["sg"],
-    description: "No mandated nurse-patient ratio.",
+    description: "No mandated nurse-patient ratio: ask the ward for its own numbers on a card.",
     today: "2026-09-24",
     route: "/rules",
     seed: { build: sixNurses },
     user: { turns: ["What nurse-patient ratio does MOH require for a general ward?"] },
     expect: {
       noProposal: true,
-      judge: ["Does not state a ratio as a legal or MOH requirement."],
+      toolsCalled: ["offer_choices"],
+      judge: [
+        "Says MOH sets no nurse-to-patient ratio and the ward decides its own numbers.",
+        "Asks the user for the ward's own ratio numbers, or offers to set them on a card (for example Set our numbers / Not now).",
+        "Does not invent or give a default ratio number (such as 1:4 or 1:6) for the ward to use.",
+      ],
     },
   },
   {
@@ -119,18 +124,30 @@ export const SINGAPORE_CASES: EvalCase[] = [
   {
     id: "sg-mc-cover",
     tags: ["sg"],
-    description: "MC cover on a published roster: warn that a re-run reshuffles.",
+    description: "MC cover on the saved roster: find who is free and offer the cover on a card.",
     today: "2026-11-03",
     route: "/roster",
     seed: { build: sixNurses },
-    optimizer: { outcome: "optimal" },
-    afterRunFinished: true,
-    user: { turns: ["Ben is on MC tomorrow morning. Who can cover?"] },
+    // The roster a successful run saved. Tomorrow (2026-11-04): Ben and Dev on Day, Eve on
+    // Night; Ana, Cara and Siti are off.
+    savedRoster: {
+      ana: "D D D OFF OFF OFF D",
+      ben: "D OFF D D D OFF OFF",
+      cara: "N N OFF OFF OFF D OFF",
+      dev: "OFF D OFF D OFF N N",
+      eve: "OFF OFF N N N OFF OFF",
+      siti: "OFF OFF OFF OFF D D D",
+    },
+    user: {
+      turns: ["Ben is on MC tomorrow morning. Who can cover?"],
+      onChoices: { pick: 1 },
+    },
     expect: {
+      toolsCalled: ["find_swap_partners", "prepare_roster_swap"],
       toolsNotCalled: ["request_optimize_run"],
       judge: [
-        "Says running the optimiser again can change other nurses' shifts.",
-        "Does not claim to see who is working tomorrow.",
+        "Names at least one of Ana, Cara or Siti as free to cover Ben's day shift tomorrow, and never offers Dev or Eve, who already work that day.",
+        "Offers one concrete cover (a named nurse takes Ben's day shift) on a roster change card or an option card, not only in text.",
       ],
     },
   },
@@ -181,6 +198,22 @@ export const SINGAPORE_CASES: EvalCase[] = [
     expect: {
       toolsCalled: ["offer_choices"],
       judge: ["Leaves the choice of who gets the day off to the manager."],
+    },
+  },
+  {
+    id: "sg-extend-range-asks-holidays",
+    tags: ["sg"],
+    description:
+      "v1 dates-range-expand-singapore-*: extending the period asks about public holidays before preparing it.",
+    today: "2026-10-20",
+    route: "/dates",
+    seed: { build: sixNurses },
+    user: { turns: ["Extend the roster to 31 December."], onPreview: "ignore" },
+    expect: {
+      noProposal: true,
+      judge: [
+        "Before preparing the new period, asks whether to import the public holidays for the new dates.",
+      ],
     },
   },
 ];

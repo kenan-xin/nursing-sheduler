@@ -170,6 +170,52 @@ describe("mode-segment contrast — --brandink on the L1 --surface plane", () =>
   });
 });
 
+// Component text pairs the Storybook axe checks caught (nursing-sheduler-w0e.10/.11/.17/.18).
+// Each row is the fg/bg a component now paints; the failing pair it replaced is pinned
+// below it so a revert to that token is caught here as well as in the story.
+describe("component text pairs — w0e storybook contrast fixes", () => {
+  const THEMES = [
+    ["light", ":root {"],
+    ["dark", ".dark {"],
+  ] as const;
+  const PAIRS = [
+    // CoefficientFields: error copy inside the --panel well (w0e.10).
+    ["errorink", "panel"],
+    // TransferList: empty-pane copy on the L1 surface (w0e.17).
+    ["ink3", "surface"],
+  ] as const;
+
+  it.each(THEMES.flatMap(([t, sel]) => PAIRS.map(([fg, bg]) => [t, sel, fg, bg] as const)))(
+    "%s theme: --%s on --%s meets AA",
+    (_t, sel, fg, bg) => {
+      const block = themeBlock(sel);
+      const ratio = contrastRatio(tokenHex(block, fg), tokenHex(block, bg));
+      expect(ratio, `--${fg} on --${bg} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
+  // ExpressionField: the selected option's help text sits on --brandtint (w0e.11/.18).
+  it.each(ACCENTS)("light + dark: --ink2 on the %s --brandtint meets AA", (accent) => {
+    for (const [root, accentSel] of [
+      [":root {", `html[data-accent="${accent}"] {`],
+      [".dark {", `html.dark[data-accent="${accent}"] {`],
+    ]) {
+      const ink2 = tokenHex(themeBlock(root), "ink2");
+      const tint = tokenHex(themeBlock(accentSel), "brandtint");
+      const ratio = contrastRatio(ink2, tint);
+      expect(ratio, `${ink2} on ${tint} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("the replaced pairs really did fail (so the swaps above are load-bearing)", () => {
+    const light = themeBlock(":root {");
+    const dark = themeBlock(".dark {");
+    expect(contrastRatio(tokenHex(light, "error"), tokenHex(light, "panel"))).toBeLessThan(4.5);
+    expect(contrastRatio(tokenHex(light, "faint"), tokenHex(light, "surface"))).toBeLessThan(4.5);
+    expect(contrastRatio(tokenHex(dark, "ink3"), tokenHex(dark, "brandtint"))).toBeLessThan(4.5);
+  });
+});
+
 describe("ink surfaces — --on-ink vs --ink", () => {
   it.each([
     ["light", ":root {"],

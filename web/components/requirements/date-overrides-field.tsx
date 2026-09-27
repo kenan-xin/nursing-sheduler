@@ -27,6 +27,15 @@ function blurOnWheel(e: React.WheelEvent<HTMLInputElement>) {
   (e.target as HTMLInputElement).blur();
 }
 
+/** The label a date option renders. Also the closed select's `title`, so a long
+ *  authored label clipped by the row width stays discoverable on hover (bd memory
+ *  `long-user-text-no-overflow`). Mirrors the option list's own rendering: the
+ *  empty value and a stale out-of-range date both fall back to the same text. */
+function optionLabel(iso: string, dates: OverrideDateOption[]): string {
+  if (iso === "") return "Pick a date";
+  return dates.find((d) => d.iso === iso)?.label ?? formatShortDate(iso, true);
+}
+
 export function DateOverridesField({ rows, dates, onChange }: DateOverridesFieldProps) {
   const update = (index: number, patch: Partial<OverrideRow>) =>
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -44,6 +53,13 @@ export function DateOverridesField({ rows, dates, onChange }: DateOverridesField
             aria-label={`Date of exception ${index + 1}`}
             value={row.date}
             onChange={(e) => update(index, { date: e.target.value })}
+            // A date-group label is arbitrary user input (bd memory
+            // `long-user-text-no-overflow`): cap the select at its row width so a
+            // long option ellipsizes instead of widening the row past the frame.
+            // The full value stays discoverable via `title`.
+            title={optionLabel(row.date, dates)}
+            wrapperClassName="min-w-0 max-w-full"
+            className="min-w-0 max-w-full"
           >
             <option value="">Pick a date</option>
             {row.date && !dates.some((d) => d.iso === row.date) && (

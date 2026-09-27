@@ -35,7 +35,7 @@ from nurse_scheduling.server.jobs.models import (
     StoredArtifact,
     StoreLimits,
 )
-from tests.server_support import make_job, utc_now
+from tests.server_support import claim, make_job, utc_now
 
 LIMITS = StoreLimits(max_pending=8, max_retained=128)
 
@@ -84,7 +84,7 @@ def test_pending_capacity_enforced(store):
 def test_retained_capacity_evicts_oldest_terminal(store):
     limits = StoreLimits(max_pending=4, max_retained=2)
     first = store.create(make_job("job_old", created_at=utc_now() - timedelta(minutes=5)), b"x", limits, [])
-    store.save(_terminal(first), first.revision, [_state_event("completed")])
+    store.update_job(_terminal(first), first.revision, [_state_event("completed")])
     second = store.create(make_job("job_new"), b"x", limits, [])
     # A third create must evict the oldest terminal job (job_old), not fail.
     store.create(make_job("job_third"), b"x", limits, [])
@@ -96,14 +96,14 @@ def test_retained_capacity_evicts_oldest_terminal(store):
 def test_claim_next_is_fifo_and_marks_running(store):
     store.create(make_job("job_1", created_at=utc_now() - timedelta(seconds=2)), b"x", LIMITS, [_state_event("queued")])
     store.create(make_job("job_2", created_at=utc_now()), b"x", LIMITS, [_state_event("queued")])
-    now = utc_now()
-    claimed = store.claim_next("worker-1", now, now + timedelta(seconds=90))
+    # W6: one lease owns one active job, so each claim uses its own worker.
+    claimed, _lease = claim(store, "worker-1")
     assert claimed.id == "job_1"
     assert claimed.state == JobState.RUNNING
     assert claimed.worker_id == "worker-1"
     assert claimed.revision == 2
-    assert store.claim_next("worker-1", now, now + timedelta(seconds=90)).id == "job_2"
-    assert store.claim_next("worker-1", now, now + timedelta(seconds=90)) is None
+    assert claim(store, "worker-2")[0].id == "job_2"
+    assert claim(store, "worker-3")[0] is None
 
 
 def test_store_exposes_nonempty_identity(store):
@@ -123,8 +123,7 @@ def test_claim_next_records_worker_and_runtime_identity(store):
         "job_store_id": "store-test",
     }
     store.create(make_job("job_1"), b"x", LIMITS, [_state_event("queued")])
-    now = utc_now()
-    claimed = store.claim_next("worker-1", now, now + timedelta(seconds=90), runtime_identity)
+    claimed, _lease = claim(store, "worker-1", runtime=runtime_identity)
     assert claimed.id == "job_1"
 
     window = store.prepare_event_replay("job_1", None)
@@ -136,22 +135,22 @@ def test_claim_next_records_worker_and_runtime_identity(store):
 def test_save_revision_guard(store):
     created = store.create(make_job("job_a"), b"x", LIMITS, [_state_event("queued")])
     running = replace(created, state=JobState.RUNNING, worker_id="w")
-    saved = store.save(running, created.revision, [_state_event("running")])
+    saved = store.update_job(running, created.revision, [_state_event("running")])
     assert saved.revision == created.revision + 1
     with pytest.raises(StoreWriteConflictError):
-        store.save(running, created.revision, [_state_event("running")])
+        store.update_job(running, created.revision, [_state_event("running")])
 
 
 def test_save_missing_job_raises(store):
     with pytest.raises(JobNotFoundError):
-        store.save(make_job("ghost"), 1, [])
+        store.update_job(make_job("ghost"), 1, [])
 
 
 def test_artifacts_round_trip(store):
     created = store.create(make_job("job_a"), b"x", LIMITS, [])
     artifact = StoredArtifact(name="schedule.xlsx", media_type="application/octet-stream", content=b"xlsxbytes")
     completed = replace(_terminal(created), artifact_name="schedule.xlsx")
-    store.save(completed, created.revision, [_state_event("completed")], artifact=artifact)
+    store.update_job(completed, created.revision, [_state_event("completed")], artifact=artifact)
     fetched = store.get_artifact("job_a", "schedule.xlsx")
     assert fetched.content == b"xlsxbytes"
     with pytest.raises(JobArtifactNotFoundError):
@@ -161,7 +160,7 @@ def test_artifacts_round_trip(store):
 def test_delete_revision_guard(store):
     created = store.create(make_job("job_a"), b"x", LIMITS, [])
     terminal = _terminal(created)
-    store.save(terminal, created.revision, [_state_event("completed")])
+    store.update_job(terminal, created.revision, [_state_event("completed")])
     with pytest.raises(StoreWriteConflictError):
         store.delete("job_a", created.revision)
     store.delete("job_a", created.revision + 1)
@@ -171,13 +170,13 @@ def test_delete_revision_guard(store):
 
 def test_find_finished_and_claimed(store):
     created = store.create(make_job("job_done"), b"x", LIMITS, [])
-    store.save(_terminal(created), created.revision, [_state_event("completed")])
+    store.update_job(_terminal(created), created.revision, [_state_event("completed")])
     assert [job.id for job in store.find_finished_before(utc_now() + timedelta(hours=1))] == ["job_done"]
 
     running = store.create(make_job("job_run"), b"x", LIMITS, [_state_event("queued")])
     now = utc_now()
-    store.claim_next("w", now, now + timedelta(seconds=1))
-    claimed_expired = store.find_claimed_before(now + timedelta(seconds=5))
+    claim(store, "w", now=now, seconds=1)
+    claimed_expired = store.find_jobs_without_live_workers(now + timedelta(seconds=5))
     assert running.id in {job.id for job in claimed_expired}
 
 

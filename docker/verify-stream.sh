@@ -69,7 +69,7 @@ PROJECT_IMAGES="${PROJECT}-web ${PROJECT}-backend"
 
 # The durable job store's key namespace, mirroring JOB_REDIS_KEY_PREFIX in
 # docker/compose.yml. Used by the ward stage's owned-residue audit.
-JOB_KEY_PATTERN="nurse_scheduling:jobs:v0*"
+JOB_KEY_PATTERN="nurse_scheduling:jobs:v2*"
 
 # Deterministic solver inputs (see docker/README.md streaming-gate section):
 #   TINY  — 1 nurse / 1 shift / 1 day: feasible, solves ~instantly to optimal.

@@ -104,8 +104,6 @@ export {
   type ClearAllSessionsOutcome,
   OPTIMIZE_RETIRE_PENDING_STORAGE_KEY,
   clearRetirementPending,
-  OPTIMIZE_TIMEOUT_MAX_SECONDS,
-  OPTIMIZE_TIMEOUT_MIN_SECONDS,
   type ActivateOutcome,
   type ActiveOptimizeSession,
   type OptimizeRunOptions,
@@ -133,6 +131,7 @@ export {
 
 export {
   deriveOptimizeReadiness,
+  UNSUPPORTED_EXPRESSION_REASON,
   type OptimizeReadiness,
   type OptimizeReadinessIssue,
   type OptimizeReadinessSource,

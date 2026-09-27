@@ -12,8 +12,9 @@
 // importing `components/guided-rules/mutations`, which reaches the Guided row UI;
 // `operations.parity.test.ts` keeps that restatement honest. The create/edit rule
 // arms need no restatement: they call each Advanced editor's own model
-// (`successions-model`, `counts-model`, `requirements-model`, `requirement-patch`),
-// which is React-free -- `react-free.test.ts` holds that line.
+// (`successions-model`, `counts-model`, `requirements-model`, `requirement-patch`,
+// `affinities-model`, `coverings-model`), which is React-free -- `react-free.test.ts`
+// holds that line.
 //
 // A REJECTION IS A PRODUCT ANSWER, not an error. "That rule targets more than one
 // shift type" is what the Preview says to the user, so the message is written for a
@@ -115,6 +116,30 @@ import {
   type RequirementNumberValue,
 } from "@/components/requirements/requirements-model";
 import { applyRequirementPatch } from "@/components/requirements/requirement-patch";
+import {
+  buildAffinityCard,
+  buildAffinityShiftTypeTransferOptions,
+  buildDateScopeAutoScopes as pairingAutoScopes,
+  buildDateScopeDateGroups as pairingDateGroups,
+  buildDateScopeDateItems as pairingDateItems,
+  buildPeopleTransferOptions as pairingPeopleOptions,
+  isEditableAffinityCard,
+  validateAffinityForm,
+  type AffinityFormState,
+} from "@/components/affinities/affinities-model";
+import {
+  buildCoveringCard,
+  buildDateScopeAutoScopes as supervisionAutoScopes,
+  buildDateScopeDateGroups as supervisionDateGroups,
+  buildDateScopeDateItems as supervisionDateItems,
+  buildPeopleTransferOptions as supervisionPeopleOptions,
+  buildShiftTypeTransferOptions as supervisionShiftOptions,
+  COVERING_MESSAGES,
+  isEditableCoveringCard,
+  selectionReachesDayState,
+  validateCoveringForm,
+  type CoveringFormState,
+} from "@/components/coverings/coverings-model";
 import { skillMixOverflow, skillMixOverflowMessage } from "@/lib/rules/shortfalls";
 import { RenameCollisionError } from "@/lib/cascade";
 import { foldPaintIntents, type MintCellUid } from "@/lib/store/paint-fold";
@@ -298,6 +323,7 @@ function withCards(
 interface PickerOption {
   value: unknown;
   disabled?: boolean;
+  disabledReason?: string;
 }
 
 /**
@@ -404,7 +430,10 @@ function firstFormError(errors: object): string | undefined {
 
 // --- Shift sequences --------------------------------------------------------
 
-type SuccessionFields = Omit<Extract<AssistantCommandV1, { type: "add_succession_rule" }>, "type">;
+type SuccessionFields = Omit<
+  Extract<AssistantCommandV1, { type: "add_shift_sequence_rule" }>,
+  "type"
+>;
 
 const SUCCESSION_DATES: DateScopeBuilders = {
   auto: successionAutoScopes,
@@ -454,7 +483,7 @@ function successionRejection(
 
 function applyAddSuccessionRule(
   state: ScenarioUiState,
-  command: Extract<AssistantCommandV1, { type: "add_succession_rule" }>,
+  command: Extract<AssistantCommandV1, { type: "add_shift_sequence_rule" }>,
   index: number,
 ): OperationResult {
   const refused = successionRejection(
@@ -477,7 +506,7 @@ function applyAddSuccessionRule(
 
 function applyEditSuccessionRule(
   state: ScenarioUiState,
-  command: Extract<AssistantCommandV1, { type: "edit_succession_rule" }>,
+  command: Extract<AssistantCommandV1, { type: "edit_shift_sequence_rule" }>,
   index: number,
 ): OperationResult {
   const source = state.cardsByKind.successions.find((card) => card.uid === command.ruleId);
@@ -914,6 +943,296 @@ function applySetRequirementOnDate(
         requirements: state.cardsByKind.requirements.map((c) => (c.uid === source.uid ? card : c)),
       },
     },
+  };
+}
+
+/**
+ * The refusal for the first picked shift the screen's picker does not offer: the
+ * picker's own reason when it shows the shift greyed out (a numeric id), else the choices.
+ */
+function shiftPickerRefusal(
+  picked: readonly string[],
+  offered: readonly PickerOption[],
+  name: string,
+  index: number,
+): OperationResult | undefined {
+  const shift = firstUnoffered(picked, offered);
+  if (shift === undefined) return undefined;
+  // A numeric shift entity id is offered disabled with a reason, but its option
+  // `value` is a number while the picked ref is the string form, so compare on the
+  // stringified value (not `Object.is`) to reach the screen's own reason.
+  const greyed = offered.find((option) => option.disabled && String(option.value) === shift);
+  if (greyed?.disabledReason) {
+    return reject(index, "invalid_value", `${name}: ${greyed.disabledReason}.`);
+  }
+  return reject(
+    index,
+    "unknown_target",
+    `${name}: there is no shift or shift group ${idLabel(shift)}. ${offeredChoices(offered)}`,
+  );
+}
+
+/** The first person on either side a People picker does not offer (an edit keeps its own). */
+function peoplePickerRefusal(
+  state: ScenarioUiState,
+  sides: readonly (readonly [readonly PersonRef[], unknown])[],
+  offered: readonly PickerOption[],
+  name: string,
+  index: number,
+): OperationResult | undefined {
+  for (const [picked, held] of sides) {
+    const person = firstUnofferedPerson(picked, offered, held);
+    if (person !== undefined) return rulePersonRefusal(state, name, person, offered, index);
+  }
+  return undefined;
+}
+
+// --- Pairing (the Affinities screen) ---------------------------------------------
+
+type PairingFields = Omit<Extract<AssistantCommandV1, { type: "add_pairing_rule" }>, "type">;
+
+const PAIRING_DATES: DateScopeBuilders = {
+  auto: pairingAutoScopes,
+  groups: pairingDateGroups,
+  items: pairingDateItems,
+};
+
+/** The draft the Affinities form holds once the user has entered these values. */
+function pairingDraft(fields: PairingFields): AffinityFormState {
+  return {
+    description: fields.description,
+    people1: [...fields.people],
+    people2: [...fields.withPeople],
+    shiftTypes: [...fields.shiftTypes],
+    date: [...fields.dates],
+    weight: parseWeightInput(fields.weight),
+  };
+}
+
+function pairingRejection(
+  state: ScenarioUiState,
+  fields: PairingFields,
+  name: string,
+  index: number,
+  held: { people1?: unknown; people2?: unknown } = {},
+): OperationResult | undefined {
+  const people = pairingPeopleOptions(state);
+  const refusedPerson = peoplePickerRefusal(
+    state,
+    [
+      [fields.people, held.people1],
+      [fields.withPeople, held.people2],
+    ],
+    [...people.items, ...people.groups],
+    name,
+    index,
+  );
+  if (refusedPerson) return refusedPerson;
+  const shifts = buildAffinityShiftTypeTransferOptions(state);
+  const refusedShift = shiftPickerRefusal(
+    fields.shiftTypes,
+    [...shifts.items, ...shifts.groups],
+    name,
+    index,
+  );
+  if (refusedShift) return refusedShift;
+  const dates = dateScopeRejection(state, fields.dates, PAIRING_DATES);
+  if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
+  const error = firstFormError(validateAffinityForm(pairingDraft(fields)));
+  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  // Deliberate deviation from the Affinities screen, which ACCEPTS +Infinity. On a
+  // pairing rule +Infinity is not "keep together where possible" but "force both
+  // sides onto these shifts on every date" (the solver is paid for the expression
+  // holding), which is almost never intended; a large finite weight is the honest
+  // way to say "prefer together". -Infinity stays allowed ("keep apart always").
+  if (parseWeightInput(fields.weight) === Number.POSITIVE_INFINITY) {
+    return reject(
+      index,
+      "invalid_value",
+      `${name}: "+infinity" is not allowed. It forces both sides onto those shifts on every ` +
+        "date. Use a large finite weight such as 1000 to strongly prefer them together.",
+    );
+  }
+  return undefined;
+}
+
+function applyAddPairingRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_pairing_rule" }>,
+  index: number,
+): OperationResult {
+  const refused = pairingRejection(
+    state,
+    command,
+    ruleName("affinities", command.description),
+    index,
+  );
+  if (refused) return refused;
+  // `use-affinities.ts` `add`: append `buildAffinityCard(form)`.
+  const card = buildAffinityCard(pairingDraft(command), newRuleUid(state, "affinities", command));
+  return {
+    ok: true,
+    next: withCards(state, "affinities", [...state.cardsByKind.affinities, card]),
+  };
+}
+
+function applyEditPairingRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "edit_pairing_rule" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.affinities.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      `That pairing rule is not in this schedule any more. ${ruleChoices(state, "affinities")}`,
+    );
+  }
+  const name = ruleName("affinities", source.description?.trim() || source.uid);
+  // The screen opens no form for such a card (`isEditableAffinityCard`).
+  if (!isEditableAffinityCard(source)) {
+    return reject(
+      index,
+      "unsupported_shape",
+      `${name}: it pairs several separate groups, so it has to be edited on the Affinities screen.`,
+    );
+  }
+  const refused = pairingRejection(state, command, name, index, source);
+  if (refused) return refused;
+  const next = keepMarkers(source, buildAffinityCard(pairingDraft(command), source.uid));
+  if (stableStringify(next) === stableStringify(source)) {
+    return reject(index, "no_effect", `${name} already says exactly that.`);
+  }
+  return {
+    ok: true,
+    next: withCards(
+      state,
+      "affinities",
+      state.cardsByKind.affinities.map((card) => (card.uid === source.uid ? next : card)),
+    ),
+  };
+}
+
+// --- Supervision (the Shift Type Coverings screen) ------------------------------
+
+type SupervisionFields = Omit<
+  Extract<AssistantCommandV1, { type: "add_supervision_rule" }>,
+  "type"
+>;
+
+const SUPERVISION_DATES: DateScopeBuilders = {
+  auto: supervisionAutoScopes,
+  groups: supervisionDateGroups,
+  items: supervisionDateItems,
+};
+
+/** The draft the Coverings form holds once the user has entered these values. */
+function supervisionDraft(fields: SupervisionFields): CoveringFormState {
+  return {
+    description: fields.description,
+    preceptors: [...fields.supervisors],
+    preceptees: [...fields.supervisedPeople],
+    shiftTypes: [...fields.shiftTypes],
+    dates: [...fields.dates],
+  };
+}
+
+function supervisionRejection(
+  state: ScenarioUiState,
+  fields: SupervisionFields,
+  name: string,
+  index: number,
+  held: { preceptors?: unknown; preceptees?: unknown } = {},
+): OperationResult | undefined {
+  const people = supervisionPeopleOptions(state);
+  const refusedPerson = peoplePickerRefusal(
+    state,
+    [
+      [fields.supervisors, held.preceptors],
+      [fields.supervisedPeople, held.preceptees],
+    ],
+    [...people.items, ...people.groups],
+    name,
+    index,
+  );
+  if (refusedPerson) return refusedPerson;
+  // The picker never offers OFF/LEAVE; say why in the screen's words, not "no such shift".
+  if (selectionReachesDayState(fields.shiftTypes, state)) {
+    return reject(index, "invalid_value", `${name}: ${COVERING_MESSAGES.offLeave}.`);
+  }
+  const shifts = supervisionShiftOptions(state);
+  const refusedShift = shiftPickerRefusal(
+    fields.shiftTypes,
+    [...shifts.items, ...shifts.groups],
+    name,
+    index,
+  );
+  if (refusedShift) return refusedShift;
+  const dates = dateScopeRejection(state, fields.dates, SUPERVISION_DATES);
+  if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
+  const error = firstFormError(validateCoveringForm(supervisionDraft(fields), state));
+  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  return undefined;
+}
+
+function applyAddSupervisionRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_supervision_rule" }>,
+  index: number,
+): OperationResult {
+  const refused = supervisionRejection(
+    state,
+    command,
+    ruleName("coverings", command.description),
+    index,
+  );
+  if (refused) return refused;
+  // `use-coverings.ts` `add`: append `buildCoveringCard(form)`.
+  const card = buildCoveringCard(
+    supervisionDraft(command),
+    newRuleUid(state, "coverings", command),
+  );
+  return {
+    ok: true,
+    next: withCards(state, "coverings", [...state.cardsByKind.coverings, card]),
+  };
+}
+
+function applyEditSupervisionRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "edit_supervision_rule" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.coverings.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      `That supervision rule is not in this schedule any more. ${ruleChoices(state, "coverings")}`,
+    );
+  }
+  const name = ruleName("coverings", source.description?.trim() || source.uid);
+  if (!isEditableCoveringCard(source)) {
+    return reject(
+      index,
+      "unsupported_shape",
+      `${name}: it lists several separate groups, so it has to be edited on the Shift Type Coverings screen.`,
+    );
+  }
+  const refused = supervisionRejection(state, command, name, index, source);
+  if (refused) return refused;
+  const next = keepMarkers(source, buildCoveringCard(supervisionDraft(command), source.uid));
+  if (stableStringify(next) === stableStringify(source)) {
+    return reject(index, "no_effect", `${name} already says exactly that.`);
+  }
+  return {
+    ok: true,
+    next: withCards(
+      state,
+      "coverings",
+      state.cardsByKind.coverings.map((card) => (card.uid === source.uid ? next : card)),
+    ),
   };
 }
 
@@ -1722,9 +2041,9 @@ export function applyAssistantCommand(
     case "set_shift_request":
     case "clear_requests":
       return applyRequestPaint(state, command, index);
-    case "add_succession_rule":
+    case "add_shift_sequence_rule":
       return applyAddSuccessionRule(state, command, index);
-    case "edit_succession_rule":
+    case "edit_shift_sequence_rule":
       return applyEditSuccessionRule(state, command, index);
     case "add_count_rule":
       return applyAddCountRule(state, command, index);
@@ -1756,6 +2075,14 @@ export function applyAssistantCommand(
       return applyAddTemporaryCover(state, command, index);
     case "remove_temporary_cover":
       return applyRemoveTemporaryCover(state, command, index);
+    case "add_pairing_rule":
+      return applyAddPairingRule(state, command, index);
+    case "edit_pairing_rule":
+      return applyEditPairingRule(state, command, index);
+    case "add_supervision_rule":
+      return applyAddSupervisionRule(state, command, index);
+    case "edit_supervision_rule":
+      return applyEditSupervisionRule(state, command, index);
   }
 }
 

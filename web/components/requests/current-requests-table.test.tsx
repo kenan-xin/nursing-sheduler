@@ -302,3 +302,53 @@ describe("CurrentRequestsTable — v2 intent tone", () => {
     expect(tokens(screen.getByTestId("requests-weight"))).toContain("text-brandink");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Long user text in a narrow host (bd memory `long-user-text-no-overflow`). The
+// grid's track minimums need 504px, so on a phone-width host the whole table
+// scrolls as ONE region instead of overflowing its card; the person and shift
+// cells are single-line slots (shift ids are arbitrary user text), so each
+// truncates with an ellipsis and exposes its full value through `title`.
+// ---------------------------------------------------------------------------
+describe("CurrentRequestsTable — long user text in a narrow host", () => {
+  const LONG_PERSON = "ward8-east-extended-weekend-night-cover-rotation-".repeat(3).slice(0, 120);
+  const LONG_SHIFT = "night-cover-rotation-ward8-east-".repeat(6).slice(0, 120);
+
+  function renderLong() {
+    return render(
+      <CurrentRequestsTable
+        rows={[{ ...baseRow, key: "r-long", person: LONG_PERSON, shiftLabel: LONG_SHIFT }]}
+      />,
+    );
+  }
+
+  it("truncates the person and shift cells, exposing each full value on hover", () => {
+    renderLong();
+
+    const person = screen.getByTitle(LONG_PERSON);
+    expect(person).toHaveTextContent(LONG_PERSON);
+    expect(person).toHaveClass("min-w-0", "truncate");
+
+    const shift = screen.getByTitle(LONG_SHIFT);
+    expect(shift).toHaveTextContent(LONG_SHIFT);
+    expect(shift).toHaveClass("min-w-0", "truncate");
+  });
+
+  it("scrolls the header band and every row together in one floored region", () => {
+    renderLong();
+
+    const header = screen.getByTestId("requests-header-row");
+    const [row] = screen.getAllByTestId("requests-row");
+    const scroller = header.closest<HTMLElement>('[aria-label="Current shift requests list"]');
+
+    expect(scroller).not.toBeNull();
+    // One scroll region holds the band AND the rows, so their columns stay aligned.
+    expect(row.closest('[aria-label="Current shift requests list"]')).toBe(scroller);
+    expect(scroller).toHaveClass("overflow-auto");
+    expect(scroller).toHaveAttribute("tabindex", "0");
+    // The inner floor spans the band and zebra backgrounds across the scroll width.
+    expect(scroller?.firstElementChild).toHaveStyle({ minWidth: "504px" });
+    // The band stays pinned while the list scrolls vertically.
+    expect(header).toHaveClass("sticky", "top-0");
+  });
+});

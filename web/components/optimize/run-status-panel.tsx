@@ -377,10 +377,20 @@ export function RunStatusPanel({
                 variant="outline"
                 onClick={onDownloadAgain}
                 data-testid="optimize-download-again"
+                // A long, whitespace-free filename must not widen this nowrap button past
+                // its frame (bd memory `long-user-text-no-overflow`): `shrink` overrides the
+                // button base's `shrink-0`, `min-w-0` lets it shrink below its content, and
+                // `max-w-full` caps it at the parent. The filename slot truncates below.
+                className="max-w-full min-w-0 shrink"
               >
-                <FaDownload aria-hidden /> Download Again
+                <FaDownload aria-hidden /> Download Again{" "}
                 {downloadAgainFilename !== null ? (
-                  <span className="text-ink3">· {downloadAgainFilename}</span>
+                  <span
+                    className="min-w-0 max-w-full truncate text-ink3"
+                    title={downloadAgainFilename}
+                  >
+                    · {downloadAgainFilename}
+                  </span>
                 ) : null}
               </Button>
             ) : null}

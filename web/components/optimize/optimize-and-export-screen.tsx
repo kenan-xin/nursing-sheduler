@@ -38,14 +38,15 @@ import {
   useScenarioStore,
 } from "@/lib/store";
 import { toast } from "sonner";
+import { useOptimizeTimeoutOptions, LEGACY_OPTIMIZE_TIMEOUT } from "@/lib/query/optimize-options";
+import type { OptimizeTimeoutOptions } from "@/app/api/optimize/options/validate";
 import {
-  OPTIMIZE_TIMEOUT_MAX_SECONDS,
-  OPTIMIZE_TIMEOUT_MIN_SECONDS,
   acquireSessionStorage,
   noteOptimizeRunStarted,
   createAttemptRegistry,
   createOptimizeObservability,
   deriveOptimizeReadiness,
+  UNSUPPORTED_EXPRESSION_REASON,
   isActiveLifecycle,
   isSettledLifecycle,
   migrateLegacySession,
@@ -78,18 +79,20 @@ import { RunOptionsForm } from "./run-options-form";
 import { RunStatusPanel } from "./run-status-panel";
 import { ServerIdentity } from "./server-identity";
 
-const TIMEOUT_ERROR = "Solver timeout must be a valid positive integer.";
+/** v1's copy (eacd021), naming the deployment's own bounds. */
+function timeoutErrorFor(bounds: OptimizeTimeoutOptions): string {
+  return `Solver timeout must be an integer between ${bounds.minimum} and ${bounds.maximum} seconds.`;
+}
 
-/** Parse the timeout field, enforcing an integer within the settled bounds. */
-function parseTimeoutInput(raw: string): { ok: true; value: number } | { ok: false } {
+/** Parse the timeout field, enforcing an integer within the backend's bounds. */
+function parseTimeoutInput(
+  raw: string,
+  bounds: OptimizeTimeoutOptions,
+): { ok: true; value: number } | { ok: false } {
   const trimmed = raw.trim();
   if (trimmed === "") return { ok: false };
   const value = Number(trimmed);
-  if (
-    !Number.isInteger(value) ||
-    value < OPTIMIZE_TIMEOUT_MIN_SECONDS ||
-    value > OPTIMIZE_TIMEOUT_MAX_SECONDS
-  ) {
+  if (!Number.isInteger(value) || value < bounds.minimum || value > bounds.maximum) {
     return { ok: false };
   }
   return { ok: true, value };
@@ -317,9 +320,10 @@ export function OptimizeAndExportScreen({
   const shiftGroups = useScenarioStore((state) => state.shiftGroups);
   const rangeStart = useScenarioStore((state) => state.rangeStart);
   const rangeEnd = useScenarioStore((state) => state.rangeEnd);
+  const counts = useScenarioStore((state) => state.cardsByKind.counts);
   const readiness = useMemo(
-    () => deriveOptimizeReadiness({ staff, shifts, shiftGroups, rangeStart, rangeEnd }),
-    [staff, shifts, shiftGroups, rangeStart, rangeEnd],
+    () => deriveOptimizeReadiness({ staff, shifts, shiftGroups, rangeStart, rangeEnd, counts }),
+    [staff, shifts, shiftGroups, rangeStart, rangeEnd, counts],
   );
 
   // B2-2 — the scenario stat grid (NURSES / DAYS / SHIFTS / RULES ON) rendered
@@ -339,7 +343,14 @@ export function OptimizeAndExportScreen({
 
   const [prettify, setPrettify] = useState(true);
   const [anonymize, setAnonymize] = useState(true);
-  const [timeoutValue, setTimeoutValue] = useState("300");
+  // 2by.7 — the default and bounds come from the backend (`/api/optimize/options`),
+  // falling back to the legacy ones. `null` means the user has not typed, so the
+  // field shows the backend default once it arrives: derived, not copied by an
+  // effect, so a submit in the same commit can never read a stale default.
+  const timeoutOptions = useOptimizeTimeoutOptions();
+  const timeoutBounds = timeoutOptions.data?.timeout ?? LEGACY_OPTIMIZE_TIMEOUT;
+  const [typedTimeout, setTimeoutValue] = useState<string | null>(null);
+  const timeoutValue = typedTimeout ?? String(timeoutBounds.default);
   const [timeoutError, setTimeoutError] = useState<string | null>(null);
   const [capturePending, setCapturePending] = useState(false);
   // The one plain-language failure the hidden pre-submit step can produce. It is a
@@ -448,9 +459,9 @@ export function OptimizeAndExportScreen({
   }, []);
 
   const buildSubmitInput = useCallback(async (): Promise<OptimizeRunSubmitInput | null> => {
-    const parsed = parseTimeoutInput(timeoutValue);
+    const parsed = parseTimeoutInput(timeoutValue, timeoutBounds);
     if (!parsed.ok) {
-      setTimeoutError(TIMEOUT_ERROR);
+      setTimeoutError(timeoutErrorFor(timeoutBounds));
       return null;
     }
     setTimeoutError(null);
@@ -486,7 +497,14 @@ export function OptimizeAndExportScreen({
       // had no parent to diagnose.
       semanticProfile: serverInfo.semanticProfile,
     };
-  }, [anonymize, prettify, timeoutValue, preflightAuthority, serverInfo.semanticProfile]);
+  }, [
+    anonymize,
+    prettify,
+    timeoutValue,
+    timeoutBounds,
+    preflightAuthority,
+    serverInfo.semanticProfile,
+  ]);
 
   // The click boundary. One click owns one attempt until its POST settles.
   //
@@ -610,8 +628,12 @@ export function OptimizeAndExportScreen({
   // RUN in progress but a REQUEST in flight. It exists so the settled promise, not
   // the wall clock, decides when a second gesture becomes a second attempt.
   const submitEnabled = readiness.ready && serverInfo.status === "online" && !submitInFlight;
+  // The unsupported-expression issue is pushed last, so it leads only when it is
+  // the sole reason; missing set-up keeps the generic sentence.
   const disabledReason = !readiness.ready
-    ? "Complete the missing schedule configuration before optimising."
+    ? readiness.issues[0].kind === "shift-counts"
+      ? UNSUPPORTED_EXPRESSION_REASON
+      : "Complete the missing schedule configuration before optimising."
     : serverInfo.status !== "online"
       ? "Backend unavailable. Check that the configured backend is running."
       : null;
@@ -619,11 +641,14 @@ export function OptimizeAndExportScreen({
   // ASSISTANT RUN REQUEST. The assistant's confirm card asks for exactly the run the
   // Optimize button starts, so this calls the SAME `onSubmit`: options, lease
   // preflight, basis, capture, download and cleanup are the button's, not a copy.
-  // It waits while the backend check is still `checking`; the request itself
-  // expires (`run-request.ts`), so a late mount never starts a surprise run.
+  // It waits while the backend check is still `checking`, and for the timeout
+  // options, so an assistant run uses the backend's default and bounds exactly as a
+  // click would. The request itself expires (`run-request.ts`), so a late mount
+  // never starts a surprise run.
   const runRequested = useRunRequestStore((state) => state.pending !== null);
+  const timeoutOptionsPending = timeoutOptions.isPending;
   useEffect(() => {
-    if (!runRequested || serverInfo.status === "checking") return;
+    if (!runRequested || serverInfo.status === "checking" || timeoutOptionsPending) return;
     if (!takeOptimizeRunRequest()) return;
     if (!readiness.ready) {
       reportOptimizeRunRequest("not-ready");
@@ -640,7 +665,14 @@ export function OptimizeAndExportScreen({
     // Reported only once `onSubmit` settles: it can still stop short of a POST (bad
     // timeout, lost lease, blocked submit), and "started" would then be false.
     void onSubmit().then((started) => reportOptimizeRunRequest(started ? "started" : "blocked"));
-  }, [runRequested, serverInfo.status, readiness.ready, submitInFlight, onSubmit]);
+  }, [
+    runRequested,
+    serverInfo.status,
+    timeoutOptionsPending,
+    readiness.ready,
+    submitInFlight,
+    onSubmit,
+  ]);
 
   return (
     <Surface
@@ -700,6 +732,7 @@ export function OptimizeAndExportScreen({
             prettify={prettify}
             anonymize={anonymize}
             timeout={timeoutValue}
+            timeoutBounds={timeoutBounds}
             timeoutError={timeoutError}
             // Editable whenever a new run could be started, so the options a later
             // deliberate click sends are the ones the user can actually change.

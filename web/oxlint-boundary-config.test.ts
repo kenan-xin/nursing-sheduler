@@ -600,6 +600,12 @@ const TEST_SUPPORT_TREES = [
   ...HELPER_EXTENSIONS.map((extension) => `**/test-support.${extension}`),
   ...HELPER_EXTENSIONS.map((extension) => `**/*.test-support.${extension}`),
   "lib/store/test-authority.ts",
+  // STORYBOOK (bead w0e.2). Stories and the workbench config are test/support code: they
+  // gain the acquisition families. They belong HERE, not in TEST_FILE_GLOBS, for the reason
+  // this override exists at all: a story is not on the assistant boundary's
+  // permitted-reference list, so every global family stays in force over it.
+  ...HELPER_EXTENSIONS.map((extension) => `**/*.stories.${extension}`),
+  "**/.storybook/**",
 ];
 
 /**
@@ -1505,6 +1511,27 @@ const GOVERNED: GovernedPath[] = [
     properties: "base",
     note: "class {23,24} -- EVAL PIPELINE. The ledgered report writer: the evals/** override matches it, and the later row-B override wins, removing the filesystem family and nothing else",
   },
+  {
+    path: "components/ui/select.stories.tsx",
+    exempt: [],
+    acquisition: [],
+    properties: "base",
+    note: "class {2} -- STORYBOOK (w0e.2). A story is test/support code: the acquisition families apply with no exception, and it is NOT on the assistant boundary's permitted-reference list",
+  },
+  {
+    path: ".storybook/preview.tsx",
+    exempt: [],
+    acquisition: [],
+    properties: "base",
+    note: "class {2} -- STORYBOOK (w0e.2). The hidden workbench config directory. Oxlint walks dot-directories; this row proves the glob actually reaches it",
+  },
+  {
+    path: "components/ai/dock-card.stories.tsx",
+    exempt: [],
+    acquisition: [],
+    properties: "base",
+    note: "class {1,2} -- STORYBOOK (w0e.4). A story inside the AI owner's tree: the later Storybook override must win over the AI-owner override, so it keeps every acquisition family, no assistant exemption and the base property contract",
+  },
 ];
 
 function effective(path: string, rule: string): RuleValue | undefined {
@@ -1540,7 +1567,9 @@ const TRANSIENT_FIXTURE_DIR = "acquisition-fixtures";
 
 function walk(dir: string, skip: Set<string>, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
-    if (entry.startsWith(".") || skip.has(entry) || entry === TRANSIENT_FIXTURE_DIR) continue;
+    // `.storybook` is authored test/support source; every other dot-entry is tooling state.
+    const hidden = entry.startsWith(".") && entry !== ".storybook";
+    if (hidden || skip.has(entry) || entry === TRANSIENT_FIXTURE_DIR) continue;
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) walk(full, skip, out);
     else if (SOURCE_EXTENSIONS.test(entry)) out.push(full);

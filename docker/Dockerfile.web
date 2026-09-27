@@ -17,6 +17,7 @@ RUN corepack enable
 FROM base AS deps
 WORKDIR /app
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+COPY web/patches/ ./patches/
 RUN pnpm install --frozen-lockfile
 
 # builder — stamp the version and compile the standalone bundle.

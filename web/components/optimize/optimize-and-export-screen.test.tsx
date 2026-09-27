@@ -32,6 +32,7 @@ import {
   scenarioCommands,
   useAuthorityStore,
   useHotStore,
+  useScenarioStore,
 } from "@/lib/store";
 import { resetScenarioForTest } from "@/lib/store/test-authority";
 import type { PrepareOptimizeSubmissionResult } from "@/lib/scenario";
@@ -47,6 +48,7 @@ import {
   type SessionTransactionStorage,
   type UseOptimizeServerInfoDeps,
 } from "@/lib/optimize";
+import { UNSUPPORTED_EXPRESSION_REASON } from "@/lib/optimize/optimize-readiness";
 import { OptimizeAndExportScreen } from "./optimize-and-export-screen";
 
 vi.mock("next/navigation", () => ({
@@ -269,6 +271,46 @@ describe("OptimizeAndExportScreen — gating", () => {
     expect(screen.getByTestId("optimize-readiness")).toBeInTheDocument();
     expect(screen.getByTestId("optimize-disabled-reason")).toHaveTextContent(
       "Complete the missing schedule configuration before optimising.",
+    );
+    expect(screen.getByTestId("optimize-submit")).toBeDisabled();
+  });
+
+  it("blocks submission with the reason when a shift count's expression is unsupported (wa46)", async () => {
+    await readyStore();
+    await scenarioCommands.mutate({
+      cardsByKind: {
+        ...useScenarioStore.getState().cardsByKind,
+        counts: [
+          {
+            uid: "bad",
+            person: "ALL",
+            countDates: "ALL",
+            countShiftTypes: "day",
+            expression: "x >= 0",
+            target: 1,
+            weight: 1,
+          },
+        ],
+      },
+    });
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
+      />,
+      { wrapper },
+    );
+    await waitFor(() => expect(screen.getByText("Online")).toBeInTheDocument());
+    expect(screen.getByTestId("optimize-readiness")).toHaveTextContent(
+      UNSUPPORTED_EXPRESSION_REASON,
+    );
+    expect(screen.getByTestId("optimize-disabled-reason")).toHaveTextContent(
+      UNSUPPORTED_EXPRESSION_REASON,
     );
     expect(screen.getByTestId("optimize-submit")).toBeDisabled();
   });
@@ -885,6 +927,116 @@ describe("OptimizeAndExportScreen — assistant run request", () => {
 
     await waitFor(() => expect(posts()).toBe(1));
     expect(useRunRequestStore.getState().last).toBeNull();
+  });
+});
+
+describe("OptimizeAndExportScreen — backend timeout options (2by.7)", () => {
+  const BACKEND_TIMEOUT = { timeout: { default: 120, minimum: 10, maximum: 600 } };
+
+  /** Routes `/api/optimize/options` to `options` and records each POSTed timeout. */
+  function routeWithOptions(options: () => Response | Promise<Response>): string[] {
+    const posted: string[] = [];
+    routeFetch((u, init) => {
+      const method = init?.method ?? "GET";
+      if (u.endsWith("/api/optimize/options")) return options();
+      if (u.endsWith("/api/optimize") && method === "POST") {
+        posted.push(String((init!.body as FormData).get("timeout")));
+        return json(202, baseJob());
+      }
+      if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
+      if (u.endsWith("/cancel")) return json(200, baseJob({ state: "cancelled", terminal: true }));
+      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, baseJob({ state: "running" }));
+      throw new Error(`unexpected request: ${u}`);
+    });
+    return posted;
+  }
+
+  function renderScreen() {
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
+      />,
+      { wrapper },
+    );
+  }
+
+  beforeEach(() => {
+    useRunRequestStore.setState({ pending: null, last: null, runRevision: null });
+  });
+
+  it("fills the timeout with the backend default and shows its bounds", async () => {
+    await readyStore();
+    routeWithOptions(() => json(200, BACKEND_TIMEOUT));
+    renderScreen();
+
+    await waitFor(() => expect(screen.getByLabelText("Solver Timeout")).toHaveValue(120));
+    expect(screen.getByLabelText("Solver Timeout")).toHaveAttribute("max", "600");
+    expect(screen.getByText("Between 10 and 600 seconds.")).toBeInTheDocument();
+  });
+
+  it("falls back to the legacy default and bounds when the backend lacks the endpoint", async () => {
+    await readyStore();
+    routeWithOptions(() =>
+      json(404, { error: { code: "backend_route_unsupported", message: "unsupported" } }),
+    );
+    renderScreen();
+
+    await waitFor(() =>
+      expect(screen.getByText("Between 1 and 3600 seconds.")).toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("Solver Timeout")).toHaveValue(300);
+  });
+
+  it("refuses a timeout outside the backend's bounds with a clear message", async () => {
+    await readyStore();
+    const posted = routeWithOptions(() => json(200, BACKEND_TIMEOUT));
+    renderScreen();
+
+    await waitFor(() => expect(screen.getByLabelText("Solver Timeout")).toHaveValue(120));
+    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    const input = screen.getByLabelText("Solver Timeout");
+    await userEvent.clear(input);
+    await userEvent.type(input, "700");
+    // A click is stopped by the browser's own range check (`max`)...
+    expect((input as HTMLInputElement).validity.rangeOverflow).toBe(true);
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+    expect(posted).toEqual([]);
+
+    // ...and a submit that bypasses the form (the assistant's Run card) is refused by
+    // the screen with the deployment's own bounds.
+    requestOptimizeRun();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Solver timeout must be an integer between 10 and 600 seconds.",
+    );
+    await waitFor(() => expect(useRunRequestStore.getState().last).toBe("blocked"));
+    expect(posted).toEqual([]);
+  });
+
+  it("submits the backend default for an assistant run request made before the options load", async () => {
+    await readyStore();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const posted = routeWithOptions(async () => {
+      await gate;
+      return json(200, BACKEND_TIMEOUT);
+    });
+    requestOptimizeRun();
+    renderScreen();
+
+    // The request waits for the options rather than submitting the legacy 300.
+    await waitFor(() => expect(screen.getByText("Online")).toBeInTheDocument());
+    expect(posted).toEqual([]);
+    release();
+
+    await waitFor(() => expect(posted).toEqual(["120"]));
+    expect(useRunRequestStore.getState().last).toBe("started");
   });
 });
 

@@ -28,6 +28,8 @@ files:
   - "**/*.test-support.*"
   - "lib/store/test-authority.ts"
   - "evals/**"
+  - "**/*.stories.*"
+  - "**/.storybook/**"
 rule:
   any:
     - pattern: require($SPEC)

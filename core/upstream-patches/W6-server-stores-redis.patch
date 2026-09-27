@@ -1,0 +1,560 @@
+# W6 patch for core/nurse_scheduling/server/stores/redis.py against genie 1bf4b85.
+# hunk: prepare_event_replay WATCH/MULTI/EXEC snapshot (P6)
+# hunk: explicit basis, purpose and INCONCLUSIVE serialize and deserialize (P8)
+# hunk: two purpose queues (ordinary keeps the genie key), reserve admission, WATCH sets, residue repair, invariant records, queue snapshot (P9)
+
+diff --git a/core/nurse_scheduling/server/stores/redis.py b/core/nurse_scheduling/server/stores/redis.py
+index a5892b3..c440108 100644
+--- a/core/nurse_scheduling/server/stores/redis.py
++++ b/core/nurse_scheduling/server/stores/redis.py
+@@ -28,16 +28,23 @@ from uuid import uuid4
+ import redis
+ 
+ from ..errors import (
++    DiagnosticCapacityError,
+     JobArtifactNotFoundError,
+     JobCapacityError,
+     JobInputNotFoundError,
+     JobNotFoundError,
++    JobOperationContentionError,
++    QueueInvariantError,
+     StoreWriteConflictError,
+ )
++from ..event_cursor import EventCursorExpired, EventCursorInvalid, decode_cursor, encode_cursor
++from ..optimize_basis import NormalizedOptions, OptimizeBasisV2
+ from ..jobs.models import (
++    EventReplayWindow,
+     Job,
+     JobEvent,
+     JobFailure,
++    JobPurpose,
+     JobRequest,
+     JobState,
+     OptimizationOutcome,
+@@ -47,6 +54,21 @@ from ..jobs.models import (
+     StoreLimits,
+     WorkerLease,
+ )
++from ..queue_state import (
++    ADMISSION_OK,
++    ADMISSION_ORDINARY_RESERVED,
++    DIAGNOSTIC_CAPACITY_MESSAGE,
++    INVARIANT_ERROR_ORPHAN_QUEUE_MEMBER,
++    INVARIANT_ERROR_STALE_PENDING_MEMBER,
++    INVARIANT_ERROR_STALE_QUEUE_MEMBER,
++    MAX_RETAINED_INVARIANT_ERRORS,
++    JobQueueFacts,
++    QueueMember,
++    QueueStateSnapshot,
++    admission_decision,
++    fifo_sorted,
++    validate_transition,
++)
+ from ..retry import retry_with_backoff
+ from ..usage_metrics import RedisUsageMetrics, schedule_basics_for
+ 
+@@ -54,6 +76,67 @@ SOCKET_TIMEOUT_MARGIN_SECONDS = 5.0
+ """Additional socket time allowed beyond one blocking event-stream read."""
+ REDIS_OPERATION_TIMEOUT_SECONDS = 2.0
+ """Short timeout for ordinary Redis operations and deployment probes."""
++REPLAY_INITIAL_BATCH_COUNT = 1_000
++"""v2 P6: maximum events returned in one prepared replay batch."""
++REPLAY_SNAPSHOT_MAX_ATTEMPTS = 50
++"""v2 P6: bound on watched snapshot attempts before reporting store contention."""
++
++
++def _serialize_basis(basis: OptimizeBasisV2 | None) -> dict[str, Any] | None:
++    """v2 P8: serialize the immutable submission basis field by field (T08)."""
++    if basis is None:
++        return None
++    return {
++        "schema_version": basis.schema_version,
++        "submission_contract_version": basis.submission_contract_version,
++        "workspace_schema_version": basis.workspace_schema_version,
++        "serializer_version": basis.serializer_version,
++        "anonymization_mode": basis.anonymization_mode,
++        "input_sha256": basis.input_sha256,
++        "normalized_options": {
++            "solver": basis.normalized_options.solver,
++            "prettify": basis.normalized_options.prettify,
++            "timeout_seconds": basis.normalized_options.timeout_seconds,
++        },
++        "solver_semantic_version": basis.solver_semantic_version,
++        "backend_capability_version": basis.backend_capability_version,
++    }
++
++
++def _deserialize_basis(data: Any) -> OptimizeBasisV2 | None:
++    """v2 P8: rebuild the immutable submission basis from a stored job record."""
++    if not isinstance(data, dict):
++        return None
++    options = data["normalized_options"]
++    return OptimizeBasisV2(
++        schema_version=data["schema_version"],
++        submission_contract_version=data["submission_contract_version"],
++        workspace_schema_version=data["workspace_schema_version"],
++        serializer_version=data["serializer_version"],
++        anonymization_mode=data["anonymization_mode"],
++        input_sha256=data["input_sha256"],
++        normalized_options=NormalizedOptions(
++            solver=options["solver"],
++            prettify=options["prettify"],
++            timeout_seconds=options["timeout_seconds"],
++        ),
++        solver_semantic_version=data["solver_semantic_version"],
++        backend_capability_version=data["backend_capability_version"],
++    )
++
++
++def _parse_stream_id(native_id: str) -> tuple[int, int]:
++    """v2 P6: parse a canonical Redis stream ID `<ms>-<seq>` into a comparable tuple.
++
++    Raises:
++        EventCursorInvalid: If the value is not a canonical stream ID.
++    """
++    parts = native_id.split("-")
++    if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
++        raise EventCursorInvalid("Cursor native ID is not a stream ID")
++    if str(int(parts[0])) != parts[0] or str(int(parts[1])) != parts[1]:
++        raise EventCursorInvalid("Cursor native ID is not in canonical form")
++    return int(parts[0]), int(parts[1])
+ 
+ 
+ @overload
+@@ -143,6 +226,14 @@ class RedisJobStore:
+         """Set key (`SADD`) of non-terminal job IDs used for pending-capacity checks."""
+         self._queue_key = self._key("queue")
+         """Sorted-set key (`ZADD`) of queued job IDs scored by creation time for FIFO claims."""
++        # v2 P9: the ordinary queue keeps the genie key; diagnostics get their own queue.
++        self._queue_keys = {
++            JobPurpose.ORDINARY: self._queue_key,
++            JobPurpose.ASSISTANT_DIAGNOSTIC: self._key("queue", JobPurpose.ASSISTANT_DIAGNOSTIC.value),
++        }
++        """v2 P9: one sorted-set key per purpose, scored by creation time for FIFO claims (T09)."""
++        self._invariant_errors_key = self._key("metadata", "invariant_errors")
++        """v2 P9: bounded stream (`XADD MAXLEN`) recording defensive queue repairs."""
+         self._workers_key = self._key("workers", "leases")
+         """Sorted-set key of worker IDs scored by lease expiration time."""
+         self._worker_tokens_key = self._key("workers", "tokens")
+@@ -193,17 +284,29 @@ class RedisJobStore:
+         # Parsed once outside the loop, because a watched transaction may retry and the
+         # submitted YAML can be megabytes.
+         schedule_basics = schedule_basics_for(input_bytes) if self._usage_metrics is not None else {}
++        if job.state != JobState.QUEUED:
++            raise QueueInvariantError("A job may only be admitted in the queued state")
+         while True:
+             try:
+                 with self._redis.pipeline() as transaction:
+                     job_key = self._job_key(job.id)
+-                    transaction.watch(self._jobs_key, self._pending_key, self._queue_key, job_key)
++                    transaction.watch(self._jobs_key, self._pending_key, *self._queue_keys.values(), job_key)
+                     if transaction.exists(job_key):
+                         transaction.unwatch()
+                         raise StoreWriteConflictError(f"Job already exists: {job.id}")
+-                    pending_count = transaction.scard(self._pending_key)
+-                    if pending_count >= limits.max_pending:
++                    # v2 P9: repair residue in the same transaction, before counting (T09).
++                    repairs = self._find_residue(transaction)
++                    stale_pending = sum(purpose is None for _kind, _job_id, purpose in repairs)
++                    decision = admission_decision(
++                        job.request.purpose,
++                        pending_count=transaction.scard(self._pending_key) - stale_pending,
++                        max_pending=limits.max_pending,
++                        ordinary_reserved_slots=limits.ordinary_reserved_slots,
++                    )
++                    if decision != ADMISSION_OK:
+                         transaction.unwatch()
++                        if decision == ADMISSION_ORDINARY_RESERVED:
++                            raise DiagnosticCapacityError(DIAGNOSTIC_CAPACITY_MESSAGE)
+                         raise JobCapacityError("Too many jobs are queued or running")
+ 
+                     prune_ids: list[str] = []
+@@ -219,23 +322,23 @@ class RedisJobStore:
+                             raise JobCapacityError("Too many jobs are retained")
+                         prune_ids = [candidate.id for candidate in terminal[:prune_count]]
+ 
+-                    queued_entries = transaction.zrange(self._queue_key, 0, -1, withscores=True)
+-                    queue_order = [(_decode(raw_id), score) for raw_id, score in queued_entries]
+-                    # can bisect to insert but just sort for simplicity
+-                    queue_order.append((job.id, job.created_at.timestamp()))
+-                    queue_order.sort(key=lambda entry: (entry[1], entry[0]))
+-                    queue_position = next(
+-                        index for index, (queued_id, _score) in enumerate(queue_order, start=1) if queued_id == job.id
+-                    )
++                    residue = {(job_id, purpose) for _kind, job_id, purpose in repairs}
++                    members = self._read_queue_members(transaction)
++                    for purpose, purpose_members in members.items():
++                        members[purpose] = [m for m in purpose_members if (m.job_id, purpose) not in residue]
++                    members[job.request.purpose].append(QueueMember(job.id, job.created_at.timestamp()))
++                    queue_order = self._effective_ids(members)
++                    queue_position = queue_order.index(job.id) + 1
+ 
+                     saved = replace(job, revision=1, queue_position=None)
+                     transaction.multi()
++                    self._stage_repairs(transaction, repairs, job.created_at)
+                     for prune_id in prune_ids:
+                         self._stage_job_deletion(transaction, prune_id)
+                     transaction.set(job_key, self._serialize_job(saved))
+                     transaction.set(self._input_key(job.id), input_bytes)
+                     transaction.zadd(self._jobs_key, {job.id: job.created_at.timestamp()})
+-                    transaction.zadd(self._queue_key, {job.id: job.created_at.timestamp()})
++                    transaction.zadd(self._queue_keys[job.request.purpose], {job.id: job.created_at.timestamp()})
+                     transaction.sadd(self._pending_key, job.id)
+                     self._stage_event_appends(
+                         transaction,
+@@ -244,7 +347,7 @@ class RedisJobStore:
+                     )
+                     if self._usage_metrics is not None:
+                         self._usage_metrics.stage_job_created(transaction, saved, schedule_basics)
+-                    for position, (queued_id, _score) in enumerate(queue_order, start=1):
++                    for position, queued_id in enumerate(queue_order, start=1):
+                         if queued_id != job.id:
+                             self._stage_queue_position_event(transaction, queued_id, position, job.created_at)
+                     transaction.execute()
+@@ -330,7 +433,7 @@ class RedisJobStore:
+             try:
+                 with self._redis.pipeline() as transaction:
+                     transaction.watch(
+-                        self._queue_key,
++                        *self._queue_keys.values(),
+                         self._workers_key,
+                         self._worker_tokens_key,
+                         self._worker_active_jobs_key,
+@@ -344,11 +447,12 @@ class RedisJobStore:
+                     ):
+                         transaction.unwatch()
+                         return None
+-                    queued = transaction.zrange(self._queue_key, 0, 0)
+-                    if not queued:
++                    # v2 P9: the effective head is the ordinary FIFO head, then diagnostics (T09).
++                    order = self._effective_ids(self._read_queue_members(transaction))
++                    if not order:
+                         transaction.unwatch()
+                         return None
+-                    job_id = _decode(queued[0])
++                    job_id = order[0]
+                     job_key = self._job_key(job_id)
+                     transaction.watch(job_key)
+                     raw = transaction.get(job_key)
+@@ -357,7 +461,10 @@ class RedisJobStore:
+                         # Remove the orphan defensively in case the stored data is inconsistent,
+                         # so it cannot block later claims.
+                         transaction.multi()
+-                        transaction.zrem(self._queue_key, job_id)
++                        self._stage_queue_removal(transaction, job_id)
++                        self._stage_invariant_error(
++                            transaction, INVARIANT_ERROR_ORPHAN_QUEUE_MEMBER, job_id, started_at
++                        )
+                         transaction.execute()
+                         continue
+                     current = self._deserialize_job(raw)
+@@ -367,7 +474,8 @@ class RedisJobStore:
+                         # defensively if its state and queue index are inconsistent, so it cannot
+                         # block later claims.
+                         transaction.multi()
+-                        transaction.zrem(self._queue_key, job_id)
++                        self._stage_queue_removal(transaction, job_id)
++                        self._stage_invariant_error(transaction, INVARIANT_ERROR_STALE_QUEUE_MEMBER, job_id, started_at)
+                         transaction.execute()
+                         continue
+                     claimed = replace(
+@@ -390,10 +498,10 @@ class RedisJobStore:
+                         },
+                         occurred_at=started_at,
+                     )
+-                    remaining_ids = [_decode(raw_id) for raw_id in transaction.zrange(self._queue_key, 1, -1)]
++                    remaining_ids = order[1:]
+                     transaction.multi()
+                     transaction.set(job_key, self._serialize_job(claimed))
+-                    transaction.zrem(self._queue_key, job_id)
++                    self._stage_queue_removal(transaction, job_id)
+                     transaction.hset(self._worker_active_jobs_key, lease.worker_id, job_id)
+                     self._stage_event_appends(transaction, job_id, [event])
+                     if self._usage_metrics is not None:
+@@ -554,14 +662,19 @@ class RedisJobStore:
+                         ):
+                             transaction.unwatch()
+                             return self.get(job.id)
++                    try:
++                        validate_transition(current.state, current.request.purpose, job)
++                    except QueueInvariantError:
++                        transaction.unwatch()
++                        raise
+                     updated_job = replace(job, revision=expected_revision + 1, queue_position=None)
+                     remaining_queue_ids: list[str] = []
+                     if current.state == JobState.QUEUED and updated_job.state != JobState.QUEUED:
+-                        transaction.watch(self._queue_key)
++                        transaction.watch(*self._queue_keys.values())
+                         remaining_queue_ids = [
+                             queued_id
+-                            for raw_id in transaction.zrange(self._queue_key, 0, -1)
+-                            if (queued_id := _decode(raw_id)) != updated_job.id
++                            for queued_id in self._effective_ids(self._read_queue_members(transaction))
++                            if queued_id != updated_job.id
+                         ]
+                     worker_id_to_release: str | None = None
+                     if updated_job.state.terminal and updated_job.worker_id is not None:
+@@ -572,7 +685,7 @@ class RedisJobStore:
+                     transaction.multi()
+                     transaction.set(job_key, self._serialize_job(updated_job))
+                     if updated_job.state != JobState.QUEUED:
+-                        transaction.zrem(self._queue_key, updated_job.id)
++                        self._stage_queue_removal(transaction, updated_job.id)
+                     if updated_job.state.terminal:
+                         transaction.srem(self._pending_key, updated_job.id)
+                     if worker_id_to_release is not None:
+@@ -594,6 +707,67 @@ class RedisJobStore:
+             except redis.WatchError:
+                 continue
+ 
++    def prepare_event_replay(self, job_id: str, requested_cursor: str | None) -> EventReplayWindow:
++        """v2 P6: snapshot the initial replay batch inside one `WATCH`/`MULTI`/`EXEC` transaction.
++
++        Raises:
++            JobNotFoundError: If the job does not exist.
++            EventCursorExpired: If the cursor is valid but older than the retained floor.
++            EventCursorInvalid: If the cursor is malformed, foreign, future, or non-exact.
++            JobOperationContentionError: If a stable snapshot is not obtained in the retry bound.
++        """
++        native = decode_cursor(requested_cursor, job_id) if requested_cursor is not None else None
++        native_key = _parse_stream_id(native) if native is not None else None
++        events_key = self._events_key(job_id)
++        job_key = self._job_key(job_id)
++        for _attempt in range(REPLAY_SNAPSHOT_MAX_ATTEMPTS):
++            try:
++                with self._redis.pipeline() as transaction:
++                    transaction.watch(job_key, events_key)
++                    if not transaction.exists(job_key):
++                        transaction.unwatch()
++                        raise JobNotFoundError("Job was not found")
++                    transaction.multi()
++                    transaction.xrange(events_key, count=1)
++                    transaction.xrevrange(events_key, count=1)
++                    if native is not None:
++                        transaction.xrange(events_key, min=native, max=native, count=1)
++                        transaction.xrange(events_key, min=f"({native}", max="+", count=REPLAY_INITIAL_BATCH_COUNT)
++                    else:
++                        transaction.xrange(events_key, count=REPLAY_INITIAL_BATCH_COUNT)
++                    results = transaction.execute()
++                break
++            except redis.WatchError:
++                continue
++        else:
++            raise JobOperationContentionError("Event replay snapshot did not stabilize")
++        first, last = results[0], results[1]
++        exact = results[2] if native is not None else None
++        batch = results[3] if native is not None else results[2]
++        if not first:
++            if native is None:
++                return EventReplayWindow(initial_events=[], next_cursor=None, oldest_event_id=None)
++            raise EventCursorExpired(None)
++        floor_id = _decode(first[0][0])
++        oldest_public = encode_cursor(job_id, floor_id)
++        if native_key is not None:
++            if native_key < _parse_stream_id(floor_id):
++                raise EventCursorExpired(oldest_public)
++            if native_key > _parse_stream_id(_decode(last[0][0])):
++                raise EventCursorInvalid("Cursor native ID is newer than the retained tail")
++            if len(exact) != 1:
++                raise EventCursorInvalid("Cursor native ID is not an exact retained event")
++        events = [
++            JobEvent(
++                id=_decode(raw_id),
++                type=_decode(fields.get(b"type")) or "job.event",
++                data=json.loads(_decode(fields.get(b"data")) or "{}"),
++                occurred_at=datetime.fromisoformat(_decode(fields.get(b"occurred_at")) or ""),
++            )
++            for raw_id, fields in batch
++        ]
++        return EventReplayWindow(events, events[-1].id if events else native, oldest_public)
++
+     def stream_events(
+         self,
+         job_id: str,
+@@ -748,8 +922,144 @@ class RedisJobStore:
+         """
+         if job.state != JobState.QUEUED:
+             return replace(job, queue_position=None)
+-        rank = self._redis.zrank(self._queue_key, job.id)
+-        return replace(job, queue_position=rank + 1 if rank is not None else None)
++        # v2 P9: plain reads of both queues, like genie's single ZRANK. The position is
++        # advisory, and a read-only call must not surface a WatchError.
++        order = self._effective_ids(self._read_queue_members(self._redis))
++        return replace(job, queue_position=order.index(job.id) + 1 if job.id in order else None)
++
++    def _read_queue_members(self, reader, *, execute: bool = False) -> dict[JobPurpose, list[QueueMember]]:
++        """v2 P9: read both purpose queues with their FIFO scores through one reader."""
++        purposes = list(JobPurpose)
++        replies = [reader.zrange(self._queue_keys[purpose], 0, -1, withscores=True) for purpose in purposes]
++        if execute:
++            replies = reader.execute()
++        return {
++            purpose: [QueueMember(job_id=_decode(raw_id), created_at=score) for raw_id, score in reply]
++            for purpose, reply in zip(purposes, replies)
++        }
++
++    @staticmethod
++    def _effective_ids(members: Mapping[JobPurpose, list[QueueMember]]) -> list[str]:
++        """v2 P9: return the effective claim order: ordinary FIFO, then diagnostic FIFO."""
++        ordered = fifo_sorted(members[JobPurpose.ORDINARY]) + fifo_sorted(members[JobPurpose.ASSISTANT_DIAGNOSTIC])
++        return [member.job_id for member in ordered]
++
++    def _stage_queue_removal(self, transaction, job_id: str) -> None:
++        """v2 P9: stage removal of a job from both purpose queues."""
++        for queue_key in self._queue_keys.values():
++            transaction.zrem(queue_key, job_id)
++
++    def _find_residue(self, transaction) -> list[tuple[str, str, JobPurpose | None]]:
++        """v2 P9: read index entries no job record justifies, inside a watched transaction.
++
++        Every transition that changes queue or pending membership writes a watched
++        index key, so watching the indexes is enough to keep this read consistent.
++        """
++        repairs: list[tuple[str, str, JobPurpose | None]] = []
++        for purpose, members in self._read_queue_members(transaction).items():
++            for member in members:
++                raw = transaction.get(self._job_key(member.job_id))
++                if raw is None:
++                    repairs.append((INVARIANT_ERROR_ORPHAN_QUEUE_MEMBER, member.job_id, purpose))
++                    continue
++                job = self._deserialize_job(raw)
++                if job.state != JobState.QUEUED or job.request.purpose != purpose:
++                    repairs.append((INVARIANT_ERROR_STALE_QUEUE_MEMBER, member.job_id, purpose))
++        for raw_id in transaction.smembers(self._pending_key):
++            job_id = _decode(raw_id)
++            raw = transaction.get(self._job_key(job_id))
++            if raw is None or self._deserialize_job(raw).state.terminal:
++                repairs.append((INVARIANT_ERROR_STALE_PENDING_MEMBER, job_id, None))
++        return repairs
++
++    def _stage_repairs(self, transaction, repairs, occurred_at: datetime) -> None:
++        """v2 P9: stage residue removals and their bounded repair records."""
++        for kind, job_id, purpose in repairs:
++            if purpose is None:
++                transaction.srem(self._pending_key, job_id)
++            else:
++                transaction.zrem(self._queue_keys[purpose], job_id)
++            self._stage_invariant_error(transaction, kind, job_id, occurred_at)
++
++    def _stage_invariant_error(self, transaction, kind: str, job_id: str, occurred_at: datetime) -> None:
++        """v2 P9: stage one bounded repair record carrying no submitted content."""
++        transaction.xadd(
++            self._invariant_errors_key,
++            {"kind": kind, "job_id": job_id, "occurred_at": occurred_at.isoformat()},
++            maxlen=MAX_RETAINED_INVARIANT_ERRORS,
++            approximate=False,
++        )
++
++    def describe_queue_state(self) -> QueueStateSnapshot:
++        """v2 P9: return one atomic snapshot of the complete queue state (T09).
++
++        Raises:
++            redis.RedisError: If a Redis operation fails.
++        """
++        while True:
++            try:
++                with self._redis.pipeline() as transaction:
++                    transaction.watch(
++                        self._jobs_key, self._pending_key, *self._queue_keys.values(), self._worker_active_jobs_key
++                    )
++                    members = self._read_queue_members(transaction)
++                    pending = frozenset(_decode(raw_id) for raw_id in transaction.smembers(self._pending_key))
++                    active = {_decode(raw) for raw in transaction.hvals(self._worker_active_jobs_key)}
++                    job_ids = [_decode(raw_id) for raw_id in transaction.zrange(self._jobs_key, 0, -1)]
++                    if job_ids:
++                        transaction.watch(*(self._job_key(job_id) for job_id in job_ids))
++                    jobs: dict[str, JobQueueFacts] = {}
++                    for job_id in job_ids:
++                        raw = transaction.get(self._job_key(job_id))
++                        if raw is None:
++                            continue
++                        job = self._deserialize_job(raw)
++                        jobs[job_id] = JobQueueFacts(job.state, job.request.purpose, job.created_at, job_id in active)
++                    # An EXEC validates every watch, so the reads above coexisted.
++                    transaction.multi()
++                    transaction.zcard(self._jobs_key)
++                    transaction.execute()
++                return QueueStateSnapshot(
++                    jobs=jobs,
++                    pending_ids=pending,
++                    ordinary_members=tuple(members[JobPurpose.ORDINARY]),
++                    diagnostic_members=tuple(members[JobPurpose.ASSISTANT_DIAGNOSTIC]),
++                )
++            except redis.WatchError:
++                continue
++
++    def repair_queue_residue(self, occurred_at: datetime | None = None) -> list[str]:
++        """v2 P9: atomically remove inconsistent index entries and report the repairs.
++
++        Raises:
++            redis.RedisError: If a Redis operation fails.
++        """
++        stamp = occurred_at or datetime.now(timezone.utc)
++        while True:
++            try:
++                with self._redis.pipeline() as transaction:
++                    transaction.watch(self._pending_key, *self._queue_keys.values())
++                    repairs = self._find_residue(transaction)
++                    if not repairs:
++                        transaction.unwatch()
++                        return []
++                    transaction.multi()
++                    self._stage_repairs(transaction, repairs, stamp)
++                    transaction.execute()
++                return [kind for kind, _job_id, _purpose in repairs]
++            except redis.WatchError:
++                continue
++
++    def recent_invariant_errors(self) -> list[dict[str, str]]:
++        """v2 P9: return the bounded record of defensive repairs, oldest first."""
++        return [
++            {
++                "kind": _decode(fields.get(b"kind")) or "",
++                "job_id": _decode(fields.get(b"job_id")) or "",
++                "occurred_at": _decode(fields.get(b"occurred_at")) or "",
++            }
++            for _raw_id, fields in self._redis.xrange(self._invariant_errors_key)
++        ]
+ 
+     def _stage_event_appends(self, transaction, job_id: str, events: Sequence[JobEvent]) -> None:
+         """Stage event-stream appends in an active Redis transaction."""
+@@ -775,7 +1085,7 @@ class RedisJobStore:
+             self._events_key(job_id),
+         )
+         transaction.zrem(self._jobs_key, job_id)
+-        transaction.zrem(self._queue_key, job_id)
++        self._stage_queue_removal(transaction, job_id)
+         transaction.srem(self._pending_key, job_id)
+ 
+     @staticmethod
+@@ -790,8 +1100,15 @@ class RedisJobStore:
+                 "solver": job.request.solver,
+                 "prettify": job.request.prettify,
+                 "timeout_seconds": job.request.timeout_seconds,
++                # v2 P8/P9: immutable purpose and submission basis (T08, T09).
++                "purpose": job.request.purpose.value,
++                "basis": _serialize_basis(job.request.basis),
++                "basis_id": job.request.basis_id,
++                "parent_basis_id": job.request.parent_basis_id,
++                "transform_digest": job.request.transform_digest,
+             },
+             "created_at": job.created_at.isoformat(),
++            "expires_at": job.expires_at.isoformat() if job.expires_at is not None else None,
+             "revision": job.revision,
+             "started_at": job.started_at.isoformat() if job.started_at is not None else None,
+             "finished_at": job.finished_at.isoformat() if job.finished_at is not None else None,
+@@ -831,8 +1148,14 @@ class RedisJobStore:
+                 solver=request["solver"],
+                 prettify=request.get("prettify"),
+                 timeout_seconds=request["timeout_seconds"],
++                purpose=JobPurpose(request.get("purpose", JobPurpose.ORDINARY.value)),
++                basis=_deserialize_basis(request.get("basis")),
++                basis_id=request.get("basis_id"),
++                parent_basis_id=request.get("parent_basis_id"),
++                transform_digest=request.get("transform_digest"),
+             ),
+             created_at=datetime.fromisoformat(data["created_at"]),
++            expires_at=datetime.fromisoformat(data["expires_at"]) if data.get("expires_at") else None,
+             revision=data["revision"],
+             started_at=datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
+             finished_at=datetime.fromisoformat(data["finished_at"]) if data.get("finished_at") else None,

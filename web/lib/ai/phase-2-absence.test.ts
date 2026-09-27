@@ -106,8 +106,8 @@ const PROPOSAL_OPERATIONS = [
   "set_off_request",
   "set_shift_request",
   "clear_requests",
-  "add_succession_rule",
-  "edit_succession_rule",
+  "add_shift_sequence_rule",
+  "edit_shift_sequence_rule",
   "add_count_rule",
   "edit_count_rule",
   "add_staffing_requirement",
@@ -123,6 +123,10 @@ const PROPOSAL_OPERATIONS = [
   "remove_people_group",
   "add_temporary_cover",
   "remove_temporary_cover",
+  "add_pairing_rule",
+  "edit_pairing_rule",
+  "add_supervision_rule",
+  "edit_supervision_rule",
 ] as const;
 
 /**

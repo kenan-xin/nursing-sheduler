@@ -90,6 +90,13 @@ describe("image input", () => {
 });
 
 describe("recommended default", () => {
+  it("is DeepSeek V4.1 Flash -- a real slug, not the :nitro routing variant (46g)", () => {
+    expect(RECOMMENDED_MODEL_ID).toBe("deepseek/deepseek-v4.1-flash");
+    // The catalog is what Settings renders and what `pickRecommended` matches, and
+    // `:nitro` is a request-time routing variant with no row of its own.
+    expect(FALLBACK_MODELS.some((model) => model.id === RECOMMENDED_MODEL_ID)).toBe(true);
+  });
+
   it("prefers the recommended slug when the live catalog offers it", () => {
     const models = selectToolCapableModels(
       catalogPayload([

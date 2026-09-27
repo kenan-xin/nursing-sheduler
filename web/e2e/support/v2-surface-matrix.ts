@@ -659,6 +659,10 @@ export const V2_STYLE_OWNER_FILES: Readonly<Record<V2Owner, readonly string[]>> 
     "app/globals.css",
     "app/layout.tsx",
     "app/providers.tsx",
+    // The root-layout error boundary. It renders its own <html>/<body> and
+    // replaces the root layout, so it belongs with the root layout it guards,
+    // not with any route owner (bd nursing-sheduler-6t1y).
+    "app/global-error.tsx",
     "app/design-system/page.tsx",
     "components/ui/**/*.tsx",
     "components/theme/**/*.tsx",
@@ -666,10 +670,14 @@ export const V2_STYLE_OWNER_FILES: Readonly<Record<V2Owner, readonly string[]>> 
     "components/entity-editor/transfer-list*.tsx",
     "components/icons.tsx",
     "components/app-version.tsx",
+    "components/app-version.stories.tsx",
   ]),
   R1: Object.freeze([
     "app/(app)/layout.tsx",
     "app/(app)/page.tsx",
+    // The (app) route-group error boundary renders INSIDE the shell layout, so
+    // it is shell-owned, like the layout it is nested in (bd nursing-sheduler-6t1y).
+    "app/(app)/error.tsx",
     "components/shell/**/*.tsx",
     "components/home/**/*.tsx",
   ]),
@@ -693,6 +701,7 @@ export const V2_STYLE_OWNER_FILES: Readonly<Record<V2Owner, readonly string[]>> 
     "components/shift-types/**/*.tsx",
     "components/entity-editor/working-time-fields.tsx",
     "components/entity-editor/working-time-fields.test.tsx",
+    "components/entity-editor/working-time-fields.stories.tsx",
   ]),
   R3: Object.freeze(["app/(app)/rules/page.tsx", "components/guided-rules/**/*.tsx"]),
   R4: Object.freeze([

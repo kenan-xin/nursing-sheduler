@@ -9,7 +9,15 @@ import { describe, expect, it } from "vitest";
 import { getCapabilityRegistry } from "@/lib/capability/registry";
 import { applyAssistantCommands } from "./operations";
 import { deriveProposalDiff, diffScenarioDocuments, SCOPE_LABEL, type DiffScope } from "./diff";
-import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
+import {
+  octoberWard,
+  pairingWardScenario,
+  peopleScenario,
+  proposalScenario,
+  ruleWardScenario,
+} from "./test-support";
+import { planChangeHighlight } from "@/lib/change-highlight/plan";
+import { resolveScreenName } from "@/lib/capability/resolve";
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
 import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
@@ -296,7 +304,7 @@ describe("deriveProposalDiff", () => {
   it("lists every new rule as asked-for and states each in plain words", () => {
     const before = ruleWardScenario();
     const nightAfter = {
-      type: "add_succession_rule" as const,
+      type: "add_shift_sequence_rule" as const,
       description: "No day shift straight after a night shift",
       people: ["ana", "ben", "cai"],
       pattern: ["Night", "Day"],
@@ -1153,5 +1161,74 @@ describe("scope identities", () => {
       if (scope === "export-layout") continue;
       expect(ids.has(scope), `${scope} is not a shipped capability id`).toBe(true);
     }
+  });
+});
+
+describe("pairing and supervision rules in the Preview", () => {
+  it("states each new rule in plain words and lands it on its own screen", () => {
+    const before = pairingWardScenario();
+    const commands: AssistantCommandV1[] = [
+      {
+        type: "add_pairing_rule",
+        description: "Keep Ana and Cai apart on nights",
+        people: ["ana"],
+        withPeople: ["cai"],
+        shiftTypes: ["Night"],
+        dates: ["ALL"],
+        weight: "-infinity",
+      },
+      {
+        type: "add_supervision_rule",
+        description: "A senior whenever Ana works",
+        supervisors: ["Senior"],
+        supervisedPeople: ["ana"],
+        shiftTypes: ["Day", "Night"],
+        dates: [],
+      },
+      {
+        type: "edit_pairing_rule",
+        ruleId: "aff-apart",
+        description: "Ana and Ben together on weekends",
+        people: ["ana"],
+        withPeople: ["ben"],
+        shiftTypes: ["Working shifts"],
+        dates: ["WEEKEND"],
+        weight: "5",
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(`fixture should apply: ${applied.rejection.message}`);
+    const diff = deriveProposalDiff(before, applied.next, commands);
+    const pairing = diff.direct.find(
+      (entry) => entry.key.startsWith("rule:affinities:") && entry.kind === "created",
+    );
+    const supervision = diff.direct.find((entry) => entry.key.startsWith("rule:coverings:"));
+    const edited = diff.direct.find((entry) => entry.key === "rule:affinities:aff-apart");
+    expect(pairing).toMatchObject({
+      scope: "shift-affinities",
+      after:
+        "On · “Keep Ana and Cai apart on nights” · ana with cai on Night, every date: never together",
+    });
+    expect(supervision).toMatchObject({
+      scope: "shift-type-coverings",
+      after:
+        "On · “A senior whenever Ana works” · Whenever ana works Day or Night, at least one of Senior works it too, every date",
+    });
+    expect(edited).toMatchObject({
+      kind: "changed",
+      before:
+        "On · “Ana and Ben apart on nights” · ana with ben on Night, every date: apart where possible (weight -10)",
+      after:
+        "On · “Ana and Ben together on weekends” · ana with ben on Working shifts, weekends: together where possible (weight 5)",
+    });
+    expect(diff.cascade).toEqual([]);
+
+    // Apply opens each owning screen (bead iwo), named as the sidebar names it.
+    const plan = planChangeHighlight(diff, "advanced");
+    const screens = [plan.primary, ...plan.others].map((screen) => screen?.capabilityId);
+    expect(screens).toEqual(expect.arrayContaining(["shift-affinities", "shift-type-coverings"]));
+    const advanced = { mode: "advanced" as const, modeResolved: true, gates: [] };
+    expect(resolveScreenName("shift-affinities", advanced)).toBe("Affinities");
+    expect(resolveScreenName("shift-type-coverings", advanced)).toBe("Shift Type Coverings");
   });
 });

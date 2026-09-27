@@ -1,6 +1,7 @@
 import type { AssistantCommandV1 } from "@/lib/proposal";
 import type { ScenarioName } from "@/lib/rules/ward-fixtures.test-support";
 import type { ScenarioUiState } from "@/lib/scenario";
+import type { SavedRosterRows } from "./saved-roster";
 
 export interface UserPolicy {
   /** Sent in order, one per settled turn with no card waiting. */
@@ -26,6 +27,12 @@ export interface Expect {
   choicesInclude?: string[];
   choicesFromStaff?: boolean;
   proposalOps?: Array<{ type: string } & Record<string, unknown>>;
+  /**
+   * Every op in the last proposal must be one of these types. v1's `changes` guard, for a
+   * case that allows one shape of change and nothing else; prefer this over a proposalCheck
+   * closure that re-tests op types by hand.
+   */
+  onlyOpTypes?: string[];
   /** A reason the last proposal's ops are wrong, or null. */
   proposalCheck?: (ops: AssistantCommandV1[]) => string | null;
   noProposal?: boolean;
@@ -47,6 +54,8 @@ export interface EvalCase {
   today: string;
   route: string;
   seed: Seed;
+  /** A roster the last run made and the app saved, as a successful Optimize run leaves it. */
+  savedRoster?: SavedRosterRows;
   optimizer?: { outcome: "infeasible" | "optimal" };
   afterRunFinished?: boolean;
   user: UserPolicy | { simulated: SimulatedUser };

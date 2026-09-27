@@ -15,6 +15,7 @@
 // content and account detail, so it is never forwarded, logged, or wrapped.
 
 import { AI_SETUP_CODES, OPENROUTER_BASE_URL, type AiSetupCode } from "@/lib/ai/protocol";
+import { routeModel } from "./routing";
 
 export type ProbeResult = { ok: true } | { ok: false; code: AiSetupCode };
 
@@ -64,6 +65,9 @@ export interface ProbeInput {
 
 export async function probeCredentials(input: ProbeInput): Promise<ProbeResult> {
   const fetchImpl = input.fetchImpl ?? globalThis.fetch;
+  // The probe tests the pair the chat will actually use: the default model is routed
+  // for throughput with the Sonnet fallback, exactly as a turn is (see `routing.ts`).
+  const routing = routeModel(input.model);
 
   let response: Response;
   try {
@@ -75,7 +79,8 @@ export async function probeCredentials(input: ProbeInput): Promise<ProbeResult> 
       },
       ...(input.signal ? { signal: input.signal } : {}),
       body: JSON.stringify({
-        model: input.model,
+        model: routing.model,
+        ...(routing.fallbacks.length > 0 ? { models: [...routing.fallbacks] } : {}),
         messages: [{ role: "user", content: "Call report_ready." }],
         tools: [PROBE_TOOL],
         // Forced, so a model that merely CAN call tools has to actually do it --

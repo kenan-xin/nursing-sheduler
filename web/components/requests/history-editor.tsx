@@ -62,8 +62,13 @@ export function HistoryEditor({
         showCloseButton={false}
         className="gap-0 overflow-hidden p-0"
       >
-        <div className="flex items-center justify-between border-b border-line2 px-4.5 py-4">
-          <div>
+        {/* min-w-0 on both the flex row and its text column: a flex item's
+            default `min-width: auto` is the token's min-content, which a long
+            hyphenated person name keeps whole — the row could not shrink and
+            pushed the description past the popup (DESIGN.md §7.6). With it, the
+            name wraps inside the header instead. */}
+        <div className="flex min-w-0 items-center justify-between border-b border-line2 px-4.5 py-4">
+          <div className="min-w-0">
             <DialogTitle>Edit history</DialogTitle>
             <DialogDescription className="mt-0.5 text-ink3">
               {who} · {positionLabel}
@@ -81,7 +86,9 @@ export function HistoryEditor({
           </DialogClose>
         </div>
 
-        <div className="p-4.5">
+        {/* min-w-0 keeps the option row inside the popup: a long option's
+            min-content would otherwise size the dialog's grid column past it. */}
+        <div className="min-w-0 p-4.5">
           <p className="mb-2.5 text-meta text-ink3">
             Set the shift worked on this pre-period day. History may include OFF and Leave.
           </p>

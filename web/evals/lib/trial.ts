@@ -8,6 +8,30 @@ export interface ToolCallRecord {
   args: unknown;
   result: string | null;
 }
+
+/**
+ * The model-facing text of one tool result.
+ *
+ * CopilotKit hands a STRING result to the model verbatim and JSON-encodes anything else
+ * (`@copilotkit/core` 1.66.2), so a handler that answered in a sentence put a ward-supplied
+ * name into the model's own text. Every shipped handler now answers with an object, which
+ * makes the persisted result JSON and its words a `guidance` field. A bare string -- a
+ * fixture written before that change, or a truncated capture -- is read as it stands, so
+ * both shapes mean the same thing to a grader.
+ */
+export function toolResultText(result: string | null): string {
+  if (!result) return "";
+  try {
+    const parsed: unknown = JSON.parse(result);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      const guidance = (parsed as { guidance?: unknown }).guidance;
+      if (typeof guidance === "string") return guidance;
+    }
+  } catch {
+    // A bare string result: read it as it stands.
+  }
+  return result;
+}
 export interface TranscriptEntry {
   role: "user" | "assistant" | "tool";
   text: string;
@@ -28,6 +52,11 @@ export interface Usage {
   usd: number;
   estimated: boolean;
 }
+/** One user-visible turn: a send, an Apply or a finished run, until the assistant settles. */
+export interface TurnLatency {
+  ttftMs: number | null;
+  ms: number;
+}
 export interface TrialRecord {
   caseId: string;
   trial: number;
@@ -41,6 +70,10 @@ export interface TrialRecord {
   usage: Usage;
   hops: number;
   ms: number;
+  /** Turns that settled; a timed-out turn is in `error`, not here. */
+  turns?: TurnLatency[];
+  /** The assistant model's own spend; `usage` adds the judge and the simulated user. */
+  assistantUsd?: number;
   error: string | null;
 }
 export interface GateResult {

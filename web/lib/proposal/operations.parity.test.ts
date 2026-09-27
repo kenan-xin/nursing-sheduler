@@ -44,13 +44,36 @@ import {
   writeGroupMembers,
   writeItemGroups,
 } from "@/components/entity-editor/core";
-import type { CountCard, DateRef, PersonRef, SuccessionCard } from "@/lib/scenario";
+import type {
+  AffinityCard,
+  CountCard,
+  CoveringCard,
+  DateRef,
+  PersonRef,
+  SuccessionCard,
+} from "@/lib/scenario";
 import { peopleDescriptor } from "@/components/people/people-descriptor";
 import { computeQuickPaintCellIntent } from "@/components/requests/requests-gestures";
 import { createHotStore } from "@/lib/store/hot-store";
 import { foldPaintIntents } from "@/lib/store/paint-fold";
 import { applyAssistantCommand, assistantCellUids } from "./operations";
-import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
+import {
+  octoberWard,
+  pairingWardScenario,
+  peopleScenario,
+  proposalScenario,
+  ruleWardScenario,
+} from "./test-support";
+import {
+  buildAffinityCard,
+  validateAffinityForm,
+  type AffinityFormState,
+} from "@/components/affinities/affinities-model";
+import {
+  buildCoveringCard,
+  validateCoveringForm,
+  type CoveringFormState,
+} from "@/components/coverings/coverings-model";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 import {
   buildSuccessionCard,
@@ -800,7 +823,7 @@ describe("succession arms are the Shift sequences form's Save", () => {
     for (const [i, row] of rows.entries()) {
       const draft = form(row, `row ${i}`);
       const assistant = applyAssistantCommand(state, {
-        type: "add_succession_rule",
+        type: "add_shift_sequence_rule",
         description: `row ${i}`,
         ...row,
       });
@@ -828,7 +851,7 @@ describe("succession arms are the Shift sequences form's Save", () => {
     for (const [i, row] of rows.entries()) {
       const draft = form(row, "No day after night");
       const assistant = applyAssistantCommand(state, {
-        type: "edit_succession_rule",
+        type: "edit_shift_sequence_rule",
         ruleId: "suc-nd",
         description: "No day after night",
         ...row,
@@ -1140,6 +1163,162 @@ describe("remove_rule is every editor's Delete", () => {
           cards.filter((card) => card.uid !== ruleId),
         );
       }
+    }
+  });
+});
+
+describe("pairing arms are the Affinities form's Save", () => {
+  const rows: {
+    people: PersonRef[];
+    withPeople: PersonRef[];
+    shiftTypes: string[];
+    dates: string[];
+    weight: string;
+  }[] = [
+    { people: ["ana"], withPeople: ["ben"], shiftTypes: ["Night"], dates: ["ALL"], weight: "-10" },
+    {
+      people: ["RN"],
+      withPeople: ["Senior"],
+      shiftTypes: ["Working shifts"],
+      dates: ["WEEKEND"],
+      weight: "5",
+    },
+    {
+      people: ["ana"],
+      withPeople: ["cai"],
+      shiftTypes: ["OFF"],
+      dates: ["2026-04-06", "2026-04-07"],
+      weight: "-infinity",
+    },
+    { people: [], withPeople: ["ben"], shiftTypes: ["Night"], dates: ["ALL"], weight: "1" },
+    { people: ["ana"], withPeople: [], shiftTypes: ["Night"], dates: ["ALL"], weight: "1" },
+    { people: ["ana"], withPeople: ["ben"], shiftTypes: [], dates: ["ALL"], weight: "1" },
+    { people: ["ana"], withPeople: ["ben"], shiftTypes: ["Night"], dates: [], weight: "1" },
+    { people: ["ana"], withPeople: ["ben"], shiftTypes: ["Night"], dates: ["ALL"], weight: "x" },
+  ];
+  const form = (row: (typeof rows)[number], description: string): AffinityFormState => ({
+    description,
+    people1: row.people,
+    people2: row.withPeople,
+    shiftTypes: row.shiftTypes,
+    date: row.dates,
+    weight: parseWeightInput(row.weight),
+  });
+
+  it("add: accepts and refuses what the form does, and appends the same card", () => {
+    const state = pairingWardScenario();
+    for (const [i, row] of rows.entries()) {
+      const draft = form(row, `row ${i}`);
+      const assistant = applyAssistantCommand(state, {
+        type: "add_pairing_rule",
+        description: `row ${i}`,
+        ...row,
+      });
+      expect(assistant.ok, `row ${i}`).toBe(valid(validateAffinityForm(draft)));
+      if (!assistant.ok) continue;
+      const uid = assistant.next.cardsByKind.affinities.at(-1)!.uid;
+      // `use-affinities.ts` add: append `buildAffinityCard(form)`.
+      expect(assistant.next).toEqual({
+        ...state,
+        cardsByKind: {
+          ...state.cardsByKind,
+          affinities: [...state.cardsByKind.affinities, buildAffinityCard(draft, uid)],
+        },
+      });
+    }
+  });
+
+  it("edit: rebuilds the card in place and keeps a switched-off rule off", () => {
+    const state = pairingWardScenario();
+    const source: AffinityCard = { ...state.cardsByKind.affinities[0], disabled: true };
+    state.cardsByKind.affinities = [source];
+    for (const [i, row] of rows.entries()) {
+      const draft = form(row, "Ana and Ben apart on nights");
+      const assistant = applyAssistantCommand(state, {
+        type: "edit_pairing_rule",
+        ruleId: "aff-apart",
+        description: "Ana and Ben apart on nights",
+        ...row,
+      });
+      const manual = carryMarkers(source, buildAffinityCard(draft, "aff-apart"));
+      const changes = stableStringify(manual) !== stableStringify(source);
+      expect(assistant.ok, `row ${i}`).toBe(valid(validateAffinityForm(draft)) && changes);
+      if (assistant.ok) expect(assistant.next.cardsByKind.affinities).toEqual([manual]);
+    }
+  });
+});
+
+describe("supervision arms are the Shift type coverings form's Save", () => {
+  const rows: {
+    supervisors: PersonRef[];
+    supervisedPeople: PersonRef[];
+    shiftTypes: string[];
+    dates: string[];
+  }[] = [
+    { supervisors: ["Senior"], supervisedPeople: ["ben"], shiftTypes: ["Day"], dates: [] },
+    {
+      supervisors: ["cai"],
+      supervisedPeople: ["RN"],
+      shiftTypes: ["Working shifts"],
+      dates: ["WEEKDAY"],
+    },
+    {
+      supervisors: ["Senior"],
+      supervisedPeople: ["ana", "ben"],
+      shiftTypes: ["Night"],
+      dates: ["2026-04-06"],
+    },
+    { supervisors: [], supervisedPeople: ["ben"], shiftTypes: ["Day"], dates: [] },
+    { supervisors: ["Senior"], supervisedPeople: [], shiftTypes: ["Day"], dates: [] },
+    { supervisors: ["Senior"], supervisedPeople: ["ben"], shiftTypes: [], dates: [] },
+  ];
+  const form = (row: (typeof rows)[number], description: string): CoveringFormState => ({
+    description,
+    preceptors: row.supervisors,
+    preceptees: row.supervisedPeople,
+    shiftTypes: row.shiftTypes,
+    dates: row.dates,
+  });
+
+  it("add: accepts and refuses what the form does, and appends the same card", () => {
+    const state = pairingWardScenario();
+    for (const [i, row] of rows.entries()) {
+      const draft = form(row, `row ${i}`);
+      const assistant = applyAssistantCommand(state, {
+        type: "add_supervision_rule",
+        description: `row ${i}`,
+        ...row,
+      });
+      expect(assistant.ok, `row ${i}`).toBe(valid(validateCoveringForm(draft, state)));
+      if (!assistant.ok) continue;
+      const uid = assistant.next.cardsByKind.coverings.at(-1)!.uid;
+      // `use-coverings.ts` add: append `buildCoveringCard(form)`.
+      expect(assistant.next).toEqual({
+        ...state,
+        cardsByKind: {
+          ...state.cardsByKind,
+          coverings: [...state.cardsByKind.coverings, buildCoveringCard(draft, uid)],
+        },
+      });
+    }
+  });
+
+  it("edit: rebuilds the card in place and keeps its applied marker", () => {
+    const state = pairingWardScenario();
+    const source: CoveringCard = { ...state.cardsByKind.coverings[0], applied: true };
+    state.cardsByKind.coverings = [source];
+    for (const [i, row] of rows.entries()) {
+      const draft = form(row, "Ben needs a senior on Day");
+      const assistant = applyAssistantCommand(state, {
+        type: "edit_supervision_rule",
+        ruleId: "cov-ben",
+        description: "Ben needs a senior on Day",
+        ...row,
+      });
+      const manual = carryMarkers(source, buildCoveringCard(draft, "cov-ben"));
+      const changes = stableStringify(manual) !== stableStringify(source);
+      expect(assistant.ok, `row ${i}`).toBe(valid(validateCoveringForm(draft, state)) && changes);
+      if (assistant.ok) expect(assistant.next.cardsByKind.coverings).toEqual([manual]);
     }
   });
 });

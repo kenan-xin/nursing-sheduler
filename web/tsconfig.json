@@ -37,7 +37,11 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "**/*.mts",
+    // `**/*` skips dot-directories, so the Storybook config would otherwise be
+    // silently un-type-checked (bead w0e.2).
+    ".storybook/**/*.ts",
+    ".storybook/**/*.tsx"
   ],
   "exclude": ["node_modules"]
 }

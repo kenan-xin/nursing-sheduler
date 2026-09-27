@@ -255,6 +255,25 @@ describe("the command arms the provider is actually shown", () => {
     expect(offeredArms(operations)).toEqual([...ASSISTANT_COMMAND_TYPES]);
   });
 
+  it("never names a rule by the engine's 'succession' jargon (bead nj3q)", () => {
+    // The op name is what the model repeats to the user. The screen may still be called
+    // Shift Successions (a `ruleKind` or capability id); a *rule* is a shift sequence rule.
+    for (const [name, tool] of wire) {
+      expect(JSON.stringify(tool), name).not.toMatch(/succession[_ ]rule/i);
+    }
+  });
+
+  it("names pairing and supervision ops in plain words, not the engine's (bead 31og)", () => {
+    // The screens are Affinities and Shift Type Coverings; the fields are preceptors and
+    // people1/people2. None of that is what the model should repeat to a ward manager.
+    for (const name of ASSISTANT_COMMAND_TYPES) {
+      expect(name).not.toMatch(/affinit|covering|precept/i);
+    }
+    const parameters = child(wire.get("prepare_scenario_change"), "parameters");
+    const operations = JSON.stringify(child(child(parameters, "properties"), "operations"));
+    expect(operations).not.toMatch(/"people[12]"|"preceptors"|"preceptees"/);
+  });
+
   it("names every command arm in test_feasibility_candidates' candidates", () => {
     // One level deeper -- `candidates[].operations` -- which is why it gets its own case
     // rather than being inferred from the tool above.
@@ -335,16 +354,16 @@ describe("the command arms the provider is actually shown", () => {
         startDate: "2026-10-14",
         endDate: "2026-10-14",
       },
-      add_succession_rule: {
-        type: "add_succession_rule",
+      add_shift_sequence_rule: {
+        type: "add_shift_sequence_rule",
         description: "No day shift straight after a night shift",
         people: ["ana", "ben"],
         pattern: ["Night", "Day"],
         dates: ["ALL"],
         weight: "-infinity",
       },
-      edit_succession_rule: {
-        type: "edit_succession_rule",
+      edit_shift_sequence_rule: {
+        type: "edit_shift_sequence_rule",
         ruleId: "s1",
         description: "No day shift straight after a night shift",
         people: ["ana", "ben"],
@@ -446,6 +465,42 @@ describe("the command arms the provider is actually shown", () => {
         date: "2026-10-14",
         shiftType: "N",
       },
+      add_pairing_rule: {
+        type: "add_pairing_rule",
+        description: "Keep Ana and Ben apart on nights",
+        people: ["ana"],
+        withPeople: ["ben"],
+        shiftTypes: ["N"],
+        dates: ["ALL"],
+        weight: "-infinity",
+      },
+      edit_pairing_rule: {
+        type: "edit_pairing_rule",
+        ruleId: "a1",
+        description: "Ana and Ben apart on nights",
+        people: ["ana"],
+        withPeople: ["ben"],
+        shiftTypes: ["N"],
+        dates: ["ALL"],
+        weight: "-10",
+      },
+      add_supervision_rule: {
+        type: "add_supervision_rule",
+        description: "A senior whenever Ana works",
+        supervisors: ["Seniors"],
+        supervisedPeople: ["ana"],
+        shiftTypes: ["D", "N"],
+        dates: [],
+      },
+      edit_supervision_rule: {
+        type: "edit_supervision_rule",
+        ruleId: "v1",
+        description: "A senior whenever Ana works",
+        supervisors: ["Seniors"],
+        supervisedPeople: ["ana"],
+        shiftTypes: ["N"],
+        dates: ["WEEKEND"],
+      },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
     // The only optional wire fields: advertised, present in the payload, not `required`.
@@ -512,11 +567,13 @@ describe("the command arms the provider is actually shown", () => {
       "groups",
       "lenderConfirmed",
       "name",
+      "names",
       "person",
       "reason",
       "summary",
     ]);
     expect(child(borrow, "lenderConfirmed").type).toBe("boolean");
+    expect(child(child(borrow, "names"), "items").type).toBe("string");
     const read = child(child(wire.get("get_roster"), "parameters"), "properties");
     expect(child(child(read, "people"), "items").type).toBe("string");
   });

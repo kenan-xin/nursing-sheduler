@@ -217,14 +217,19 @@ function PatternChip({
       // untokened elevation value, which the F4 provenance scanner rejects even
       // when the value happens to match: a copy stops tracking its source the
       // moment either side is retuned.
-      className={`inline-flex cursor-grab items-center gap-1 rounded-pill border py-1 pl-2.5 pr-1 text-meta font-semibold text-ink ${
+      className={`inline-flex min-w-0 max-w-full cursor-grab items-center gap-1 rounded-pill border py-1 pl-2.5 pr-1 text-meta font-semibold text-ink ${
         isDragging ? "opacity-50" : ""
       } ${isOver ? "border-dashed border-brand bg-panel-alt shadow-2" : "border-line bg-surface shadow-1"}`}
       data-testid={`pattern-chip-${index}`}
       // See CardListItem: a waitable hook for the drag state the chips share.
       data-dragging={isDragging ? "true" : undefined}
     >
-      {label}
+      {/* An unknown shift id is arbitrary user input (bd memory
+          `long-user-text-no-overflow`): keep the chip to a single line and expose
+          the full id on hover rather than growing the chip past the panel. */}
+      <span className="truncate" title={label}>
+        {label}
+      </span>
       <button
         type="button"
         aria-label="Move earlier"

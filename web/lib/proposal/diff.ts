@@ -19,8 +19,10 @@
 // surface, and it keeps working when an arm's transform is improved underneath it.
 
 import type {
+  AffinityCard,
   CardsByKind,
   CountCard,
+  CoveringCard,
   RequirementCard,
   ScenarioUiState,
   SuccessionCard,
@@ -29,6 +31,8 @@ import type {
   UiTemporaryCover,
 } from "@/lib/scenario";
 import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
+import { isEditableAffinityCard } from "@/components/affinities/affinities-model";
+import { isEditableCoveringCard } from "@/components/coverings/coverings-model";
 import { calendarSpan } from "./assumptions";
 import { generateDateItems } from "@/lib/dates";
 import { formatShortDate } from "@/lib/dates/date-id";
@@ -326,6 +330,29 @@ function describeCount(card: CountCard): string | null {
   return `${amount} ${shifts} shifts for ${people ? `each of ${people}` : "everyone"}, across ${renderDates(card.countDates)}: ${renderCountStrength(squared, card.weight, card.target)}`;
 }
 
+/** A pairing's strength, per `shift_affinity` in core: the weight is gained on each date both sides work. */
+function renderPairingStrength(weight: number): string {
+  if (weight === Infinity) return "must work together on every date";
+  if (weight === -Infinity) return "never together";
+  if (weight > 0) return `together where possible (weight ${weight})`;
+  if (weight < 0) return `apart where possible (weight ${weight})`;
+  return "no effect (weight 0)";
+}
+
+/** `null` for a multi-term card: flattening its groups would state a different rule. */
+function describePairing(card: AffinityCard): string | null {
+  if (!isEditableAffinityCard(card)) return null;
+  const shifts = flattenRefs(card.shiftTypes).map(String).join(" or ");
+  return `${renderPeople(card.people1, "everyone")} with ${renderPeople(card.people2, "everyone")} on ${shifts}, ${renderDates(card.date)}: ${renderPairingStrength(card.weight)}`;
+}
+
+/** Restates `shift_type_covering` in core: a hard implication, so no strength. */
+function describeSupervision(card: CoveringCard): string | null {
+  if (!isEditableCoveringCard(card)) return null;
+  const shifts = flattenRefs(card.shiftTypes).map(String).join(" or ");
+  return `Whenever ${renderPeople(card.preceptees, "everyone")} works ${shifts}, at least one of ${renderPeople(card.preceptors, "everyone")} works it too, ${renderDates(card.date)}`;
+}
+
 /** The plain sentence for the families the assistant authors; `null` keeps the opaque form. */
 function describeRule(kind: keyof CardsByKind, card: Record<string, unknown>): string | null {
   switch (kind) {
@@ -335,9 +362,10 @@ function describeRule(kind: keyof CardsByKind, card: Record<string, unknown>): s
       return describeSuccession(card as unknown as SuccessionCard);
     case "counts":
       return describeCount(card as unknown as CountCard);
-    default:
-      // Pairing and supervision: plain wording arrives with their authoring arms.
-      return null;
+    case "affinities":
+      return describePairing(card as unknown as AffinityCard);
+    case "coverings":
+      return describeSupervision(card as unknown as CoveringCard);
   }
 }
 
@@ -1020,7 +1048,7 @@ function directKeys(
         // Every painted date is asked-for, including a leave day a clear removes.
         for (const key of paintedCellKeys(command, after)) keys.add(key);
         break;
-      case "add_succession_rule":
+      case "add_shift_sequence_rule":
         created("successions");
         break;
       case "add_count_rule":
@@ -1029,7 +1057,7 @@ function directKeys(
       case "add_staffing_requirement":
         created("requirements");
         break;
-      case "edit_succession_rule":
+      case "edit_shift_sequence_rule":
         keys.add(`rule:successions:${command.ruleId}`);
         break;
       case "edit_count_rule":
@@ -1042,6 +1070,18 @@ function directKeys(
         break;
       case "remove_rule":
         keys.add(`rule:${command.ruleKind}:${command.ruleId}`);
+        break;
+      case "add_pairing_rule":
+        created("affinities");
+        break;
+      case "add_supervision_rule":
+        created("coverings");
+        break;
+      case "edit_pairing_rule":
+        keys.add(`rule:affinities:${command.ruleId}`);
+        break;
+      case "edit_supervision_rule":
+        keys.add(`rule:coverings:${command.ruleId}`);
         break;
       case "add_person":
         // The host trims names (Staff screen rule), so the keys must too.

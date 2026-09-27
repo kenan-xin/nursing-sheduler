@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
+import { stringify } from "yaml";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import {
   formatUncreditedLeaveWarning,
+  serializeScenario,
+  toCanonicalScenarioDocument,
+  type CanonicalScenarioDocument,
   type ImportNormalizationTarget,
   type PrepareScenarioLoadResult,
 } from "@/lib/scenario";
+import { UNSUPPORTED_EXPRESSION_REASON } from "@/lib/optimize/optimize-readiness";
 
 // Keep the real scenario library (detector, adapters, formatter) — only the
 // inbound `prepareScenarioLoad` is stubbed so a marked contract can be staged
@@ -60,7 +65,7 @@ const MARKED_CONTRACT = {
   person: "ALL",
   countDates: "ALL",
   countShiftTypes: "D",
-  expression: "==",
+  expression: "x = T",
   target: 1,
   weight: -1,
 };
@@ -177,6 +182,35 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     expect(loadScenarioMock).toHaveBeenCalledTimes(1);
   });
 
+  it("onContinue settles only after the load has committed (nursing-sheduler-iks)", async () => {
+    // The confirm holds its busy state on this promise; settling early reopened the
+    // window in which a hard reload aborts the IndexedDB switch.
+    isEmptyMock.mockReturnValue(false);
+    let commitLoad!: (outcome: { ok: true }) => void;
+    loadScenarioMock.mockReturnValue(new Promise((resolve) => (commitLoad = resolve)));
+    stageResult(targetWithCounts([MARKED_CONTRACT]));
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleFile("<yaml>"));
+
+    let settled = false;
+    let continued!: Promise<void>;
+    act(() => {
+      continued = result.current.confirm!.onContinue().then(() => {
+        settled = true;
+      });
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(toast.success).not.toHaveBeenCalled();
+
+    await act(async () => {
+      commitLoad({ ok: true });
+      await continued;
+    });
+    expect(settled).toBe(true);
+    expect(toast.success).toHaveBeenCalledOnce();
+  });
+
   it("a REFUSED switch keeps the staged file and reports no success", async () => {
     // T03F1 finding 5. The commit used to clear staging and toast "Scenario loaded"
     // before the switch had settled — so a refusal (this tab is read-only, or was
@@ -197,5 +231,48 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     expect(result.current.warnings).toBeNull();
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalled();
+  });
+});
+
+describe("useScenarioImport — unsupported shift-count expression (wa46)", () => {
+  /** A real file through the REAL `prepareScenarioLoad`, one extra count appended. */
+  async function importYaml(raw: string) {
+    const actual = await vi.importActual<typeof import("@/lib/scenario")>("@/lib/scenario");
+    prepareMock.mockImplementation(actual.prepareScenarioLoad);
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleFile(raw));
+    return result;
+  }
+
+  function yamlWithCount(expression: string): string {
+    const doc = toCanonicalScenarioDocument(makeValidUiState());
+    doc.preferences.push({
+      type: "shift count",
+      person: "Alice",
+      countDates: "ALL",
+      countShiftTypes: "D",
+      expression,
+      target: 1,
+      weight: 1,
+    } as CanonicalScenarioDocument["preferences"][number]);
+    return stringify(doc, { version: "1.2" });
+  }
+
+  it('loads a file whose count uses "x >= 0" and warns it must be edited before Optimize', async () => {
+    const result = await importYaml(yamlWithCount("x >= 0"));
+
+    expect(result.current.issues).toBeNull();
+    expect(loadScenarioMock).toHaveBeenCalledTimes(1);
+    expect(result.current.warnings).toContain(UNSUPPORTED_EXPRESSION_REASON);
+  });
+
+  it("a supported expression adds no such warning", async () => {
+    const result = await importYaml(yamlWithCount("x >= T"));
+    expect(loadScenarioMock).toHaveBeenCalledTimes(1);
+    expect(result.current.warnings ?? []).not.toContain(UNSUPPORTED_EXPRESSION_REASON);
+    await act(async () => result.current.clearImportState());
+
+    const plain = await importYaml(serializeScenario(makeValidUiState()));
+    expect(plain.current.warnings ?? []).not.toContain(UNSUPPORTED_EXPRESSION_REASON);
   });
 });

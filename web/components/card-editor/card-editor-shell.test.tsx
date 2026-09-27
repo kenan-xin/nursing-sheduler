@@ -250,3 +250,58 @@ describe("CardEditorHeader — secondary entry action", () => {
     expect(button.querySelector("svg")).not.toBeNull();
   });
 });
+
+// Long user-entered field values (bd memory `long-user-text-no-overflow`, bead
+// w0e.22). A string field IS the ward's own text — a person/group ref or a shift
+// code — so it must truncate to one line with an ellipsis and expose the whole
+// value on hover instead of wrapping the card. Surfaced by the AffinityCardList /
+// CoveringCardList `LongText` stories, whose 120-character whitespace-free token
+// could only overflow or be truncated, never word-wrap.
+describe("CardListItem — long field values (bd memory long-user-text-no-overflow)", () => {
+  // The same shape the stories use: 120 characters, no whitespace.
+  const LONG_TOKEN = "ward8-east-extended-weekend-night-cover-rotation-".repeat(3).slice(0, 120);
+
+  it("truncates a long string field value and exposes the full value on hover", () => {
+    render(
+      <ul>
+        <CardListItem
+          index={0}
+          title="Night cap"
+          fields={[{ label: "People 1", value: LONG_TOKEN }]}
+          actions={null}
+          changeKey="rule:affinities:a1"
+        />
+      </ul>,
+    );
+
+    const value = screen.getByText(LONG_TOKEN);
+    const classes = Array.from(value.classList);
+    // The shared recipe: min-w-0 max-w-full truncate + title.
+    expect(classes).toContain("min-w-0");
+    expect(classes).toContain("max-w-full");
+    expect(classes).toContain("truncate");
+    // The ellipsis hides the tail, so the title carries the whole value.
+    expect(value).toHaveAttribute("title", LONG_TOKEN);
+  });
+
+  it("leaves a structured JSX value to its own layout rather than clipping it", () => {
+    // The chips/pattern/link fields are not free text: the chips wrap and the
+    // requirement Exceptions link must stay visible, so a nowrap ancestor that
+    // would ellipsis-clip them is deliberately NOT applied.
+    render(
+      <ul>
+        <CardListItem
+          index={0}
+          title="Night cap"
+          fields={[{ label: "Pattern", value: <span data-testid="chip">D → N</span> }]}
+          actions={null}
+          changeKey="rule:successions:s1"
+        />
+      </ul>,
+    );
+
+    const chip = screen.getByTestId("chip");
+    expect(chip.parentElement).not.toHaveClass("truncate");
+    expect(chip.parentElement).not.toHaveAttribute("title");
+  });
+});

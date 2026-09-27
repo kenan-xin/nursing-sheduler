@@ -9,11 +9,15 @@
 // (`lib/roster/change-request.ts`): one undo step, one autosave, the same export.
 // No handler writes a roster or a scenario. The ladder tools prepare a pending LINKED
 // proposal (leave move, MC leave, temporary cover) that applies only with the roster cells.
+// With no saved roster, `prepare_borrowed_cover` shows a plain Preview of the covers instead.
 
 import { z } from "zod";
 import { useModelVisibleTool } from "./register-model-visible-tool";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { OPTIMIZE_RUN_TOOL } from "@/lib/ai/assistant/playbook";
+import { rankRepairOptions } from "@/lib/ai/assistant/repair-options";
+import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
+import { applyAssistantCommands } from "@/lib/proposal";
 import {
   buildBorrowView,
   buildOvertimeView,
@@ -128,6 +132,14 @@ export const borrowParameters = z.object({
       "The nurse's name as the user said it, with the lending ward in brackets, for example " +
         "Haseena (Ward 3). Never invent one.",
     ),
+  names: z
+    .array(z.string().min(1))
+    .max(10)
+    .optional()
+    .describe(
+      "With no saved roster, when more than one nurse is missing: the other lent nurses' names, " +
+        "written like name. One cover is booked per name. Never invent one.",
+    ),
   groups: z
     .array(z.string())
     .max(5)
@@ -135,7 +147,8 @@ export const borrowParameters = z.object({
   lenderConfirmed: z
     .boolean()
     .describe(
-      "true ONLY after the user said in chat that the lending ward or agency agreed to lend this nurse.",
+      "true ONLY after the user said in chat that the lending ward or agency agreed to lend this " +
+        "nurse, or every nurse named in names.",
     ),
   summary: z.string().min(1).describe("Why, in one plain sentence. Shown as your reasoning."),
 });
@@ -145,6 +158,7 @@ const PLAIN_WORDS =
 
 type Linked = {
   proposalId: string;
+  baseDocumentRevision?: number;
   assumptionIds: string[];
   assumptions: { type: string; question: string }[];
 };
@@ -173,6 +187,7 @@ async function prepareLinked(
       ok: true,
       linked: {
         proposalId: outcome.proposal.proposalId,
+        baseDocumentRevision: outcome.proposal.baseDocumentRevision,
         assumptionIds: outcome.proposal.assumptions.map((a) => a.assumptionId),
         assumptions: outcome.proposal.assumptions.map((a) => ({
           type: a.type,
@@ -226,18 +241,42 @@ const rankedPartners = (ctx: SwapContext, ladder: CoverLadder): string[] => [
   ),
 ];
 
-/** The valid choices for a refusal: the ranked partners, else everyone else on the roster. */
-function partnerChoices(ctx: SwapContext, personIdx: number, ladder: CoverLadder): string {
+/**
+ * The valid choices for a refusal: the ranked partners, else everyone else on the roster.
+ *
+ * An OBJECT, never a bare string: CopilotKit passes a string result to the model verbatim,
+ * so a ward-supplied name inside the sentence could carry a newline and start a forged
+ * line. `partners` carries the same names as data, and `guidance` the same wording.
+ */
+function partnerChoices(
+  ctx: SwapContext,
+  personIdx: number,
+  ladder: CoverLadder,
+): { guidance: string; partners: string[] } {
   const ranked = rankedPartners(ctx, ladder);
-  if (ranked.length > 0) return `Partners who can take these shifts: ${ranked.join(", ")}.`;
+  if (ranked.length > 0) {
+    return {
+      guidance: `Partners who can take these shifts: ${ranked.join(", ")}.`,
+      partners: ranked,
+    };
+  }
   const others = ctx.context.people.flatMap((p, i) => (i === personIdx ? [] : [String(p.id)]));
-  return `Nobody can take these shifts as the roster stands. People on it: ${others.join(", ")}.`;
+  return {
+    guidance: `Nobody can take these shifts as the roster stands. People on it: ${others.join(", ")}.`,
+    partners: others,
+  };
 }
 
 /** "Step 1 still has options: SN-Cara, SN-Eve." The lower step comes first. */
-const stillHasOptions = (ctx: SwapContext, ladder: CoverLadder): string => {
+const stillHasOptions = (
+  ctx: SwapContext,
+  ladder: CoverLadder,
+): { guidance: string; partners: string[] } => {
   const ranked = rankedPartners(ctx, ladder);
-  return `Step ${ladder.step} still has options${ranked.length > 0 ? `: ${ranked.join(", ")}` : ""}.`;
+  return {
+    guidance: `Step ${ladder.step} still has options${ranked.length > 0 ? `: ${ranked.join(", ")}` : ""}.`,
+    partners: ranked,
+  };
 };
 
 const CARD_SHOWN =
@@ -273,6 +312,62 @@ function showCard(
   }
   if (change.linked) void assistantProposalCommands.cancel(change.linked.proposalId);
   return false;
+}
+
+/**
+ * With no saved roster (after an infeasible run) a cover is still just a staffing credit
+ * (bead 20wo): the covers are the scenario's own short (date, shift) slots on these dates,
+ * the same ones suggest_feasibility_options' borrow repair books. Each missing nurse the
+ * repair counts is one named cover, in its order (bead v9lu): the user's names go to them in
+ * turn, and the ones left unnamed are `missing`. The repair gives a nurse at most one slot a
+ * day, so no name lands twice on a date and shift. A sick nurse named in the scenario gets her
+ * leave first (`add_leave`, as the Requests screen records it), so her own shifts count too.
+ */
+function scenarioCovers(
+  args: Pick<z.infer<typeof borrowParameters>, "person" | "reason" | "groups" | "dates">,
+  names: readonly string[],
+): {
+  covers: Extract<AssistantCommandV1, { type: "add_temporary_cover" }>[];
+  missing: number;
+  leave: AssistantCommandV1[];
+  shortDates: string[];
+} {
+  const live = pickScenario(useScenarioStore.getState());
+  const personIdx =
+    args.reason === "sick_or_emergency" ? findPersonIdx({ people: live.staff }, args.person) : -1;
+  const leave = personIdx < 0 ? [] : addLeave(live.staff[personIdx].id, args.dates);
+  // A leave the record refuses (already on leave, a date off the period) is left out.
+  const withLeave = applyAssistantCommands(live, leave);
+  const [state, recorded] = withLeave.ok ? [withLeave.next, leave] : [live, []];
+  const borrow = rankRepairOptions(state, findStaffingShortfalls(state), {
+    runInfeasible: true,
+  }).find((option) => option.repairId === "borrow_temporary_nurse");
+  const slots = (borrow?.operations ?? []).flatMap((op) =>
+    op.type === "add_temporary_cover" ? [op] : [],
+  );
+  const onDates = slots.filter((op) => args.dates.includes(op.date));
+  // The repair names its nurses "Borrowed nurse 1", "Borrowed nurse 2"...: one per missing nurse.
+  const nurses = [...new Set(onDates.map((op) => op.name))];
+  const covers = onDates.flatMap((op) => {
+    const name = names[nurses.indexOf(op.name)];
+    return name === undefined
+      ? []
+      : [{ ...op, name, groups: [...new Set([...args.groups, ...op.groups])] }];
+  });
+  return {
+    covers,
+    missing: Math.max(0, nurses.length - names.length),
+    leave: recorded,
+    shortDates: [...new Set(slots.map((op) => op.date))],
+  };
+}
+
+/** A cover's date and shift in the scenario's words, so the model names the shift it got. */
+function coverSlot(cover: { date: string; shiftType: string }): string {
+  const shift = pickScenario(useScenarioStore.getState()).shifts.find(
+    (s) => String(s.id) === cover.shiftType,
+  );
+  return `${plainDate(cover.date)}, ${shift?.description ?? cover.shiftType}`;
 }
 
 const NO_ROSTER =
@@ -376,16 +471,17 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
       handler: async (args, { token, signal }) => {
         const read = await readRosterForAssistant();
         const late = assertTurnAuthority(token, signal);
-        if (late) return late;
-        if (read.status === "unavailable") return UNREADABLE;
-        if (read.status === "none") return read.newerRunWaiting ? LOAD_FIRST : noRoster();
+        if (late) return { guidance: late };
+        if (read.status === "unavailable") return { guidance: UNREADABLE };
+        if (read.status === "none")
+          return { guidance: read.newerRunWaiting ? LOAD_FIRST : noRoster() };
         const summary = summarizeRoster(
           read.document,
           args,
           read.newerRunWaiting,
           rosterCover(read.document),
         );
-        if (typeof summary === "string") return summary;
+        if (typeof summary === "string") return { guidance: summary };
         const lastChange = describeRosterChangeOutcome(readRosterChangeOutcome());
         return lastChange === undefined ? summary : { ...summary, lastChange };
       },
@@ -407,12 +503,12 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
       handler: async (args, { token, signal }) => {
         const read = await readRosterForAssistant();
         const late = assertTurnAuthority(token, signal);
-        if (late) return late;
+        if (late) return { guidance: late };
         const resolved = resolveSwap(read, args.person, args.dates);
-        if (!resolved.ok) return resolved.message;
+        if (!resolved.ok) return { guidance: resolved.message };
         const { ctx, personIdx, dateIdxs } = resolved;
         const giving = givingProblem(ctx, personIdx, dateIdxs);
-        if (giving !== null) return `${giving} Ask the user which dates they mean.`;
+        if (giving !== null) return { guidance: `${giving} Ask the user which dates they mean.` };
         const ladder = findCoverLadder(ctx, personIdx, dateIdxs, args.reason, {
           noTemporaryNurse: args.noTemporaryNurse,
         });
@@ -575,13 +671,13 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
       handler: async (args, { token, signal }) => {
         const read = await readRosterForAssistant();
         const late = assertTurnAuthority(token, signal);
-        if (late) return late;
-        if (token === null) return SUPERSEDED;
+        if (late) return { guidance: late };
+        if (token === null) return { guidance: SUPERSEDED };
         const resolved = resolveSwap(read, args.person, args.dates);
-        if (!resolved.ok) return resolved.message;
+        if (!resolved.ok) return { guidance: resolved.message };
         const { ctx, personIdx, dateIdxs, baselineId } = resolved;
         const giving = givingProblem(ctx, personIdx, dateIdxs);
-        if (giving !== null) return `${giving} Ask the user which dates they mean.`;
+        if (giving !== null) return { guidance: `${giving} Ask the user which dates they mean.` };
         const ladder = findCoverLadder(ctx, personIdx, dateIdxs, args.reason, {
           noTemporaryNurse: args.noTemporaryNurse,
         });
@@ -589,7 +685,11 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         const partnerIdx =
           args.partner === undefined ? null : findPersonIdx(ctx.context, args.partner);
         if (partnerIdx === -1) {
-          return `No one called "${args.partner}" is on this roster. ${partnerChoices(ctx, personIdx, ladder)}`;
+          const choices = partnerChoices(ctx, personIdx, ladder);
+          return {
+            guidance: `No one called "${args.partner}" is on this roster. ${choices.guidance}`,
+            partners: choices.partners,
+          };
         }
 
         const show = async (
@@ -597,16 +697,16 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
           view: RosterChangeView,
           commands: AssistantCommandV1[],
           rationale = args.summary,
-        ): Promise<string> => {
+        ): Promise<{ guidance: string }> => {
           let linked: Linked | null = null;
           if (commands.length > 0) {
             const prepared = await prepareLinked(commands, rationale);
             const lateAgain = assertTurnAuthority(token, signal);
             if (lateAgain) {
               if (prepared.ok) void assistantProposalCommands.cancel(prepared.linked.proposalId);
-              return lateAgain;
+              return { guidance: lateAgain };
             }
-            if (!prepared.ok) return prepared.message;
+            if (!prepared.ok) return { guidance: prepared.message };
             linked = prepared.linked;
           }
           const shown = showCard(
@@ -621,7 +721,7 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
             },
             token.turnEpoch,
           );
-          return shown ? CARD_SHOWN : ROSTER_BUSY;
+          return { guidance: shown ? CARD_SHOWN : ROSTER_BUSY };
         };
         const sick = args.reason === "sick_or_emergency";
         const sickLeave = sick ? addLeave(ctx.context.people[personIdx].id, isos) : [];
@@ -639,8 +739,11 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
           }
           if (sick) {
             const plan = planSickCover(ctx, personIdx, null, dateIdxs);
-            if (!plan.ok)
-              return `That cannot be recorded, so no card was shown: ${plan.reasons.join(" ")}`;
+            if (!plan.ok) {
+              return {
+                guidance: `That cannot be recorded, so no card was shown: ${plan.reasons.join(" ")}`,
+              };
+            }
             const view = buildSickView(
               ctx.context,
               personIdx,
@@ -657,22 +760,31 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
               sickLeave,
             );
           }
-          if (empty) return `${NOTHING_TO_COVER} No card was shown.`;
+          if (empty) return { guidance: `${NOTHING_TO_COVER} No card was shown.` };
           // The refusal already says to talk to the roster owner or the nursing supervisor.
-          if (short) return short.reasons[0];
-          return (
-            `${stillHasOptions(ctx, ladder)} Leaving the shift short is only for when steps 1-3 ` +
-            `find nobody, and needs the ${SIGN_OFF_ROLE}'s sign-off.`
-          );
+          if (short) return { guidance: short.reasons[0] };
+          const options = stillHasOptions(ctx, ladder);
+          return {
+            guidance:
+              `${options.guidance} Leaving the shift short is only for when steps 1-3 ` +
+              `find nobody, and needs the ${SIGN_OFF_ROLE}'s sign-off.`,
+            partners: options.partners,
+          };
         }
 
         // Step 2: a trade with later dates. Never while a straight swap or cover exists.
         if (args.laterDates && args.laterDates.length > 0) {
           if (ladder.step === 1) {
-            return `${stillHasOptions(ctx, ladder)} No trade was prepared. Offer a swap or cover with one of them first.`;
+            const options = stillHasOptions(ctx, ladder);
+            return {
+              guidance: `${options.guidance} No trade was prepared. Offer a swap or cover with one of them first.`,
+              partners: options.partners,
+            };
           }
           const later = args.laterDates.map((iso) => findDateIdx(ctx.context, iso));
-          if (later.some((d) => d < 0)) return "Some of those later dates are outside this roster.";
+          if (later.some((d) => d < 0)) {
+            return { guidance: "Some of those later dates are outside this roster." };
+          }
           const variants: TradeVariant[] = sick
             ? ["partner-off"]
             : ["person-covers", "partner-off"];
@@ -684,14 +796,20 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
             plan = planTrade(ctx, personIdx, partnerIdx, dateIdxs, later, variant, args.reason);
             if (plan.ok) break;
           }
-          if (!plan.ok)
-            return `That trade breaks a rule, so no card was shown: ${plan.reasons.join(" ")}`;
+          if (!plan.ok) {
+            return {
+              guidance: `That trade breaks a rule, so no card was shown: ${plan.reasons.join(" ")}`,
+            };
+          }
           const moves: AssistantCommandV1[] = [];
           for (const move of plan.leaveMoves) {
             const fromDate = liveDateId(ctx.context.calendar[move.from].iso);
             const toDate = liveDateId(ctx.context.calendar[move.to].iso);
             if (fromDate === null || toDate === null) {
-              return "Those dates are outside the schedule's period, so the leave cannot be moved. No card was shown.";
+              return {
+                guidance:
+                  "Those dates are outside the schedule's period, so the leave cannot be moved. No card was shown.",
+              };
             }
             moves.push({
               type: "move_leave",
@@ -712,15 +830,22 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
           ? planSickCover(ctx, personIdx, partnerIdx, dateIdxs)
           : planSwap(ctx, personIdx, partnerIdx, dateIdxs);
         if (!plan.ok) {
-          return (
-            `That ${sick ? "cover" : "swap"} breaks a rule, so no card was shown: ${plan.reasons.join(" ")} ` +
-            `${partnerChoices(ctx, personIdx, ladder)} Explain this to the user in plain words.`
-          );
+          const choices = partnerChoices(ctx, personIdx, ladder);
+          return {
+            guidance:
+              `That ${sick ? "cover" : "swap"} breaks a rule, so no card was shown: ${plan.reasons.join(" ")} ` +
+              `${choices.guidance} Explain this to the user in plain words.`,
+            partners: choices.partners,
+          };
         }
         const overtime = plan.kind === "cover" && !countHeadroom(ctx.model, ctx.days, partnerIdx);
         // Overtime is a step 2 request: never while a straight swap or cover exists.
         if (overtime && ladder.step === 1) {
-          return `${stillHasOptions(ctx, ladder)} No overtime request was prepared. Offer a swap or cover with one of them first.`;
+          const options = stillHasOptions(ctx, ladder);
+          return {
+            guidance: `${options.guidance} No overtime request was prepared. Offer a swap or cover with one of them first.`,
+            partners: options.partners,
+          };
         }
         const view = overtime
           ? buildOvertimeView(ctx.context, personIdx, partnerIdx, plan, args.reason, args.summary)
@@ -740,32 +865,97 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
       description:
         "Step 3 only, when find_swap_partners says step 3 and the user said in chat that the " +
         "lending ward agreed: prepare a temporary cover nurse from the relief pool, another " +
-        "ward or an agency for the uncovered shifts. The nurse is not added as staff: each cover " +
+        "ward or an agency for the uncovered shifts. With no saved roster (after a run that " +
+        "could not build one), it books one cover per name for the missing nurses on those dates, and a person on " +
+        "sick_or_emergency leave gets that leave recorded in the same preview. The nurse is not added as staff: each cover " +
         "lowers that shift's staffing need by one. This does NOT change anything: the user " +
         "sees a card with an Apply button only they can press.",
       parameters: borrowParameters,
       handler: async (args, { token, signal }) => {
         if (!args.lenderConfirmed) {
-          return (
-            "Ask the user in chat whether the lending ward or agency agreed to lend this nurse, " +
-            "and call prepare_borrowed_cover with lenderConfirmed true only after they say yes. " +
-            "No card was shown and nothing was altered."
-          );
+          return {
+            guidance:
+              "Ask the user in chat whether the lending ward or agency agreed to lend this nurse, " +
+              "and call prepare_borrowed_cover with lenderConfirmed true only after they say yes. " +
+              "No card was shown and nothing was altered.",
+          };
         }
         const read = await readRosterForAssistant();
         const late = assertTurnAuthority(token, signal);
-        if (late) return late;
-        if (token === null) return SUPERSEDED;
+        if (late) return { guidance: late };
+        if (token === null) return { guidance: SUPERSEDED };
+        const name = args.name.trim();
+        if (read.status === "none" && !read.newerRunWaiting) {
+          const names = [...new Set([name, ...(args.names ?? []).map((n) => n.trim())])].filter(
+            Boolean,
+          );
+          const { covers, missing, leave, shortDates } = scenarioCovers(args, names);
+          const commands = [...covers, ...leave];
+          if (commands.length === 0) {
+            if (shortDates.length === 0) return { guidance: noRoster() };
+            return {
+              guidance:
+                `No shift on those dates is short, so nothing was prepared. The short dates are ` +
+                `${shortDates.join(", ")}.`,
+            };
+          }
+          const prepared = await prepareLinked(commands, args.summary);
+          const lateAgain = assertTurnAuthority(token, signal);
+          if (lateAgain) {
+            if (prepared.ok) void assistantProposalCommands.cancel(prepared.linked.proposalId);
+            return { guidance: lateAgain };
+          }
+          if (!prepared.ok) return { guidance: prepared.message };
+          // A Preview it replaces goes with it, so none is left applicable.
+          const replaced = useAssistantStore.getState().activeProposal;
+          if (replaced) void assistantProposalCommands.cancel(replaced.proposalId);
+          assistantActions.showProposal(
+            prepared.linked.proposalId,
+            token.turnEpoch,
+            prepared.linked.baseDocumentRevision,
+          );
+          const sickPerson = leave.find((c) => c.type === "add_leave")?.personId;
+          const leaveWords =
+            sickPerson === undefined ? "" : `${sickPerson}'s leave on the Requests screen`;
+          const shown =
+            "is now shown to the user. Nothing has changed yet; only the user can apply it. " +
+            'Say "I\'ve prepared ...; check it and press Apply" in one short sentence. ';
+          if (covers.length === 0) {
+            return {
+              guidance:
+                `A preview of ${leaveWords} ${shown}No cover is needed: every shift on those ` +
+                "dates is still staffed with the leave. Then wait.",
+            };
+          }
+          const booked = covers.map((c) => `${c.name} on ${coverSlot(c)}`).join("; ");
+          return {
+            guidance:
+              `A preview ${shown}Apply books these temporary covers on the Staff screen: ` +
+              `${booked}. Name each shift as written here.` +
+              (leaveWords ? ` It also records ${leaveWords}.` : "") +
+              (missing === 0
+                ? " "
+                : ` ${missing} more ${missing === 1 ? "nurse is" : "nurses are"} still missing: ` +
+                  "ask the user for their names and whether the lending ward agreed, then call " +
+                  "prepare_borrowed_cover again with every name. ") +
+              `Remind the user to let their ${ROSTER_OWNER} know. Once they have applied ` +
+              `it, offer a run with ${OPTIMIZE_RUN_TOOL} so a roster can be built with the cover; ` +
+              "it starts only when the user says yes. Then wait.",
+          };
+        }
         const resolved = resolveSwap(read, args.person, args.dates);
-        if (!resolved.ok) return resolved.message;
+        if (!resolved.ok) return { guidance: resolved.message };
         const { ctx, personIdx, dateIdxs } = resolved;
         const giving = givingProblem(ctx, personIdx, dateIdxs);
-        if (giving !== null) return `${giving} Ask the user which dates they mean.`;
+        if (giving !== null) return { guidance: `${giving} Ask the user which dates they mean.` };
         const ladder = findCoverLadder(ctx, personIdx, dateIdxs, args.reason);
         if (ladder.step !== 3) {
-          return `${stillHasOptions(ctx, ladder)} No temporary nurse should be asked for yet. Call find_swap_partners and offer those first.`;
+          const options = stillHasOptions(ctx, ladder);
+          return {
+            guidance: `${options.guidance} No temporary nurse should be asked for yet. Call find_swap_partners and offer those first.`,
+            partners: options.partners,
+          };
         }
-        const name = args.name.trim();
         const sick = args.reason === "sick_or_emergency";
         const personId = ctx.context.people[personIdx].id;
         const personIsos = dateIdxs.map((d) => ctx.context.calendar[d].iso);
@@ -798,9 +988,9 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         const lateAgain = assertTurnAuthority(token, signal);
         if (lateAgain) {
           if (prepared.ok) void assistantProposalCommands.cancel(prepared.linked.proposalId);
-          return lateAgain;
+          return { guidance: lateAgain };
         }
-        if (!prepared.ok) return prepared.message;
+        if (!prepared.ok) return { guidance: prepared.message };
         const needs = ladder.borrow.map((n) => ({
           date: plainDate(isos[n.dateIdx]),
           shift: shiftName(ctx.context, n.shift),
@@ -823,16 +1013,17 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
           },
           token.turnEpoch,
         );
-        if (!shown) return ROSTER_BUSY;
-        return (
-          `${CARD_SHOWN} Tell the user Apply books ${name} as temporary cover on the Staff screen, ` +
-          (sick
-            ? ""
-            : `the swap takes effect after the next optimiser run (${person} keeps these shifts until then), `) +
-          `and to let their ${ROSTER_OWNER} know about the temporary nurse. Once they have ` +
-          `applied it, offer a run with ${OPTIMIZE_RUN_TOOL} so the roster fits the cover; it ` +
-          "starts only when the user says yes."
-        );
+        if (!shown) return { guidance: ROSTER_BUSY };
+        return {
+          guidance:
+            `${CARD_SHOWN} Tell the user Apply books ${name} as temporary cover on the Staff screen, ` +
+            (sick
+              ? ""
+              : `the swap takes effect after the next optimiser run (${person} keeps these shifts until then), `) +
+            `and to let their ${ROSTER_OWNER} know about the temporary nurse. Once they have ` +
+            `applied it, offer a run with ${OPTIMIZE_RUN_TOOL} so the roster fits the cover; it ` +
+            "starts only when the user says yes.",
+        };
       },
     },
     [agentId, turnEpoch],

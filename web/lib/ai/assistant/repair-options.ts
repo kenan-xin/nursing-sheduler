@@ -338,11 +338,37 @@ const softenHardRequest: Builder = (ctx, findings, situation) => {
   );
   const cell = hit ? hit.cell : !anyHit && situation === "unexplained" ? hard[0] : undefined;
   if (!cell) return null;
-  const dateId = toDateId(cell.date, range(ctx));
-  const iso = isoOf(ctx, dateId);
-  if (!iso) return null;
+  const at = (c: HardCell) => ctx.items.findIndex((i) => i.id === toDateId(c.date, range(ctx)));
+  let first = at(cell);
+  if (first < 0) return null;
+  let last = first;
+  // A guess softens the nurse's whole run of this request (l3m: one day of a week of
+  // "never nights" never helps). A static-check hit frees her on its one short date only.
+  if (!hit) {
+    const shiftOf = (c: HardCell) => (c.kind === "request" ? String(c.shiftType) : null);
+    const run = new Set(
+      hard
+        .filter(
+          (c) =>
+            String(c.person) === String(cell.person) &&
+            c.kind === cell.kind &&
+            c.weight === cell.weight &&
+            shiftOf(c) === shiftOf(cell),
+        )
+        .map(at)
+        // An imported request can sit outside the roster range (at() === -1).
+        .filter((i) => i >= 0),
+    );
+    while (run.has(first - 1)) first--;
+    while (run.has(last + 1)) last++;
+  }
+  const iso = ctx.items[first].iso;
+  const endIso = ctx.items[last].iso;
   const who = String(cell.person);
-  const when = dateLabel(ctx, dateId);
+  const when =
+    first === last
+      ? ctx.items[first].description
+      : `${ctx.items[first].description} to ${ctx.items[last].description}`;
   const dayOff = cell.kind === "off";
   const never = !dayOff && cell.weight === -Infinity;
   const request = dayOff
@@ -361,7 +387,7 @@ const softenHardRequest: Builder = (ctx, findings, situation) => {
             type: "set_off_request",
             personId: cell.person,
             startDate: iso,
-            endDate: iso,
+            endDate: endIso,
             weight: SOFT_REQUEST_WEIGHT,
           }
         : {
@@ -369,7 +395,7 @@ const softenHardRequest: Builder = (ctx, findings, situation) => {
             personId: cell.person,
             shiftType: String(cell.shiftType),
             startDate: iso,
-            endDate: iso,
+            endDate: endIso,
             weight: never ? -SOFT_REQUEST_WEIGHT : SOFT_REQUEST_WEIGHT,
           },
     ],
@@ -411,7 +437,15 @@ const extraShiftWillingNurse: Builder = (ctx, findings) => {
 
 const relaxCountRule: Builder = (ctx, findings, situation) => {
   if (situation === "unexplained") {
-    const card = ctx.state.cardsByKind.counts.find(editableCap);
+    // Ruling (spdk, 2026-09-27): never guess at an exact count (x = T). Raising it raises
+    // its floor too, and with no cap_short its cap already covers the demand, so a raise
+    // cannot help (l3m: "exactly six nights" 6 -> 7 asked for 98 nights of 84). The side
+    // that can bind is its floor, and lowering a floor, changing the expression or
+    // softening a hard count all break the safety floor. Relax the first true cap instead.
+    // (A hard-negative "|x - T|^2" is exact too.)
+    const card = ctx.state.cardsByKind.counts.find(
+      (c) => editableCap(c) && c.expression !== "x = T" && c.expression !== "|x - T|^2",
+    );
     return editableCap(card) ? relaxOption(ctx, card, 1, null) : null;
   }
   for (const f of findings) {
@@ -848,11 +882,11 @@ const runOneShort: Builder = (ctx, all) => {
 function softenedRest(
   ctx: Ctx,
   card: SuccessionCard,
-): Extract<AssistantCommandV1, { type: "edit_succession_rule" }> | null {
+): Extract<AssistantCommandV1, { type: "edit_shift_sequence_rule" }> | null {
   const pattern = asList(card.pattern);
   if (pattern.some((p) => typeof p === "object")) return null;
   return {
-    type: "edit_succession_rule",
+    type: "edit_shift_sequence_rule",
     ruleId: card.uid,
     description: card.description ?? "",
     people: asList(card.person),
@@ -1013,7 +1047,7 @@ export function violatesSafetyFloor(
             : offByKind(op.ruleKind, op.ruleId);
         case "remove_rule":
           return offByKind(op.ruleKind, op.ruleId);
-        case "edit_succession_rule": {
+        case "edit_shift_sequence_rule": {
           const card = ctx.state.cardsByKind.successions.find((c) => c.uid === op.ruleId);
           if (!card || Number.isFinite(card.weight)) return null;
           // Softening is allowed (guidance, not law); people, pattern and dates all stay:
@@ -1218,7 +1252,7 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
           [...people].every((p) => staff.has(p))
         );
       }
-      case "edit_succession_rule": {
+      case "edit_shift_sequence_rule": {
         // Soften a hard rest rule to a strong preference, nothing else about it changing.
         const card = ctx.state.cardsByKind.successions.find((c) => c.uid === op.ruleId);
         const want = isHardRest(card) ? softenedRest(ctx, card) : null;
@@ -1239,22 +1273,27 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
               (real(op.personId) || ctx.groupIds.has(String(op.personId)))
           : op.weight === "must" && loan && added.has(String(op.personId));
       case "set_off_request":
-        // Pin off a nurse this loan adds, or soften a real nurse's own hard day off on
-        // that date. Anything else could paint over someone's leave.
+        // Pin off a nurse this loan adds, or soften a real nurse's own hard days off on
+        // every date of the range. Anything else could paint over someone's leave.
         if (op.weight === "must") return loan && added.has(String(op.personId));
-        return (
-          typeof op.weight === "number" &&
-          Number.isFinite(op.weight) &&
-          op.weight > 0 &&
-          op.startDate === op.endDate &&
-          ctx.state.reqData.some(
-            (c) =>
-              c.kind === "off" &&
-              c.weight === Infinity &&
-              String(c.person) === String(op.personId) &&
-              isoOf(ctx, toDateId(c.date, range(ctx))) === op.startDate,
-          )
-        );
+        if (typeof op.weight !== "number" || !Number.isFinite(op.weight) || op.weight <= 0)
+          return false;
+        {
+          const offs = new Set(
+            ctx.state.reqData
+              .filter(
+                (c) =>
+                  c.kind === "off" &&
+                  c.weight === Infinity &&
+                  String(c.person) === String(op.personId),
+              )
+              .map((c) => isoOf(ctx, toDateId(c.date, range(ctx)))),
+          );
+          const span = ctx.items.filter((i) => i.iso >= op.startDate && i.iso <= op.endDate);
+          return (
+            offs.has(op.startDate) && offs.has(op.endDate) && span.every((i) => offs.has(i.iso))
+          );
+        }
       case "clear_requests":
       case "move_leave":
         return nurseAsked && real(op.personId);

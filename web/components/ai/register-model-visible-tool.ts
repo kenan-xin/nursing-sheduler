@@ -122,6 +122,25 @@ interface CopilotToolContext {
   readonly signal?: AbortSignal;
 }
 
+/**
+ * What every tool result is before the transport sees it: an object, never a bare string.
+ *
+ * WHY THIS IS HERE AND NOT AT EACH HANDLER. `@copilotkit/core` 1.66.2 hands the model a
+ * STRING result verbatim, but JSON-encodes anything else:
+ *
+ *     typeof result === "string" ? result : JSON.stringify(result)
+ *
+ * So a handler that answers in a sentence naming a person puts that name -- supplied by the
+ * ward's own import, not by the app -- into the model's text, where a newline in it can start
+ * a forged line. A name inside a JSON string VALUE cannot: the escape is the payload's, not
+ * the model's. Every result therefore goes through this one coercion, so the invalid state is
+ * unavailable to any tool, present or future, rather than a convention each handler keeps.
+ * A string answer keeps its exact wording, carried in `guidance` like every other field.
+ */
+function asToolResult(value: unknown): unknown {
+  return typeof value === "string" ? { guidance: value } : value;
+}
+
 /** What a model-visible handler receives instead of the raw invocation context. */
 export interface ModelVisibleToolContext {
   readonly signal?: AbortSignal;
@@ -178,15 +197,15 @@ export function useModelVisibleTool<S extends z.ZodTypeAny>(
         // 1. AUTHORITY, and its refusal returned.
         const token = currentTurnToken();
         const refusal = assertTurnAuthority(token, context.signal);
-        if (refusal) return refusal;
+        if (refusal) return asToolResult(refusal);
 
         // 2. THE HOST PARSE, against this tool's own schema. CopilotKit's core hands over
         //    `JSON.parse` output with no validation and no defaults applied.
         const payload = parseToolPayload(tool.parameters, rawArgs);
-        if (!payload.ok) return payload.refusal;
+        if (!payload.ok) return asToolResult(payload.refusal);
 
         // 3. Only now does the tool's own code run, and only on validated data.
-        return tool.handler(payload.data, { signal: context.signal, token });
+        return asToolResult(await tool.handler(payload.data, { signal: context.signal, token }));
       },
     },
     deps,
@@ -213,8 +232,8 @@ export function useParameterlessModelVisibleTool(
       handler: async (_rawArgs: unknown, context: CopilotToolContext) => {
         const token = currentTurnToken();
         const refusal = assertTurnAuthority(token, context.signal);
-        if (refusal) return refusal;
-        return tool.handler({ signal: context.signal, token });
+        if (refusal) return asToolResult(refusal);
+        return asToolResult(await tool.handler({ signal: context.signal, token }));
       },
     },
     deps,

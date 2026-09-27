@@ -5,6 +5,7 @@ import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario
 import { useAuthorityStore, useHotStore } from "@/lib/store";
 import { INITIAL_OPTIMIZE_RUN_VIEW, type OptimizeRunView } from "@/lib/optimize/run-view";
 import { useRunRequestStore } from "@/lib/optimize/run-request";
+import { UNSUPPORTED_EXPRESSION_REASON } from "@/lib/optimize/optimize-readiness";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { summarizeOptimizeRun, useOptimizeTools } from "./use-optimize-tools";
 import { bindTurnForTest, type TestTurnHandle } from "./turn-authority.test-support";
@@ -74,6 +75,9 @@ function tool(name: string): CapturedTool {
   return found;
 }
 
+/** The model-facing text of a tool result; every handler answers with an object (bead 3eve). */
+const text = (answer: unknown) => (answer as { guidance: string }).guidance;
+
 beforeEach(() => {
   captured.length = 0;
   fixture.scenario = readyScenario();
@@ -105,9 +109,9 @@ describe("the optimiser tools", () => {
 describe("request_optimize_run", () => {
   it("shows a card stamped with the turn and starts nothing", async () => {
     const answer = await tool("request_optimize_run").handler({}, {});
-    expect(answer).toMatch(/Nothing has started/);
+    expect(text(answer)).toMatch(/Nothing has started/);
     // dt9: "I've set up the run card" read as a claim of work done.
-    expect(answer).toMatch(/never that you set it up/);
+    expect(text(answer)).toMatch(/never that you set it up/);
     expect(useAssistantStore.getState().activeRunRequest).toEqual({ turnEpoch: TURN });
     expect(useRunRequestStore.getState().pending).toBeNull();
   });
@@ -115,21 +119,44 @@ describe("request_optimize_run", () => {
   it("refuses and names what is missing when set-up is incomplete", async () => {
     fixture.scenario = readyScenario({ staff: [] });
     const answer = await tool("request_optimize_run").handler({}, {});
-    expect(answer).toMatch(/Staff/);
+    expect(text(answer)).toMatch(/Staff/);
+    expect(useAssistantStore.getState().activeRunRequest).toBeNull();
+  });
+
+  it("refuses with the reason when a shift count's expression is unsupported (wa46)", async () => {
+    const ready = readyScenario();
+    fixture.scenario = readyScenario({
+      cardsByKind: {
+        ...ready.cardsByKind,
+        counts: [
+          {
+            uid: "bad",
+            person: "ALL",
+            countDates: "ALL",
+            countShiftTypes: "ALL",
+            expression: "x >= 0",
+            target: 1,
+            weight: 1,
+          },
+        ],
+      },
+    });
+    const answer = await tool("request_optimize_run").handler({}, {});
+    expect(text(answer)).toContain(UNSUPPORTED_EXPRESSION_REASON);
     expect(useAssistantStore.getState().activeRunRequest).toBeNull();
   });
 
   it("refuses in a tab that does not hold the schedule", async () => {
     fixture.isOwner = false;
     const answer = await tool("request_optimize_run").handler({}, {});
-    expect(answer).toMatch(/another tab/);
+    expect(text(answer)).toMatch(/another tab/);
     expect(useAssistantStore.getState().activeRunRequest).toBeNull();
   });
 
   it("refuses a second run while one is live", async () => {
     useHotStore.getState().setRunView(view({ lifecycle: "running", jobId: "opt_1" }));
     const answer = await tool("request_optimize_run").handler({}, {});
-    expect(answer).toMatch(/already going/);
+    expect(text(answer)).toMatch(/already going/);
     expect(useAssistantStore.getState().activeRunRequest).toBeNull();
   });
 });

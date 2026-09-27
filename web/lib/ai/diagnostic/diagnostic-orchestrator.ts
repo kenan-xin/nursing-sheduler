@@ -65,6 +65,7 @@ import type { RecoveryClassification } from "@/lib/optimize/basis/recovery";
 import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 import type { JobResponse } from "@/lib/bff/types";
 import type { ProductOutcomeView } from "@/lib/optimize/outcome-mapping";
+import type { OptimizeTimeoutOptions } from "@/app/api/optimize/options/validate";
 
 /** One model-proposed candidate: typed commands + rationale. */
 export interface ProposedCandidate {
@@ -179,6 +180,8 @@ export async function runDiagnosticSearch(
     parent: { basisId: string; jobId: string; scenarioId: string; documentRevision: number };
     parentExpiresAt: string | null;
     proposed: readonly ProposedCandidate[];
+    /** The deployment's accepted timeout bounds; the fixed candidate timeout is clamped into them. */
+    timeoutBounds?: OptimizeTimeoutOptions;
   },
   runtime: DiagnosticRuntime,
 ): Promise<DiagnosticSearchResult> {
@@ -211,6 +214,7 @@ export async function runDiagnosticSearch(
       scenarioGeneration: 0,
       compare: input.compare,
       parentExpiresAt: input.parentExpiresAt,
+      timeoutBounds: input.timeoutBounds,
       now,
     });
     const closed = closeSearch(search, gate.reason, gate.message, now);
@@ -236,6 +240,7 @@ export async function runDiagnosticSearch(
     scenarioGeneration: guard.find((g) => g.scopeKey === `scenario:${scenarioId}`)?.generation ?? 0,
     compare: input.compare,
     parentExpiresAt: input.parentExpiresAt,
+    timeoutBounds: input.timeoutBounds,
     now,
   });
   await runtime.putSearch(search, guard);
@@ -330,10 +335,20 @@ async function runOneCandidate(
   const transformDigest = computeTransformDigest(proposed.commands, diff);
   const commandsDigestValue = commandsDigest(proposed.commands);
 
-  // 3. Serialize the copied document to exact YAML through the T08 path.
+  // 3. Serialize the copied document to exact YAML through the T08 path, ALWAYS
+  //    anonymized. v1 anonymized every assistant-started run (people become `P#`
+  //    and every free-text description is stripped), and the Optimise screen
+  //    anonymizes by default, so a diagnostic candidate — which the user never
+  //    opted into sending as plain text — must not leak real names or prose.
+  //
+  //    Nothing requires the candidate to match its PARENT's mode: the identity
+  //    check binds basis id, parent basis, transform and input digest
+  //    (`candidateIdentityState`), and the backend records `anonymization_mode`
+  //    without comparing it to the parent's. So following the parent would leak
+  //    names exactly when the parent happened to be a plain run.
   const canonical = toCanonicalScenarioDocument(withCoverOverrides(operation.next));
   const prepResult: PrepareOptimizeSubmissionResult = prepareOptimizeSubmission(canonical, {
-    anonymize: false,
+    anonymize: true,
   });
   if (!prepResult.ok) {
     const rejected = appendRejectedCandidate(search, {

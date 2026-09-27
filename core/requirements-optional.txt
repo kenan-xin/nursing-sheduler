@@ -19,12 +19,21 @@ pyscipopt==6.2.1
 pyyaml
 # For CI. Exact pins keep the fresh-venv install and CI toolchain
 # reproducible. `fakeredis` is fenced below 3 instead of pinned exactly:
-# `stores/redis.py` branches on the fakeredis client class for its Lua-less
-# test path, so a major bump must be a deliberate change, while 2.x fixes
+# the store tests run the production `stores/redis.py` WATCH/MULTI path on
+# fakeredis, so a major bump must be a deliberate change, while 2.x fixes
 # keep flowing. The currently resolving version is 2.38.0.
 pytest==9.1.1
 pytest-cov==7.1.0
 fakeredis>=2,<3
+# `starlette.testclient` (re-exported as `fastapi.testclient`) is built on
+# `httpx2`; when `httpx2` is missing it falls back to `httpx` and emits
+# `StarletteDeprecationWarning: Using \`httpx\` with \`starlette.testclient\` is
+# deprecated; install \`httpx2\` instead.` Neither `fastapi[standard]` nor
+# Starlette's base install pulls `httpx2` — it lives only in Starlette's `full`
+# extra — so declare the supported test-client backend explicitly. Test-only:
+# production imports `httpx` (the diagnostic runner), never `starlette.testclient`.
+# Fenced below 3 like `fakeredis`: a major bump must be deliberate.
+httpx2>=2,<3
 # Ruff is intentionally pinned: Ruff's *default* rule set expands between
 # releases (e.g. 0.15.x -> 0.16.x widened it materially). The explicit
 # `tool.ruff.lint.select` in pyproject.toml keeps the contract honest even if

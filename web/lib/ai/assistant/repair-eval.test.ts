@@ -311,7 +311,7 @@ describe("the scripted wards read as real ward situations", () => {
     const [soften] = report.options;
     expect(soften.operations).toEqual([
       {
-        type: "edit_succession_rule",
+        type: "edit_shift_sequence_rule",
         ruleId: "no-day-after-night",
         description: "No day shift straight after a night",
         people: ["Nurses"],

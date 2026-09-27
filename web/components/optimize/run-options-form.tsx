@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { OPTIMIZE_TIMEOUT_MAX_SECONDS, OPTIMIZE_TIMEOUT_MIN_SECONDS } from "@/lib/optimize";
+import type { OptimizeTimeoutOptions } from "@/app/api/optimize/options/validate";
 import { cn } from "@/lib/utils";
 import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
 import { OPTIMIZE_RUN_OPTIONS_ANCHOR } from "./capability-anchors";
@@ -41,6 +41,8 @@ export interface RunOptionsFormProps {
   prettify: boolean;
   anonymize: boolean;
   timeout: string;
+  /** The backend's advertised default and inclusive bounds (or the legacy ones). */
+  timeoutBounds: OptimizeTimeoutOptions;
   timeoutError: string | null;
   /** Options are locked while a run is active. */
   optionsDisabled: boolean;
@@ -113,6 +115,7 @@ export function RunOptionsForm({
   prettify,
   anonymize,
   timeout,
+  timeoutBounds,
   timeoutError,
   optionsDisabled,
   submitEnabled,
@@ -161,7 +164,7 @@ export function RunOptionsForm({
               Solver Timeout
             </Label>
             <p className="mt-0.5 text-meta text-ink3">
-              Between {OPTIMIZE_TIMEOUT_MIN_SECONDS} and {OPTIMIZE_TIMEOUT_MAX_SECONDS} seconds.
+              Between {timeoutBounds.minimum} and {timeoutBounds.maximum} seconds.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -169,9 +172,9 @@ export function RunOptionsForm({
               id="optimize-timeout"
               type="number"
               inputMode="numeric"
-              min={OPTIMIZE_TIMEOUT_MIN_SECONDS}
-              max={OPTIMIZE_TIMEOUT_MAX_SECONDS}
-              placeholder="300"
+              min={timeoutBounds.minimum}
+              max={timeoutBounds.maximum}
+              placeholder={String(timeoutBounds.default)}
               value={timeout}
               disabled={optionsDisabled}
               onChange={(event) => onTimeoutChange(event.target.value)}

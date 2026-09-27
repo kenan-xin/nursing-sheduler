@@ -26,7 +26,7 @@ import {
   AlertDialogMedia,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { FaTriangleExclamation, FaTrash } from "@/components/icons";
+import { FaSpinner, FaTriangleExclamation, FaTrash } from "@/components/icons";
 
 export interface ConfirmDialogProps {
   open: boolean;
@@ -44,8 +44,18 @@ export interface ConfirmDialogProps {
   variant?: "default" | "destructive";
   /** Structured cascade consequences shown as a bullet list under the description. */
   consequences?: string[];
-  onConfirm: () => void;
+  /**
+   * Opt-in busy state. When set, the dialog AWAITS `onConfirm` and stays open —
+   * both actions disabled, Escape ignored, the confirm showing this label — until
+   * it settles, then closes. For a confirm whose work must be durable before the
+   * dialog may report it done (nursing-sheduler-iks: a hard reload while an import
+   * was still writing to IndexedDB silently dropped it).
+   */
+  busyLabel?: string;
+  onConfirm: () => void | Promise<unknown>;
 }
+
+const ignoreOpenChange = () => {};
 
 export function ConfirmDialog({
   open,
@@ -57,14 +67,36 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   variant = "default",
   consequences,
+  busyLabel,
   onConfirm,
 }: ConfirmDialogProps) {
+  const [busy, setBusy] = React.useState(false);
   const destructive = variant === "destructive";
   const hasConsequences = Boolean(consequences && consequences.length > 0);
 
+  const confirmAndClose = async () => {
+    if (busyLabel === undefined) {
+      void onConfirm();
+      onOpenChange(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onConfirm();
+    } finally {
+      setBusy(false);
+      onOpenChange(false);
+    }
+  };
+
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent data-testid="confirm-dialog" className="overflow-hidden">
+    // While busy nothing (Escape included) may dismiss a confirm whose work is still writing.
+    <AlertDialog open={open} onOpenChange={busy ? ignoreOpenChange : onOpenChange}>
+      <AlertDialogContent
+        data-testid="confirm-dialog"
+        aria-busy={busy || undefined}
+        className="overflow-hidden"
+      >
         {/* Band 1 — severity tile + title */}
         <AlertDialogHeader>
           <AlertDialogMedia tone={destructive ? "error" : "brand"}>
@@ -105,17 +137,21 @@ export function ConfirmDialog({
             and the single close signal is the explicit one below. Escape and an
             alert dialog's non-dismissable backdrop can therefore never confirm. */}
         <AlertDialogFooter>
-          <AlertDialogCancel data-testid="confirm-dialog-cancel">{cancelLabel}</AlertDialogCancel>
+          <AlertDialogCancel data-testid="confirm-dialog-cancel" disabled={busy}>
+            {cancelLabel}
+          </AlertDialogCancel>
           <AlertDialogAction
             variant={destructive ? "destructive" : "default"}
-            onClick={() => {
-              onConfirm();
-              onOpenChange(false);
-            }}
+            onClick={() => void confirmAndClose()}
+            disabled={busy}
             data-testid="confirm-dialog-confirm"
           >
-            {destructive && <FaTrash />}
-            {confirmLabel}
+            {busy ? (
+              <FaSpinner className="animate-spin-slow" aria-hidden />
+            ) : (
+              destructive && <FaTrash />
+            )}
+            {busy ? busyLabel : confirmLabel}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

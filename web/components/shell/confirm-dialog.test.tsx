@@ -173,3 +173,49 @@ describe("ConfirmDialog — exactly-once signals", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 });
+
+// nursing-sheduler-iks: an opted-in confirm (`busyLabel`) must not close — nor be
+// closable — until its work has settled, so "dialog gone" means "work durable".
+describe("ConfirmDialog — busy until onConfirm settles", () => {
+  function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  it("stays open and busy while onConfirm is pending, then closes exactly once", async () => {
+    const pending = deferred();
+    const onConfirm = vi.fn(() => pending.promise);
+    const { onOpenChange } = renderConfirm({
+      confirmLabel: "Continue",
+      busyLabel: "Loading scenario…",
+      onConfirm,
+    });
+
+    await userEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    const confirmButton = screen.getByTestId("confirm-dialog-confirm");
+    expect(confirmButton).toBeDisabled();
+    expect(confirmButton).toHaveTextContent("Loading scenario…");
+    expect(screen.getByTestId("confirm-dialog-cancel")).toBeDisabled();
+    expect(screen.getByTestId("confirm-dialog")).toHaveAttribute("aria-busy", "true");
+
+    // Escape cannot dismiss it mid-write either.
+    await userEvent.keyboard("{Escape}");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(onConfirm).toHaveBeenCalledOnce();
+
+    pending.resolve();
+    await waitFor(async () => expect(onOpenChange).toHaveBeenCalledOnce());
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("without busyLabel closes immediately, even for an async onConfirm", async () => {
+    const pending = deferred();
+    const { onOpenChange } = renderConfirm({ onConfirm: () => pending.promise });
+    await userEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    expect(onOpenChange).toHaveBeenCalledOnce();
+    pending.resolve();
+  });
+});

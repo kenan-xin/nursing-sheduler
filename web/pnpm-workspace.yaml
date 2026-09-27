@@ -22,6 +22,9 @@ allowBuilds:
   # before every `pnpm <script>`, so an undeclared ignored build makes `pnpm build`,
   # `pnpm test`, `pnpm lint` and the Playwright `webServer` all exit 1.
   "@ast-grep/cli": false
+  # Arrives with vite (Storybook workbench, bead w0e). Its postinstall only validates
+  # the platform binary, which ships via the @esbuild/<platform> optional package.
+  esbuild: false
 
 # pnpm 11 reads `overrides` from this file, not from `package.json`'s `pnpm`
 # field (that field is silently ignored — see the warning emitted on every
@@ -41,3 +44,11 @@ allowBuilds:
 # declared `^8.3.2` compatibility surface.
 overrides:
   uuid: "11.1.1"
+
+# mui/base-ui#5528 (bead w0e.23): an open Combobox aria-hides everything outside
+# it but leaves that content tabbable (axe aria-hidden-focus, WCAG 4.1.2), and no
+# prop turns it off (still unfixed in 1.8.0). The patch is upstream's proposed fix
+# verbatim: markOthers also sets tabindex=-1 on focusables it aria-hides and
+# restores them on close. Delete it once a Base UI release carries the fix.
+patchedDependencies:
+  "@base-ui/react@1.6.0": patches/@base-ui__react@1.6.0.patch

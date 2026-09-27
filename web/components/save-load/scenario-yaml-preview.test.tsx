@@ -85,6 +85,15 @@ describe("ScenarioYamlPreview — editing mode", () => {
       "bad indentation of a mapping entry",
     );
   });
+
+  // axe rule `label`: a form control with no accessible name. The visible heading is
+  // the only thing naming this editor, so the textarea must borrow it (w0e.27).
+  it("takes its accessible name from the visible Edit-YAML heading", () => {
+    renderPreview({ editing: true, draft: "meta:\n" });
+    expect(screen.getByRole("textbox", { name: "Edit YAML Configuration" })).toBe(
+      screen.getByTestId("scenario-yaml-textarea"),
+    );
+  });
 });
 
 // R7 v2 — the editing branch and the invalid-export branch are CONDITIONAL, so the

@@ -170,6 +170,36 @@ describe("RunStatusPanel — terminal outcomes", () => {
     expect(screen.getByTestId("optimize-download-again")).toHaveTextContent("schedule.xlsx");
   });
 
+  it("row 1 long filename: the button can shrink and the filename slot truncates with a title", () => {
+    // bd memory `long-user-text-no-overflow` (bead nursing-sheduler-w0e.24): a long,
+    // whitespace-free `downloadAgainFilename` must not widen the nowrap button past its
+    // frame. jsdom has no layout, so the story tier proves the overflow; here the contract
+    // is the classes that let the slot shrink and the title that reveals the full value.
+    const long = "ward8-east-extended-weekend-night-cover-rotation-".repeat(3).slice(0, 120);
+    setup(
+      view({
+        lifecycle: "completed",
+        jobId: "opt_1",
+        result: { outcome: "optimal", score: 42, solverStatus: "OPTIMAL", terminationReason: null },
+        latestScore: 42,
+        download: { status: "downloaded", artifactAvailable: true, filename: "schedule.xlsx" },
+      }),
+      { canDownloadAgain: true, downloadAgainFilename: long },
+    );
+    const button = screen.getByTestId("optimize-download-again");
+    // The button must be allowed to shrink below its content width, else it overflows.
+    expect(button).toHaveClass("min-w-0");
+    expect(button).toHaveClass("max-w-full");
+    expect(button).toHaveClass("shrink");
+    // The filename slot truncates with an ellipsis and exposes the full value through its title.
+    const filename = screen.getByTitle(long);
+    expect(filename).toHaveClass("truncate");
+    expect(filename).toHaveClass("min-w-0");
+    expect(filename).toHaveClass("max-w-full");
+    // The accessible name still leads with the action and carries the filename.
+    expect(button).toHaveAccessibleName(`Download Again · ${long}`);
+  });
+
   it("success: terminal heading + SOLVER STATUS / FINAL SCORE / ELAPSED grid", () => {
     setup(
       view({

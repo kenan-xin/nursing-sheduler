@@ -245,6 +245,57 @@ describe("gradeDeterministic", () => {
     );
   });
 
+  it("fails a last proposal carrying an op outside onlyOpTypes", () => {
+    const r = record({
+      proposals: [
+        {
+          proposalId: "p",
+          status: "pending",
+          ops: [
+            { type: "set_off_request", personId: "ana" } as never,
+            { type: "remove_person", personId: "ben" } as never,
+          ],
+        },
+      ],
+    });
+    const proposal = gate(
+      gradeDeterministic(evalCase({ onlyOpTypes: ["set_off_request"] }), r),
+      "proposal",
+    );
+    expect(proposal?.pass).toBe(false);
+    expect(proposal?.detail).toContain("remove_person");
+    expect(
+      gate(
+        gradeDeterministic(evalCase({ onlyOpTypes: ["set_off_request", "remove_person"] }), r),
+        "proposal",
+      )?.pass,
+    ).toBe(true);
+  });
+
+  it("grades onlyOpTypes on the last proposal, and passes when there is none", () => {
+    expect(
+      gate(gradeDeterministic(evalCase({ onlyOpTypes: ["set_off_request"] }), record()), "proposal")
+        ?.pass,
+    ).toBe(true);
+    const r = record({
+      proposals: [
+        {
+          proposalId: "p1",
+          status: "rejected",
+          ops: [{ type: "remove_person", personId: "ben" } as never],
+        },
+        {
+          proposalId: "p2",
+          status: "pending",
+          ops: [{ type: "set_off_request", personId: "ana" } as never],
+        },
+      ],
+    });
+    expect(
+      gate(gradeDeterministic(evalCase({ onlyOpTypes: ["set_off_request"] }), r), "proposal")?.pass,
+    ).toBe(true);
+  });
+
   it("allows one corrected retry after a refusal, not two", () => {
     const refused = (id: string) => ({
       role: "assistant" as const,
@@ -448,7 +499,7 @@ describe("gradeDeterministic", () => {
         {
           proposalId: "p",
           status: "preview_ready",
-          ops: [{ type: "add_succession_rule", weight: "infinity" } as never],
+          ops: [{ type: "add_shift_sequence_rule", weight: "infinity" } as never],
         },
       ],
     });

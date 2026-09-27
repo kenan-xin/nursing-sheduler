@@ -42,6 +42,7 @@ from nurse_scheduling.server.jobs.models import (
     OptimizationResult,
     StoredArtifact,
     StoreLimits,
+    WorkerLease,
 )
 from nurse_scheduling.server.jobs.process_executor import ProcessControl, ProcessResult, ProcessStatus
 from nurse_scheduling.server.jobs.runner import RunOutput
@@ -221,25 +222,38 @@ def test_worker_survives_when_failure_persistence_also_fails():
             self.claim_calls = 0
             self.next_claim_attempted = threading.Event()
 
-        def claim_next_job(self, _worker_id):
+        def register_worker(self, worker_id):
+            self.registered = True
+            return WorkerLease(
+                worker_id, f"token-{self.claim_calls}", datetime.now(timezone.utc) + timedelta(seconds=0.3)
+            )
+
+        def renew_worker(self, lease):
+            return lease if self.registered else None
+
+        def unregister_worker(self, _lease):
+            self.registered = False
+
+        def expire_worker_claims(self):
+            return []
+
+        def claim_next_job(self, _lease):
             self.claim_calls += 1
             if self.claim_calls == 1:
                 return job
             self.next_claim_attempted.set()
             return None
 
-        def renew_claim(self, _job_id, _worker_id):
-            return job
-
         def get_input(self, _job_id):
             raise ConnectionError("store unavailable")
 
-        def fail_job(self, _job_id, _failure, *, worker_id=None):
+        def fail_job(self, _job_id, _failure, *, lease=None):
             raise ConnectionError("store still unavailable")
 
     controller = FailingController()
+    # W6: the heartbeat (lease/3) re-registers the released lease before the next claim.
     worker = JobWorker(
-        controller, SuccessfulRunner(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=60
+        controller, SuccessfulRunner(), worker_id="worker", claim_poll_seconds=0.005, worker_lease_seconds=0.3
     )
     worker.start()
     try:
@@ -255,7 +269,7 @@ def _claimed_running_job(store, clock):
         store,
         limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
-        claim_lease_seconds=30,
+        worker_lease_seconds=30,
         clock=lambda: clock[0],
     )
     controller.create_job(
@@ -266,9 +280,10 @@ def _claimed_running_job(store, clock):
         timeout_seconds=60,
         input_bytes=b"apiVersion: alpha\n",
     )
-    claimed = controller.claim_next_job("worker")
+    lease = controller.register_worker("worker")
+    claimed = controller.claim_next_job(lease)
     assert claimed is not None
-    return controller, claimed
+    return controller, claimed, lease
 
 
 def test_worker_shutdown_discards_buffered_event(monkeypatch):
@@ -276,7 +291,7 @@ def test_worker_shutdown_discards_buffered_event(monkeypatch):
     # persisted once shutdown is in effect; maintenance owns the eventual worker_lost.
     clock = [datetime.now(timezone.utc)]
     store = MemoryJobStore()
-    controller, claimed = _claimed_running_job(store, clock)
+    controller, claimed, lease = _claimed_running_job(store, clock)
     before_events = list(controller.prepare_event_replay(claimed.id, None).initial_events)
 
     def fake_run_optimization_process(*_args, event_callback, control, **_kwargs):
@@ -288,8 +303,8 @@ def test_worker_shutdown_discards_buffered_event(monkeypatch):
         "nurse_scheduling.server.jobs.worker.run_optimization_process",
         fake_run_optimization_process,
     )
-    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30)
-    worker._execute(claimed)
+    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, worker_lease_seconds=30)
+    worker._execute(claimed, lease)
 
     assert controller.get_job(claimed.id).state == JobState.RUNNING
     assert controller.prepare_event_replay(claimed.id, None).initial_events == before_events
@@ -304,7 +319,7 @@ def test_worker_shutdown_discards_buffered_result(monkeypatch):
     # shutdown is in effect; the job stays running for maintenance to reclaim.
     clock = [datetime.now(timezone.utc)]
     store = MemoryJobStore()
-    controller, claimed = _claimed_running_job(store, clock)
+    controller, claimed, lease = _claimed_running_job(store, clock)
 
     def fake_run_optimization_process(*_args, control, **_kwargs):
         worker._stop.set()
@@ -320,8 +335,8 @@ def test_worker_shutdown_discards_buffered_result(monkeypatch):
         "nurse_scheduling.server.jobs.worker.run_optimization_process",
         fake_run_optimization_process,
     )
-    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30)
-    worker._execute(claimed)
+    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, worker_lease_seconds=30)
+    worker._execute(claimed, lease)
 
     current = controller.get_job(claimed.id)
     assert current.state == JobState.RUNNING
@@ -338,7 +353,7 @@ def test_worker_shutdown_suppresses_abort_cleanup_failure(monkeypatch):
     # failure over the still-valid lease; maintenance owns the worker_lost write.
     clock = [datetime.now(timezone.utc)]
     store = MemoryJobStore()
-    controller, claimed = _claimed_running_job(store, clock)
+    controller, claimed, lease = _claimed_running_job(store, clock)
 
     def fake_run_optimization_process(*_args, control, **_kwargs):
         worker._stop.set()
@@ -348,8 +363,8 @@ def test_worker_shutdown_suppresses_abort_cleanup_failure(monkeypatch):
         "nurse_scheduling.server.jobs.worker.run_optimization_process",
         fake_run_optimization_process,
     )
-    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30)
-    worker._execute(claimed)
+    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, worker_lease_seconds=30)
+    worker._execute(claimed, lease)
 
     current = controller.get_job(claimed.id)
     assert current.state == JobState.RUNNING
@@ -367,7 +382,7 @@ def test_stop_blocks_until_admitted_completion_persists(monkeypatch):
     # completes, and stop() only returns afterward.
     clock = [datetime.now(timezone.utc)]
     store = MemoryJobStore()
-    base_controller, claimed = _claimed_running_job(store, clock)
+    base_controller, claimed, lease = _claimed_running_job(store, clock)
 
     write_entered = threading.Event()
     release_write = threading.Event()
@@ -395,10 +410,10 @@ def test_stop_blocks_until_admitted_completion_persists(monkeypatch):
         fake_run_optimization_process,
     )
     worker = JobWorker(
-        PausingController(), object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30
+        PausingController(), object(), worker_id="worker", claim_poll_seconds=0.005, worker_lease_seconds=30
     )
 
-    execute_thread = threading.Thread(target=worker._execute, args=(claimed,))
+    execute_thread = threading.Thread(target=worker._execute, args=(claimed, lease))
     execute_thread.start()
     stop_returned = threading.Event()
     try:
@@ -434,7 +449,7 @@ def test_stop_blocks_until_admitted_event_persists(monkeypatch):
     # before stop persists, and stop() cannot set the flag mid-write.
     clock = [datetime.now(timezone.utc)]
     store = MemoryJobStore()
-    base_controller, claimed = _claimed_running_job(store, clock)
+    base_controller, claimed, lease = _claimed_running_job(store, clock)
     before_events = list(base_controller.prepare_event_replay(claimed.id, None).initial_events)
 
     write_entered = threading.Event()
@@ -458,10 +473,10 @@ def test_stop_blocks_until_admitted_event_persists(monkeypatch):
         fake_run_optimization_process,
     )
     worker = JobWorker(
-        PausingController(), object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30
+        PausingController(), object(), worker_id="worker", claim_poll_seconds=0.005, worker_lease_seconds=30
     )
 
-    execute_thread = threading.Thread(target=worker._execute, args=(claimed,))
+    execute_thread = threading.Thread(target=worker._execute, args=(claimed, lease))
     execute_thread.start()
     stop_returned = threading.Event()
     try:
@@ -499,7 +514,7 @@ def test_cancellation_settles_when_cleanup_raises_after_shutdown(monkeypatch):
         store,
         limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
-        claim_lease_seconds=30,
+        worker_lease_seconds=30,
     )
     created = controller.create_job(
         input_name="input.yaml",
@@ -529,7 +544,7 @@ def test_cancellation_settles_when_cleanup_raises_after_shutdown(monkeypatch):
         "nurse_scheduling.server.jobs.worker.run_optimization_process",
         fake_run_optimization_process,
     )
-    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30)
+    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, worker_lease_seconds=30)
     worker.start()
     try:
         assert process_started.wait(timeout=3)
@@ -555,7 +570,7 @@ def test_worker_cancellation_takes_priority_over_concurrent_shutdown(monkeypatch
         store,
         limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
-        claim_lease_seconds=30,
+        worker_lease_seconds=30,
     )
     created = controller.create_job(
         input_name="input.yaml",
@@ -589,7 +604,7 @@ def test_worker_cancellation_takes_priority_over_concurrent_shutdown(monkeypatch
         "nurse_scheduling.server.jobs.worker.run_optimization_process",
         fake_run_optimization_process,
     )
-    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30)
+    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, worker_lease_seconds=30)
     worker.start()
     try:
         assert process_started.wait(timeout=3)
@@ -617,7 +632,7 @@ def test_worker_renews_claim_during_long_running_job(monkeypatch):
         store,
         limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
-        claim_lease_seconds=3.0,
+        worker_lease_seconds=3.0,
     )
     created = controller.create_job(
         input_name="input.yaml",
@@ -638,9 +653,13 @@ def test_worker_renews_claim_during_long_running_job(monkeypatch):
         def __getattr__(self, name):
             return getattr(self.delegate, name)
 
-        def renew_claim(self, job_id, worker_id):
+        def register_worker(self, worker_id):
+            self.initial_lease = self.delegate.register_worker(worker_id)
+            return self.initial_lease
+
+        def renew_worker(self, lease):
             self.renewal_allowed.wait(timeout=2)
-            renewed = self.delegate.renew_claim(job_id, worker_id)
+            renewed = self.delegate.renew_worker(lease)
             if renewed is not None:
                 self.renewed_job = renewed
                 self.claim_renewed.set()
@@ -673,15 +692,15 @@ def test_worker_renews_claim_during_long_running_job(monkeypatch):
         fake_run_optimization_process,
     )
     worker = JobWorker(
-        worker_controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=3.0
+        worker_controller, object(), worker_id="worker", claim_poll_seconds=0.005, worker_lease_seconds=3.0
     )
     worker.start()
     try:
         assert process_started.wait(timeout=3)
-        initial_claim = controller.get_job(created.id)
         worker_controller.renewal_allowed.set()
         assert worker_controller.claim_renewed.wait(timeout=5)
-        assert worker_controller.renewed_job.claim_expires_at > initial_claim.claim_expires_at
+        # W6: the worker lease (not a per-job claim) is renewed while the job runs.
+        assert worker_controller.renewed_job.expires_at > worker_controller.initial_lease.expires_at
 
         controller.request_early_completion(created.id)
         assert finish_observed.wait(timeout=3)

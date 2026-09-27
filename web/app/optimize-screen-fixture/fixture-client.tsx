@@ -145,6 +145,7 @@ const readiness = deriveOptimizeReadiness({
   staff: [],
   shifts: [],
   shiftGroups: [],
+  counts: [],
 });
 
 /** Same L1 card + hairline head band as the route's own `Section` (R6 v2). */
@@ -213,6 +214,7 @@ export default function OptimizeScreenFixtureClient() {
           prettify
           anonymize
           timeout="300"
+          timeoutBounds={{ default: 300, minimum: 1, maximum: 3600 }}
           timeoutError={null}
           optionsDisabled={false}
           submitEnabled

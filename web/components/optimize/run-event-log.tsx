@@ -105,11 +105,21 @@ export function RunEventLog({ log, active }: RunEventLogProps) {
           events
         </span>
       </summary>
+      {/* `tabIndex={0}` because this is a SCROLLABLE region (axe
+          `scrollable-region-focusable`, nursing-sheduler-w0e.12): at `max-h-80` the
+          tail of a long run is past the fold, and without a tab stop a keyboard user
+          cannot reach it. `role="region"` + the name give the tab stop something to
+          announce — a bare focusable div lands on nothing. The focus ring is
+          DESIGN.md §3's 2px `--brand` outline at -1px offset, the same rule the rest
+          of the system states explicitly. */}
       <div
         ref={containerRef}
         onScroll={onScroll}
+        role="region"
+        tabIndex={0}
+        aria-label="Event log"
         data-testid="optimize-event-log-scroll"
-        className="max-h-80 overflow-y-auto border-t border-line2"
+        className="max-h-80 overflow-y-auto border-t border-line2 outline-none focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand"
       >
         {count === 0 ? (
           <p className="px-4 py-3 text-meta text-ink3">

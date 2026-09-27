@@ -18,7 +18,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Surface } from "@/components/ui/surface";
-import { CAPABILITY_UNAVAILABLE, resolveCapability } from "@/lib/capability/resolve";
+import {
+  CAPABILITY_UNAVAILABLE,
+  resolveNavigationTarget,
+  resolveScreenName,
+} from "@/lib/capability/resolve";
 import { leavesLiveRun } from "@/lib/optimize/run-request";
 import { useHotStore } from "@/lib/store";
 import {
@@ -37,22 +41,24 @@ import type { AssistantProposalController } from "./use-assistant-proposals";
 
 export interface ApplyStep {
   screen: ChangeScreen;
+  /** The sidebar's own name for the screen, resolved when the step was made. */
+  name: string;
   status: "opening" | "shown" | "stayed" | "run-live" | "failed";
 }
 
-export function describeStep({ screen, status }: ApplyStep): string {
+export function describeStep({ name, screen, status }: ApplyStep): string {
   const what = screen.announcement ? ` ${screen.announcement}.` : "";
   switch (status) {
     case "opening":
-      return `Opening ${screen.label}…`;
+      return `Opening ${name}…`;
     case "shown":
-      return `Opened ${screen.label}.${what}`;
+      return `Opened ${name}.${what}`;
     case "stayed":
-      return `Stayed here so your unsaved edit is kept. The change is on ${screen.label}.${what}`;
+      return `Stayed here so your unsaved edit is kept. The change is on ${name}.${what}`;
     case "run-live":
-      return `Stayed here so the optimiser run keeps going. The change is on ${screen.label}.${what}`;
+      return `Stayed here so the optimiser run keeps going. The change is on ${name}.${what}`;
     case "failed":
-      return `${screen.label} could not be opened.${what}`;
+      return `${name} could not be opened.${what}`;
   }
 }
 
@@ -66,10 +72,20 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
   const showToken = useRef(0);
   const { outcome } = controller;
 
+  // The sidebar's own name for the screen — the same source the assistant's prepare
+  // result uses, so the two cannot name one place two different things. The Preview's
+  // scope word ("Supervision") is not a screen name and is never shown here.
+  const nameFor = useCallback(
+    (capabilityId: string): string =>
+      resolveScreenName(capabilityId, readCapabilityContext()) ?? capabilityId,
+    [],
+  );
+
   const show = useCallback(
     async (screen: ChangeScreen) => {
+      const name = nameFor(screen.capabilityId);
       const token = ++showToken.current;
-      setStep({ screen, status: "opening" });
+      setStep({ screen, name, status: "opening" });
       // The user's Apply (or link) click is its own authority, so no turn check. An
       // open unsaved draft still gets the shell's confirm, like a manual jump.
       const result = await navigate(screen.capabilityId, { reveal: false });
@@ -77,6 +93,7 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
       if (result.status === CAPABILITY_UNAVAILABLE) {
         setStep({
           screen,
+          name,
           status: result.reason === "navigation_cancelled" ? "stayed" : "failed",
         });
         return;
@@ -89,10 +106,13 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
           .querySelector<HTMLElement>(CHANGE_HIGHLIGHT_SELECTOR)
           ?.scrollIntoView?.({ block: "center" });
       });
-      setStep({ screen, status: "shown" });
+      setStep({ screen, name, status: "shown" });
     },
-    [navigate],
+    [navigate, nameFor],
   );
+
+  // An unmount also voids an in-flight show(): its navigation can settle later.
+  useEffect(() => () => void showToken.current++, []);
 
   useEffect(() => {
     if (outcome?.kind === "applied" && handled.current !== outcome.receiptId) {
@@ -103,10 +123,14 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
       if (!next.primary) return;
       // Leaving Optimise stops a live run. The user pressed Apply, not a screen link,
       // so the host does not make that move for them; the links below still can.
-      const target = resolveCapability(next.primary.capabilityId, readCapabilityContext());
+      const target = resolveNavigationTarget(next.primary.capabilityId, readCapabilityContext());
       const routeId = target.status === "ok" ? target.value.routeId : undefined;
       if (leavesLiveRun(useHotStore.getState().runView.lifecycle, routeId)) {
-        setStep({ screen: next.primary, status: "run-live" });
+        setStep({
+          screen: next.primary,
+          name: nameFor(next.primary.capabilityId),
+          status: "run-live",
+        });
         return;
       }
       void show(next.primary);
@@ -122,7 +146,7 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
       setStep(null);
       clearChangeHighlight();
     }
-  }, [outcome, show]);
+  }, [outcome, show, nameFor]);
 
   // A new Preview replaces this notice; the user is reviewing the next change now.
   const visible = plan !== null && controller.proposal === null;
@@ -152,18 +176,21 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
           {links.length > 0 ? (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-meta text-ink3">Show changes on:</span>
-              {links.map((screen) => (
-                <Button
-                  key={screen.capabilityId}
-                  variant="outline"
-                  size="sm"
-                  data-testid="apply-navigation-link"
-                  data-capability-id={screen.capabilityId}
-                  onClick={() => void show(screen)}
-                >
-                  {screen.announcement ? `${screen.label} (${screen.announcement})` : screen.label}
-                </Button>
-              ))}
+              {links.map((screen) => {
+                const name = nameFor(screen.capabilityId);
+                return (
+                  <Button
+                    key={screen.capabilityId}
+                    variant="outline"
+                    size="sm"
+                    data-testid="apply-navigation-link"
+                    data-capability-id={screen.capabilityId}
+                    onClick={() => void show(screen)}
+                  >
+                    {screen.announcement ? `${name} (${screen.announcement})` : name}
+                  </Button>
+                );
+              })}
             </div>
           ) : null}
           <div>

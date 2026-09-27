@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AI_KEY_HEADER, AI_MODEL_HEADER, AI_SETUP_CODES } from "@/lib/ai/protocol";
-import { FALLBACK_MODELS } from "./catalog";
+import { FALLBACK_MODELS, RECOMMENDED_MODEL_ID } from "./catalog";
+import { FALLBACK_MODEL_ID } from "./routing";
 import { summarizeConversation } from "./summarize";
 import {
   CATALOG_TTL_MS,
@@ -173,6 +174,20 @@ describe("probe route", () => {
     expect(JSON.stringify(body.messages)).not.toMatch(/nurse|shift|roster|leave/i);
   });
 
+  it("probes the default model with throughput routing and the Sonnet fallback (46g)", async () => {
+    const fetchImpl = vi.fn(async () => toolCallCompletion());
+
+    await handleProbeRequest(
+      probeRequest({ ...credentialHeaders(), [AI_MODEL_HEADER]: RECOMMENDED_MODEL_ID }),
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body.model).toBe(`${RECOMMENDED_MODEL_ID}:nitro`);
+    expect(body.models).toEqual([FALLBACK_MODEL_ID]);
+  });
+
   it("fails a model that answers without calling the tool", async () => {
     const response = await handleProbeRequest(probeRequest(credentialHeaders()), {
       fetchImpl: (async () =>
@@ -320,6 +335,25 @@ describe("POST /api/ai/openrouter/summarize (bead ypo)", () => {
     expect(String(calls[0].init.body)).toContain("Ana wants 3 Nov off.");
     expect(JSON.stringify(body)).not.toContain(SENTINEL);
     expect(consoleOutput.join("\n")).not.toContain(SENTINEL);
+  });
+
+  it("summarises with the default model's throughput routing and fallback (46g)", async () => {
+    const calls: RequestInit[] = [];
+    const fetchImpl = async (_url: string, init: RequestInit) => {
+      calls.push(init);
+      return completion("ok");
+    };
+    await handleSummaryRequest(
+      summaryRequest(
+        { previousSummary: null, transcript: "User: hello" },
+        { ...credentialHeaders(), [AI_MODEL_HEADER]: RECOMMENDED_MODEL_ID },
+      ),
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+
+    const body = JSON.parse(String(calls[0].body)) as Record<string, unknown>;
+    expect(body.model).toBe(`${RECOMMENDED_MODEL_ID}:nitro`);
+    expect(body.models).toEqual([FALLBACK_MODEL_ID]);
   });
 
   it("hands the summariser the conversation as one JSON data object, never as instructions", async () => {
