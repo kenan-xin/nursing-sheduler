@@ -87,7 +87,7 @@ function guidanceFor(
         );
       case "infeasible":
         return (
-          "The rules as written cannot all be met, so no roster exists. The solver does not " +
+          "The rules as written cannot all be met, so no roster exists. The optimiser does not " +
           "say which rule is responsible. Call suggest_feasibility_options with " +
           "afterInfeasibleRun true: name a cause only when it reports a certain gap, and never " +
           "otherwise. Then use test_feasibility_candidates to test its options on copies."
@@ -185,7 +185,7 @@ export function useOptimizeTools(agentId: string, turnEpoch: number): void {
       agentId,
       description:
         "Read how the latest optimiser run on the Optimise screen is going or how it ended: " +
-        "its status, the solver verdict (optimal, feasible, infeasible or inconclusive), any " +
+        "its status, the optimiser's verdict (optimal, feasible, infeasible or inconclusive), any " +
         "error, and whether a roster was saved. It reports only what that screen shows and " +
         "never starts or changes a run.",
       handler: async () => {

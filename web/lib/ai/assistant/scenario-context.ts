@@ -147,11 +147,11 @@ export const ASSISTANT_AUTHORITY_STATEMENT = [
   "When the user names a month without a year, use the next such month from today's date, and check it against the roster period if one is set.",
   "To set up a schedule step by step, call get_setup_progress and follow its nextStep. When a schedule is short-staffed or an Optimize run is infeasible, call suggest_feasibility_options and offer at most three of its options.",
   "Never write a pick-one question as plain text, and a yes/no offer is one too (for example 'Ben Tan or Chloe Lim?', which option?, 'Want me to prepare it?', 'Want me to take you to the Shifts screen?', 'Ready to run Optimize?'): call offer_choices instead, with up to four related questions on one card through moreQuestions, and keep your text to one short line; set multiple true only when several answers can be true together, never for alternatives such as repair options, yes/no or did-you-mean.",
-  "To take the user to a screen, call open_app_screen instead of asking; to offer a run, call request_optimize_run instead of asking. End a reply on a question only when it is open (a name, a number, a date) or a card holds it.",
+  "To take the user to a screen, call open_app_screen instead of asking; to offer a run, call request_optimize_run instead of asking. When the user asks whether the app can do something it can, say so in one line and offer to prepare it with offer_choices (Prepare it / Not now), never as a question in text. End a reply on a question only when it is open (a name, a number, a date) or a card holds it.",
   ...KNOWLEDGE_LINES,
   "The people you help are nurses and nurse managers, not technical users.",
   "Talk like a helpful colleague on the ward, not a manual: warm, short and to the point.",
-  "Use everyday words a nurse uses; no technical or product jargon, ids, tool names or field names: never say solver, checker, weight, penalty, constraint or infeasible; say the optimiser, a must, a preference, no roster could be made.",
+  "Use everyday words a nurse uses; no technical or product jargon, ids, tool names or field names: never say solver, checker, weight, penalty, constraint, succession rule or infeasible; say the optimiser, a must, a preference, a shift sequence rule, no roster could be made.",
   "Keep most replies to one to three short sentences. Use a short list only for real choices or steps.",
   "Do not repeat what the Preview already shows; say in one line what you prepared and what to check.",
   "When a detail has a sensible usual value, suggest it instead of asking; the user can change it in the Preview.",
@@ -168,6 +168,24 @@ export interface BuildContextInput {
   routeLabel: string | null;
   /** The browser clock at send time; injected by tests. */
   now?: Date;
+  /** Cards on screen whose change waits on the user's Apply. Omitted: none. */
+  pending?: { preview: boolean; rosterChange: boolean };
+}
+
+/**
+ * What the user has been shown and not applied. Without it the model cannot tell whether a
+ * Preview from an earlier turn was applied, and answers "is it in place now?" with yes (dt9).
+ */
+export function describePending(pending: BuildContextInput["pending"]): string {
+  const cards = [
+    ...(pending?.preview ? ["a change Preview"] : []),
+    ...(pending?.rosterChange ? ["a roster change card"] : []),
+  ];
+  if (cards.length === 0) return "Nothing.";
+  return (
+    `The user sees ${cards.join(" and ")}, not applied: nothing in it has changed yet. ` +
+    "Until they press Apply, say it is prepared and waiting for Apply, never that it is done or in place."
+  );
 }
 
 /** Local today as "2026-09-24 (Thursday 24 September 2026)". */
@@ -182,7 +200,7 @@ export function describeToday(now: Date): string {
   return `${iso} (${weekday} ${now.getDate()} ${month} ${now.getFullYear()})`;
 }
 
-/** The complete context set attached to a turn. Deliberately only these four. */
+/** The complete context set attached to a turn. Deliberately only these five. */
 export function buildAssistantContext(input: BuildContextInput): AssistantContextEntry[] {
   return [
     {
@@ -210,6 +228,10 @@ export function buildAssistantContext(input: BuildContextInput): AssistantContex
     {
       description: "Today's date, where the user is.",
       value: describeToday(input.now ?? new Date()),
+    },
+    {
+      description: "What the user has been shown and has not applied yet.",
+      value: describePending(input.pending),
     },
   ];
 }

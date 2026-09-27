@@ -198,6 +198,9 @@ describe("get_optimize_result", () => {
     // staffing check is deterministic evidence, so a CERTAIN gap may be named; nothing else may.
     expect(summary.guidance).toMatch(/suggest_feasibility_options/);
     expect(summary.guidance).toMatch(/test_feasibility_candidates/);
+    // dt9: the model repeats tool wording, so a result says optimiser, never solver.
+    expect(summary.guidance).not.toMatch(/solver/i);
+    expect(tool("get_optimize_result").description).not.toMatch(/solver/i);
     expect(summary.guidance).toMatch(/only when it reports a certain gap/);
     expect(summary.guidance).not.toMatch(/never name a cause/);
   });

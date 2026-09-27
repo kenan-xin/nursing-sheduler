@@ -386,6 +386,8 @@ describe("gradeDeterministic", () => {
     it("fails jargon a nurse would not know", () => {
       expect(wording(turn("The solver found it infeasible."))?.pass).toBe(false);
       expect(wording(turn("I set it as a preference with weight 10."))?.pass).toBe(false);
+      expect(wording(turn("I'll prepare a succession rule."))?.pass).toBe(false);
+      expect(wording(turn("It is on the Shift successions screen."))?.pass).toBe(true);
       expect(wording(turn("No roster could be made with these rules."))?.pass).toBe(true);
     });
   });

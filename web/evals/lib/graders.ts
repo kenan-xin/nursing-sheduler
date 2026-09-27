@@ -118,7 +118,7 @@ const PICK_ONE =
 const APPLIED_CLAIM =
   /\bI(?:'ve| have)?\s+(?:now\s+)?(?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created|scheduled)\b|\b(?:has|have) been (?:applied|added|saved|set up|changed|updated|turned off|switched off|removed|created)\b|\bis now (?:set|in place|active|applied)\b/i;
 const JARGON =
-  /\bsolver\b|\binfeasib\w*|\bconstraints?\b|\bpenalt(?:y|ies)\b|\bchecker\b|\bweights?\s+(?:of\s+)?-?\d/i;
+  /\bsolver\b|\bsuccession rules?\b|\binfeasib\w*|\bconstraints?\b|\bpenalt(?:y|ies)\b|\bchecker\b|\bweights?\s+(?:of\s+)?-?\d/i;
 
 /**
  * The dt9 failures, deterministically: a pick-one question in text with no card in its turn,

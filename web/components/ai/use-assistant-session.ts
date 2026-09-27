@@ -584,6 +584,11 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
             documentRevision: plan.documentRevision,
             routePath: input.routePath,
             routeLabel: input.routeLabel,
+            // Read at launch: a card still up now was not applied before this message.
+            pending: {
+              preview: useAssistantStore.getState().activeProposal !== null,
+              rosterChange: useAssistantStore.getState().activeRosterChange !== null,
+            },
           }),
         }),
       );

@@ -76,8 +76,8 @@ describe("the attached turn context", () => {
     now: new Date(2026, 8, 24, 9, 30),
   });
 
-  it("is exactly the authority statement, the document, the current screen and today", () => {
-    expect(context).toHaveLength(4);
+  it("is exactly the authority statement, the document, the current screen, today and what waits on Apply", () => {
+    expect(context).toHaveLength(5);
     expect(context[0].description).toBe(ASSISTANT_AUTHORITY_STATEMENT);
   });
 
@@ -281,6 +281,36 @@ describe("a prepared change is spoken of as prepared, never done", () => {
   });
 });
 
+describe("what still waits on the user's Apply (dt9)", () => {
+  // Asked "so that's in place now?" a turn after a Preview, the model could not tell
+  // whether the user had pressed Apply, and said yes 3 times in 3.
+  const waiting = (pending?: { preview: boolean; rosterChange: boolean }) =>
+    buildAssistantContext({
+      scenario: wardScenario(),
+      scenarioId: "scenario-a",
+      documentRevision: 12,
+      routePath: "/rules",
+      routeLabel: "Rules",
+      now: new Date(2026, 8, 24, 9, 30),
+      pending,
+    })[4];
+
+  it("says an unapplied Preview has changed nothing yet", () => {
+    const entry = waiting({ preview: true, rosterChange: false });
+    expect(entry.value).toMatch(/Preview.*not applied/);
+    expect(entry.value).toMatch(/nothing in it has changed/);
+  });
+
+  it("says the same of a roster change card", () => {
+    expect(waiting({ preview: false, rosterChange: true }).value).toMatch(/roster change card/);
+  });
+
+  it("says nothing waits when nothing does, by default too", () => {
+    expect(waiting({ preview: false, rosterChange: false }).value).toBe("Nothing.");
+    expect(waiting().value).toBe("Nothing.");
+  });
+});
+
 describe("pick-one questions go on a card (dt9)", () => {
   it("treats a yes/no offer as a pick-one question", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/yes\/no offer/);
@@ -291,11 +321,15 @@ describe("pick-one questions go on a card (dt9)", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/open_app_screen instead of asking/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/request_optimize_run instead of asking/);
   });
+  it("offers a supported change on a card when asked whether the app can do it", () => {
+    // 3 of 3 eval trials answered "Can the app stop ...?" with "Would you like me to ...?" in text.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/asks whether the app can do something/);
+  });
   it("ends a reply on a question only when it is open or a card holds it", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/End a reply on a question only when/);
   });
   it("names the jargon that leaked in the 2026-09-24 evals", () => {
-    for (const word of ["solver", "checker", "weight", "infeasible"])
+    for (const word of ["solver", "checker", "weight", "infeasible", "succession rule"])
       expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(new RegExp(`never say [^.]*${word}`));
   });
 });
