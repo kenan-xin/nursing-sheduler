@@ -99,8 +99,6 @@ export const Legend: Story = {
 
 // A long name widens the grid, which scrolls inside itself; the frame never overflows.
 export const LongText: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.30; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   loaders: [
     async () => ({
       document: await fixtureRosterDocument({
