@@ -80,6 +80,669 @@ residue tests skips, because the genie memory store derives its queues from the 
 Genie tests whose behaviour v2 changes on purpose are listed, with reasons, in
 `core/tests/conftest.py` `UPSTREAM_DEVIATIONS`.
 
+## W5: origin of every core file and the sync recipe
+
+W5 gives every file in `core/`, tests included, one row in
+`core/upstream-patches/manifest.toml`. The manifest is the one source of truth. The
+table below is generated from it, and the check fails if the two differ. There are
+four classes:
+
+- `verbatim`: the same bytes as the genie file. The row records the genie blob SHA.
+- `patched`: the genie file plus one v2 patch file in `core/upstream-patches/`. The row
+  records the genie blob SHA, and the table shows the patch IDs from the patch header.
+- `v2-only`: genie has no such file. The row says why v2 has it.
+- `excluded`: a genie path (a glob) that v2 does not vendor. The row says why. No file
+  in `core/` may match it.
+
+`python -m scripts.check_upstream_sync` (run from `core/`, also run by the core suite)
+checks that every file in `core/` has exactly one row, that no row names a missing
+file, that each `verbatim` and `patched` file equals its genie blob once the patches are
+reversed, and that the table below is current. `--write-table` rewrites the table.
+
+W5 added 6 patch files, so that files which differed from genie with no row now
+have one: `W0-pyproject.patch`, `W0-requirements.patch` (both requirements files),
+`W2-tests-test_process_executor.patch`, `W2-tests-test_public_diagnostic.patch`,
+`W5-tests-real-README.patch` and `W5-AGENTS.patch`. `core/AGENTS.md` is the genie file
+with one v2 section added at the end (lane 07 D17, lane 05 L5-30). W5 also restored one
+genie `# noqa: BLE001` comment in `tests/test_process_executor.py`, to keep that patch
+small. It rebuilt `P2-P3-skillmix-overrides.patch`: the hunk line numbers were stale
+after P1 was retired, and the content is unchanged.
+
+Upstream at the time of W5 (2026-09-27): v1 `feature/genie` is still at `1bf4b85`, so
+v1 has not moved past the pin.
+
+### Sync recipe
+
+Run from `core/`, with the v1 clone at `~/work/nurse-scheduling`, on a new branch from
+`develop`:
+
+```sh
+git -C ~/work/nurse-scheduling fetch origin
+python -m scripts.sync_upstream --repo ~/work/nurse-scheduling --to origin/feature/genie
+python -m scripts.sync_upstream --repo ~/work/nurse-scheduling --to origin/feature/genie --apply
+python -m scripts.check_upstream_sync --write-table
+ruff check . && ruff format --check . && pytest
+```
+
+The first `sync_upstream` call is a dry run. It diffs the pinned genie commit against
+the new head for `core/` and prints one line for each changed genie file:
+
+- `copy` for a `verbatim` file.
+- `patch` for a `patched` file: copy it, then re-apply its v2 patch.
+- `skip` for a file under an `excluded` row.
+
+It also prints a `PROBLEM` line, and `--apply` refuses to run, when:
+
+- a genie file has no row. Add a row first.
+- genie adds a file that v2 owns as `v2-only`. Decide which one wins.
+- genie deletes a tracked file.
+- a recorded blob does not match the genie tree at the pin.
+
+`--apply` writes the files, moves `upstream_commit` and the blob SHAs in the manifest to
+the new commit, and rebuilds each patch file against the new genie blobs. The `#`
+header lines of each patch stay. If a patch does not apply, it leaves `*.rej` files. Fix
+the file by hand, delete the `*.rej` files, run `python -m scripts.sync_upstream --repo
+~/work/nurse-scheduling --refresh-patches`, and update the patch header if the hunks
+changed. Then run the
+check and the suite. Also read the genie commit log for the range. A change in an
+`excluded` file, or in a v2-only area, can still matter (for example a new `/info` key).
+
+Dry run on the current pins (`1bf4b85` to `origin/feature/genie`, which is `1bf4b85`):
+0 changed files and 0 problems. Every genie file at `1bf4b85` has a row or matches an
+`excluded` glob, and every recorded blob matches the genie tree. `--refresh-patches` on
+the current pins rebuilt every patch file byte for byte, except the stale P2-P3 line
+numbers noted above.
+
+`--apply` was also tried in a scratch worktree against a made-up genie commit on top of
+`1bf4b85`. The commit changed `cli.py` (verbatim), `server/config.py` (patched) and
+added a file under `ai/` (excluded). The script copied `cli.py`, copied `config.py` and
+re-applied its patch, skipped the `ai/` file, and the check then passed with 0 problems.
+A second made-up commit changed a line inside the `config.py` patch context. The script
+then stopped with a `.rej` file, as described above.
+
+### Upstream candidates
+
+Each change that upstream accepts moves its files from `patched` or `v2-only` to
+`verbatim`, and its patch hunks go away.
+
+| Candidate | v2 files today | Notes |
+| --- | --- | --- |
+| Per-date overrides (P3) | `models.py`, `preference_types.py` (P2-P3 patch) | `required_by_date`. A date outside the requirement fails at load time. |
+| `skillMix` (P2) | `models.py`, `preference_types.py` (P2-P3 patch) | Resolved floors in `CompiledShiftTypeRequirements`. |
+| `on_roster` callback (P4) | `scheduler.py` | Keyword-only day-state callback. |
+| INCONCLUSIVE outcome (P8) | `jobs/models.py`, `jobs/runner.py`, both stores, `api/schemas.py` | A timeout with no incumbent is not a failure. |
+| Opaque event cursors and replay snapshot (P6) | `event_cursor.py` (v2-only), `job_store.py`, `jobs/controller.py`, both stores, `api/optimize.py` | Job-bound cursors and a `WATCH`/`MULTI`/`EXEC` replay snapshot. |
+| Purpose queues (P9) | `queue_state.py` (v2-only), `job_store.py`, `jobs/*`, both stores, `config.py`, `errors.py`, `maintenance.py`, `app.py` | Offer only if v1 wants assistant probes on the job server. |
+| Worker shutdown write gate (P10) | `jobs/worker.py` | No worker write lands after `stop()`. |
+| Diagnostic path mode and idempotent cleanup (P14) | `diagnostic.py`, `tests/test_public_diagnostic.py` | Lets the diagnostic run through a BFF prefix. |
+| Fixture hash re-stamp (P0) | `tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json` | Upstream bug: the `scenarioSha256` is stale. Report it. |
+| Solver process residue audit (r6g) | `tests/real/solver_capabilities_residue.py` (v2-only) | Linux `/proc` check that no solver child outlives a cancelled job. |
+| `httpx2` for the Starlette test client (bead `qq0.27.5`) | `requirements-optional.txt` | Merged into `develop` (PR #110). `W0-requirements.patch` carries it. Starlette prefers `httpx2`, and genie would see the same warning. |
+| SG 28-day compliance case | `tests/testcases/real/sg-28day-160h-compliance-14-nurses.yaml`, `tests/test_sg_compliance_roster.py` | Real ward case (lane 07 D19). |
+
+### Origin table
+
+<!-- origin-table:start (generated by core/scripts/check_upstream_sync.py --write-table) -->
+Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
+
+| File (under `core/`) | Class | Genie blob | Patches or reason |
+| --- | --- | --- | --- |
+| `AGENTS.md` | patched | `1a5ca4f2565f` | `W5-AGENTS.patch` |
+| `nurse_scheduling/__init__.py` | verbatim | `f95dc39cacc6` |  |
+| `nurse_scheduling/ai/*` | excluded |  | X5: v1 Python AI package. v2 has its own web assistant |
+| `nurse_scheduling/ai_serve.py` | excluded |  | X5: AI service entry |
+| `nurse_scheduling/cli.py` | verbatim | `8a204b863f7e` |  |
+| `nurse_scheduling/constants.py` | verbatim | `9fdcc4a54b1c` |  |
+| `nurse_scheduling/context.py` | verbatim | `0242cfd9a79b` |  |
+| `nurse_scheduling/exporter.py` | verbatim | `1b1eb7f5192a` |  |
+| `nurse_scheduling/frontend_validation.py` | excluded |  | X5: used only by the v1 AI package |
+| `nurse_scheduling/group_map.py` | verbatim | `c619776c6420` |  |
+| `nurse_scheduling/loader.py` | verbatim | `308e2076a579` |  |
+| `nurse_scheduling/model_build_stats.py` | verbatim | `77640eb47261` |  |
+| `nurse_scheduling/models.py` | patched | `edcdab1503ea` | `P2-P3-skillmix-overrides.patch` (P2, P3) |
+| `nurse_scheduling/preference_types.py` | patched | `51f7cb3570bd` | `P2-P3-skillmix-overrides.patch` (P2, P3) |
+| `nurse_scheduling/report.py` | verbatim | `8cff02666faf` |  |
+| `nurse_scheduling/scheduler.py` | patched | `7867e7d1b159` | `P4-on-roster.patch` (P4) |
+| `nurse_scheduling/serve.py` | verbatim | `8a844abe3b79` |  |
+| `nurse_scheduling/server/__init__.py` | verbatim | `7b3119b1236e` |  |
+| `nurse_scheduling/server/api/__init__.py` | verbatim | `10c7354468e8` |  |
+| `nurse_scheduling/server/api/optimize.py` | patched | `5da18e2b4951` | `W2-server-api-optimize.patch` (P5, P6, P7, P8, P9) |
+| `nurse_scheduling/server/api/schemas.py` | patched | `c0ed76c4fe7f` | `W2-server-api-schemas.patch` (P8, P9) |
+| `nurse_scheduling/server/api/sse.py` | verbatim | `7b5e8dfa6fe4` |  |
+| `nurse_scheduling/server/app.py` | patched | `31e62ad1cfc5` | `W2-server-app.patch` (P5, P8, P9, P11) |
+| `nurse_scheduling/server/auth.py` | verbatim | `f292e5c6cae4` |  |
+| `nurse_scheduling/server/basis_admission.py` | v2-only |  | P8 basis admission: checks a basis claim before a job is created |
+| `nurse_scheduling/server/canonical.py` | v2-only |  | P5 canonical strict YAML dumper |
+| `nurse_scheduling/server/config.py` | patched | `8f517ab71b5a` | `W2-server-config.patch` (P9, P13) |
+| `nurse_scheduling/server/diagnostic.py` | patched | `e09e2002eead` | `W2-server-diagnostic.patch` (P14) |
+| `nurse_scheduling/server/errors.py` | patched | `a1c4eb810f1a` | `W2-server-errors.patch` (P9) |
+| `nurse_scheduling/server/event_cursor.py` | v2-only |  | P6 opaque job-bound event cursors |
+| `nurse_scheduling/server/job_store.py` | patched | `fb656a30e27b` | `W6-server-job_store.patch` (P6, P9) |
+| `nurse_scheduling/server/jobs/__init__.py` | verbatim | `ec33f2782dcb` |  |
+| `nurse_scheduling/server/jobs/controller.py` | patched | `a18fb0bd1a34` | `W6-server-jobs-controller.patch` (P6, P8, P9) |
+| `nurse_scheduling/server/jobs/models.py` | patched | `1b358ba15342` | `W6-server-jobs-models.patch` (P6, P8, P9) |
+| `nurse_scheduling/server/jobs/process_executor.py` | verbatim | `183712393bfc` |  |
+| `nurse_scheduling/server/jobs/process_tree.py` | verbatim | `8d5d3687550e` |  |
+| `nurse_scheduling/server/jobs/runner.py` | patched | `0ebde2edb9c4` | `W2-server-jobs-runner.patch` (P7, P8) |
+| `nurse_scheduling/server/jobs/worker.py` | patched | `ff808a06deff` | `W6-server-jobs-worker.patch` (P10) |
+| `nurse_scheduling/server/maintenance.py` | patched | `2adb7af1de57` | `W2-server-maintenance.patch` (P9, P11) |
+| `nurse_scheduling/server/optimize_basis.py` | v2-only |  | P8 optimize basis: the basis fields a job records |
+| `nurse_scheduling/server/queue_state.py` | v2-only |  | P9 queue snapshot for describe_queue_state() |
+| `nurse_scheduling/server/request_limits.py` | verbatim | `b258b13f6e80` |  |
+| `nurse_scheduling/server/retry.py` | verbatim | `89d82ba6bd2b` |  |
+| `nurse_scheduling/server/roster_container.py` | v2-only |  | P7 roster container artifact |
+| `nurse_scheduling/server/runtime_identity.py` | verbatim | `d4ff822cb69e` |  |
+| `nurse_scheduling/server/scheduling_errors.py` | v2-only |  | P5 the 422 scheduling-content envelope |
+| `nurse_scheduling/server/scheduling_input.py` | v2-only |  | P5 parse-once submit boundary, CP-SAT only (X4) |
+| `nurse_scheduling/server/semantic_profile.py` | v2-only |  | P8 solver semantic profile (X12) |
+| `nurse_scheduling/server/solver_capabilities.py` | verbatim | `f8c0f5f5c94d` |  |
+| `nurse_scheduling/server/solver_options.py` | verbatim | `6e098779587b` |  |
+| `nurse_scheduling/server/stores/__init__.py` | verbatim | `538df653cb11` |  |
+| `nurse_scheduling/server/stores/memory.py` | patched | `076668c1005f` | `W6-server-stores-memory.patch` (P6, P9) |
+| `nurse_scheduling/server/stores/redis.py` | patched | `a5892b308668` | `W6-server-stores-redis.patch` (P6, P8, P9) |
+| `nurse_scheduling/server/usage_metrics.py` | verbatim | `9dcd9e84c6d3` |  |
+| `nurse_scheduling/server/usage_report.py` | excluded |  | X6: no usage telemetry |
+| `nurse_scheduling/server/workspace.py` | v2-only |  | P5 Workspace V1 input and located errors (X14) |
+| `nurse_scheduling/solver_interface.py` | verbatim | `63db2a420257` |  |
+| `nurse_scheduling/solver_ortools_cp_sat.py` | verbatim | `346f334d6713` |  |
+| `nurse_scheduling/solver_ortools_linear.py` | verbatim | `36c4d411e7ae` |  |
+| `nurse_scheduling/solver_ortools_mathopt.py` | verbatim | `b2a2cf0db547` |  |
+| `nurse_scheduling/solver_pulp.py` | verbatim | `a796fcb7e684` |  |
+| `nurse_scheduling/solver_pulp_glpk.py` | verbatim | `1a489f7b6b67` |  |
+| `nurse_scheduling/solver_pulp_python.py` | verbatim | `b3c028f4f84d` |  |
+| `nurse_scheduling/utils.py` | verbatim | `28f99473b6c5` |  |
+| `nurse_scheduling/version.py` | verbatim | `8a848d24ced7` |  |
+| `pyproject.toml` | patched | `da988b91d33d` | `W0-pyproject.patch` |
+| `requirements-optional.txt` | patched | `edfeae4e5dcd` | `W0-requirements.patch` (P5, X4, X5) |
+| `requirements.txt` | patched | `8d39f8b82f67` | `W0-requirements.patch` (P5, X4, X5) |
+| `scripts/__init__.py` | v2-only |  | sync tooling |
+| `scripts/check_upstream_sync.py` | v2-only |  | sync tooling: checks this manifest |
+| `scripts/sync_upstream.py` | v2-only |  | sync tooling: the sync recipe |
+| `tests/__init__.py` | verbatim | `e69de29bb2d1` |  |
+| `tests/ai_eval/*` | excluded |  | X5: v1 AI evals (studied in W4) |
+| `tests/ai_test_helper.py` | excluded |  | X5: AI test helper |
+| `tests/catalogue_oracle.py` | v2-only |  | CP-SAT oracle for the web conflict catalogue |
+| `tests/conftest.py` | v2-only |  | v2 test setup. UPSTREAM_DEVIATIONS skips 9 genie tests in test_serve.py that v2 changes on purpose (P5, P6, P7, P8, X4), each with the v2 test that replaces it |
+| `tests/export_test_helper.py` | verbatim | `78cd8e94575a` |  |
+| `tests/fixtures/assistant_repair/busyNightsWithRestRule.after.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/busyNightsWithRestRule.before.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/busyNightsWithRestRule.run_one_short.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/conflictingRequirements.after.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/conflictingRequirements.before.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/onlyRnOnLeave.after.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/onlyRnOnLeave.before.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/personalCapsTooLow.after.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/personalCapsTooLow.before.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/rnMixOnLeave.after.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/rnMixOnLeave.before.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/ruleTooStrict.after.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/ruleTooStrict.before.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/shortOnLeaveDay.after.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/shortOnLeaveDay.before.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/shortOnLeaveDay.run_one_short.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/tooFewNurses.after.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/tooFewNurses.before.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/understaffedNight.after.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/assistant_repair/understaffedNight.before.yaml` | v2-only |  | assistant repair fixture |
+| `tests/fixtures/temporary_cover/date_split.after.yaml` | v2-only |  | temporary cover fixture |
+| `tests/fixtures/temporary_cover/date_split.before.yaml` | v2-only |  | temporary cover fixture |
+| `tests/fixtures/temporary_cover/rn_cover.after.yaml` | v2-only |  | temporary cover fixture |
+| `tests/fixtures/temporary_cover/rn_cover.before.yaml` | v2-only |  | temporary cover fixture |
+| `tests/fixtures/temporary_cover/shift_split.after.yaml` | v2-only |  | temporary cover fixture |
+| `tests/fixtures/temporary_cover/shift_split.before.yaml` | v2-only |  | temporary cover fixture |
+| `tests/real/README.md` | patched | `af19df716ceb` | `W5-tests-real-README.patch` (X4) |
+| `tests/real/__init__.py` | verbatim | `6c79a45cde2e` |  |
+| `tests/real/assignment_fixture.py` | verbatim | `60caf55255a2` |  |
+| `tests/real/performance_benchmark.py` | excluded |  | Docker performance benchmark not adopted (lane 05 D5) |
+| `tests/real/run_schedule.py` | verbatim | `fe8b19714a22` |  |
+| `tests/real/schedule_ortools_cp_sat.py` | verbatim | `3b090ba6d501` |  |
+| `tests/real/schedule_real_helper.py` | verbatim | `b7b7e8f8c943` |  |
+| `tests/real/schedule_score_ground_truth.py` | verbatim | `b5c8445ce63c` |  |
+| `tests/real/solver_capabilities.py` | verbatim | `e713cdbaf7e3` |  |
+| `tests/real/solver_capabilities_residue.py` | v2-only |  | Linux /proc solver-process residue audit kept from the retired v2 probe (r6g) |
+| `tests/schedule_test_helper.py` | verbatim | `cd35d2b02d5f` |  |
+| `tests/server_support.py` | v2-only |  | helpers for the v2 test_server_* suites |
+| `tests/solver_test_utils.py` | verbatim | `e22d07ca2dd4` |  |
+| `tests/test_ai_*.py` | excluded |  | X5: AI tests |
+| `tests/test_assistant_repair_fixtures.py` | v2-only |  | assistant repair fixtures solve as expected |
+| `tests/test_catalogue_oracle_g7.py` | v2-only |  | proves web catalogue check G7 is sound |
+| `tests/test_check_upstream_sync.py` | v2-only |  | runs the sync check in the core suite |
+| `tests/test_cli.py` | verbatim | `75d0d16b66dc` |  |
+| `tests/test_export_formatting.py` | verbatim | `0c773e90a93d` |  |
+| `tests/test_export_xlsx_ortools_cp_sat.py` | verbatim | `45d8278a04b2` |  |
+| `tests/test_exporter.py` | verbatim | `f974c0e0018f` |  |
+| `tests/test_frontend_validation.py` | excluded |  | X5: tests frontend_validation.py |
+| `tests/test_hours_contract_field.py` | verbatim | `a493c596f095` |  |
+| `tests/test_hours_contract_validation.py` | verbatim | `53b75c6d1a86` |  |
+| `tests/test_job_response_contract.py` | v2-only |  | pins the job response contract golden |
+| `tests/test_leave_daystate.py` | verbatim | `c2367ad6ecfd` |  |
+| `tests/test_loader.py` | verbatim | `52e8a5289bd2` |  |
+| `tests/test_models_validation.py` | verbatim | `7a3bc9fb4c3f` |  |
+| `tests/test_optimize_basis.py` | v2-only |  | P8 basis |
+| `tests/test_optimize_basis_admission.py` | v2-only |  | P8 basis admission |
+| `tests/test_optimize_job_backends.py` | verbatim | `c6586bafd54a` |  |
+| `tests/test_performance_benchmark.py` | excluded |  | Docker performance benchmark not adopted (lane 05 D5) |
+| `tests/test_person_temporary.py` | v2-only |  | temporary staff in Workspace input (P1 retired, bead pknr) |
+| `tests/test_preference_validation.py` | verbatim | `8ab8e8de5fc8` |  |
+| `tests/test_process_executor.py` | patched | `2fe233743b2b` | `W2-tests-test_process_executor.patch` (X4) |
+| `tests/test_public_diagnostic.py` | patched | `b45cadd61187` | `W2-tests-test_public_diagnostic.patch` (P14) |
+| `tests/test_real_run_schedule.py` | verbatim | `2c3b74aa2246` |  |
+| `tests/test_real_schedule_helper.py` | verbatim | `86f0202bb4c9` |  |
+| `tests/test_real_solver_capabilities.py` | verbatim | `dcd4f9c72723` |  |
+| `tests/test_requirement_overrides.py` | v2-only |  | P3 per-date overrides |
+| `tests/test_retry.py` | verbatim | `724b206e0095` |  |
+| `tests/test_roster_container.py` | v2-only |  | P7 roster container |
+| `tests/test_roster_routes.py` | v2-only |  | P7 /xlsx and /roster routes |
+| `tests/test_runner_inconclusive.py` | v2-only |  | P8 INCONCLUSIVE outcome |
+| `tests/test_runner_real_inconclusive.py` | v2-only |  | P8 real scheduler reaches INCONCLUSIVE |
+| `tests/test_runner_termination.py` | v2-only |  | P7 roster handoff on each termination |
+| `tests/test_schedule_ortools_cp_sat.py` | verbatim | `18d0697bddd4` |  |
+| `tests/test_schedule_ortools_mathopt_cp_sat.py` | verbatim | `81d13a3ecb77` |  |
+| `tests/test_schedule_ortools_mathopt_gscip.py` | verbatim | `6d31e03ae628` |  |
+| `tests/test_schedule_ortools_mathopt_highs.py` | verbatim | `6f0b66c44012` |  |
+| `tests/test_schedule_ortools_mpsolver_bop.py` | verbatim | `1fda1bb6934e` |  |
+| `tests/test_schedule_ortools_mpsolver_cbc.py` | verbatim | `7c5292150b21` |  |
+| `tests/test_schedule_ortools_mpsolver_cp_sat.py` | verbatim | `7eff3b47430f` |  |
+| `tests/test_schedule_ortools_mpsolver_scip.py` | verbatim | `56c2c9353b90` |  |
+| `tests/test_schedule_pulp_glpk.py` | verbatim | `a4b4ae59afd5` |  |
+| `tests/test_schedule_pulp_highs.py` | verbatim | `e232c450b15a` |  |
+| `tests/test_schedule_pulp_scip.py` | verbatim | `2920bc5a6e5f` |  |
+| `tests/test_scheduler.py` | verbatim | `d82103a534ad` |  |
+| `tests/test_scheduler_on_roster.py` | v2-only |  | P4 on_roster callback |
+| `tests/test_serve.py` | patched | `00598907deac` | `W6-tests-test_serve.patch` (P5, P8, P11). conftest.py UPSTREAM_DEVIATIONS skips 9 of its genie tests |
+| `tests/test_serve_curl.sh` | verbatim | `6eedfbee5736` |  |
+| `tests/test_server_api.py` | v2-only |  | v2 HTTP API suite (P5 to P9, P11) |
+| `tests/test_server_backend_parity.py` | v2-only |  | memory, fakeredis and real Redis behave the same |
+| `tests/test_server_controller_retry.py` | v2-only |  | controller retry paths |
+| `tests/test_server_identity.py` | v2-only |  | runtime identity in /info |
+| `tests/test_server_lifecycle_gates.py` | v2-only |  | job lifecycle gates, rewritten onto the W6 lease API |
+| `tests/test_server_priority_queue.py` | v2-only |  | P9 purpose queues. W6: the memory variant of 5 residue tests skips (the genie memory store has no queue index), and the 2-line hash-tag test was deleted (Lua only) |
+| `tests/test_server_replay.py` | v2-only |  | P6 event replay |
+| `tests/test_server_scheduling_input.py` | v2-only |  | P5 submit boundary |
+| `tests/test_server_store_contract.py` | v2-only |  | store contract on every backend |
+| `tests/test_server_worker_loss.py` | v2-only |  | worker loss recovery. W6 deleted the claim_expires_at and worker_id equality lines (Lua only) |
+| `tests/test_server_worker_loss_multiprocess.py` | v2-only |  | real-Redis SIGKILL worker-loss gate |
+| `tests/test_sg_compliance_roster.py` | v2-only |  | SG 28-day compliance ward case (upstream candidate) |
+| `tests/test_shift_type_covering_preference.py` | verbatim | `ebe0c2d46e3a` |  |
+| `tests/test_shift_type_working_time.py` | verbatim | `8c8caf53830a` |  |
+| `tests/test_skill_mix.py` | v2-only |  | P2 skillMix |
+| `tests/test_solver_interface.py` | verbatim | `523fc735d17e` |  |
+| `tests/test_solver_ortools_cp_sat.py` | verbatim | `794aad1fceb4` |  |
+| `tests/test_solver_ortools_linear.py` | verbatim | `ad85c5496d0f` |  |
+| `tests/test_solver_ortools_mathopt.py` | verbatim | `5dd68e6d1afe` |  |
+| `tests/test_solver_pulp_glpk.py` | verbatim | `be94ac4ce248` |  |
+| `tests/test_solver_pulp_python.py` | verbatim | `9d25e7b5690f` |  |
+| `tests/test_temporary_cover_equivalence.py` | v2-only |  | temporary cover fixtures solve alike |
+| `tests/test_usage_metrics.py` | excluded |  | X6: tests telemetry that v2 keeps off |
+| `tests/test_utils.py` | verbatim | `0850cbb2d6aa` |  |
+| `tests/test_version.py` | v2-only |  | v2 version stamping |
+| `tests/test_ward_shift_patterns_roster.py` | v2-only |  | 8-shift-pattern ward case |
+| `tests/test_workspace_temporary_cover.py` | v2-only |  | P5 temporary cover in Workspace input |
+| `tests/test_yaml_bound.py` | v2-only |  | coded 400 for the YAML expansion bound |
+| `tests/testcases/artificial/ortools/README.md` | verbatim | `8e5bfb197203` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution.csv` | verbatim | `dc543f5000cf` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution.prettify.xlsx` | verbatim | `bc51fc0fb6cd` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution.xlsx` | verbatim | `5177485d8690` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution.yaml` | verbatim | `7b9e14f90ed1` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_all_mse.csv` | verbatim | `a3a6a6b03ce3` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_all_mse.prettify.xlsx` | verbatim | `cfeecb04a986` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_all_mse.xlsx` | verbatim | `3fdd37a78da7` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_all_mse.yaml` | verbatim | `fc4332bf1fd5` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_nested.csv` | verbatim | `dc543f5000cf` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_nested.prettify.xlsx` | verbatim | `bc51fc0fb6cd` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_nested.xlsx` | verbatim | `5177485d8690` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_nested.yaml` | verbatim | `75771eb8a213` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_offs.csv` | verbatim | `dc543f5000cf` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_offs.prettify.xlsx` | verbatim | `bc51fc0fb6cd` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_offs.xlsx` | verbatim | `5177485d8690` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_offs.yaml` | verbatim | `43c701d9b28b` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_penalty.csv` | verbatim | `dc543f5000cf` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_penalty.prettify.xlsx` | verbatim | `bc51fc0fb6cd` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_penalty.xlsx` | verbatim | `5177485d8690` |  |
+| `tests/testcases/artificial/ortools/ex1_even_shift_distribution_count_penalty.yaml` | verbatim | `9edfc09acc40` |  |
+| `tests/testcases/artificial/ortools/ex2_multiple_date_formats.csv` | verbatim | `e5864cc021c6` |  |
+| `tests/testcases/artificial/ortools/ex2_multiple_date_formats.prettify.xlsx` | verbatim | `41e8a7121ba0` |  |
+| `tests/testcases/artificial/ortools/ex2_multiple_date_formats.xlsx` | verbatim | `5774fb00bd08` |  |
+| `tests/testcases/artificial/ortools/ex2_multiple_date_formats.yaml` | verbatim | `6e090e1b95d4` |  |
+| `tests/testcases/artificial/ortools/ex2_multiple_shift_requests.csv` | verbatim | `99392c859a1f` |  |
+| `tests/testcases/artificial/ortools/ex2_multiple_shift_requests.prettify.xlsx` | verbatim | `bcdcb911b2b8` |  |
+| `tests/testcases/artificial/ortools/ex2_multiple_shift_requests.xlsx` | verbatim | `fc09d55d7f22` |  |
+| `tests/testcases/artificial/ortools/ex2_multiple_shift_requests.yaml` | verbatim | `d820b695ca02` |  |
+| `tests/testcases/artificial/ortools/ex2_shorthand_dates.csv` | verbatim | `e5864cc021c6` |  |
+| `tests/testcases/artificial/ortools/ex2_shorthand_dates.prettify.xlsx` | verbatim | `8e0ba7230fe9` |  |
+| `tests/testcases/artificial/ortools/ex2_shorthand_dates.xlsx` | verbatim | `5774fb00bd08` |  |
+| `tests/testcases/artificial/ortools/ex2_shorthand_dates.yaml` | verbatim | `91c531f3b0b5` |  |
+| `tests/testcases/basics/01_1nurse_1shift_12day_fix_shift_count_penalty_ortools_9.12_bug.csv` | verbatim | `3f842aeba9dc` |  |
+| `tests/testcases/basics/01_1nurse_1shift_12day_fix_shift_count_penalty_ortools_9.12_bug.prettify.xlsx` | verbatim | `bbd40c6696ca` |  |
+| `tests/testcases/basics/01_1nurse_1shift_12day_fix_shift_count_penalty_ortools_9.12_bug.xlsx` | verbatim | `81138d60d0c8` |  |
+| `tests/testcases/basics/01_1nurse_1shift_12day_fix_shift_count_penalty_ortools_9.12_bug.yaml` | verbatim | `5916e2c81550` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day.csv` | verbatim | `012778dd0614` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day.prettify.xlsx` | verbatim | `39609182f76d` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day.xlsx` | verbatim | `a3b222a61f10` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day.yaml` | verbatim | `bbafd44288b8` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_all_prefs.csv` | verbatim | `6379882a616d` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_all_prefs.prettify.xlsx` | verbatim | `e6bb40889d22` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_all_prefs.xlsx` | verbatim | `c70edc72dfc9` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_all_prefs.yaml` | verbatim | `bbf99ad75f54` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_all_error.txt` | verbatim | `29047bcabe13` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_all_error.yaml` | verbatim | `d676ff52eb76` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_monday_error.txt` | verbatim | `3bda98421cc2` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_monday_error.yaml` | verbatim | `1f1815867aff` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_weekday_error.txt` | verbatim | `6d04a7b3218f` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_dates_group_keyword_weekday_error.yaml` | verbatim | `e1d9296c43bd` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_extra_parameter_error.txt` | verbatim | `91e3e902491e` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_extra_parameter_error.yaml` | verbatim | `5d124a388ee5` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_infeasible.csv` | verbatim | `d7580c7303f6` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_infeasible.yaml` | verbatim | `0b672883c947` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_pattern_not_list_error.txt` | verbatim | `d8addb71b627` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_pattern_not_list_error.yaml` | verbatim | `f03a7b45fa4c` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_people_group_keyword_all_error.txt` | verbatim | `1057b856318d` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_people_group_keyword_all_error.yaml` | verbatim | `b1004fa01e65` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_shift_type_requirement_off_error.txt` | verbatim | `59627852ed8d` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_shift_type_requirement_off_error.yaml` | verbatim | `492ad4bc3590` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_shift_types_group_keyword_all_error.txt` | verbatim | `35521dac3200` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_shift_types_group_keyword_all_error.yaml` | verbatim | `b0a12100a34e` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_weight_floating_point_error.txt` | verbatim | `a98fa7fcf705` |  |
+| `tests/testcases/basics/01_1nurse_1shift_1day_weight_floating_point_error.yaml` | verbatim | `767c3f6e2664` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_aggregate.csv` | verbatim | `4b07e8a62e4f` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_aggregate.prettify.xlsx` | verbatim | `f5bf578f8698` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_aggregate.xlsx` | verbatim | `cc0f1a834698` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_aggregate.yaml` | verbatim | `5cd2d95614d8` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_duplicate.csv` | verbatim | `d87429f07541` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_duplicate.prettify.xlsx` | verbatim | `47dc91d4d933` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_duplicate.xlsx` | verbatim | `fa595661d398` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_duplicate.yaml` | verbatim | `ab45d832f098` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_group_aggregate.csv` | verbatim | `41b282f21f0f` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_group_aggregate.prettify.xlsx` | verbatim | `bc995deee44e` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_group_aggregate.xlsx` | verbatim | `56d927426e95` |  |
+| `tests/testcases/basics/02_1nurse_2shifts_2days_shift_type_requirement_nested_group_aggregate.yaml` | verbatim | `f05b754cbade` |  |
+| `tests/testcases/basics/02_2nurses_2shifts_1day_shift_type_requirement_flat_list_independent.csv` | verbatim | `efc5158665f1` |  |
+| `tests/testcases/basics/02_2nurses_2shifts_1day_shift_type_requirement_flat_list_independent.prettify.xlsx` | verbatim | `ab87ce680469` |  |
+| `tests/testcases/basics/02_2nurses_2shifts_1day_shift_type_requirement_flat_list_independent.xlsx` | verbatim | `806202e41d8e` |  |
+| `tests/testcases/basics/02_2nurses_2shifts_1day_shift_type_requirement_flat_list_independent.yaml` | verbatim | `cfd4e1330a23` |  |
+| `tests/testcases/basics/02_2nurses_2shifts_6days_shift_count_coefficients_balance.csv` | verbatim | `d8042f04fac6` |  |
+| `tests/testcases/basics/02_2nurses_2shifts_6days_shift_count_coefficients_balance.prettify.xlsx` | verbatim | `64fc2e7eb845` |  |
+| `tests/testcases/basics/02_2nurses_2shifts_6days_shift_count_coefficients_balance.xlsx` | verbatim | `f92bae30fac9` |  |
+| `tests/testcases/basics/02_2nurses_2shifts_6days_shift_count_coefficients_balance.yaml` | verbatim | `1932ee869fc9` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day.csv` | verbatim | `5c27dfda5f00` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day.prettify.xlsx` | verbatim | `4799c3218cc3` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day.xlsx` | verbatim | `dbf922d73e8f` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day.yaml` | verbatim | `9da77055e633` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract.csv` | verbatim | `e508d123e20c` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract.prettify.xlsx` | verbatim | `cb681b9bdef0` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract.xlsx` | verbatim | `c14196a52130` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract.yaml` | verbatim | `a8424e31c65b` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract_off.csv` | verbatim | `19eb87679575` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract_off.prettify.xlsx` | verbatim | `cea0678aca6e` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract_off.xlsx` | verbatim | `e09fcbd9fd6f` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_attract_off.yaml` | verbatim | `3414fe8b30db` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_repel.csv` | verbatim | `80e726b88422` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_repel.prettify.xlsx` | verbatim | `a5d60f4f4de4` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_repel.xlsx` | verbatim | `de03e639e943` |  |
+| `tests/testcases/basics/02_3nurses_1shift_1day_shift_affinity_repel.yaml` | verbatim | `1dc71f7b4aa3` |  |
+| `tests/testcases/basics/02_3nurses_2shifts_5days_shift_type_requirement_coefficients_balance_weighted.csv` | verbatim | `422f7bcd21cc` |  |
+| `tests/testcases/basics/02_3nurses_2shifts_5days_shift_type_requirement_coefficients_balance_weighted.prettify.xlsx` | verbatim | `5b1ab79b559a` |  |
+| `tests/testcases/basics/02_3nurses_2shifts_5days_shift_type_requirement_coefficients_balance_weighted.xlsx` | verbatim | `a0735f8f49e7` |  |
+| `tests/testcases/basics/02_3nurses_2shifts_5days_shift_type_requirement_coefficients_balance_weighted.yaml` | verbatim | `2976bca29914` |  |
+| `tests/testcases/basics/02_3nurses_2shifts_6days_shift_type_requirement_coefficients_balance_all.csv` | verbatim | `7cf60e46c0bc` |  |
+| `tests/testcases/basics/02_3nurses_2shifts_6days_shift_type_requirement_coefficients_balance_all.prettify.xlsx` | verbatim | `ac3bb28e7cf0` |  |
+| `tests/testcases/basics/02_3nurses_2shifts_6days_shift_type_requirement_coefficients_balance_all.xlsx` | verbatim | `5b39d97eb318` |  |
+| `tests/testcases/basics/02_3nurses_2shifts_6days_shift_type_requirement_coefficients_balance_all.yaml` | verbatim | `1eafd0a5900c` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days.csv` | verbatim | `21b46ee70bbf` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days.prettify.xlsx` | verbatim | `e3ee89eecb24` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days.xlsx` | verbatim | `ccce1b961c83` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days.yaml` | verbatim | `732dbbde7c51` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_dates_group_odd.csv` | verbatim | `4e649ef8c168` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_dates_group_odd.prettify.xlsx` | verbatim | `53f2a33453db` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_dates_group_odd.xlsx` | verbatim | `ffba2a5108e3` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_dates_group_odd.yaml` | verbatim | `a38159d2268f` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_monday_blue.csv` | verbatim | `37d378463aab` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_monday_blue.prettify.xlsx` | verbatim | `8314e12286ca` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_monday_blue.xlsx` | verbatim | `f04d2975296e` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_monday_blue.yaml` | verbatim | `b2954833afbe` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_equals.csv` | verbatim | `01dd1efced8a` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_equals.prettify.xlsx` | verbatim | `0c3ae8750371` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_equals.xlsx` | verbatim | `f20ea088ea9d` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_equals.yaml` | verbatim | `719c7b313bf2` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_mse.csv` | verbatim | `01dd1efced8a` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_mse.prettify.xlsx` | verbatim | `0c3ae8750371` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_mse.xlsx` | verbatim | `f20ea088ea9d` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_shift_request_shift_type_mixed_off_shift_count_mse.yaml` | verbatim | `9d4cc36f3c4e` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all.csv` | verbatim | `e83ceca3227e` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all.prettify.xlsx` | verbatim | `38c5536d42f8` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all.xlsx` | verbatim | `711a45d0d425` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all.yaml` | verbatim | `9e234ebf8ab6` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all_with_shift_request_off.csv` | verbatim | `985eb190b9f8` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all_with_shift_request_off.prettify.xlsx` | verbatim | `5ac78a50f27e` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all_with_shift_request_off.xlsx` | verbatim | `f27966dfc41a` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_all_all_all_with_shift_request_off.yaml` | verbatim | `9ef4d7692358` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off.csv` | verbatim | `4684c7a57c20` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off.prettify.xlsx` | verbatim | `74731d3a2268` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off.xlsx` | verbatim | `737f684b8d75` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off.yaml` | verbatim | `410a43beba2c` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off_with_history.csv` | verbatim | `dc543f5000cf` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off_with_history.prettify.xlsx` | verbatim | `bd6ecaf929e7` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off_with_history.xlsx` | verbatim | `c44c2a7d8f93` |  |
+| `tests/testcases/basics/02_4nurses_3shifts_3days_unwanted_patterns_off_off_with_history.yaml` | verbatim | `88ea86960c24` |  |
+| `tests/testcases/basics/03_3nurses_3shifts_8days_shift_type_requirement_coefficients_balance_weighted.csv` | verbatim | `d8418416069f` |  |
+| `tests/testcases/basics/03_3nurses_3shifts_8days_shift_type_requirement_coefficients_balance_weighted.prettify.xlsx` | verbatim | `9a8619b9f7d8` |  |
+| `tests/testcases/basics/03_3nurses_3shifts_8days_shift_type_requirement_coefficients_balance_weighted.xlsx` | verbatim | `124a004f7ee9` |  |
+| `tests/testcases/basics/03_3nurses_3shifts_8days_shift_type_requirement_coefficients_balance_weighted.yaml` | verbatim | `c91ffcd3c774` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts.csv` | verbatim | `4eda085fc651` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts.prettify.xlsx` | verbatim | `fcc5bd689608` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts.xlsx` | verbatim | `89885d8c27fb` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts.yaml` | verbatim | `4f9a46ca6d33` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer.csv` | verbatim | `f6c6bc9cd1f7` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer.prettify.xlsx` | verbatim | `f26ada526195` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer.xlsx` | verbatim | `2d9ebca40e1d` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer.yaml` | verbatim | `606cda39449e` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer_with_dates.csv` | verbatim | `34b2556d94b0` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer_with_dates.prettify.xlsx` | verbatim | `3ebf0fc23114` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer_with_dates.xlsx` | verbatim | `d24e04c172f8` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_5days_unwanted_pattern_three_consecutive_shifts_prefer_with_dates.yaml` | verbatim | `f37a31fea673` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days.csv` | verbatim | `770b36448a2a` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days.prettify.xlsx` | verbatim | `72278ac8240b` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days.xlsx` | verbatim | `12e660501e0f` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days.yaml` | verbatim | `918226af1d9c` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_avoid_night_shifts.csv` | verbatim | `899bd6c5d4ce` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_avoid_night_shifts.prettify.xlsx` | verbatim | `37cc713dcea3` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_avoid_night_shifts.xlsx` | verbatim | `35ab65945635` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_avoid_night_shifts.yaml` | verbatim | `1d04cbb8f03c` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_person_list_dates_range.csv` | verbatim | `899bd6c5d4ce` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_person_list_dates_range.prettify.xlsx` | verbatim | `9053f3dbb6d5` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_person_list_dates_range.xlsx` | verbatim | `4c76ee8b99a4` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_person_list_dates_range.yaml` | verbatim | `698c65e9fe57` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group.csv` | verbatim | `603a715f186c` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group.prettify.xlsx` | verbatim | `ec6df09201a2` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group.xlsx` | verbatim | `018ad3afc343` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group.yaml` | verbatim | `7c1d55d7da53` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group_nested.csv` | verbatim | `603a715f186c` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group_nested.prettify.xlsx` | verbatim | `ec6df09201a2` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group_nested.xlsx` | verbatim | `018ad3afc343` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_group_nested.yaml` | verbatim | `f1fbc467c8b3` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_length_1.csv` | verbatim | `899bd6c5d4ce` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_length_1.prettify.xlsx` | verbatim | `9053f3dbb6d5` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_length_1.xlsx` | verbatim | `35ab65945635` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_length_1.yaml` | verbatim | `7322166d34fc` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty.csv` | verbatim | `603a715f186c` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty.prettify.xlsx` | verbatim | `d7fbe00cece8` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty.xlsx` | verbatim | `61811caffcea` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty.yaml` | verbatim | `3e1c4449b668` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty_infinite.csv` | verbatim | `603a715f186c` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty_infinite.prettify.xlsx` | verbatim | `d7fbe00cece8` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty_infinite.xlsx` | verbatim | `6ec479eb3ad6` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_request_shift_type_list_penalty_infinite.yaml` | verbatim | `ceab37ed8066` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_people_all.csv` | verbatim | `bc7d6e5ff746` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_people_all.prettify.xlsx` | verbatim | `372403084932` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_people_all.xlsx` | verbatim | `1fd36dc962aa` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_people_all.yaml` | verbatim | `6eb35ae2dbc2` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_qualified_people.csv` | verbatim | `8f0bfefc51f6` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_qualified_people.prettify.xlsx` | verbatim | `b38514e05ad2` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_qualified_people.xlsx` | verbatim | `a0bb5ccb8298` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_qualified_people.yaml` | verbatim | `8af819c57e39` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_shift_type_all.csv` | verbatim | `33e417540aea` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_shift_type_all.prettify.xlsx` | verbatim | `497cd1c160b9` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_shift_type_all.xlsx` | verbatim | `ca1f51111f8d` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_shift_type_requirement_shift_type_all.yaml` | verbatim | `cbfb859b23b3` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history.csv` | verbatim | `5fc0f2424703` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history.prettify.xlsx` | verbatim | `ea6a05ea4682` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history.xlsx` | verbatim | `a7da1b01ffe3` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history.yaml` | verbatim | `aeefe297b3b7` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history_shift_request_must_violate.csv` | verbatim | `064141125478` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history_shift_request_must_violate.prettify.xlsx` | verbatim | `77464bf79a70` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history_shift_request_must_violate.xlsx` | verbatim | `fa656ce3c2bb` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_history_shift_request_must_violate.yaml` | verbatim | `f8f33cb44c8c` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_inf.csv` | verbatim | `899bd6c5d4ce` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_inf.prettify.xlsx` | verbatim | `9053f3dbb6d5` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_inf.xlsx` | verbatim | `4c76ee8b99a4` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_inf.yaml` | verbatim | `b60a56f04272` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_ninf.csv` | verbatim | `899bd6c5d4ce` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_ninf.prettify.xlsx` | verbatim | `9053f3dbb6d5` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_ninf.xlsx` | verbatim | `4c76ee8b99a4` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_ninf.yaml` | verbatim | `4e18bea1eb11` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups.csv` | verbatim | `899bd6c5d4ce` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups.prettify.xlsx` | verbatim | `02010b16ec57` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups.xlsx` | verbatim | `4c76ee8b99a4` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups.yaml` | verbatim | `3a140c418753` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups_nested.csv` | verbatim | `899bd6c5d4ce` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups_nested.prettify.xlsx` | verbatim | `02010b16ec57` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups_nested.xlsx` | verbatim | `4c76ee8b99a4` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_groups_nested.yaml` | verbatim | `01019269bff6` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_reversed.csv` | verbatim | `60b385b050d3` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_reversed.prettify.xlsx` | verbatim | `8844bba189ed` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_reversed.xlsx` | verbatim | `0f339f63da21` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_reversed.yaml` | verbatim | `a9d46a20bd5e` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_string.csv` | verbatim | `6516d79fef90` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_string.prettify.xlsx` | verbatim | `00bd2512d2f0` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_string.xlsx` | verbatim | `a05b1de451f1` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_people_ids_string.yaml` | verbatim | `78b0eb6a7d67` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns.csv` | verbatim | `555d8cd74f8c` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns.prettify.xlsx` | verbatim | `ee3cfed90217` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns.xlsx` | verbatim | `37f210b687f4` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns.yaml` | verbatim | `236e1c8591b3` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_2.csv` | verbatim | `555d8cd74f8c` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_2.prettify.xlsx` | verbatim | `19dd62700411` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_2.xlsx` | verbatim | `6faab3029f22` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_2.yaml` | verbatim | `cb6226f97b4d` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_nested.csv` | verbatim | `555d8cd74f8c` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_nested.prettify.xlsx` | verbatim | `19dd62700411` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_nested.xlsx` | verbatim | `e5997b1040b5` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_real_patterns_nested.yaml` | verbatim | `ab40d5db2eb5` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_single_shift.csv` | verbatim | `899bd6c5d4ce` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_single_shift.prettify.xlsx` | verbatim | `37cc713dcea3` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_single_shift.xlsx` | verbatim | `c7f65dc3f681` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_single_shift.yaml` | verbatim | `0b03310fbb22` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_consecutive_shifts.csv` | verbatim | `ae6a4aa9a960` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_consecutive_shifts.prettify.xlsx` | verbatim | `62ab70caf1a7` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_consecutive_shifts.xlsx` | verbatim | `2471978b1d39` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_consecutive_shifts.yaml` | verbatim | `0f71c7534098` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_nurses.csv` | verbatim | `899bd6c5d4ce` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_nurses.prettify.xlsx` | verbatim | `9053f3dbb6d5` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_nurses.xlsx` | verbatim | `4c76ee8b99a4` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_two_nurses.yaml` | verbatim | `012f5345ad0b` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_weighted.csv` | verbatim | `8533b98aa0ea` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_weighted.prettify.xlsx` | verbatim | `c409cfd74730` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_weighted.xlsx` | verbatim | `065dfdf2fd87` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_pattern_weighted.yaml` | verbatim | `507399e5fce9` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_patterns_all_all_all_with_history.csv` | verbatim | `3809ce0813e7` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_patterns_all_all_all_with_history.prettify.xlsx` | verbatim | `20c9d111519b` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_patterns_all_all_all_with_history.xlsx` | verbatim | `5d420aa8d122` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_7days_unwanted_patterns_all_all_all_with_history.yaml` | verbatim | `2099cd70ccc2` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_9days_fix_dates_range_modified_during_date_parsing_bug.csv` | verbatim | `049d2db1a2ed` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_9days_fix_dates_range_modified_during_date_parsing_bug.prettify.xlsx` | verbatim | `fe19a1b09201` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_9days_fix_dates_range_modified_during_date_parsing_bug.xlsx` | verbatim | `53527dbf739e` |  |
+| `tests/testcases/basics/03_4nurses_3shifts_9days_fix_dates_range_modified_during_date_parsing_bug.yaml` | verbatim | `3a5ea07d156d` |  |
+| `tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_range.csv` | verbatim | `46f324d02cf9` |  |
+| `tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_range.prettify.xlsx` | verbatim | `184a3e21e9a2` |  |
+| `tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_range.xlsx` | verbatim | `d861e64c0127` |  |
+| `tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_range.yaml` | verbatim | `8b0287a95713` |  |
+| `tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_weekday.csv` | verbatim | `e9bdfbf19978` |  |
+| `tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_weekday.prettify.xlsx` | verbatim | `bdd3cdfd6e6d` |  |
+| `tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_weekday.xlsx` | verbatim | `b0176ca27717` |  |
+| `tests/testcases/basics/03_4nurses_4shifts_7days_shift_type_requirement_date_weekday.yaml` | verbatim | `fd88549c89c7` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days.csv` | verbatim | `273fabaaad97` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days.prettify.xlsx` | verbatim | `0fdc68b1126a` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days.xlsx` | verbatim | `95f14611e6a1` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days.yaml` | verbatim | `0ad116987cb0` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_date.csv` | verbatim | `c0d268ab2498` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_date.prettify.xlsx` | verbatim | `0f99df7245c6` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_date.xlsx` | verbatim | `fc769882143f` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_date.yaml` | verbatim | `fa0b1778bc04` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1.csv` | verbatim | `a48042a773ec` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1.prettify.xlsx` | verbatim | `83fbb208213a` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1.xlsx` | verbatim | `401113309383` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1.yaml` | verbatim | `1e135127d271` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1_nested.csv` | verbatim | `a48042a773ec` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1_nested.prettify.xlsx` | verbatim | `ca8513f31481` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1_nested.xlsx` | verbatim | `74b85e967564` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_attract_repel_multiple_people1_nested.yaml` | verbatim | `898ea5af1d9f` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2.csv` | verbatim | `059408770421` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2.prettify.xlsx` | verbatim | `c9f342351bd9` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2.xlsx` | verbatim | `7e502ddc9802` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2.yaml` | verbatim | `5791c354ef4a` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested.csv` | verbatim | `059408770421` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested.prettify.xlsx` | verbatim | `683bab43b638` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested.xlsx` | verbatim | `b146173793ff` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested.yaml` | verbatim | `bbb7a6eea9fb` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested_nested.csv` | verbatim | `059408770421` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested_nested.prettify.xlsx` | verbatim | `c9f342351bd9` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested_nested.xlsx` | verbatim | `7e502ddc9802` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_affinity_repel_multiple_people1_people2_nested_nested.yaml` | verbatim | `623c5f6c9586` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_type_requirement_preferred_num_people.csv` | verbatim | `273fabaaad97` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_type_requirement_preferred_num_people.prettify.xlsx` | verbatim | `0fdc68b1126a` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_type_requirement_preferred_num_people.xlsx` | verbatim | `95f14611e6a1` |  |
+| `tests/testcases/basics/03_6nurses_3shifts_7days_shift_type_requirement_preferred_num_people.yaml` | verbatim | `e954544deab7` |  |
+| `tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types.csv` | verbatim | `db2a1afca741` |  |
+| `tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types.prettify.xlsx` | verbatim | `69d6d6984925` |  |
+| `tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types.xlsx` | verbatim | `7e1a87d50844` |  |
+| `tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types.yaml` | verbatim | `19199611e222` |  |
+| `tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types_expand.csv` | verbatim | `db2a1afca741` |  |
+| `tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types_expand.prettify.xlsx` | verbatim | `835d89d0083a` |  |
+| `tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types_expand.xlsx` | verbatim | `22ecc4d39b13` |  |
+| `tests/testcases/basics/03_6nurses_6shifts_7days_shift_affinity_attract_multiple_shift_types_expand.yaml` | verbatim | `5158c9cff365` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2023.csv` | verbatim | `594ce8847d97` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2023.prettify.xlsx` | verbatim | `89a594da4fd4` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2023.xlsx` | verbatim | `33d025043df5` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2024.csv` | verbatim | `d2d3bced72e9` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2024.prettify.xlsx` | verbatim | `52a5eab2d0c5` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2024.xlsx` | verbatim | `63d986eb461b` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025.csv` | verbatim | `a2e62d1bb00f` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025.prettify.xlsx` | verbatim | `3651ba9d0e7f` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025.xlsx` | verbatim | `4bcb505999b2` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025_labor.csv` | verbatim | `f01275ca988b` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025_labor.prettify.xlsx` | verbatim | `938d7f6e8767` |  |
+| `tests/testcases/basics/04_1nurses_1shifts_1years_shift_type_requirement_date_workday_2025_labor.xlsx` | verbatim | `97d61fd2fc79` |  |
+| `tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json` | patched | `4221af315e07` | `P0-fixture-restamp.patch` (P0) |
+| `tests/testcases/real/large-ward-with-87-people-2025-11.yaml` | verbatim | `8ec166c666d5` |  |
+| `tests/testcases/real/sg-28day-160h-compliance-14-nurses.yaml` | v2-only |  | SG compliance ward case |
+| `tests/testcases/real/ward-8-shift-patterns-senior-on-every-shift.yaml` | v2-only |  | 8-shift-pattern ward case |
+| `upstream-patches/P0-fixture-restamp.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/P2-P3-skillmix-overrides.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/P4-on-roster.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W0-pyproject.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W0-requirements.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W2-server-api-optimize.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W2-server-api-schemas.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W2-server-app.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W2-server-config.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W2-server-diagnostic.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W2-server-errors.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W2-server-jobs-runner.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W2-server-maintenance.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W2-tests-test_process_executor.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W2-tests-test_public_diagnostic.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W5-AGENTS.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W5-tests-real-README.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W6-server-job_store.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W6-server-jobs-controller.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W6-server-jobs-models.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W6-server-jobs-worker.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W6-server-stores-memory.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W6-server-stores-redis.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/W6-tests-test_serve.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/manifest.toml` | v2-only |  | sync patch or manifest |
+<!-- origin-table:end -->
+
 ## Ported files (upstream → rebuild)
 
 All paths below are relative to `core/nurse_scheduling/`. Files were vendored from
