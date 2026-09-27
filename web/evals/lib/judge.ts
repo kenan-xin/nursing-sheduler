@@ -6,7 +6,7 @@ import { z } from "zod";
 import { OPENROUTER_BASE_URL } from "@/lib/ai/runtime/containment";
 import type { ScenarioUiState } from "@/lib/scenario";
 import type { ImportNormalizationTarget } from "@/lib/scenario/types";
-import type { JudgeItem, TranscriptEntry, TrialRecord } from "./trial";
+import { toolResultText, type JudgeItem, type TranscriptEntry, type TrialRecord } from "./trial";
 
 export const RUBRIC_VERSION = "2026-09-27.7";
 /** The app's screen names (components/shell/nav-config.ts), plain words for the judge. */
@@ -107,14 +107,14 @@ export function renderTranscript(
       // The roster tools show a card only on success; a refusal shows nothing (bead 20wo).
       if (
         (call.name === "prepare_borrowed_cover" || call.name === "prepare_roster_swap") &&
-        call.result?.includes("Nothing has changed yet")
+        toolResultText(call.result).includes("Nothing has changed yet")
       )
         lines.push("Preview shown to the user.");
       if (call.name === "request_optimize_run") lines.push("Run card shown to the user.");
       // ponytail: matches CARD_SHOWN in use-roster-tools.ts by prefix; a reworded result drops the line.
       const rosterCard =
         call.name === "prepare_roster_swap" || call.name === "prepare_borrowed_cover";
-      if (rosterCard && call.result?.startsWith("The user now sees a card"))
+      if (rosterCard && toolResultText(call.result).startsWith("The user now sees a card"))
         lines.push("Roster change card shown to the user; it changes nothing until they apply it.");
       if (call.name === "get_optimize_result") {
         // What the app told the assistant, so repeating it is not judged a false claim (pu5).

@@ -1,0 +1,354 @@
+# W2 patch for core/tests/test_process_executor.py against genie 1bf4b85.
+# hunk: the fake job uses ortools/cp-sat (X4)
+# hunk: v2 control, watchdog and failure-classification tests for run_optimization_process (U31)
+
+diff --git a/core/tests/test_process_executor.py b/core/tests/test_process_executor.py
+index 2fe2337..5005f5d 100644
+--- a/core/tests/test_process_executor.py
++++ b/core/tests/test_process_executor.py
+@@ -33,13 +33,22 @@ from pathlib import Path
+ import pytest
+ 
+ from nurse_scheduling.server.jobs import process_tree
+-from nurse_scheduling.server.jobs.models import Job, JobRequest, JobState
++from nurse_scheduling.server.jobs.models import (
++    Job,
++    JobFailure,
++    JobRequest,
++    JobState,
++    OptimizationOutcome,
++    OptimizationResult,
++    StoredArtifact,
++)
+ from nurse_scheduling.server.jobs.process_executor import (
+     ChildOptimizationError,
+     ProcessControl,
+     ProcessStatus,
+     run_optimization_process,
+ )
++from nurse_scheduling.server.jobs.runner import RunOutput
+ 
+ 
+ class DescendantHangingRunner:
+@@ -94,7 +103,7 @@ def _job(job_id: str) -> Job:
+         request=JobRequest(
+             input_name="input.yaml",
+             client_id="client",
+-            solver="pulp/highs",
++            solver="ortools/cp-sat",
+             prettify=False,
+             timeout_seconds=60,
+         ),
+@@ -570,3 +579,312 @@ def test_guard_death_aborts_optimization_process_tree():
+     assert not proof["supervisor_still_active"], proof
+     assert not proof["wrapper_still_active"], proof
+     assert not proof["descendant_still_active"], proof
++
++
++# Focused control, watchdog, and failure-classification tests drive
++# ``run_optimization_process`` directly with fake runners, independent of the
++# worker's claim/commit integration. Runner classes are module-level so the
++# spawn start method can pickle them for the child process.
++
++
++def _control_job(job_id: str, *, timeout_seconds: float = 60) -> Job:
++    return Job(
++        id=job_id,
++        state=JobState.RUNNING,
++        request=JobRequest(
++            input_name="input.yaml",
++            client_id="client",
++            solver="ortools/cp-sat",
++            prettify=False,
++            timeout_seconds=timeout_seconds,
++        ),
++        created_at=datetime.now(timezone.utc),
++    )
++
++
++class SuccessfulRunner:
++    def run(self, job, input_bytes, *, event_callback, should_stop):
++        event_callback("job.phase_changed", {"message": "Solving"}, None)
++        event_callback("job.progressed", {"current_best_score": 42}, 42)
++        return RunOutput(
++            result=OptimizationResult(
++                outcome=OptimizationOutcome.OPTIMAL,
++                score=42,
++                solver_status="OPTIMAL",
++                termination_reason="optimality_proven",
++            ),
++            artifact=StoredArtifact(
++                name="schedule.xlsx",
++                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
++                content=b"fake xlsx",
++            ),
++        )
++
++
++class HangingRunner:
++    def run(self, job, input_bytes, *, event_callback, should_stop):
++        event_callback("job.phase_changed", {"code": "solving", "message": "Solving"}, None)
++        while True:
++            time.sleep(1)
++
++
++class PreSolveHangingRunner:
++    def run(self, job, input_bytes, *, event_callback, should_stop):
++        while True:
++            time.sleep(1)
++
++
++class AbruptExitRunner:
++    def run(self, job, input_bytes, *, event_callback, should_stop):
++        os._exit(7)
++
++
++class SlowTerminalMessage:
++    def __reduce__(self):
++        time.sleep(4)
++        return SlowTerminalMessage, ()
++
++
++class SlowTerminalMessageRunner:
++    def run(self, job, input_bytes, *, event_callback, should_stop):
++        return SlowTerminalMessage()
++
++
++class DelayedNativeTimeoutRunner:
++    def run(self, job, input_bytes, *, event_callback, should_stop):
++        time.sleep(0.15)
++        event_callback("job.phase_changed", {"code": "solving", "message": "Solving"}, None)
++        time.sleep(0.08)
++        event_callback("job.phase_changed", {"code": "exporting", "message": "Exporting"}, None)
++        time.sleep(0.15)
++        return RunOutput(
++            result=OptimizationResult(
++                outcome=OptimizationOutcome.FEASIBLE,
++                score=7,
++                solver_status="FEASIBLE",
++                termination_reason="solver_timeout",
++            ),
++            artifact=StoredArtifact("schedule.xlsx", "application/test", b"partial"),
++        )
++
++
++class ReturnedFailureRunner:
++    def run(self, job, input_bytes, *, event_callback, should_stop):
++        return JobFailure(
++            code="no_solution_found",
++            message="No schedule was produced. Solver status: UNKNOWN",
++        )
++
++
++class InvalidModelFailureRunner:
++    def run(self, job, input_bytes, *, event_callback, should_stop):
++        return JobFailure("invalid_model", "The generated solver model is invalid")
++
++
++class UnexpectedErrorRunner:
++    def run(self, job, input_bytes, *, event_callback, should_stop):
++        raise RuntimeError("solver exploded")
++
++
++def test_watchdog_terminates_process_after_timeout_grace():
++    result = run_optimization_process(
++        HangingRunner(),
++        _control_job("job_watchdog", timeout_seconds=1),
++        b"apiVersion: alpha\n",
++        event_callback=lambda *_args: None,
++        control=lambda: None,
++        hard_timeout_seconds=1.1,
++        finish_now_enabled=False,
++    )
++
++    assert result.status is ProcessStatus.FAILED
++    assert result.failure is not None
++    assert result.failure.code == "process_timeout"
++    # The message is surfaced verbatim to the user, so its UK-English prose is
++    # part of the contract, not incidental wording.
++    assert result.failure.message.startswith("The optimization process did not return")
++    assert "1-second timeout" in result.failure.message
++    assert "0.1-second timeout grace period" in result.failure.message
++
++
++def test_process_timeout_does_not_require_solving_phase_event():
++    result = run_optimization_process(
++        PreSolveHangingRunner(),
++        _control_job("job_pre_solve_timeout", timeout_seconds=0.05),
++        b"apiVersion: alpha\n",
++        event_callback=lambda *_args: None,
++        control=lambda: None,
++        hard_timeout_seconds=1.05,
++        finish_now_enabled=False,
++    )
++
++    assert result.status is ProcessStatus.FAILED
++    assert result.failure is not None
++    assert result.failure.code == "process_timeout"
++
++
++def test_watchdog_remains_armed_until_terminal_message_is_delivered():
++    result = run_optimization_process(
++        SlowTerminalMessageRunner(),
++        _control_job("job_slow_terminal_message", timeout_seconds=1),
++        b"apiVersion: alpha\n",
++        event_callback=lambda *_args: None,
++        control=lambda: None,
++        hard_timeout_seconds=2,
++        finish_now_enabled=False,
++    )
++
++    assert result.status is ProcessStatus.FAILED
++    assert result.failure is not None
++    assert result.failure.code == "process_timeout"
++
++
++def test_native_feasible_timeout_completes_with_solver_timeout_reason():
++    result = run_optimization_process(
++        DelayedNativeTimeoutRunner(),
++        _control_job("job_native_timeout", timeout_seconds=0.05),
++        b"apiVersion: alpha\n",
++        event_callback=lambda *_args: None,
++        control=lambda: None,
++        hard_timeout_seconds=2.05,
++        finish_now_enabled=False,
++    )
++
++    assert result.status is ProcessStatus.COMPLETED
++    assert result.output is not None
++    assert result.output.result.termination_reason == "solver_timeout"
++    assert result.output.artifact is not None
++
++
++def test_executor_reports_abrupt_child_exit_without_waiting_for_timeout():
++    # The worker wraps this into JobFailure("optimization_failed", str(error)), so the
++    # prose reaches the user: assert the UK-English wording, not just the code.
++    with pytest.raises(ChildOptimizationError, match="ChildProcessCommunicationError") as raised:
++        run_optimization_process(
++            AbruptExitRunner(),
++            _control_job("job_abrupt_exit"),
++            b"apiVersion: alpha\n",
++            event_callback=lambda *_args: None,
++            control=lambda: None,
++            hard_timeout_seconds=61,
++            finish_now_enabled=False,
++        )
++    assert "Optimization process closed its result channel" in str(raised.value)
++
++
++@pytest.mark.parametrize(
++    ("control", "expected_status"),
++    [
++        (ProcessControl.CANCEL, ProcessStatus.CANCELLED),
++        (ProcessControl.ABORT, ProcessStatus.ABORTED),
++    ],
++)
++def test_executor_returns_controlled_stop(control, expected_status):
++    result = run_optimization_process(
++        HangingRunner(),
++        _control_job(f"job_{control.value}"),
++        b"apiVersion: alpha\n",
++        event_callback=lambda *_args: None,
++        control=lambda: control,
++        hard_timeout_seconds=61,
++        finish_now_enabled=False,
++    )
++
++    assert result.status is expected_status
++    assert result.output is None
++    assert result.failure is None
++
++
++def test_abort_yields_to_a_buffered_terminal_success():
++    abort_requested = False
++
++    def publish(*_args):
++        nonlocal abort_requested
++        abort_requested = True
++        time.sleep(0.2)
++
++    result = run_optimization_process(
++        SuccessfulRunner(),
++        _control_job("job_buffered_success"),
++        b"apiVersion: alpha\n",
++        event_callback=publish,
++        control=lambda: ProcessControl.ABORT if abort_requested else None,
++        hard_timeout_seconds=61,
++        finish_now_enabled=False,
++    )
++
++    assert result.status is ProcessStatus.COMPLETED
++    assert result.output is not None
++    assert result.output.result.outcome is OptimizationOutcome.OPTIMAL
++
++
++def test_cancel_wins_over_a_buffered_terminal_success():
++    result_buffered = False
++
++    def publish(*_args):
++        nonlocal result_buffered
++        result_buffered = True
++        time.sleep(0.2)
++
++    result = run_optimization_process(
++        SuccessfulRunner(),
++        _control_job("job_cancel_over_buffer"),
++        b"apiVersion: alpha\n",
++        event_callback=publish,
++        control=lambda: ProcessControl.CANCEL if result_buffered else None,
++        hard_timeout_seconds=61,
++        finish_now_enabled=False,
++    )
++
++    assert result.status is ProcessStatus.CANCELLED
++    assert result.output is None
++    assert result.failure is None
++
++
++def test_returned_failure_becomes_a_structured_failed_result():
++    result = run_optimization_process(
++        ReturnedFailureRunner(),
++        _control_job("job_returned_failure"),
++        b"apiVersion: alpha\n",
++        event_callback=lambda *_args: None,
++        control=lambda: None,
++        hard_timeout_seconds=61,
++        finish_now_enabled=False,
++    )
++
++    assert result.status is ProcessStatus.FAILED
++    assert result.failure == JobFailure(
++        code="no_solution_found",
++        message="No schedule was produced. Solver status: UNKNOWN",
++    )
++
++
++def test_returned_invalid_model_failure_becomes_a_structured_failed_result():
++    result = run_optimization_process(
++        InvalidModelFailureRunner(),
++        _control_job("job_invalid_model_failure"),
++        b"apiVersion: alpha\n",
++        event_callback=lambda *_args: None,
++        control=lambda: None,
++        hard_timeout_seconds=61,
++        finish_now_enabled=False,
++    )
++
++    assert result.status is ProcessStatus.FAILED
++    assert result.failure == JobFailure(
++        code="invalid_model",
++        message="The generated solver model is invalid",
++    )
++
++
++def test_unexpected_child_exception_raises_child_optimization_error():
++    with pytest.raises(ChildOptimizationError, match="solver exploded"):
++        run_optimization_process(
++            UnexpectedErrorRunner(),
++            _control_job("job_unexpected_error"),
++            b"apiVersion: alpha\n",
++            event_callback=lambda *_args: None,
++            control=lambda: None,
++            hard_timeout_seconds=61,
++            finish_now_enabled=False,
++        )
