@@ -131,6 +131,11 @@ describe("the attached turn context", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Preview/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/user .*Apply/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/instead of refusing/);
+    // bead pu5: a successful run got no reading, a claimed Roster screen and a text question.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(
+      /finished and made a roster, call get_optimize_result.*as its guidance says; ask nothing/,
+    );
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/before anything else.*may not have kept/);
     // bead hnd: 'Make it fair' got a Prepare it / Not now card instead of a Preview.
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/prepare it straight away.*asking whether to/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/open_app_screen/);

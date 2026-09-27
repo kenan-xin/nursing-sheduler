@@ -7,6 +7,8 @@ import {
   useAssistantStore,
 } from "@/lib/ai/assistant/store";
 import { generateDateItems } from "@/lib/dates/date-id";
+import { INITIAL_OPTIMIZE_RUN_VIEW } from "@/lib/optimize/run-view";
+import { useHotStore } from "@/lib/store";
 import { useRosterChangeStore } from "@/lib/roster/change-request";
 import { fixtureSubmission } from "@/lib/roster/test-fixtures";
 import { PREFERENCE_TYPE, type CanonicalScenarioDocument } from "@/lib/scenario";
@@ -220,6 +222,35 @@ describe("find_swap_partners", () => {
         {},
       ),
     ).toMatch(/outside this roster/);
+  });
+
+  it("when the last run made a roster the app did not keep, never steers a cover to a new run", async () => {
+    // bead pu5: 'offer a run' here sent an MC cover to request_optimize_run, with no word
+    // that a new run can change everyone's shifts.
+    fixture.working = null;
+    fixture.pointer = null;
+    useHotStore.getState().setRunView({
+      ...INITIAL_OPTIMIZE_RUN_VIEW,
+      lifecycle: "completed",
+      jobId: "job-unsaved",
+      outcome: "optimal",
+    });
+    try {
+      for (const answer of [
+        String(await tool("find_swap_partners").handler(PRIYA_NIGHTS, {})),
+        String(await tool("get_roster").handler({}, {})),
+      ]) {
+        expect(answer).toMatch(/only the downloaded XLSX/);
+        expect(answer).toMatch(/cannot see who works/);
+        expect(answer).toMatch(/such as a nurse on MC, do not offer a new run/);
+        expect(answer).toMatch(/Start your reply with both facts/);
+        expect(answer).toMatch(/end on one open question at most, such as who is free that day/);
+        expect(answer).toMatch(/running the optimiser again can change everyone's shifts/);
+        expect(answer).not.toMatch(/request_optimize_run/);
+      }
+    } finally {
+      useHotStore.getState().setRunView(INITIAL_OPTIMIZE_RUN_VIEW);
+    }
   });
 
   it("refuses to swap while a newer run waits", async () => {
