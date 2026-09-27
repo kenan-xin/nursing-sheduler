@@ -29,6 +29,7 @@ import {
   type TestAuthority,
 } from "@/lib/store/test-authority";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
+import { useModeStore } from "@/lib/mode/mode";
 import { AssistantReceipts } from "./assistant-receipts";
 import { ProposalPreviewCard } from "./proposal-preview-card";
 import { useAssistantProposals } from "./use-assistant-proposals";
@@ -115,6 +116,9 @@ async function showProposal(commands: AssistantCommandV1[]) {
 beforeEach(async () => {
   sessionState.isRunning = false;
   sessionSend.mockClear();
+  // A live Preview is rendered after mount, when the stored mode has been adopted;
+  // the affected-screen names resolve only then, so pin that here.
+  useModeStore.setState({ mode: "guided", adoption: "ready" });
   assistantActions.resetForTest();
   harness = await installTestAuthority();
   await loadScenario(proposalScenario());
@@ -152,7 +156,12 @@ describe("the Preview states host-derived facts", () => {
     expect(await screen.findByTestId("proposal-needs-review")).toHaveTextContent(
       "Leave and requests",
     );
-    expect(await screen.findByTestId("proposal-screens")).toHaveTextContent("roster-period");
+    // The affected screens are named as the SIDEBAR names them, never as raw
+    // capability ids ("leave-and-requests, roster-period").
+    const screens = await screen.findByTestId("proposal-screens");
+    expect(screens).toHaveTextContent("Affects: Requests & Leave, Dates");
+    expect(screens).not.toHaveTextContent("leave-and-requests");
+    expect(screens).not.toHaveTextContent("roster-period");
 
     // The model's words are labelled as reasoning, never as the change itself.
     expect(await screen.findByTestId("proposal-rationale")).toHaveTextContent(
