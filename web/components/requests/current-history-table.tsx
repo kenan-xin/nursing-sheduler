@@ -87,7 +87,10 @@ export function CurrentHistoryTable({ people }: CurrentHistoryTableProps) {
               className="grid items-center gap-3 rounded-none border-b border-line2 px-5 py-2.5"
               style={{ gridTemplateColumns: "minmax(120px,1fr) 3fr" }}
             >
-              <span className="truncate font-ui text-meta font-semibold text-ink">
+              <span
+                className="min-w-0 truncate font-ui text-meta font-semibold text-ink"
+                title={person.person}
+              >
                 {person.person}
               </span>
               <div className="flex flex-wrap items-center gap-1.5" data-testid="history-chips">

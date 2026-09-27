@@ -51,6 +51,49 @@ describe("HistoryEditor", () => {
     expect(option).toHaveAttribute("title", label);
   });
 
+  // A long person name is prose: it wraps inside the header rather than pushing
+  // the popup past its own edge. The description's column and its flex row must
+  // both be shrinkable, or the flex item's `min-width: auto` keeps the whole
+  // hyphenated token as its min-content and overflows the dialog.
+  it("wraps a long person name inside the dialog header", () => {
+    const who = "ward8-east-extended-weekend-night-cover-rotation-".repeat(3).slice(0, 120);
+    render(
+      <HistoryEditor
+        open
+        who={who}
+        positionLabel="H-2"
+        currentValue={null}
+        options={OPTIONS}
+        onSet={vi.fn()}
+        onClear={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const description = document.querySelector("[data-slot='dialog-description']");
+    expect(description).not.toBeNull();
+    expect(description).toHaveTextContent(`${who} · H-2`);
+    expect(description?.parentElement).toHaveClass("min-w-0");
+    expect(description?.closest(".flex")).toHaveClass("min-w-0");
+  });
+
+  // The option row is the other dialog child: its own min-content would size the
+  // popup's grid column, so the row container is shrinkable too.
+  it("keeps a long option row inside the dialog", () => {
+    render(
+      <HistoryEditor
+        open
+        who="Kevin Ong"
+        positionLabel="H-2"
+        currentValue={null}
+        options={[{ id: "XG", label: "X".repeat(120) }]}
+        onSet={vi.fn()}
+        onClear={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("history-editor-options").parentElement).toHaveClass("min-w-0");
+  });
+
   it("marks the current value's option as selected", () => {
     render(
       <HistoryEditor

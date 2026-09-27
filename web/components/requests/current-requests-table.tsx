@@ -80,6 +80,15 @@ const INTENT_DOT_CLASS: Record<IntentTone, string> = {
   negative: "text-warn",
 };
 
+// One template for the header band and every row, so the columns cannot drift
+// apart. Its track minimums (120+90+64+76+90) plus four 10px gaps and two 12px
+// paddings need 504px: on a narrower host the table scrolls horizontally rather
+// than crushing a column below the width its content needs. Shift ids are
+// arbitrary user text, so both the person and shift cells truncate with an
+// ellipsis and expose the full value through `title` (DESIGN.md §7.6).
+const GRID_TEMPLATE_COLUMNS = "minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr)";
+const GRID_MIN_WIDTH = "504px";
+
 function rowHaystack(row: CurrentRequestRow): string {
   return `${row.person} ${row.dateLabel} ${row.shiftLabel} ${row.weightLabel} ${row.caption}`;
 }
@@ -163,26 +172,25 @@ export function CurrentRequestsTable({ rows }: CurrentRequestsTableProps) {
           No requests match “{trimmed}”.
         </p>
       ) : (
-        <div>
-          <div
-            className="grid gap-2.5 rounded-none border-b border-line bg-panel px-3 py-2 font-ui text-label font-semibold uppercase tracking-[0.03em] text-ink3"
-            style={{
-              gridTemplateColumns:
-                "minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr)",
-            }}
-            data-testid="requests-header-row"
-          >
-            <span>Person</span>
-            <span>Date</span>
-            <span className="text-center">Shift</span>
-            <span className="text-center">Weight</span>
-            <span>Intent</span>
-          </div>
-          <div
-            className="max-h-[340px] overflow-auto"
-            tabIndex={0}
-            aria-label="Current shift requests list"
-          >
+        <div
+          className="max-h-[340px] overflow-auto"
+          tabIndex={0}
+          aria-label="Current shift requests list"
+        >
+          {/* The inner floor keeps the header band and every zebra row at the full
+              scroll width, so their backgrounds span the table when it scrolls. */}
+          <div style={{ minWidth: GRID_MIN_WIDTH }}>
+            <div
+              className="sticky top-0 z-10 grid gap-2.5 rounded-none border-b border-line bg-panel px-3 py-2 font-ui text-label font-semibold uppercase tracking-[0.03em] text-ink3"
+              style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS }}
+              data-testid="requests-header-row"
+            >
+              <span>Person</span>
+              <span>Date</span>
+              <span className="text-center">Shift</span>
+              <span className="text-center">Weight</span>
+              <span>Intent</span>
+            </div>
             {filtered.map((row, i) => {
               const intent = intentOf(row);
               return (
@@ -196,18 +204,18 @@ export function CurrentRequestsTable({ rows }: CurrentRequestsTableProps) {
                     // zebra/hover tone), matching the prototype's own striping.
                     i % 2 ? "bg-panel-alt" : "bg-surface",
                   )}
-                  style={{
-                    gridTemplateColumns:
-                      "minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr)",
-                  }}
+                  style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS }}
                 >
-                  <span className="inline-flex items-center gap-1.5 overflow-hidden">
+                  <span className="inline-flex min-w-0 items-center gap-1.5 overflow-hidden">
                     {row.personIsGroup ? (
                       <FaUsers className="size-2.5 shrink-0 text-brandink" />
                     ) : (
                       <FaUsers className="size-2.5 shrink-0 text-ink3" />
                     )}
-                    <span className="truncate font-ui text-meta font-semibold text-ink">
+                    <span
+                      className="min-w-0 truncate font-ui text-meta font-semibold text-ink"
+                      title={row.person}
+                    >
                       {row.person}
                     </span>
                   </span>
@@ -219,7 +227,10 @@ export function CurrentRequestsTable({ rows }: CurrentRequestsTableProps) {
                     )}
                     {row.dateLabel}
                   </span>
-                  <span className="text-center font-mono text-meta font-semibold text-ink">
+                  <span
+                    className="min-w-0 truncate text-center font-mono text-meta font-semibold text-ink"
+                    title={row.shiftLabel}
+                  >
                     {row.shiftLabel}
                   </span>
                   <span
