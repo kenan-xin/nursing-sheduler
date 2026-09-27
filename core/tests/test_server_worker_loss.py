@@ -477,7 +477,7 @@ def test_maintenance_reports_unhealthy_when_passes_stall():
     maintenance.start()
     try:
         assert maintenance.is_healthy()  # started within the liveness window
-        clock[0] = 5000.0  # far beyond interval * liveness factor with no successful pass
+        clock[0] = 10_000.0  # far beyond interval * liveness factor with no successful pass
         assert not maintenance.is_healthy()
     finally:
         maintenance.stop()
@@ -525,3 +525,12 @@ def test_redis_outage_makes_health_and_ready_fail_closed():
         store.healthy = True
         assert client.get("/health").status_code == 200
         assert client.get("/ready").status_code == 200
+
+
+def test_maintenance_backoff_cap_stays_inside_the_liveness_window():
+    # After an outage the loop may sleep for the capped delay before its next pass.
+    # That sleep alone must never make /ready fail once the store is back.
+    maintenance = JobMaintenance(object(), interval_seconds=2.0)
+    for _ in range(10):
+        maintenance._failures.report()
+    assert maintenance._failures.delay_seconds() < maintenance._liveness_timeout_seconds
