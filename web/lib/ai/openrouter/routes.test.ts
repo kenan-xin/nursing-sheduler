@@ -6,6 +6,7 @@ import {
   CATALOG_TTL_MS,
   handleModelCatalogRequest,
   handleProbeRequest,
+  handleSummaryRequest,
   resetCatalogMemo,
 } from "./routes";
 
@@ -276,5 +277,72 @@ describe("probe route", () => {
       ok: false,
       code: AI_SETUP_CODES.providerUnreachable,
     });
+  });
+});
+
+function summaryRequest(body: unknown, headers = credentialHeaders()): Request {
+  return new Request("https://app.test/api/ai/openrouter/summarize", {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+const completion = (text: string) =>
+  new Response(
+    JSON.stringify({
+      id: "gen-1",
+      object: "chat.completion",
+      created: 0,
+      model: MODEL,
+      choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+
+describe("POST /api/ai/openrouter/summarize (bead ypo)", () => {
+  it("returns the model's summary and keeps the key out of the body and the answer", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const fetchImpl = async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return completion("Ana wants 3 Nov off.");
+    };
+    const response = await handleSummaryRequest(
+      summaryRequest({ previousSummary: null, transcript: "User: Ana wants 3 Nov off." }),
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+    const body = await response.json();
+    expect(body).toEqual({ ok: true, summary: "Ana wants 3 Nov off." });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(calls[0].url).toMatch(/\/chat\/completions$/);
+    expect(String(calls[0].init.body)).not.toContain(SENTINEL);
+    expect(String(calls[0].init.body)).toContain("Ana wants 3 Nov off.");
+    expect(JSON.stringify(body)).not.toContain(SENTINEL);
+    expect(consoleOutput.join("\n")).not.toContain(SENTINEL);
+  });
+
+  it("classifies a provider refusal and forwards none of its body", async () => {
+    const fetchImpl = async () => new Response("quota for sk-or-v1-LEAK", { status: 429 });
+    const response = await handleSummaryRequest(
+      summaryRequest({ previousSummary: null, transcript: "x" }),
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+    expect(await response.json()).toEqual({ ok: false, code: "ai_provider_declined" });
+  });
+
+  it("refuses a missing key, and an empty or oversized transcript, without calling out", async () => {
+    const fetchImpl = vi.fn();
+    const opts = { fetchImpl: fetchImpl as unknown as typeof fetch };
+    const refused = (body: unknown, headers?: Record<string, string>) =>
+      handleSummaryRequest(summaryRequest(body, headers), opts);
+    expect((await refused({ previousSummary: null, transcript: "x" }, {})).status).toBe(400);
+    expect(await (await refused({ previousSummary: null, transcript: "" })).json()).toEqual({
+      ok: false,
+      code: "ai_summary_invalid",
+    });
+    expect(
+      await (await refused({ previousSummary: null, transcript: "x".repeat(120_001) })).json(),
+    ).toEqual({ ok: false, code: "ai_summary_invalid" });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

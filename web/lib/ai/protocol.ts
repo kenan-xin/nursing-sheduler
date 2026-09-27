@@ -32,6 +32,10 @@ export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 /** Same-origin setup routes, deliberately separate from the chat runtime. */
 export const AI_MODEL_CATALOG_URL = "/api/ai/openrouter/models";
 export const AI_PROBE_URL = "/api/ai/openrouter/test";
+/** bead ypo: one summary of older conversation turns. */
+export const AI_SUMMARY_URL = "/api/ai/openrouter/summarize";
+/** The largest transcript the summary route accepts; the client keeps the newest part. */
+export const MAX_SUMMARY_INPUT_CHARS = 120_000;
 
 /**
  * Stable app error codes. These strings are the ONLY failure detail that crosses
@@ -53,6 +57,8 @@ export const AI_SETUP_CODES = {
   providerUnreachable: "ai_provider_unreachable",
   /** Anything else. Deliberately opaque rather than a forwarded body. */
   probeFailed: "ai_probe_failed",
+  /** A summary request with no transcript, or one too large to send. */
+  summaryInvalid: "ai_summary_invalid",
 } as const;
 
 export type AiSetupCode = (typeof AI_SETUP_CODES)[keyof typeof AI_SETUP_CODES];

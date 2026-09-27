@@ -28,7 +28,7 @@ const PROBE_TOOL = {
   },
 };
 
-function classifyStatus(status: number, body: string): AiSetupCode {
+export function classifyStatus(status: number, body: string): AiSetupCode {
   if (status === 401 || status === 403) return AI_SETUP_CODES.credentialsRejected;
   if (status === 402 || status === 429) return AI_SETUP_CODES.providerDeclined;
   if (status === 404) return AI_SETUP_CODES.modelUnavailable;

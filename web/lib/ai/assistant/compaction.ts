@@ -4,11 +4,12 @@
 // its result are never split. Only what the provider receives changes: the panel,
 // the durable history and the transcript keep every message.
 
+import { MAX_SUMMARY_INPUT_CHARS } from "@/lib/ai/protocol";
 import type { AssistantMessageV1, ThreadSummaryV1 } from "./records";
 
+export { MAX_SUMMARY_INPUT_CHARS };
 export const COMPACT_AT_CHARS = 60_000;
 export const KEEP_RECENT_USER_TURNS = 4;
-export const MAX_SUMMARY_INPUT_CHARS = 120_000;
 const TOOL_RESULT_CHARS = 600;
 export const COMPACTION_NOTICE =
   "Earlier messages were summarised to keep this conversation going.";
