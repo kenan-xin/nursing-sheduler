@@ -259,6 +259,34 @@ describe("Apply", () => {
     expect(await screen.findByTestId("proposal-blocks")).toHaveTextContent("stopped");
   });
 
+  it("stays applyable after a follow-up message (0f0r)", async () => {
+    await showProposal(SHRINK);
+    render(<HostSurface />);
+    await screen.findByTestId("assistant-proposal");
+
+    // The user asks a question about the Preview: the send claims the next epoch and the
+    // turn runs and ends. Nothing in the schedule moved, so Apply stays open.
+    act(() => {
+      const epoch = assistantActions.nextTurnEpoch();
+      assistantActions.beginTurn("turn-2", epoch);
+      assistantActions.endTurn("completed", "turn-2");
+    });
+
+    await waitFor(async () => expect(await screen.findByTestId("proposal-apply")).toBeEnabled());
+  });
+
+  it("stays stopped after Stop, even when a follow-up message is sent (0f0r)", async () => {
+    await showProposal(SHRINK);
+    render(<HostSurface />);
+    await screen.findByTestId("assistant-proposal");
+
+    await assistantActions.interrupt({ trigger: "stop", threadId: "thread-1", scenarioId: null });
+    act(() => void assistantActions.nextTurnEpoch());
+
+    await waitFor(async () => expect(await screen.findByTestId("proposal-apply")).toBeDisabled());
+    expect(await screen.findByTestId("proposal-blocks")).toHaveTextContent("stopped");
+  });
+
   it("blocks on an unsaved editor draft and names it", async () => {
     await showProposal(SHRINK);
     harness.hot.getState().setDraft("shift-type-editor", { id: "Day" });

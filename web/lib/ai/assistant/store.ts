@@ -222,9 +222,13 @@ export interface AssistantUiState {
    * a live Apply control to a page lifetime that never saw the conversation it came
    * from -- the same reason a reloaded turn is detached rather than resumed. The
    * epoch is what makes an interruption or takeover show "this was stopped, prepare
-   * it again" instead of a live Apply button.
+   * it again" instead of a live Apply button. A send carries a live card to its own
+   * epoch (`nextTurnEpoch`, 0f0r); only an interruption leaves it behind.
+   *
+   * `baseDocumentRevision` is the revision it was prepared on, so the next turn can tell
+   * the model whether it is out of date without a read.
    */
-  activeProposal: { proposalId: string; turnEpoch: number } | null;
+  activeProposal: { proposalId: string; turnEpoch: number; baseDocumentRevision?: number } | null;
   /**
    * The live diagnostic search snapshot, stamped with the turn that authorised it
    * (T10). Same shape of authority as `activeProposal`, for the same reason: the
@@ -257,7 +261,10 @@ export interface AssistantUiState {
     view: RosterChangeView;
     /** The linked schedule proposal (leave move, MC leave, borrowed person) applied with it. */
     linked: LinkedScheduleChange | null;
+    /** Liveness: carried forward by each send while live, like `activeProposal`. */
     turnEpoch: number;
+    /** The turn that showed it. Never carried: a carried card is not a later turn's reply. */
+    shownInEpoch: number;
   } | null;
   /**
    * Apply is running on the roster card (up to the Roster screen's 15 s window). While
@@ -1034,13 +1041,24 @@ export const assistantActions = {
    * Callers must use the returned value and never re-read it: the point of the claim
    * is to hold one epoch across the whole preparation, and a later read would follow
    * whatever superseded it.
+   *
+   * A FOLLOW-UP KEEPS A LIVE PREVIEW (0f0r, user decision 2026-09-27). A Preview or roster
+   * change card still live under the previous epoch moves to this one, so asking about it
+   * does not stop it; its own staleness checks (schedule changed, lease, registry, draft)
+   * still block Apply. A card an interruption already left behind stays stopped: Stop
+   * (closeGate) moves the epoch without carrying anything.
    */
   nextTurnEpoch(): number {
-    const turnEpoch = useAssistantStore.getState().turnEpoch + 1;
+    const state = useAssistantStore.getState();
+    const turnEpoch = state.turnEpoch + 1;
+    const carry = <T extends { turnEpoch: number }>(card: T | null): T | null =>
+      card !== null && card.turnEpoch === state.turnEpoch ? { ...card, turnEpoch } : card;
     useAssistantStore.setState({
       turnEpoch,
       authorizedTurnEpoch: null,
       preparingTurnEpoch: turnEpoch,
+      activeProposal: carry(state.activeProposal),
+      activeRosterChange: carry(state.activeRosterChange),
     });
     return turnEpoch;
   },
@@ -1103,8 +1121,10 @@ export const assistantActions = {
    * Stamped with the turn epoch that authorised it, so a later interruption or
    * takeover makes the card truthfully unavailable rather than silently still live.
    */
-  showProposal(proposalId: string, turnEpoch: number): void {
-    useAssistantStore.setState({ activeProposal: { proposalId, turnEpoch } });
+  showProposal(proposalId: string, turnEpoch: number, baseDocumentRevision?: number): void {
+    useAssistantStore.setState({
+      activeProposal: { proposalId, turnEpoch, baseDocumentRevision },
+    });
   },
 
   /** Dismiss the live Preview — Cancel, or a change that has been applied. */
@@ -1159,6 +1179,7 @@ export const assistantActions = {
         linked: change.linked ?? null,
         id: (previous?.id ?? 0) + 1,
         turnEpoch,
+        shownInEpoch: turnEpoch,
       },
     });
     return true;
@@ -1212,6 +1233,6 @@ export function turnAwaitsUserOnCard(turnEpoch: number): boolean {
   return (
     activeChoices?.turnEpoch === turnEpoch ||
     activeRunRequest?.turnEpoch === turnEpoch ||
-    activeRosterChange?.turnEpoch === turnEpoch
+    activeRosterChange?.shownInEpoch === turnEpoch
   );
 }

@@ -585,7 +585,11 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
             routePath: input.routePath,
             routeLabel: input.routeLabel,
             // Read at launch: a card still up now was not applied before this message.
-            pending: pendingAtLaunch(useAssistantStore.getState(), turnEpochForSend),
+            pending: pendingAtLaunch(
+              useAssistantStore.getState(),
+              turnEpochForSend,
+              plan.documentRevision,
+            ),
           }),
         }),
       );

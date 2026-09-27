@@ -172,8 +172,12 @@ export interface BuildContextInput {
   pending?: Pending;
 }
 
-/** An unapplied card: `stopped` once the turn that showed it is over, which disables Apply. */
-type CardState = "open" | "stopped" | null;
+/**
+ * An unapplied card: `stopped` once an interruption (Stop, takeover, scenario switch) left
+ * it behind, `stale` for a Preview prepared on an older schedule revision. Both disable
+ * Apply.
+ */
+type CardState = "open" | "stale" | "stopped" | null;
 export interface Pending {
   preview: CardState;
   rosterChange: CardState;
@@ -182,26 +186,35 @@ export interface Pending {
 /**
  * The unapplied cards at a turn's launch, by the rule the cards themselves render with: a
  * card stamped with another epoch is stopped (use-assistant-proposals `invalidated`,
- * roster-change-card `stopped`). Stop moves the epoch, and so does every send, which claims
- * its epoch before this is read: a card from an earlier turn is always stopped here.
+ * roster-change-card `stopped`). The send claims its epoch before this is read and carries
+ * a live card to it (0f0r), so at launch an `open` card is always from an earlier message.
+ * A Preview is `stale` when the schedule moved since it was prepared: its own
+ * `document_changed` block. Other blocks (another tab, the registry) are not known here.
  */
 export function pendingAtLaunch(
   cards: {
-    activeProposal: { turnEpoch: number } | null;
+    activeProposal: { turnEpoch: number; baseDocumentRevision?: number } | null;
     activeRosterChange: { turnEpoch: number } | null;
   },
   launchEpoch: number,
+  documentRevision: number,
 ): Pending {
   const state = (card: { turnEpoch: number } | null): CardState =>
     card === null ? null : card.turnEpoch === launchEpoch ? "open" : "stopped";
-  return { preview: state(cards.activeProposal), rosterChange: state(cards.activeRosterChange) };
+  const preview = state(cards.activeProposal);
+  const base = cards.activeProposal?.baseDocumentRevision;
+  return {
+    preview:
+      preview === "open" && base !== undefined && base !== documentRevision ? "stale" : preview,
+    rosterChange: state(cards.activeRosterChange),
+  };
 }
 
 /**
  * What the user has been shown and not applied. Without it the model cannot tell whether a
  * Preview from an earlier turn was applied, and answers "is it in place now?" with yes (dt9).
- * It never promises an Apply button: other blocks (another tab, a changed schedule) are
- * not known here.
+ * An `open` card is hedged, never a promised Apply button: other blocks (another tab, the
+ * roster moving) are not known here.
  */
 export function describePending(pending: Pending | undefined): string {
   const lines = (
@@ -209,22 +222,28 @@ export function describePending(pending: Pending | undefined): string {
       ["a change Preview", pending?.preview ?? null],
       ["a roster change card", pending?.rosterChange ?? null],
     ] as const
-  ).flatMap(([card, state]) =>
-    state === "stopped"
-      ? [
-          `The user still sees ${card} from an earlier message. It was stopped when a new ` +
-            "message was sent, so it cannot be applied any more, and nothing in it changed.",
-        ]
-      : state === "open"
-        ? [`The user sees ${card}, not applied: nothing in it has changed yet.`]
-        : [],
-  );
+  ).flatMap(([card, state]) => {
+    const seen = `The user still sees ${card} from an earlier message, not applied.`;
+    if (state === "stopped")
+      return [`${seen} It was stopped, so it cannot be applied any more; nothing in it changed.`];
+    if (state === "stale")
+      return [
+        `${seen} The schedule changed after it was prepared, so it is out of date and ` +
+          "cannot be applied.",
+      ];
+    if (state === "open")
+      return [
+        `${seen} Nothing in it has changed yet; they can still apply it from that card ` +
+          "unless something changed since, and the card says so if it did.",
+      ];
+    return [];
+  });
   if (lines.length === 0) return "Nothing.";
   return (
     `${lines.join(" ")} That change is NOT in place; when the user applies one, the app ` +
     "sends you a message starting 'I applied it'. If they ask whether it is done or in " +
     "place, say not yet" +
-    (lines.some((l) => l.includes("stopped"))
+    (lines.some((l) => l.includes("cannot be applied"))
       ? ", and if they still want it, prepare it again."
       : ".")
   );
