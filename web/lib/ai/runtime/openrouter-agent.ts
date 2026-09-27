@@ -17,7 +17,7 @@ import {
 } from "./copilotkit-runtime";
 import { streamText, type ToolSet } from "ai";
 
-import { prepareAttachments } from "./attachments";
+import { ATTACHED_FILE_NOTE, hasFileAttachment, prepareAttachments } from "./attachments";
 
 // Request-scoped BYO OpenRouter agent (tech-plan "Credential and model transport").
 //
@@ -93,7 +93,7 @@ export function createOpenRouterAgent(
         // attaches to every hop (standing instructions, the scenario, the screen) only
         // reaches the model if it is rendered here. It once was not: the model ran with
         // no system prompt and ended a feasibility turn with no text.
-        system: contextSystemPrompt(input.context),
+        system: systemPrompt(input.context, hasFileAttachment(input.messages)),
         messages: convertMessagesToVercelAISDKMessages(prepareAttachments(input.messages)),
         tools: toAppToolSet(convertToolsToVercelAITools(input.tools)),
         abortSignal,
@@ -103,6 +103,15 @@ export function createOpenRouterAgent(
       });
     },
   });
+}
+
+/** The context prompt, plus the attached-file note when the run carries a text file. */
+function systemPrompt(
+  context: readonly { description: string; value: string }[],
+  withFiles: boolean,
+): string | undefined {
+  const parts = [contextSystemPrompt(context), withFiles ? ATTACHED_FILE_NOTE : undefined];
+  return parts.filter(Boolean).join("\n") || undefined;
 }
 
 /**
