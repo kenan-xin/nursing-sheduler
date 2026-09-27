@@ -39,8 +39,6 @@ const meta = {
   component: Dock,
   parameters: {
     nextjs: { appDirectory: true, navigation: { pathname: "/dates" } },
-    // a11y violation tracked in nursing-sheduler-w0e.34; restore "error" when fixed
-    a11y: { test: "todo" },
   },
   decorators: [
     (Story) => (

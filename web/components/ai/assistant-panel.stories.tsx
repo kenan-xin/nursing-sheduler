@@ -45,8 +45,6 @@ const meta = {
   parameters: {
     layout: "fullscreen",
     nextjs: { appDirectory: true, navigation: { pathname: "/shift-requests" } },
-    // a11y violation tracked in nursing-sheduler-w0e.34; restore "error" when fixed
-    a11y: { test: "todo" },
   },
   decorators: [
     (Story) => (

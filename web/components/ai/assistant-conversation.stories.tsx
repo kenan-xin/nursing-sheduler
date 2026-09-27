@@ -95,8 +95,6 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Welcome: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.34; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   play: async ({ canvas }) => {
     await expect(await canvas.findByTestId("assistant-live-conversation")).toBeVisible();
     await expect(canvas.getByTestId("assistant-welcome")).toHaveTextContent(
@@ -168,8 +166,6 @@ function attach(input: HTMLElement, file: File) {
 
 // A text file queues with the privacy note (assistant-composer-attachments.test.tsx).
 export const Attachment: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.34; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   play: async ({ canvas }) => {
     await canvas.findByTestId("assistant-live-conversation");
     attach(
@@ -184,8 +180,6 @@ export const Attachment: Story = {
 
 // An image is refused, with the reason, while the model's image support is unknown.
 export const AttachmentRefused: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.34; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   play: async ({ canvas }) => {
     await canvas.findByTestId("assistant-live-conversation");
     attach(

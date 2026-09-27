@@ -155,6 +155,9 @@ function DockedComposerView(props: ComponentProps<typeof CopilotChatInput>) {
         {...props}
         containerRef={container}
         textArea={open ? { placeholder: "Or reply directly…" } : undefined}
+        // The library's icon-only buttons ship unnamed. Send turns into Stop mid-turn.
+        addMenuButton={{ "aria-label": "Add attachment" }}
+        sendButton={{ "aria-label": props.isRunning && props.onStop ? "Stop" : "Send message" }}
         disclaimer={open ? DockHint : props.disclaimer}
       />
     </>

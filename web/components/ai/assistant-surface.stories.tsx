@@ -40,8 +40,6 @@ export const NotReady: Story = {
 };
 
 export const Ready: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.34; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   beforeEach: [
     withAssistant(),
     withFetchRoutes([["/api/copilotkit", runtime]]),
@@ -61,8 +59,6 @@ export const Ready: Story = {
 };
 
 export const Dark: Story = {
-  // a11y violation tracked in nursing-sheduler-w0e.34; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   beforeEach: [
     withAssistant(),
     withFetchRoutes([["/api/copilotkit", runtime]]),
