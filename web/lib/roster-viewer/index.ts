@@ -88,6 +88,8 @@ export { shiftContextLabel, shiftTimeRange } from "./shift-label";
 
 export { buildProvenanceView, type ProvenanceView } from "./provenance";
 
+export { coverBandRows, type CoverBandRow, type CoverBandStatus } from "./cover-band";
+
 export {
   localCalendarDate,
   parseLens,

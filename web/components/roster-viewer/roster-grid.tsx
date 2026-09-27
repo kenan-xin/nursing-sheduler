@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { FaChevronDown } from "@/components/icons";
 import { typedIdKey, type EditCoordinate } from "@/lib/roster";
 import type { RosterContext, RosterDayGrid, RosterDayState, RosterCalendarDay } from "@/lib/roster";
+import type { ShiftTypeId } from "@/lib/scenario";
 import {
   classifyShiftFamily,
   dateLabel,
@@ -34,6 +35,7 @@ import {
   SHIFT_FAMILY_RAMP,
   shiftTimeRange,
   uniformShiftRequirement,
+  type CoverBandRow,
   type CoverageGrid,
   type ShiftFamily,
   type ShiftRampEntry,
@@ -60,6 +62,8 @@ export interface RosterGridProps {
   coverage: CoverageGrid;
   /** Pre-computed per-nurse tallies. */
   tallies: Tallies;
+  /** The temporary-cover band below the staff rows (d582). Empty hides the band. */
+  coverRows: readonly CoverBandRow[];
   /** When present, the grid is editable: cells select and drag-swap. */
   editing?: RosterGridEditing;
 }
@@ -73,6 +77,7 @@ export function RosterGrid({
   ramp,
   coverage,
   tallies,
+  coverRows,
   editing,
 }: RosterGridProps) {
   const people = context.people;
@@ -369,6 +374,101 @@ export function RosterGrid({
                 </td>
               </tr>
             ))}
+            {/* TEMPORARY COVER BAND (d582, spec §4 "Display rows").
+                A cover is never a solver person, so she is never on the person
+                axis: no `personIdx`, no edits, no rule check, no tallies, no
+                swaps. Her row shows her shift on her dates and NOTHING anywhere
+                else — not even the `·` a rest day carries, because nobody knows
+                when she is off; she simply is not on this ward outside her shift. */}
+            {coverRows.length > 0 ? (
+              <>
+                <tr>
+                  <th
+                    data-testid="roster-cover-band-heading"
+                    colSpan={1 + calendar.length + shiftTypes.length + 3}
+                    title="Temporary cover. Change it on Staff."
+                    className="border-y border-line bg-panel text-left font-ui text-label font-semibold uppercase tracking-[0.03em] text-ink2"
+                    style={{ padding: "6px 14px" }}
+                  >
+                    Temporary cover
+                  </th>
+                </tr>
+                {coverRows.map((row) => (
+                  <tr
+                    key={row.name}
+                    data-testid="roster-cover-band-row"
+                    data-cover-name={row.name}
+                    data-cover-status={row.status}
+                  >
+                    <th
+                      scope="row"
+                      className="sticky left-0 z-[2] border-b border-line2 bg-surface text-left"
+                      style={{ boxShadow: "var(--sh-edge)", padding: "6px 14px" }}
+                    >
+                      {/* A cover name is arbitrary user text: truncate, whole
+                          value on hover. The state badge stacks under it so a
+                          long name never widens the nurse column. */}
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span
+                          data-testid="roster-cover-band-name"
+                          title={row.name}
+                          className={cn(
+                            "min-w-0 max-w-[150px] truncate text-meta font-semibold",
+                            row.status === "removed" ? "text-ink3 line-through" : "text-ink",
+                          )}
+                        >
+                          {row.name}
+                        </span>
+                        {row.status === "not-optimized" ? (
+                          <span
+                            data-testid="roster-cover-band-badge"
+                            className="w-fit rounded-chip border border-line2 bg-panel px-2 py-0.5 font-ui text-label font-semibold uppercase tracking-[0.03em] text-ink2"
+                          >
+                            NOT OPTIMIZED YET
+                          </span>
+                        ) : row.status === "removed" ? (
+                          <span
+                            data-testid="roster-cover-band-badge"
+                            className="w-fit rounded-chip border border-warn bg-warntint px-2 py-0.5 font-ui text-label font-semibold uppercase tracking-[0.03em] text-warnink"
+                          >
+                            REMOVED
+                          </span>
+                        ) : null}
+                      </div>
+                    </th>
+                    {calendar.map((day, dateIdx) => {
+                      const shiftId = row.cells[dateIdx] ?? null;
+                      return (
+                        <td
+                          key={day.iso}
+                          data-testid="roster-cover-band-cell"
+                          className={cn(
+                            "text-center",
+                            columnBackground(day),
+                            dateIdx > 0 &&
+                              isNewMonth(calendar, dateIdx) &&
+                              "border-l border-l-line",
+                          )}
+                          style={{ padding: "4px" }}
+                        >
+                          {shiftId === null ? null : (
+                            <ShiftChip
+                              day={{ kind: "shift", shiftId }}
+                              ramp={coverRamp(ramp, shiftTypes, shiftId)}
+                            />
+                          )}
+                        </td>
+                      );
+                    })}
+                    {/* No tallies: the band is a display plane, not a person. */}
+                    <td
+                      colSpan={shiftTypes.length + 3}
+                      className="border-b border-l border-l-line2 border-line2"
+                    />
+                  </tr>
+                ))}
+              </>
+            ) : null}
           </tbody>
           {/* Per-day staffed counts vs minimum. */}
           {/* Per-day staffed counts. The count is ALWAYS shown — it is a real fact
@@ -672,6 +772,25 @@ function columnBackground(day: RosterCalendarDay): string {
   if (day.holiday) return HOLIDAY_STRIPE;
   if (day.weekend) return "bg-panel";
   return "bg-transparent";
+}
+
+/**
+ * The ramp entry for a cover's shift, so her chip carries its colour family.
+ *
+ * A cover stores her shift as TEXT — the Staff form stringifies the id — so a
+ * numerically-ided shift (`7`) reaches the ramp as `"7"` and misses its `n:7`
+ * key. Match the catalog by string first and key the ramp off the authored id
+ * that actually matched, rather than falling back to the neutral family.
+ */
+function coverRamp(
+  ramp: Map<string, ShiftRampEntry>,
+  shiftTypes: RosterContext["shiftTypes"],
+  shiftId: ShiftTypeId,
+): ShiftRampEntry | null {
+  const direct = ramp.get(typedIdKey(shiftId));
+  if (direct !== undefined) return direct;
+  const authored = shiftTypes.find((shift) => String(shift.id) === String(shiftId));
+  return authored === undefined ? null : (ramp.get(typedIdKey(authored.id)) ?? null);
 }
 
 function headerColumnBackground(day: RosterCalendarDay): string {
