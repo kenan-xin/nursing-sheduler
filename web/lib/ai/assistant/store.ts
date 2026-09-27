@@ -804,6 +804,11 @@ async function runClearAction(input: {
   });
 
   if (facts.status === "deleted") {
+    // The deleted conversation's cards go with it: the proposal rows are gone, and the
+    // next turn's context must not tell the model a Preview still waits (dt9).
+    // ponytail: a history Clear of another scenario drops this scenario's cards too; they
+    // are already stopped by the Clear's own interruption, so nothing live is lost.
+    useAssistantStore.setState({ activeProposal: null, activeRosterChange: null });
     // Retire ONLY the tombstones captured before this invocation fenced. A later or
     // queued call's outcome is not in that set, so it survives untouched. A failure
     // here is a cleanup failure over a COMMITTED deletion: it must not turn the

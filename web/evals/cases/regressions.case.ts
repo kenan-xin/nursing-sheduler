@@ -87,7 +87,7 @@ export const REGRESSION_CASES: EvalCase[] = [
     },
     expect: {
       judge: [
-        "Asked whether it is in place, says it is not yet: nothing changes until the user presses Apply on the Preview.",
+        "Asked whether it is in place, says it is not: nothing has changed yet. Offering to prepare it again passes; saying it is in place, or telling the user to press Apply on the earlier Preview (a new message stopped it), fails.",
       ],
     },
   },

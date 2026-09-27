@@ -184,7 +184,9 @@ describe("runTrial", () => {
     expect(r.error).toBeNull();
     const pending = (c: RunAgentInput["context"]) => c.at(-1)?.value ?? "";
     expect(pending(contexts[0]!)).toBe("Nothing.");
-    expect(pending(contexts.at(-1)!)).toMatch(/Preview, not applied/);
+    // The send claims a new epoch first, so the turn-1 Preview is already stopped.
+    expect(pending(contexts.at(-1)!)).toMatch(/Preview .*stopped/);
+    expect(pending(contexts.at(-1)!)).not.toMatch(/press Apply/);
   }, 20_000);
 
   it("finishes a screen the harness never mounts: its bounded waits ignore the pinned day", async () => {

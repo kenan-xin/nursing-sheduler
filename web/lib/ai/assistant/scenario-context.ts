@@ -168,25 +168,65 @@ export interface BuildContextInput {
   routeLabel: string | null;
   /** The browser clock at send time; injected by tests. */
   now?: Date;
-  /** Cards on screen whose change waits on the user's Apply. Omitted: none. */
-  pending?: { preview: boolean; rosterChange: boolean };
+  /** Unapplied cards still on screen. Omitted: none. */
+  pending?: Pending;
+}
+
+/** An unapplied card: `stopped` once the turn that showed it is over, which disables Apply. */
+type CardState = "open" | "stopped" | null;
+export interface Pending {
+  preview: CardState;
+  rosterChange: CardState;
+}
+
+/**
+ * The unapplied cards at a turn's launch, by the rule the cards themselves render with: a
+ * card stamped with another epoch is stopped (use-assistant-proposals `invalidated`,
+ * roster-change-card `stopped`). Stop moves the epoch, and so does every send, which claims
+ * its epoch before this is read: a card from an earlier turn is always stopped here.
+ */
+export function pendingAtLaunch(
+  cards: {
+    activeProposal: { turnEpoch: number } | null;
+    activeRosterChange: { turnEpoch: number } | null;
+  },
+  launchEpoch: number,
+): Pending {
+  const state = (card: { turnEpoch: number } | null): CardState =>
+    card === null ? null : card.turnEpoch === launchEpoch ? "open" : "stopped";
+  return { preview: state(cards.activeProposal), rosterChange: state(cards.activeRosterChange) };
 }
 
 /**
  * What the user has been shown and not applied. Without it the model cannot tell whether a
  * Preview from an earlier turn was applied, and answers "is it in place now?" with yes (dt9).
+ * It never promises an Apply button: other blocks (another tab, a changed schedule) are
+ * not known here.
  */
-export function describePending(pending: BuildContextInput["pending"]): string {
-  const cards = [
-    ...(pending?.preview ? ["a change Preview"] : []),
-    ...(pending?.rosterChange ? ["a roster change card"] : []),
-  ];
-  if (cards.length === 0) return "Nothing.";
+export function describePending(pending: Pending | undefined): string {
+  const lines = (
+    [
+      ["a change Preview", pending?.preview ?? null],
+      ["a roster change card", pending?.rosterChange ?? null],
+    ] as const
+  ).flatMap(([card, state]) =>
+    state === "stopped"
+      ? [
+          `The user still sees ${card} from an earlier message. It was stopped when a new ` +
+            "message was sent, so it cannot be applied any more, and nothing in it changed.",
+        ]
+      : state === "open"
+        ? [`The user sees ${card}, not applied: nothing in it has changed yet.`]
+        : [],
+  );
+  if (lines.length === 0) return "Nothing.";
   return (
-    `The user sees ${cards.join(" and ")}, not applied: nothing in it has changed yet. ` +
-    "The user has NOT pressed Apply, so that change is NOT in place; when they do, the app " +
+    `${lines.join(" ")} That change is NOT in place; when the user applies one, the app ` +
     "sends you a message starting 'I applied it'. If they ask whether it is done or in " +
-    "place, say not yet: it is ready and changes when they press Apply."
+    "place, say not yet" +
+    (lines.some((l) => l.includes("stopped"))
+      ? ", and if they still want it, prepare it again."
+      : ".")
   );
 }
 

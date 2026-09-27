@@ -6,6 +6,8 @@ import {
   KNOWLEDGE_LINES,
   buildAssistantContext,
   describeToday,
+  pendingAtLaunch,
+  type Pending,
   stringifyScenario,
   summarizeScenario,
 } from "./scenario-context";
@@ -284,7 +286,7 @@ describe("a prepared change is spoken of as prepared, never done", () => {
 describe("what still waits on the user's Apply (dt9)", () => {
   // Asked "so that's in place now?" a turn after a Preview, the model could not tell
   // whether the user had pressed Apply, and said yes 3 times in 3.
-  const waiting = (pending?: { preview: boolean; rosterChange: boolean }) =>
+  const waiting = (pending?: Pending) =>
     buildAssistantContext({
       scenario: wardScenario(),
       scenarioId: "scenario-a",
@@ -295,20 +297,38 @@ describe("what still waits on the user's Apply (dt9)", () => {
       pending,
     })[4];
 
-  it("says an unapplied Preview has changed nothing yet", () => {
-    const entry = waiting({ preview: true, rosterChange: false });
-    expect(entry.value).toMatch(/Preview.*not applied/);
-    expect(entry.value).toMatch(/nothing in it has changed/);
-    expect(entry.value).toMatch(/say not yet/);
-    expect(entry.value).toContain("'I applied it'");
+  it("reads a card stamped before this turn as stopped: the rule the Preview and roster cards use", () => {
+    // Stop moves the epoch (closeGate), and the send claims the next one before the
+    // context is built, so a Preview from turn 3 is stopped at launch of turn 5.
+    const card = { turnEpoch: 3 };
+    expect(pendingAtLaunch({ activeProposal: card, activeRosterChange: null }, 5)).toEqual({
+      preview: "stopped",
+      rosterChange: null,
+    });
+    expect(pendingAtLaunch({ activeProposal: null, activeRosterChange: card }, 3)).toEqual({
+      preview: null,
+      rosterChange: "open",
+    });
   });
 
-  it("says the same of a roster change card", () => {
-    expect(waiting({ preview: false, rosterChange: true }).value).toMatch(/roster change card/);
+  it("after Stop, says the Preview cannot be applied any more and never points at Apply", () => {
+    const entry = waiting({ preview: "stopped", rosterChange: null });
+    expect(entry.value).toMatch(/Preview.*stopped/);
+    expect(entry.value).toMatch(/nothing in it changed/);
+    expect(entry.value).toMatch(/NOT in place/);
+    expect(entry.value).toMatch(/prepare it again/);
+    expect(entry.value).not.toMatch(/press Apply/);
+  });
+
+  it("an open card is not in place either, and promises no Apply button", () => {
+    const entry = waiting({ preview: null, rosterChange: "open" });
+    expect(entry.value).toMatch(/roster change card.*not applied/);
+    expect(entry.value).toMatch(/NOT in place/);
+    expect(entry.value).not.toMatch(/press Apply/);
   });
 
   it("says nothing waits when nothing does, by default too", () => {
-    expect(waiting({ preview: false, rosterChange: false }).value).toBe("Nothing.");
+    expect(waiting({ preview: null, rosterChange: null }).value).toBe("Nothing.");
     expect(waiting().value).toBe("Nothing.");
   });
 });
