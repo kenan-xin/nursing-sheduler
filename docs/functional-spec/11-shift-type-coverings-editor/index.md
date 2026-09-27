@@ -25,27 +25,14 @@ and the cross-product expansion) are owned by the **C3 — Preference /**
 redefined, here. The reference-cascade behavior (rename/delete rewriting the
 nested reference trees) is owned by spec 06.
 
-Source files:
-
-- `web-frontend/src/app/shift-type-coverings/page.tsx (557 lines).`
-- `web-frontend/src/app/shift-type-coverings/page.test.tsx.`
-- `web-frontend/src/hooks/schedulingReferenceUpdates.ts (cascade handlers,`
-extended for `SHIFT_TYPE_COVERING per CC-B4 / spec 06).`
-- `web-frontend/src/hooks/schedulingPreferenceOrdering.ts`
-(`sortPreferencesByType + normalizePreferenceOrder extended for`
-`SHIFT_TYPE_COVERING per CC-B5 / spec 01 FR-DM-20/21).`
-- `web-frontend/src/types/scheduling.ts:157, 229-237, 247`
-(`SHIFT_TYPE_COVERING constant, ShiftTypeCoveringPreference interface,`
-added to the `Preference union).`
-- `web-frontend/src/components/Navigation.tsx:37 (the new tab).`
-- `web-frontend/src/utils/anonymizeSchedulingState.ts:25, 76-83`
-(anonymization of `preceptors/preceptees/shiftTypes via`
-`mapReferenceIdTree).`
+Related behavior owned elsewhere: reference cascades (spec 06), preference
+ordering (spec 01 FR-DM-20/21), navigation (spec 07), anonymization (specs 08 and 10).
+Shipped editor code (current app): `web/components/coverings/`.
 
 Out of scope: the shared card shell, weight input, `DraggableCardList,`
 `CheckboxList, NumberInput, and ToggleButton components (referenced`
 where their behavior is observable from this editor; specified in spec 05),
-and the persistence / undo-redo layer (`useSchedulingData — see spec 07).`
+and the persistence / undo-redo layer (see spec 07).
 
 ## Functional Requirements
 
@@ -53,27 +40,26 @@ and the persistence / undo-redo layer (`useSchedulingData — see spec 07).`
 
 - **FR-CV-01 — Route, title, and tab placement. The page is mounted at**
 `/shift-type-coverings. Navigation exposes it as the tab labelled`
-`8b. Shift Type Coverings at array index 9 (Navigation.tsx:37); see`
+`8b. Shift Type Coverings at array index 9; see`
 spec 07 for the navigation and keyboard-shortcut changes this introduces.
-The page title is `Shift Type Coverings (page.tsx:250).`
+The page title is `Shift Type Coverings.`
 - **FR-CV-02 — Instructions panel. A **`FiHelpCircle help button beside the`
-title toggles an instructions panel (`title="Toggle instructions",`
-`page.tsx:255-258). The 7-bullet instructions array is shown verbatim`
+title toggles an instructions panel (`title="Toggle instructions"`).
+The 7-bullet instructions array is shown verbatim
 in FR-PR-90 (spec 05).
 - **FR-CV-03 — Add / Cancel toggle. A **`ToggleButton (Add Shift Type Covering) starts a fresh add draft (form opens, editingIndex=null,`
 fields reset to defaults) or cancels an open draft. The form panel is
-mounted only while `isFormVisible is true. (page.tsx:262-273,`
-`:286-495)`
+mounted only while `isFormVisible` is true.
 
 ### Data model — form & saved preference
 
-- **FR-CV-06 — Form defaults. **`DEFAULT_WEIGHT = 1 (page.tsx:46);`
-all other fields default to `'' / []. (page.tsx:65-72)`
+- **FR-CV-06 — Form defaults. **`DEFAULT_WEIGHT = 1;`
+all other fields default to `'' / [].`
 - **FR-CV-07 — Saved preference shape (`buildPrefFromForm`) drops `date`.** The
 form draft tracks a `date` selection, but the builder that assembles the saved
 preference on Add/Update omits `date` entirely — the persisted rule carries
 `description`, `preceptors`, `preceptees`, `shiftTypes`, `weight`, but **no**
-`date` (`page.tsx:155-162`). This is the save-shape quirk referenced by
+`date`. This is the save-shape quirk referenced by
 FR-CV-12; it is `[incidental]`, **not** a parity requirement — and per
 [decision log 08](../decision-logs/08-covering-omitted-date-all-dates/index.md)
 an omitted `date` now means *all dates*, so the drop is no longer a functional
@@ -83,7 +69,7 @@ reproduce the drop and should persist the selection (emitting date ids or
 *already* has `date` retains it until the user re-saves.
 - **FR-CV-08 — Edit load maps the stored rule back into the form.** Opening an
 existing rule for edit restores each field, with `date: rule.date ?? []`
-(`page.tsx:104-119`) — so an imported rule's `date` is shown, but per FR-CV-07 a
+ — so an imported rule's `date` is shown, but per FR-CV-07 a
 subsequent Save drops it again.
 
 ### Save / load / cancel
@@ -92,18 +78,18 @@ subsequent Save drops it again.
 rule is appended (`[...shiftTypeCoverings, newPref]); otherwise the`
 rule at `editingIndex is replaced (newPrefs[editingIndex] = newPref).`
 Either path goes through `updatePreferencesByType(SHIFT_TYPE_COVERING, …), which normalizes (sorts date, preserves nested reference trees)`
-and persists one history entry. (`page.tsx:164-185)`
+and persists one history entry.
 - **FR-CV-10 — Cancel hides the form, resets state, restores scroll. A**
 Cancel call hides the form, clears all form fields and errors, and —
 if we were editing — restores the saved scroll position via
-`restoreScrollPosition() (page.tsx:122-130, 86-97).`
+`restoreScrollPosition().`
 
 ### Form fields and validation
 
 - **FR-CV-11 — Description field (optional). Free-text input**
 `Description (optional) with placeholder`
 `e.g., Lil must always be paired with Anna on Day shift. Stored as-is`
-(may be empty). (`page.tsx:296-308)`
+(may be empty).
 - **FR-CV-12 — Dates (optional, exposed in the UI but not persisted; the**
 **label "leave empty for all dates" is misleading under current parity).**
 `Dates (leave empty for all dates) is a multi-select CheckboxList`
@@ -111,7 +97,7 @@ of date items + groups. The error key is `date. No errors.date is`
 ever set in the current implementation; an empty date set is
 allowed. The list falls back to a guidance message when no dates are
 set up: `No dates available. Please set up dates in the Dates tab first.`
-(linking to `/dates). (page.tsx:312-348)`
+(linking to `/dates).`
 `[incidental] — current product bug (not a parity requirement):` the user's
 date selection is **not saved on Add/Update under current code** (see FR-CV-07).
 The selection is tracked only while the form draft is open; Add/Update drops it
@@ -132,15 +118,14 @@ user date selection when one is made.
 Empty → `At least one preceptor must be selected. The list falls back`
 to `No people available. Please set up people in the People tab first.`
 when no people are set up (linking to `/people).`
-(`page.tsx:351-386)`
 - **FR-CV-14 — Preceptees (required, multi-select). **`Preceptees (must be covered) * is a multi-select CheckboxList of people items + groups.`
 Empty → `At least one preceptee must be selected. Same fallback as`
-preceptors when no people are set up. (`page.tsx:388-423)`
+preceptors when no people are set up.
 - **FR-CV-15 — Shift types (required, multi-select). **`Shift Types * is`
 a multi-select `CheckboxList of shift-type items + groups. Empty → At least one shift type must be selected. The list falls back to`
 `No shift types available. Please set up shift types in the Shift Types tab first.`
 when no shift types are set up (linking to `/shift-types).`
-(`page.tsx:426-462). `**Binding (backend): the backend rejects any covering**`selector containingOFF or LEAVE with E26b ("'OFF' and 'LEAVE' are not allowed in shift type covering preferences; covering applies to worked shifts only." — C3 CON-SEM-07). `**Recommended (UI, not required):** a rebuild SHOULD prevent authoring such a rule — either by excluding `OFF`/`LEAVE` (and groups
+`. `**Binding (backend): the backend rejects any covering**`selector containingOFF or LEAVE with E26b ("'OFF' and 'LEAVE' are not allowed in shift type covering preferences; covering applies to worked shifts only." — C3 CON-SEM-07). `**Recommended (UI, not required):** a rebuild SHOULD prevent authoring such a rule — either by excluding `OFF`/`LEAVE` (and groups
 containing either) from this selector **or** by surfacing the backend error; the
 specific UI shape is a design choice, not a parity requirement. `[incidental]`
 the current covering selector exposes `OFF` and `LEAVE` with **no exclusion**
@@ -156,7 +141,7 @@ here" (`web/components/coverings/covering-form.tsx`, `CardEditorHardRuleNote`).
 There is no weight input, no weight validation, and no weight error. The saved
 shape still carries `weight: 1` — a single stamped constant (`COVERING_WEIGHT`) —
 so the persisted/serialized rule is unchanged
-(`web/components/coverings/coverings-model.ts`).
+.
 - **FR-CV-17 — Per-field error clear on edit.** Toggling a selector clears that
 field's error key. (There is no weight field, so no weight error to clear — see
 FR-CV-16.)
@@ -166,44 +151,40 @@ FR-CV-16.)
 - **FR-CV-18 — `DraggableCardList` shell with title**
 **`Current Shift Type Coverings`****. Existing rules render as cards in**
 the same `DraggableCardList used by the other four card editors.`
-(`page.tsx:499-537)`
 - **FR-CV-19 — Card content. Each card shows:**
   - optional description as an `<h4> heading (when rule.description is`
 non-empty);
-  - `Preceptors: followed by summarizeIds(rule.preceptors)`
+  - `Preceptors: followed by summarizeRefs(rule.preceptors)`
 (comma-joined ids, flattened from the nested tree);
-  - `Preceptees: followed by summarizeIds(rule.preceptees);`
-  - `Shift Types: followed by summarizeIds(rule.shiftTypes);`
-  - `Dates: followed by rule.date.join(', ') (only when`
-`rule.date && rule.date.length > 0);`
-  - a red **"Always enforced"** hard-rule badge in place of any weight row (plus a **"Disabled"** badge when the card is turned off, and an **"Advanced (multi-term)"** badge for imported multi-term rules); the card shows **no** `Weight:` row (`web/components/coverings/covering-card-list.tsx`);
-`summarizeIds(ids) flattens the nested reference tree to a single`
+  - `Preceptees: followed by summarizeRefs(rule.preceptees);`
+  - `Shift types: followed by summarizeRefs(rule.shiftTypes);`
+  - `Dates: followed by summarizeRefs(rule.date), or (all) when the`
+`rule has no date field;`
+  - a red **"Always enforced"** hard-rule badge in place of any weight row (plus a **"Disabled"** badge when the card is turned off, and an **"Advanced (multi-term)"** badge for imported multi-term rules); the card shows **no** `Weight:` row;
+`summarizeRefs(ids) flattens the nested reference tree to a single`
 comma-joined string; an empty flattened list renders the literal
-string `(all). (page.tsx:507-535, 555-557)`
+string `(all).`
 - **FR-CV-20 — Empty-state message. When the list is empty:**
-`No covering rules yet. Click "Add Shift Type Covering" to get started. (DraggableCardList's emptyMessage prop,`
-`page.tsx:502)`
+`No covering rules yet. Click "Add Shift Type Covering" to get started.`
 - **FR-CV-21 — Card operations: Edit, Duplicate, Delete, drag-reorder.**
 Reuses the same `DraggableCardList action contract as the other four`
 card editors:
   - **Edit loads the rule via **`handleStartEdit (FR-CV-08); saves`
 scroll before scrolling to top.
   - **Delete removes the card immediately with no confirmation**
-**dialog (**`handleDelete filters by index, page.tsx:220-224).`
+**dialog** (filters by index).
   - **Duplicate calls **`duplicatePreferenceByType<ShiftTypeCoveringPreference>(SHIFT_TYPE_COVERING, index) — deep-clones with copy/copy N label (see spec 05`
-FR-PR-13). (`page.tsx:226-229)`
+FR-PR-13).
   - **Reorder calls **`updatePreferencesByType with the new ordered`
-list (`handleReorder, page.tsx:231-234).`
+list.
 Each of these first calls `dismissEditingDraft() (cancels an open`
 add/edit form before the operation runs, losing the unsaved draft).
-(`page.tsx:214-218)`
 
 ### Keyboard and dirty-state
 
 - **FR-CV-22 — Enter=save, Escape=cancel under IME guard. While the**
 form is visible, a global `keydown listener (window-scoped, attached`
-with `addEventListener and cleaned up via the effect's return,`
-`page.tsx:192-212) handles:`
+with `addEventListener` and cleaned up when the form closes) handles:
   - `Enter (no Shift/Alt/Ctrl/Meta, not during IME composition per`
 `isImeCompositionKeyEvent): validates, then saves.`
   - `Escape: cancels.`
@@ -211,16 +192,15 @@ Both call `preventDefault.`
 - **FR-CV-23 — Unsaved-edit tab-switch guard. **`useTabSwitchWarning(isFormVisible)`
 arms the navigation `confirm() while the form is open (so navigating`
 away asks `You have unsaved edits. Leave this page without saving?).`
-(`page.tsx:74; spec 07 FR-ST-31.)`
+(Spec 07 FR-ST-31.)
 - **FR-CV-24 — Scroll save/restore on edit. **`handleStartEdit calls`
 `saveScrollPosition() then window.scrollTo({ top: 0, behavior: 'instant' }). Cancel and save both call restoreScrollPosition()`
 when editing. Add does not save/restore scroll.
-(`page.tsx:117-119, 127-129, 183-184)`
 
 ## Validation Rules & Messages
 
 All messages are **verbatim and produced by **`validateForm`
-(`page.tsx:132-153); Save blocks persistence if any errors are set.`
+`; Save blocks persistence if any errors are set.`
 Fields marked `* are required.`
 
 | Field | Condition | Message |
@@ -239,15 +219,13 @@ export weight cells (spec 09 FR-EX-05).
 
 ## Reference-cascade behavior
 
-The rename and delete cascade handlers in
-`schedulingReferenceUpdates.ts are extended for SHIFT_TYPE_COVERING`
-(per spec 06 FR-RI-05/10/11). Concretely:
+The rename and delete cascades cover `SHIFT_TYPE_COVERING` (per spec 06
+FR-RI-05/10/11). Concretely:
 
 - **Rename PEOPLE / SHIFT_TYPES / DATES rewrites the matching IDs in**
 `preceptors, preceptees, shiftTypes, and date (DATES only) via`
 `renameReferenceIds / mapReferenceIdTree on the nested reference`
-trees. (`schedulingReferenceUpdates.ts:163-193 for rename, :298-325`
-for delete; required-field drop at `:352-356.)`
+trees.
 - **Delete PEOPLE / SHIFT_TYPES / DATES filters the matching IDs from**
 those same fields via `filterReferenceIds / filterReferenceIdTree`
 (which also drops emptied inner sub-arrays).
@@ -267,7 +245,7 @@ Optimize submit) rewrites `preceptors, preceptees, and shiftTypes`
 through `mapReferenceIdTree (the same nested-tree contract used for`
 shift-affinity), so person IDs inside the nested arrays are replaced
 with `P1, P2, … and reference through the same person-only`
-anonymization map. (`anonymizeSchedulingState.ts:25, 76-83)`
+anonymization map.
 
 ## Edge Cases & Quirks
 
@@ -278,30 +256,29 @@ preference is always exactly one equation. Edit reads via
 `flattenIds to restore the flat form. (FR-CV-07/08.)`
 - **EDGE-CV-02 — Covering `date` is preserved on edit-load but always**
 **dropped on save (current product bug). On edit,**
-`date: rule.date ?? [] (page.tsx:108) restores any saved date`
+`date: rule.date ?? [] restores any saved date`
 array — this only works for covering rules that were hand-authored or
 imported (since the editor itself never saves `date). On Save /`
 Update, `buildPrefFromForm does **not include **date regardless of`
-the user's selection (`page.tsx:155-162), so a user who picks`
+the user's selection`, so a user who picks`
 specific Dates in the editor loses that selection on Add/Update.
 The cascade for the optional `date field is already implemented`
 and tested against hand-built state
-(`schedulingReferenceUpdates.test.ts:362-444). See the wave-3`
+`. See the wave-3`
 follow-up entry in
 `decision-logs/02-shift-type-covering-preference/index.md.`
-- **EDGE-CV-03 — Card **`(all) rendering. **`**`summarizeIds(ids) flattens`
+- **EDGE-CV-03 — Card **`(all) rendering. **`**`summarizeRefs(ids) flattens`
 the nested reference tree to a comma-joined string; an empty
 flattened list renders the literal string `(all). This means a`
 covering rule with no `preceptors in the data (which is impossible`
 by validation, but defensive) would render `Preceptors: (all).`
-(`page.tsx:555-557)`
 - **EDGE-CV-04 — No weight-sign constraint, and `weight` is ignored by**
 **the current backend. Unlike Requirements (**`weight ≤ 0 when`
 preferred ≠ required) and Counts (`weight ≤ 0 when expression is`
 `|x - T|^2), the covering editor accepts any valid weight (finite,`
 `+Infinity, -Infinity). The C3 backend `**does not read**
 **`preference.weight — every valid weight produces the same hard`**
-implication. The instructions panel text (FR-PR-90 / `page.tsx:76-84)`
+implication. The instructions panel text (FR-PR-90)
 is preserved verbatim for strict UI parity but is semantically
 misleading against the current backend. (CON-SEM-07; see FR-PR-86
 in spec 05; `behavior-test-catalog/index.md CC-B8.)`
@@ -331,8 +308,7 @@ rule is dropped from `preferences without user notification.`
 matching IDs (via `mapReferenceIdTree); it does not prune the`
 reference fields and never drops covering rules — even when no
 match is found in a field, the field is left intact.
-(Spec 06 FR-RI-10/11; `schedulingReferenceUpdates.ts:163-193 rename,`
-`:298-356 delete.)`
+(Spec 06 FR-RI-10/11.)
 - **EDGE-CV-10 — The page itself does not call `useEffect`-style**
 **save/restore of the scroll position itself. Save/restore is**
 triggered only by the user opening the edit form (save) and by
@@ -459,10 +435,8 @@ rewritten (the people-only anonymization map does not touch shift-type
 references unless they collide with anonymized people/group IDs), and
 all `description fields are removed when removeDescriptions is on`
 (the spec field is named `description, not descriptions).`
-(`anonymizeSchedulingState.ts:76-82 maps preceptors, preceptees,`
-and `shiftTypes independently via mapReferenceIdTree; the`
-anonymization map is built from people items/groups
-`anonymizeSchedulingState.ts:114-121.)`
+(Preceptors, preceptees and shift types are mapped independently; the
+anonymization map is built from people items and groups.)
 
 **AC-CV-14 — Tab navigation reaches the editor.**
 GIVEN the user is on the Home tab,

@@ -127,7 +127,7 @@ with a shift index. It IS implemented as a second reserved sentinel —
 `LEAVE_sid = -2`, cloning the `OFF_sid = -1` single-sentinel pattern
 (`constants.py:24-26`; `scheduler.py:92-93` maps `OFF → [OFF_sid]` then
 `LEAVE → [LEAVE_sid]`) — and resolves to the `leaves[(d,p)]` variable via
-`_day_state_expr` (`preference_types.py:32-44`), exactly as `OFF` resolves to
+`_day_state_expr`, exactly as `OFF` resolves to
 `offs[(d,p)]`. C3 must specify this typed day-state resolution — worked
 ids/groups → worked shift vars, `OFF` → off var, `LEAVE` → leave var — which is
 precisely what "treat `LEAVE` like `OFF`" means at the day-state level (per
@@ -426,6 +426,6 @@ distinction.
 - **Spec 05 — Card Preference Editors — **`durationMinutes, auto-fill, unit`
 toggle in the coefficient sub-editor.
 - **Spec 06 — Reference Integrity — leave reference handling.**
-- **prototype/ — the runnable reference scenario (**`hours_via_coefficients.yaml)`
-and independent verifier (`verify_hours.py); the three-state spike`
-(`three_state_spike.py) is the engine reference.`
+- **Design prototype** (kept in the Traycer workspace, not in this repo): a
+runnable reference scenario (`hours_via_coefficients.yaml`), an independent
+verifier, and a three-state spike that served as the engine reference.
