@@ -10,6 +10,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 
+// WARM THE MODULE GRAPH AT FILE SCOPE -- the fix for the 5 s timeout, not a raised
+// budget.
+//
+// `renderBridge()` below re-imports the bridge after `vi.resetModules()` so the
+// build-time compile-out constant is re-read for each case. The FIRST of those imports
+// also pays Vite's transform of the whole graph behind the component (`@/lib/store` ->
+// spine, authority, commands, ownership, scenario-store, hot-store, dexie-storage,
+// roster-storage, paint, lifecycle, fingerprint, and through the spine the Dexie
+// repository and `@/lib/scenario`; plus `@/lib/capability/registry`, the nav-guard
+// store and persistence-status). Under a full `vitest run components` that cold
+// transform is paid while it contends with the other 182 files' transforms, so it
+// lands inside whichever case runs first -- against a 5 s per-test budget. The dynamic
+// import is not the slow part (re-evaluation is a few ms once transformed); the COLD
+// TRANSFORM is.
+//
+// A static import here does that transform -- and one evaluation -- during the file's
+// import phase, which no per-test timeout bounds. Every per-case dynamic import
+// afterwards is the cheap re-evaluation. The module is a pure component/constant
+// definition with no import-time side effects, and nothing renders from this instance.
+import "./test-bridge";
+
 vi.mock("@/lib/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/store")>();
   return actual;
@@ -19,7 +40,6 @@ afterEach(() => {
   cleanup();
   delete window.__nsStore;
   delete window.__NS_ENABLE_TEST_BRIDGE;
-  vi.resetModules();
   vi.unstubAllEnvs();
 });
 
@@ -31,6 +51,12 @@ async function renderBridge() {
 
 describe("the bridge is compiled out of ordinary production", () => {
   beforeEach(() => {
+    // Reset BEFORE the case, not after it. The file-scope warm import leaves an
+    // instance in the registry that was evaluated with `NODE_ENV=test`, so the first
+    // case has to invalidate it before its own dynamic import re-reads the constant;
+    // an `afterEach`-only reset (the original shape) left that stale instance in place
+    // for case one and only helped cases two and three.
+    vi.resetModules();
     vi.stubEnv("NODE_ENV", "production");
   });
 
