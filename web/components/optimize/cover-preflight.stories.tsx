@@ -5,7 +5,11 @@ import type { UiTemporaryCover } from "@/lib/scenario";
 import { makeTemporaryCover, makeValidUiState } from "@/lib/scenario/test-fixtures";
 import { pickScenario, scenarioCommands } from "@/lib/store";
 import type { ScenarioSeed } from "../../.storybook/harness";
-import { LONG_TOKEN, withNarrowFrame } from "../../.storybook/story-helpers";
+import {
+  LONG_TOKEN,
+  expectNoHorizontalOverflow,
+  withNarrowFrame,
+} from "../../.storybook/story-helpers";
 import { CoverPreflight } from "./cover-preflight";
 
 const withCover =
@@ -60,7 +64,7 @@ export const LongText: Story = {
   },
   decorators: [withNarrowFrame],
   play: async ({ canvas }) => {
-    // KNOWN OVERFLOW nursing-sheduler-w0e.26: restore `await expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame"));` when fixed
+    await expectNoHorizontalOverflow(canvas.getByTestId("narrow-frame"));
     await expect(canvas.getByTitle(new RegExp(`^${LONG_TOKEN}, `))).toBeVisible();
   },
 };

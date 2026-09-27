@@ -37,11 +37,16 @@ export function CoverPreflight() {
           const label = `${cover.name}, ${cover.shiftType} on ${cover.date}`;
           return (
             <li key={index}>
-              <span className="flex min-w-0 gap-1">
+              {/* The name is a single-line slot (truncate + full value on `title`);
+                  the reason is prose and must wrap. `flex-wrap` lets the two take
+                  separate lines rather than compete for one, and the reason is a
+                  shrinkable `min-w-0` item — `shrink-0` pinned it to its max-content
+                  width, which painted the callout past a 320px container. */}
+              <span className="flex min-w-0 flex-wrap gap-1">
                 <span className="truncate" title={label}>
                   {label}
                 </span>
-                <span className="shrink-0">: {REASON[flag!]}.</span>
+                <span className="min-w-0">: {REASON[flag!]}.</span>
               </span>
             </li>
           );
