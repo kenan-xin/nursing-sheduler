@@ -98,6 +98,14 @@ export function freezeSubmission(submission: RosterSubmission): RosterSubmission
   });
 }
 
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 /** A fresh, frozen copy of provenance. */
 export function freezeProvenance(provenance: RosterProvenance): RosterProvenance {
   return Object.freeze({ ...provenance });
@@ -118,6 +126,8 @@ export function freezeRosterDocument(document: RosterDocument): RosterDocument {
     solvedDays: freezeDayGrid(document.solvedDays),
     edits: freezeEdits(document.edits),
     coordinateMap: freezeCoordinateMap(document.coordinateMap),
+    // Plain JSON data: a clone shares nothing with the input, then every level is frozen.
+    cover: deepFreeze(structuredClone(document.cover)),
     frozenXlsx: document.frozenXlsx,
   });
 }

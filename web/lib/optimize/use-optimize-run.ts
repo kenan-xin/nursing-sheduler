@@ -49,6 +49,7 @@ import {
   type ScenarioValidationIssue,
 } from "@/lib/scenario";
 import type { CanonicalScenarioDocument } from "@/lib/scenario/types";
+import type { RosterCover } from "@/lib/roster/types";
 import {
   buildProvisionalSession,
   removeOwnerSession,
@@ -125,6 +126,11 @@ function makeToken(generation: number, attemptId: string, jobId: string): Attach
 export interface OptimizeRunSubmitInput {
   /** The strict Workspace V1 projection to optimize (T17). */
   document: CanonicalScenarioDocument;
+  /**
+   * The temporary cover `document` was built with (d582), staged with the
+   * submission so the roster carries it. Absent means none.
+   */
+  cover?: RosterCover;
   /** Apply T16's fixed people-only anonymization + description removal. */
   anonymize: boolean;
   prettify?: boolean;
@@ -350,6 +356,7 @@ export interface UseOptimizeRunDeps {
     ownerId: string;
     canonicalYaml: string;
     reverseMap: PeopleReverseMap;
+    cover: RosterCover;
   }) => Promise<SessionCaptureState>;
   /**
    * Retire a staged snapshot once this submission is LOCALLY PROVEN to have
@@ -440,9 +447,11 @@ function defaultStageSnapshot(input: {
   ownerId: string;
   canonicalYaml: string;
   reverseMap: PeopleReverseMap;
+  cover: RosterCover;
 }): Promise<SessionCaptureState> {
   return stageSubmissionSnapshot({
     ownerId: input.ownerId,
+    cover: input.cover,
     payload: buildStagedSubmission({
       canonicalYaml: input.canonicalYaml,
       reverseMap: input.reverseMap,
@@ -767,6 +776,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
         ownerId,
         canonicalYaml: prep.yaml,
         reverseMap: prep.reverseMap,
+        cover: input.cover ?? { entries: [], decrements: [] },
       });
 
       // Only a snapshot this transaction actually staged may be purged, and only

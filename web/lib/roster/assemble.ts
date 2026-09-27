@@ -28,6 +28,7 @@ import { validateRosterDocument } from "./validate";
 import {
   ROSTER_DOCUMENT_SCHEMA_VERSION,
   ROSTER_SUBMISSION_SCHEMA_VERSION,
+  type RosterCover,
   type RosterDocument,
   type RosterSubmission,
 } from "./types";
@@ -38,6 +39,8 @@ export interface AssembleRosterInput {
   container: unknown;
   /** The immutable submission snapshot payload staged before the POST. */
   submission: RosterSubmission;
+  /** The temporary cover staged with that submission (validated with the document). */
+  cover: RosterCover;
   /** The de-anonymized styled workbook — the frozen render output. */
   frozenXlsx: Blob;
   /** Build stamp for provenance only; it never gates compatibility. */
@@ -141,6 +144,7 @@ export async function assembleRosterDocument(
     // A freshly captured roster has not been edited yet, by definition.
     edits: [],
     coordinateMap: container.coordinateMap,
+    cover: input.cover,
     frozenXlsx: input.frozenXlsx,
   };
 

@@ -16,6 +16,7 @@ import {
   FIXTURE_DATES,
   fixtureCanonicalDocument,
   fixtureContainer,
+  fixtureCover,
   fixtureFrozenXlsx,
   fixtureRosterDocument,
   fixtureSolvedDays,
@@ -27,6 +28,7 @@ function assemble(container: unknown, overrides: Record<string, unknown> = {}) {
   return assembleRosterDocument({
     container,
     submission: fixtureSubmission(),
+    cover: { entries: [], decrements: [] },
     frozenXlsx: fixtureFrozenXlsx(),
     appBuild: FIXTURE_APP_BUILD,
     ...overrides,
@@ -172,12 +174,19 @@ describe("parseRosterContainer", () => {
 describe("assembleRosterDocument", () => {
   it("builds a document whose axes are de-anonymized and index-aligned", async () => {
     const document = await fixtureRosterDocument();
-    expect(document.schemaVersion).toBe("roster-file/1");
+    expect(document.schemaVersion).toBe("roster-file/2");
     expect(document.context.people.map((person) => person.id)).toEqual(["Alice Ng", 7]);
     expect(document.context.calendar.map((day) => day.iso)).toEqual([...FIXTURE_DATES]);
     expect(document.solvedDays).toEqual(fixtureSolvedDays());
     expect(document.coordinateMap).toEqual(fixtureContainer().coordinateMap);
     expect(document.edits).toEqual([]);
+    expect(document.cover).toEqual({ entries: [], decrements: [] });
+  });
+
+  it("assembled roster carries the staged cover", async () => {
+    const result = await assemble(fixtureContainer(), { cover: fixtureCover() });
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) expect(result.document.cover).toEqual(fixtureCover());
   });
 
   it("carries provenance from the container plus the supplied build stamp", async () => {

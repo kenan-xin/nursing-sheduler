@@ -22,9 +22,10 @@
 
 import type { IsoDate, PersonId, ShiftTypeId } from "@/lib/scenario";
 import type { ReverseMapTuple } from "@/lib/scenario";
+import type { CoverDecrement } from "@/lib/scenario/temporary-cover";
 
 /** The current roster-document schema version. Independent of `appBuild`. */
-export const ROSTER_DOCUMENT_SCHEMA_VERSION = "roster-file/1";
+export const ROSTER_DOCUMENT_SCHEMA_VERSION = "roster-file/2";
 
 /**
  * The submission-snapshot envelope version. This is the `submission.schemaVersion`
@@ -156,6 +157,25 @@ export interface RosterCoordinateMap {
   readonly prettify: boolean;
 }
 
+/** One temporary cover the solve counted (d582): a display label, not a person. */
+export interface RosterCoverEntry {
+  readonly name: string;
+  readonly iso: IsoDate;
+  readonly shiftId: ShiftTypeId;
+  readonly groups: readonly string[];
+}
+
+/**
+ * The temporary cover staged with the submission (roster-file/2). `entries` are the
+ * scenario's covers at submit time; `decrements` is what that same `applyCovers`
+ * run subtracted from the submitted counts, so a reader can rebuild the authored
+ * need (submitted + decrement) without the clamp ambiguity.
+ */
+export interface RosterCover {
+  readonly entries: readonly RosterCoverEntry[];
+  readonly decrements: readonly CoverDecrement[];
+}
+
 /** The in-memory roster document — the working roster and the import/export unit. */
 export interface RosterDocument {
   /**
@@ -173,6 +193,8 @@ export interface RosterDocument {
   /** Normalized overlay — see `./overlay`. */
   readonly edits: readonly RosterEdit[];
   readonly coordinateMap: RosterCoordinateMap;
+  /** Temporary cover the solve counted (roster-file/2). */
+  readonly cover: RosterCover;
   /** The de-anonymized styled workbook, frozen as solved. */
   readonly frozenXlsx: Blob;
 }
@@ -201,5 +223,6 @@ export const ROSTER_DOCUMENT_FIELDS = [
   "solvedDays",
   "edits",
   "coordinateMap",
+  "cover",
   "frozenXlsx",
 ] as const;

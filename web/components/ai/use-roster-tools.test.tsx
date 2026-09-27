@@ -88,7 +88,7 @@ beforeEach(() => {
     candidateSource: { jobId: "job-1", candidateVersion: 1 },
   };
   fixture.pointer = { jobId: "job-1", candidateVersion: 1, submissionOrdinal: 1 };
-  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-14" };
+  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-14", temporaryCover: [] };
   fixture.prepare.mockReset().mockResolvedValue({
     ok: true,
     proposal: {
@@ -161,6 +161,32 @@ describe("get_roster", () => {
     expect(await tool("get_roster").handler({}, {})).toMatch(
       /no saved roster.*request_optimize_run/i,
     );
+  });
+
+  it("counts the scenario's live temporary cover", async () => {
+    // Priya is off on 8 Oct, so the night is empty until Haseena covers it.
+    const document = borrowRosterDocument();
+    fixture.working = {
+      document: {
+        ...document,
+        solvedDays: [[{ kind: "off" }, { kind: "off" }, { kind: "off" }], document.solvedDays[1]],
+      },
+      revision: 1,
+      candidateSource: { jobId: "job-1", candidateVersion: 1 },
+    };
+    fixture.scenario = {
+      rangeStart: "2026-10-07",
+      rangeEnd: "2026-10-14",
+      temporaryCover: [
+        { name: "Haseena (Ward 3)", date: "2026-10-08", shiftType: "N", groups: ["Nights"] },
+      ],
+    };
+    const answer = (await tool("get_roster").handler({}, {})) as {
+      rulesBrokenNow: string[];
+      temporaryCover?: string[];
+    };
+    expect(answer.rulesBrokenNow).toEqual([]);
+    expect(answer.temporaryCover).toEqual(["N on 2026-10-08: +1 cover (Haseena (Ward 3))"]);
   });
 
   it("reports the last change outcome", async () => {
@@ -242,7 +268,7 @@ const useBorrow = () => {
     revision: 1,
     candidateSource: { jobId: "job-1", candidateVersion: 1 },
   };
-  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09" };
+  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09", temporaryCover: [] };
 };
 const useShort = () => {
   fixture.working = {
@@ -413,7 +439,7 @@ describe("the escalation ladder in the tools", () => {
       revision: 1,
       candidateSource: { jobId: "job-1", candidateVersion: 1 },
     };
-    fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09" };
+    fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09", temporaryCover: [] };
     const found = (await tool("find_swap_partners").handler(
       { person: "SN-Priya", dates: ["2026-10-08"], reason: "sick_or_emergency" },
       {},
@@ -620,7 +646,7 @@ describe("the escalation ladder in the tools", () => {
       revision: 1,
       candidateSource: { jobId: "job-1", candidateVersion: 1 },
     };
-    fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09" };
+    fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09", temporaryCover: [] };
     const found = (await tool("find_swap_partners").handler(
       { person: "SN-Priya", dates: ["2026-10-08"], reason: "sick_or_emergency" },
       {},

@@ -211,6 +211,7 @@ export async function toRosterFileDocument(document: RosterDocument): Promise<Ro
     solvedDays: document.solvedDays,
     edits: document.edits,
     coordinateMap: document.coordinateMap,
+    cover: document.cover,
     frozenXlsx: { base64: bytesToBase64(bytes), mime: XLSX_MEDIA_TYPE },
   };
 }

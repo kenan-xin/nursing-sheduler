@@ -33,7 +33,8 @@ import {
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import { generateDateItems } from "@/lib/dates/date-id";
 import type { AssistantCommandV1 } from "@/lib/proposal";
-import { deriveCurrentDays } from "@/lib/roster";
+import { deriveCurrentDays, type RosterDocument } from "@/lib/roster";
+import type { RequirementCover } from "@/lib/roster-viewer/requirements";
 import { readRosterChangeOutcome, type RosterCellChange } from "@/lib/roster/change-request";
 import { countHeadroom, dayCode, deriveRuleModel, plainDate } from "@/lib/roster-viewer/rule-check";
 import {
@@ -270,6 +271,14 @@ type Resolved =
   | { ok: true; ctx: SwapContext; personIdx: number; dateIdxs: number[]; baselineId: string }
   | { ok: false; message: string };
 
+/** The solve's cover ledger plus the scenario's covers right now (d582, spec §4). */
+function rosterCover(document: RosterDocument): RequirementCover {
+  return {
+    decrements: document.cover.decrements,
+    live: pickScenario(useScenarioStore.getState()).temporaryCover,
+  };
+}
+
 function resolveSwap(
   read: AssistantRosterRead,
   person: string,
@@ -281,7 +290,7 @@ function resolveSwap(
   }
   if (read.newerRunWaiting) return { ok: false, message: LOAD_FIRST };
   const { document } = read;
-  const model = deriveRuleModel(document.submission);
+  const model = deriveRuleModel(document.submission, rosterCover(document));
   if (model === null) {
     return {
       ok: false,
@@ -334,7 +343,12 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         if (late) return late;
         if (read.status === "unavailable") return UNREADABLE;
         if (read.status === "none") return read.newerRunWaiting ? LOAD_FIRST : NO_ROSTER;
-        const summary = summarizeRoster(read.document, args, read.newerRunWaiting);
+        const summary = summarizeRoster(
+          read.document,
+          args,
+          read.newerRunWaiting,
+          rosterCover(read.document),
+        );
         if (typeof summary === "string") return summary;
         const lastChange = describeRosterChangeOutcome(readRosterChangeOutcome());
         return lastChange === undefined ? summary : { ...summary, lastChange };
