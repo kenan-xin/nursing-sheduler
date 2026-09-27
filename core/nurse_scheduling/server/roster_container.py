@@ -35,7 +35,7 @@ import re
 from datetime import date
 from typing import Any, NoReturn
 
-from .errors import OptimizationExecutionError, ServerApplicationError
+from .errors import ServerApplicationError
 
 SCHEMA_VERSION = "roster-container/1"
 """Frozen v1 container schema; a consumer rejects any other value."""
@@ -94,6 +94,16 @@ _COORDINATE_FIELDS = (
     "prettify",
 )
 _WORKBOOK_FIELDS = ("base64", "name", "mime")
+
+
+class OptimizationExecutionError(Exception):
+    """The roster container could not be built from a scheduler result."""
+
+    def __init__(self, code: str, message: str):
+        """Create an execution failure with a stable result code."""
+        super().__init__(message)
+        self.code = code
+        """Machine-readable reason that optimization could not complete normally."""
 
 
 class RosterContainerInvalidError(ServerApplicationError):

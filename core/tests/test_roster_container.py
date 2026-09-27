@@ -28,11 +28,11 @@ import pytest
 from openpyxl import load_workbook
 
 from nurse_scheduling import exporter
-from nurse_scheduling.server.errors import OptimizationExecutionError
-from nurse_scheduling.server.jobs.models import Job, JobRequest, JobState
+from nurse_scheduling.server.jobs.models import Job, JobFailure, JobRequest, JobState
 from nurse_scheduling.server.jobs.process_executor import ProcessStatus, run_optimization_process
 from nurse_scheduling.server.jobs.runner import OptimizationRunner
 from nurse_scheduling.server.roster_container import (
+    OptimizationExecutionError,
     INVALID_OUTPUT_CODE,
     MAX_RAW_XLSX_BYTES,
     MAX_ROSTER_CONTAINER_BYTES,
@@ -260,6 +260,23 @@ def test_encoded_container_cap_accepts_the_limit_and_rejects_one_byte_more():
     assert f"container is {encoded_size} bytes" in str(raised.value)
 
 
+def _build_like_the_runner(payload, *, xlsx_bytes, unreachable, **limits):
+    """Build as the real runner does: a builder failure becomes a returned JobFailure."""
+    try:
+        build_roster_container(
+            payload,
+            xlsx_bytes=xlsx_bytes,
+            xlsx_name="nurse-scheduling-20260201T000000Z.xlsx",
+            xlsx_mime=XLSX_MEDIA_TYPE,
+            score=42,
+            solver_status="OPTIMAL",
+            **limits,
+        )
+    except OptimizationExecutionError as error:
+        return JobFailure(code=error.code, message=str(error))
+    raise AssertionError(unreachable)
+
+
 class OversizedRosterRunner:
     """Fails the frozen encoded cap while producing a valid roster handoff.
 
@@ -267,16 +284,12 @@ class OversizedRosterRunner:
     """
 
     def run(self, job, input_bytes, *, event_callback, should_stop):
-        build_roster_container(
+        return _build_like_the_runner(
             ROSTER_PAYLOAD,
             xlsx_bytes=b"x" * 4096,
-            xlsx_name="nurse-scheduling-20260201T000000Z.xlsx",
-            xlsx_mime=XLSX_MEDIA_TYPE,
-            score=42,
-            solver_status="OPTIMAL",
             max_container_bytes=512,
+            unreachable="the oversized container must not be built",
         )
-        raise AssertionError("the oversized container must not be built")
 
 
 class InvalidHandoffRunner:
@@ -288,15 +301,9 @@ class InvalidHandoffRunner:
     def run(self, job, input_bytes, *, event_callback, should_stop):
         payload = _valid_handoff()
         payload["solvedDays"][0].pop()
-        build_roster_container(
-            payload,
-            xlsx_bytes=b"workbook",
-            xlsx_name="nurse-scheduling-20260201T000000Z.xlsx",
-            xlsx_mime=XLSX_MEDIA_TYPE,
-            score=42,
-            solver_status="OPTIMAL",
+        return _build_like_the_runner(
+            payload, xlsx_bytes=b"workbook", unreachable="the invalid container must not be built"
         )
-        raise AssertionError("the invalid container must not be built")
 
 
 class GappedAxisRunner:
@@ -311,15 +318,9 @@ class GappedAxisRunner:
             payload["coordinateMap"]["firstPeopleRow"],
             payload["coordinateMap"]["firstPeopleRow"] + 2,
         ]
-        build_roster_container(
-            payload,
-            xlsx_bytes=b"workbook",
-            xlsx_name="nurse-scheduling-20260201T000000Z.xlsx",
-            xlsx_mime=XLSX_MEDIA_TYPE,
-            score=42,
-            solver_status="OPTIMAL",
+        return _build_like_the_runner(
+            payload, xlsx_bytes=b"workbook", unreachable="the gapped container must not be built"
         )
-        raise AssertionError("the gapped container must not be built")
 
 
 class GappedDateColumnsAxisRunner:
@@ -333,15 +334,9 @@ class GappedDateColumnsAxisRunner:
         coordinate_map = payload["coordinateMap"]
         first_column = coordinate_map["leadingCols"] + coordinate_map["historyCols"] + 1
         coordinate_map["dateColumns"] = [first_column, first_column + 2]
-        build_roster_container(
-            payload,
-            xlsx_bytes=b"workbook",
-            xlsx_name="nurse-scheduling-20260201T000000Z.xlsx",
-            xlsx_mime=XLSX_MEDIA_TYPE,
-            score=42,
-            solver_status="OPTIMAL",
+        return _build_like_the_runner(
+            payload, xlsx_bytes=b"workbook", unreachable="the gapped container must not be built"
         )
-        raise AssertionError("the gapped container must not be built")
 
 
 def test_an_invalid_handoff_never_crosses_the_child_result_pipe():

@@ -32,7 +32,6 @@ from pathlib import Path
 
 import pytest
 
-from nurse_scheduling.server.errors import OptimizationExecutionError
 from nurse_scheduling.server.jobs import process_tree
 from nurse_scheduling.server.jobs.models import (
     Job,
@@ -677,9 +676,9 @@ class ReturnedFailureRunner:
         )
 
 
-class RaisedExecutionErrorRunner:
+class InvalidModelFailureRunner:
     def run(self, job, input_bytes, *, event_callback, should_stop):
-        raise OptimizationExecutionError("invalid_model", "The generated solver model is invalid")
+        return JobFailure("invalid_model", "The generated solver model is invalid")
 
 
 class UnexpectedErrorRunner:
@@ -703,7 +702,7 @@ def test_watchdog_terminates_process_after_timeout_grace():
     assert result.failure.code == "process_timeout"
     # The message is surfaced verbatim to the user, so its UK-English prose is
     # part of the contract, not incidental wording.
-    assert result.failure.message.startswith("The optimisation process did not return")
+    assert result.failure.message.startswith("The optimization process did not return")
     assert "1-second timeout" in result.failure.message
     assert "0.1-second timeout grace period" in result.failure.message
 
@@ -770,7 +769,7 @@ def test_executor_reports_abrupt_child_exit_without_waiting_for_timeout():
             hard_timeout_seconds=61,
             finish_now_enabled=False,
         )
-    assert "Optimisation process closed its result channel" in str(raised.value)
+    assert "Optimization process closed its result channel" in str(raised.value)
 
 
 @pytest.mark.parametrize(
@@ -860,10 +859,10 @@ def test_returned_failure_becomes_a_structured_failed_result():
     )
 
 
-def test_raised_execution_error_becomes_a_structured_failed_result():
+def test_returned_invalid_model_failure_becomes_a_structured_failed_result():
     result = run_optimization_process(
-        RaisedExecutionErrorRunner(),
-        _control_job("job_raised_execution_error"),
+        InvalidModelFailureRunner(),
+        _control_job("job_invalid_model_failure"),
         b"apiVersion: alpha\n",
         event_callback=lambda *_args: None,
         control=lambda: None,
