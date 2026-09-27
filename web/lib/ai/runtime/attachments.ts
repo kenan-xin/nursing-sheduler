@@ -1,9 +1,10 @@
 // The server's own check on user-message attachments, and the text-file rewrite
 // (bead 2by.10). Server-only: it decodes with Buffer.
 //
-// The composer already applies the same rules, but a request is untrusted input, so
-// every image and document part is checked again here: a data source only (no URL for
-// the provider to fetch), a known type, the size limit on the DECODED bytes, the
+// The composer already applies the same rules, but a request is untrusted input. Every
+// message's parts are allowlisted (text, plus a user's inline image or document), because
+// any other part, or any URL source, would make this server download the URL. Each
+// image and document is then checked: strict base64 data, a known type, the size limit on the DECODED bytes, the
 // per-message count, and the bytes' own signature. A failure throws an app code and
 // nothing else, so no attachment content can reach a RUN_ERROR body or a log.
 //
@@ -29,6 +30,8 @@ export class AttachmentRejectedError extends Error {
   }
 }
 
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
 const isAttachment = (part: Part) => part?.type === "image" || part?.type === "document";
 
 function checkedBytes(part: Part): Buffer {
@@ -40,6 +43,9 @@ function checkedBytes(part: Part): Buffer {
   const max = maxBytesFor(mimeType);
   const isImage = mimeType.startsWith("image/");
   if (max === null || isImage !== (part.type === "image")) throw new AttachmentRejectedError();
+  // Strict base64: ai@6 reads any string that parses as a URL as a URL to download, so
+  // a "data" value must not be able to be one.
+  if (!BASE64.test(source.value)) throw new AttachmentRejectedError();
   // Cheap bound before decoding: base64 is 4 characters per 3 bytes.
   if (source.value.length > Math.ceil(max / 3) * 4 + 4) throw new AttachmentRejectedError();
   const bytes = Buffer.from(source.value, "base64");
@@ -55,11 +61,19 @@ export function prepareAttachments(messages: readonly Message[]): Message[] {
   return messages.map((message) => {
     if (!Array.isArray(message.content)) return message;
     const parts = message.content as Part[];
+    // AN ALLOWLIST, on every message. CopilotKit turns audio, video, legacy `binary`
+    // and any URL-sourced part into an AI SDK file or image part, and the AI SDK
+    // DOWNLOADS a URL it cannot pass through -- from this server. So only text, and a
+    // user's inline image or document, may reach the converter.
+    for (const part of parts) {
+      const allowed =
+        (part?.type === "text" && typeof (part as { text?: unknown }).text === "string") ||
+        (isAttachment(part) && message.role === "user");
+      if (!allowed) throw new AttachmentRejectedError();
+    }
     const attachments = parts.filter(isAttachment);
     if (attachments.length === 0) return message;
-    if (message.role !== "user" || attachments.length > MAX_ATTACHMENTS) {
-      throw new AttachmentRejectedError();
-    }
+    if (attachments.length > MAX_ATTACHMENTS) throw new AttachmentRejectedError();
     const content = parts.map((part) => {
       if (!isAttachment(part)) return part;
       const bytes = checkedBytes(part);

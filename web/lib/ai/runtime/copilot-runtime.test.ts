@@ -73,6 +73,9 @@ afterEach(() => {
   runtimes = [];
 });
 
+/** Cloud instance metadata: the classic server-side request forgery target. */
+const METADATA_URL = "http://169.254.169.254/latest/meta-data/";
+
 /** A PNG signature and IHDR start: enough for the content check (2by.10). */
 const PNG_BASE64 = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52,
@@ -276,6 +279,40 @@ describe("run", () => {
       "an image by URL",
       { type: "image", source: { type: "url", value: "https://example.com/a.png" } },
     ],
+    // SSRF: every non-image URL part becomes an AI SDK file part the SERVER downloads.
+    [
+      "a document by URL",
+      {
+        type: "document",
+        source: { type: "url", value: METADATA_URL, mimeType: "application/pdf" },
+      },
+    ],
+    [
+      "an audio part by URL",
+      { type: "audio", source: { type: "url", value: METADATA_URL, mimeType: "audio/wav" } },
+    ],
+    [
+      "a video part by URL",
+      { type: "video", source: { type: "url", value: METADATA_URL, mimeType: "video/mp4" } },
+    ],
+    [
+      "a legacy binary part by URL",
+      { type: "binary", mimeType: "application/pdf", url: METADATA_URL },
+    ],
+    [
+      "a legacy binary part with data",
+      { type: "binary", mimeType: "application/pdf", data: "JVBERg==" },
+    ],
+    [
+      "an audio part with data",
+      { type: "audio", source: { type: "data", value: "AAAA", mimeType: "audio/wav" } },
+    ],
+    // ai@6 turns a string that parses as a URL into a URL, even in a "data" source.
+    [
+      "image data that is really a URL",
+      { type: "image", source: { type: "data", value: METADATA_URL, mimeType: "image/png" } },
+    ],
+    ["an unknown part type", { type: "file", url: METADATA_URL }],
   ])("refuses %s without calling the provider (2by.10)", async (_label, part) => {
     const { runtime, provider } = launch();
     const response = await runtime.handler(
@@ -295,6 +332,26 @@ describe("run", () => {
     if ("source" in part && part.source.type === "data") {
       expect(logged).not.toContain(part.source.value);
     }
+  });
+
+  it("refuses a media part on a message that is not the user's (2by.10)", async () => {
+    const { runtime, provider } = launch();
+    const response = await runtime.handler(
+      runRequest({
+        threadId: "t-assistant-part",
+        messages: [
+          { id: "m1", role: "user", content: "hi" },
+          {
+            id: "m2",
+            role: "assistant",
+            content: [{ type: "binary", mimeType: "application/pdf", url: METADATA_URL }],
+          },
+        ],
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: AI_ERROR_ATTACHMENT_REJECTED });
+    expect(provider.calls).toHaveLength(0);
   });
 
   it("refuses a fifth attachment on one message (2by.10)", async () => {
