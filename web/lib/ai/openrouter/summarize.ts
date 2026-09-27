@@ -4,7 +4,12 @@
 
 import { createOpenAI } from "@ai-sdk/openai";
 import { APICallError, generateText } from "ai";
-import { AI_SETUP_CODES, OPENROUTER_BASE_URL, type AiSetupCode } from "@/lib/ai/protocol";
+import {
+  AI_SETUP_CODES,
+  OPENROUTER_BASE_URL,
+  SUMMARY_TIMEOUT_MS,
+  type AiSetupCode,
+} from "@/lib/ai/protocol";
 import { classifyStatus } from "./probe";
 
 export type SummaryResult = { ok: true; summary: string } | { ok: false; code: AiSetupCode };
@@ -28,7 +33,11 @@ export async function summarizeConversation(input: {
   transcript: string;
   fetchImpl?: typeof globalThis.fetch;
   signal?: AbortSignal;
+  /** Test seam; the server's own bound, so a stalled provider cannot hold the request. */
+  timeoutMs?: number;
 }): Promise<SummaryResult> {
+  const timeout = AbortSignal.timeout(input.timeoutMs ?? SUMMARY_TIMEOUT_MS);
+  const abortSignal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
   const openrouter = createOpenAI({
     apiKey: input.apiKey,
     baseURL: OPENROUTER_BASE_URL,
@@ -47,7 +56,7 @@ export async function summarizeConversation(input: {
       prompt,
       maxOutputTokens: 700,
       maxRetries: 0,
-      ...(input.signal ? { abortSignal: input.signal } : {}),
+      abortSignal,
     });
     const summary = text.trim();
     return summary ? { ok: true, summary } : { ok: false, code: AI_SETUP_CODES.probeFailed };

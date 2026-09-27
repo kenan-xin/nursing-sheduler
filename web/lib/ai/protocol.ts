@@ -36,6 +36,8 @@ export const AI_PROBE_URL = "/api/ai/openrouter/test";
 export const AI_SUMMARY_URL = "/api/ai/openrouter/summarize";
 /** The largest transcript the summary route accepts; the client keeps the newest part. */
 export const MAX_SUMMARY_INPUT_CHARS = 120_000;
+/** How long a summary may take, in the browser and on the server, before the send goes on without it. */
+export const SUMMARY_TIMEOUT_MS = 15_000;
 
 /**
  * Stable app error codes. These strings are the ONLY failure detail that crosses

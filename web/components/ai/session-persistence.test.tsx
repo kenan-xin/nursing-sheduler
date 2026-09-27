@@ -894,6 +894,15 @@ describe("dirty history already on disk", () => {
 describe("a long thread (bead ypo)", () => {
   /** 12 old user/answer pairs of 6,000 characters: over COMPACT_AT_CHARS. Mounted after. */
   async function mountLongThread(summaryAnswer: unknown) {
+    const summaryCalls = await seedAndMount(summaryAnswer);
+    await act(async () => {
+      await session.current!.send("new question");
+    });
+    await settle();
+    return { hop: agent.clones.at(-1)!.hopInputs[0]!, summaryCalls };
+  }
+
+  async function seedAndMount(summaryAnswer: unknown) {
     for (let i = 0; i < 12; i++) {
       for (const row of [
         {
@@ -925,7 +934,9 @@ describe("a long thread (bead ypo)", () => {
     globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
       if (!String(url).includes("/api/ai/openrouter/summarize")) return harnessFetch(url, init);
       summaryCalls.push(init ?? {});
-      return new Response(JSON.stringify(summaryAnswer));
+      return typeof summaryAnswer === "function"
+        ? (summaryAnswer as (init?: RequestInit) => Promise<Response>)(init)
+        : new Response(JSON.stringify(summaryAnswer));
     }) as typeof fetch;
     cleanup();
     agent = new ScriptedAgent();
@@ -934,11 +945,7 @@ describe("a long thread (bead ypo)", () => {
     await waitFor(() => expect(agent.messages.length).toBe(24));
     agent.shape = "answer";
     agent.answer = "ok";
-    await act(async () => {
-      await session.current!.send("new question");
-    });
-    await settle();
-    return { hop: agent.clones.at(-1)!.hopInputs[0]!, summaryCalls };
+    return summaryCalls;
   }
 
   it("sends summary + the 4 recent turns on the FIRST hop, and the panel keeps everything", async () => {
@@ -963,6 +970,32 @@ describe("a long thread (bead ypo)", () => {
       "EARLIER-SUMMARY",
     );
     expect(session.current!.summarised).toBe(true);
+  });
+
+  it("Stop during a stalled summary aborts it and frees the panel at once (ypo review 1)", async () => {
+    // OpenRouter stalls: the summary answers only when its request is aborted.
+    const stalled = (init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("Aborted", "AbortError")),
+        );
+      });
+    const summaryCalls = await seedAndMount(stalled);
+    let done = false;
+    act(() => {
+      void session.current!.send("new question").then(() => {
+        done = true;
+      });
+    });
+    await waitFor(() => expect(summaryCalls).toHaveLength(1));
+    act(() => session.current!.stop());
+    await waitFor(() => expect(done).toBe(true));
+    await settle();
+    expect(summaryCalls[0].signal?.aborted).toBe(true);
+    // Nothing reached the provider, and the panel is free for the next send.
+    expect(agent.clones).toHaveLength(0);
+    expect(session.current!.sending).toBe(false);
+    expect(session.current!.summarised).toBe(false);
   });
 
   it("still sends the turn, with the full history and no notice, when the summary fails", async () => {

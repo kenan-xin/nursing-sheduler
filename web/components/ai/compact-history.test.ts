@@ -84,6 +84,32 @@ describe("compactHistory", () => {
     ).toEqual(kept);
   });
 
+  it("gives up on a stalled summary at the timeout or on abort, failing open (review 1)", async () => {
+    const signals: AbortSignal[] = [];
+    const stalled = (async (_url: string, init: RequestInit) => {
+      signals.push(init.signal!);
+      return new Promise<Response>((_resolve, reject) =>
+        init.signal!.addEventListener("abort", () => reject(init.signal!.reason)),
+      );
+    }) as unknown as typeof fetch;
+    const save = vi.fn();
+    const deps = {
+      readThread: async () => ({ summary: null }) as never,
+      readSettings: async () => ready,
+      fetchImpl: stalled,
+      saveThreadSummary: save,
+    };
+    const kept = { summary: null, compactedNow: false };
+    expect(await compactHistory(input(big(20)), { ...deps, timeoutMs: 5 })).toEqual(kept);
+    const stop = new AbortController();
+    const pending = compactHistory({ ...input(big(20)), signal: stop.signal }, deps);
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    stop.abort();
+    expect(await pending).toEqual(kept);
+    expect(signals.every((s) => s.aborted)).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("calls the summariser once across two consecutive sends past the threshold", async () => {
     let stored: { text: string; throughSeq: number; createdAt: string } | null = null;
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true, summary: "S" })));

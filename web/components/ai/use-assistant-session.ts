@@ -482,13 +482,27 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
       // bead ypo: a long thread is summarised here, in preparation. Every check below
       // still runs after this await, so a Stop or Clear during it refuses the launch, and
       // the summary write itself is fenced by this turn's generations.
-      const compacted = await compactHistory({
-        threadId: plan.threadId,
-        scenarioId: plan.scenarioId,
-        history: plan.history,
-        generations: plan,
-        onSummarising: () => setTurnActivity({ kind: "summarising" }),
-      });
+      // Any interruption (Stop, Clear, takeover, Disable) aborts the summary at once, so
+      // a stalled provider cannot keep this send -- and every later one -- in flight.
+      const summaryAbort = new AbortController();
+      const abortOnInterrupt = (state = useAssistantStore.getState()) => {
+        if (isInterrupting(state)) summaryAbort.abort();
+      };
+      abortOnInterrupt();
+      const unsubscribe = useAssistantStore.subscribe((state) => abortOnInterrupt(state));
+      let compacted;
+      try {
+        compacted = await compactHistory({
+          threadId: plan.threadId,
+          scenarioId: plan.scenarioId,
+          history: plan.history,
+          generations: plan,
+          signal: summaryAbort.signal,
+          onSummarising: () => setTurnActivity({ kind: "summarising" }),
+        });
+      } finally {
+        unsubscribe();
+      }
       if (compacted.compactedNow) setSummarised(true);
       setTurnActivity(THINKING);
 
