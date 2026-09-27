@@ -16,7 +16,7 @@
 
 import { formatShortDate, isValidIso } from "@/lib/dates/date-id";
 import { expandShiftTypeRefs, flattenShiftTypeRefs } from "@/lib/rules/expansion";
-import { requiredOn, requirementDateIsos } from "@/lib/rules/shortfalls";
+import { requiredOn, requirementDateIsos } from "@/lib/rules/requirement-dates";
 import {
   RESERVED_SHIFT_TYPE,
   isDayStateSelector,

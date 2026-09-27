@@ -11,7 +11,8 @@ import { applyAssistantCommands } from "./operations";
 import { deriveProposalDiff, diffScenarioDocuments, SCOPE_LABEL, type DiffScope } from "./diff";
 import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
-import type { ScenarioUiState } from "@/lib/scenario";
+import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
+import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
 
 describe("deriveProposalDiff", () => {
   it("separates what was asked for from what the app will do as a result", () => {
@@ -937,6 +938,57 @@ describe("requirement exceptions in the Preview", () => {
     const entry = diff.direct.find((e) => e.key === "rule:requirements:req-day");
     expect(entry?.label).toBe("Day cover (renamed)");
     expect(entry?.after).toContain("except 14 Apr: 1");
+  });
+});
+
+describe("temporary cover in the Preview (d582)", () => {
+  // The covers are stored apart from the cards, so a cover-only change is invisible to the
+  // card comparison; these entries are the diff stating the effective count it moved.
+  const covered = (covers: readonly UiTemporaryCover[]): ScenarioUiState => ({
+    ...ward({
+      staff: people("ana", "ben"),
+      cardsByKind: cards({
+        requirements: [
+          requirement("night", "N", 3, { date: ["2026-11-05"], description: "Night cover" }),
+        ],
+      }),
+    }),
+    temporaryCover: [...covers],
+  });
+  const haseena = (overrides: Partial<UiTemporaryCover> = {}): UiTemporaryCover =>
+    makeTemporaryCover({ date: "2026-11-05", shiftType: "N", ...overrides });
+  const line = (
+    entry: { label: string; before: string | null; after: string | null } | undefined,
+  ) => `${entry?.label}: ${entry?.before} → ${entry?.after}`;
+
+  it("shows the effective count change for a cover", () => {
+    const entries = diffScenarioDocuments(covered([]), covered([haseena()]));
+    expect(entries.map((entry) => entry.key)).toEqual(["cover:night|2026-11-05|N"]);
+    expect(entries[0].scope).toBe("staffing-requirements");
+    expect(line(entries[0])).toBe("Night on 5 Nov: exactly 3 → 2 (Night cover)");
+  });
+
+  it("shows the reverse line when the cover goes", () => {
+    const entries = diffScenarioDocuments(covered([haseena()]), covered([]));
+    expect(line(entries[0])).toBe("Night on 5 Nov: exactly 2 → 3 (Night cover)");
+  });
+
+  it("never shows a count below 0", () => {
+    // One slot, three covers: the count is a floor at 0 and one line still says so.
+    const three = [
+      haseena(),
+      haseena({ name: "Priya (Ward 5)" }),
+      haseena({ name: "Moss (Bank)" }),
+    ];
+    const entries = diffScenarioDocuments(covered([haseena()]), covered(three));
+    expect(entries).toHaveLength(1);
+    expect(line(entries[0])).toBe("Night on 5 Nov: exactly 2 → 0 (Night cover)");
+  });
+
+  it("says nothing for a cover the ward cannot resolve", () => {
+    expect(diffScenarioDocuments(covered([]), covered([haseena({ date: "2026-12-01" })]))).toEqual(
+      [],
+    );
   });
 });
 
