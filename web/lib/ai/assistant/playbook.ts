@@ -38,7 +38,7 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-27.1";
+export const PLAYBOOK_VERSION = "2026-09-27.2";
 
 /** Said on the Preview and in the reply whenever a change relaxes a rest rule. */
 export const REST_PRACTICE_WARNING =
@@ -178,6 +178,7 @@ export type RepairId =
   | "relax_count_rule"
   | "soften_rest_rule"
   | "borrow_temporary_nurse"
+  | "add_staff_member"
   | "ask_nurse_on_leave"
   | "run_one_short"
   | "split_long_shift";
@@ -272,6 +273,20 @@ export const REPAIRS: readonly RepairEntry[] = [
       "Put her in a staff group only when the manager confirms her qualification. Never invent a name.",
   },
   {
+    // bead 2vtv: a real staff member for the whole period, not a cover. The manager's
+    // Apply is the decision; the Staff screen shows the new row (iwo).
+    id: "add_staff_member",
+    title: "Add a nurse to the staff list for the whole period",
+    whenToUse:
+      "The ward is short on many days of the period, not just a bad day: a new starter, a transfer or a relief nurse on the roster.",
+    disruption: "medium",
+    confirmation: "manager",
+    enforcedBy: "apply",
+    opTypes: ["add_person"],
+    guardrail:
+      "Head count only: put her in a staff group only when the manager names it. Ask for her name; never invent one.",
+  },
+  {
     id: "ask_nurse_on_leave",
     title: "Ask a named nurse on leave to cover one shift",
     whenToUse: "A qualified nurse is on leave on the one day that is one nurse short.",
@@ -332,6 +347,7 @@ export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
   chronic: [
     "align_overlapping_requirements",
     "borrow_temporary_nurse",
+    "add_staff_member",
     "run_one_short",
     "split_long_shift",
   ],
@@ -346,6 +362,7 @@ export const CHRONIC_DATE_COUNT = 3;
 export const MAX_CAP_RAISE = 2;
 export const MAX_OPTIONS = 3;
 export const MAX_BORROWED = 3;
+export const MAX_NEW_STAFF = 2;
 export const MAX_EXPLAINED_FINDINGS = 5;
 /** The strength a softened request gets (a finite weight the solver may break only if it must). */
 export const SOFT_REQUEST_WEIGHT = 10;

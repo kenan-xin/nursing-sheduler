@@ -28,8 +28,8 @@ export function useFeasibilityTools(agentId: string, turnEpoch: number): void {
       agentId,
       description:
         "Find where the schedule is short-staffed and get up to three realistic, safe ways to fix " +
-        "it, best first: for example borrowing a nurse from another ward, asking a named nurse on " +
-        "leave, or allowing one more night this period. Each option lists its exact operations and " +
+        "it, best first: for example borrowing a nurse from another ward, adding a nurse to the " +
+        "staff list, asking a named nurse on leave, or allowing one more night this period. Each option lists its exact operations and " +
         "who must agree. Use it before running Optimize when set-up progress reports known gaps, " +
         "and whenever a run is infeasible. It changes nothing.",
       parameters: feasibilityParameters,

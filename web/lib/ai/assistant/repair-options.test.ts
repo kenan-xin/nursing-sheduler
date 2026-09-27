@@ -2071,3 +2071,51 @@ describe("skill-mix repairs (bead nursing-sheduler-2ti)", () => {
     ).not.toBeNull();
   });
 });
+
+describe("add a nurse to the staff list (bead 2vtv)", () => {
+  it("offers a new staff member for a chronic head-count shortage, and it closes the gap", () => {
+    const state = SCENARIOS.tooFewNurses();
+    const add = rank(state).find((o) => o.repairId === "add_staff_member");
+    expect(add).toMatchObject({
+      confirmation: "manager",
+      enforcedBy: "apply",
+      capabilityId: "staff-list",
+      evidence: "static_check",
+      operations: [{ type: "add_person", name: "New nurse 1", groups: [] }],
+    });
+    expect(add!.title).toMatch(/^Add a nurse to the staff list for the whole period/);
+    expect(add!.needsFromUser.join(" ")).toMatch(/name/);
+    expect(isSafeOption(state, add!)).toBe(true);
+    const after = applyAssistantCommands(state, add!.operations);
+    if (!after.ok) throw new Error(after.rejection.message);
+    expect(findStaffingShortfalls(after.next)).toEqual([]);
+  });
+
+  it("is never offered for a skill-mix gap or a short bad day", () => {
+    for (const make of [
+      SCENARIOS.onlyRnOnLeave,
+      SCENARIOS.rnMixOnLeave,
+      SCENARIOS.shortOnLeaveDay,
+    ]) {
+      expect(rank(make()).map((o) => o.repairId)).not.toContain("add_staff_member");
+    }
+  });
+
+  it("refuses a new staff member in a group, and a borrowed person without a lending ward", () => {
+    const state = SCENARIOS.tooFewNurses();
+    const add = rank(state).find((o) => o.repairId === "add_staff_member")!;
+    const grouped = {
+      ...add,
+      operations: [{ type: "add_person" as const, name: "New nurse 1", groups: ["RN"] }],
+    };
+    expect(isSafeOption(state, grouped)).toBe(false);
+    expect(isSafeOption(state, { ...add, repairId: "relax_count_rule" })).toBe(false);
+  });
+
+  it("lets a candidate test the placeholder but not an invented name", () => {
+    const state = SCENARIOS.tooFewNurses();
+    const op = (name: string) => [{ type: "add_person" as const, name, groups: [] }];
+    expect(violatesSafetyFloor(state, op("New nurse 1"), { leaveAsked: true })).toBeNull();
+    expect(violatesSafetyFloor(state, op("Siti Rahman"), { leaveAsked: true })).not.toBeNull();
+  });
+});
