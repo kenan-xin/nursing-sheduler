@@ -73,8 +73,6 @@ const cancelRoute = fn(() => jsonResponse(202, {}));
 const meta = {
   title: "AI/DiagnosticSearchCard",
   component: DiagnosticSearchCard,
-  // a11y violation tracked in nursing-sheduler-w0e.31; restore "error" when fixed
-  parameters: { a11y: { test: "todo" } },
   decorators: [
     (Story) => (
       <div className="w-96">

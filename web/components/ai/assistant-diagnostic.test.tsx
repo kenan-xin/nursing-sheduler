@@ -206,6 +206,14 @@ describe("DiagnosticSearchCard", () => {
     expect(note).toMatch(/only proves that exact copy can be solved/i);
   });
 
+  it("makes the scrolling body a named, keyboard-focusable region", () => {
+    publish(searchWith([FEASIBLE]));
+    render(<DiagnosticSearchCard />);
+    const body = screen.getByRole("region", { name: "Test details" });
+    expect(body).toContainElement(screen.getByTestId("diagnostic-cause-note"));
+    expect(body).toHaveAttribute("tabindex", "0");
+  });
+
   it("separates a verified copied run from the untested idea that suggested it", () => {
     publish(closeSearch(searchWith([FEASIBLE]), "first_feasible", null, NOW));
     render(<DiagnosticSearchCard />);
