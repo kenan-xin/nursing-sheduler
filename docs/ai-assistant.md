@@ -96,6 +96,11 @@ Ready, the following may be sent through OpenRouter to the model you chose:
 - the complete relevant schedule — dates, people, shift types, rules, requests,
   identifiers and descriptions;
 - which screen you are on, and the conversation so far for that schedule;
+- images and text files you attach to a message (PNG, JPEG, WebP or GIF up to 5 MB;
+  .txt, .csv or .md up to 200 KB; at most 4 per message, always with some typed text).
+  Images need a model that reads images; the panel says so when yours does not. An
+  attachment is part of the conversation, so it is sent again with each later message
+  until older messages are summarised;
 - in a long conversation, the older messages once more, so the model can write a short
   summary of them. After that the summary is sent instead of those messages, and the panel
   says "Earlier messages were summarised to keep this conversation going." Your own copy of
@@ -116,7 +121,7 @@ tool argument, the conversation, or your schedule.
 | --- | --- |
 | Your OpenRouter key | This browser profile only, in the app's local database |
 | Model choice and AI preferences | This browser profile only |
-| Conversations, previews and receipts | This browser profile only, kept per schedule |
+| Conversations, attachments, previews and receipts | This browser profile only, kept per schedule |
 | Your schedule | Unchanged — the app's normal storage, separate from the chat |
 
 **The key is not encrypted.** Anyone who can use this browser profile can read it and
@@ -141,7 +146,7 @@ immediately:
 | **Stop** (in the panel) | Ends the current answer. Anything already written stays, labelled as stopped. An unapplied Preview or roster change card stops with it; asking a follow-up question does not stop one. |
 | **Remove key** | Deletes the key at once. History and preferences are kept; the assistant becomes unavailable. |
 | **Replace key or model** | Stops current work first, then tests the new configuration. |
-| **Clear conversation history** | Deletes this schedule's messages, previews and receipts. Key, preferences and the schedule itself are kept. |
+| **Clear conversation history** | Deletes this schedule's messages and their attachments, previews and receipts. Key, preferences and the schedule itself are kept. |
 | **Clear all AI data** | Deletes the key and every local AI setting and conversation. Your schedule and roster are untouched. |
 | **AI features** switch off | Stops work, hides the assistant, keeps everything stored so turning it back on resumes where you were. |
 

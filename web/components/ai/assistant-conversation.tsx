@@ -16,11 +16,12 @@
 // in the card dock above the composer (`assistant-card-dock.tsx`), which reaches the
 // live handlers only through the context this rendering provides.
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { CopilotChatMessageView, CopilotChatView } from "@copilotkit/react-core/v2";
 import type { Message } from "@ag-ui/client";
 import { readThreadMessages } from "@/lib/ai/assistant/history-repo";
 import { toTransportThread } from "@/lib/ai/assistant/messages";
+import { ATTACHMENT_PRIVACY_NOTE } from "@/lib/ai/assistant/attachment-rules";
 import { COMPACTION_NOTICE } from "@/lib/ai/assistant/compaction";
 import { describeInterruptionPhase, describeSettlement } from "@/lib/ai/assistant/lifecycle";
 import { describeRefusal } from "@/lib/ai/assistant/send-gate";
@@ -36,6 +37,8 @@ import { CardDockContext, DockedComposer } from "./assistant-card-dock";
 import { AssistantReceipts } from "./assistant-receipts";
 import { ApplyNavigationNotice } from "./apply-navigation-notice";
 import { useAssistantRetry } from "./use-assistant-retry";
+import { useComposerAttachments } from "./use-composer-attachments";
+import { useModelImageInput } from "./use-model-image-input";
 import { Button } from "@/components/ui/button";
 import { Surface } from "@/components/ui/surface";
 
@@ -231,6 +234,20 @@ export function AssistantLiveConversation({
     () => ({ onSend: sendMessage, disabled: running, proposals }),
     [sendMessage, running, proposals],
   );
+  // 2by.10. Only a composer submit carries files; cards and follow-ups send text alone.
+  // A send refused as busy keeps the queue, an accepted one clears it.
+  const attach = useComposerAttachments(useModelImageInput());
+  const { ready, consume } = attach;
+  const submit = useCallback(
+    (text: string) => {
+      const files = ready();
+      if (files.length === 0) return void sendMessage(text);
+      void sendMessage(text, { attachments: files }).then((accepted) => {
+        if (accepted) consume();
+      });
+    },
+    [ready, consume, sendMessage],
+  );
   // The failed turn's Retry, through the SESSION'S OWN send -- the same function the
   // composer's path calls, given the failed turn's id so the gate replaces it. Deliberately
   // not wrapped in another adapter: an adapter here is one more place a send option could
@@ -247,13 +264,41 @@ export function AssistantLiveConversation({
   }, [hasMessages, onHasMessages]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-live-conversation">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      data-testid="assistant-live-conversation"
+      ref={attach.containerRef}
+    >
       {session.messages.length === 0 && <WelcomeState />}
       <RefusalNotice />
       <LifecycleNotice onRetry={retry.canRetry ? retry.retry : null} />
       <CompactionNotice show={session.summarised} />
       <AssistantReceipts controller={proposals} />
       <ApplyNavigationNotice controller={proposals} />
+      <input
+        type="file"
+        multiple
+        hidden
+        ref={attach.fileInputRef}
+        accept={attach.accept}
+        onChange={attach.handleFileUpload}
+        data-testid="assistant-file-input"
+      />
+      {attach.error && (
+        <p
+          className="truncate px-4 pb-2 text-meta text-errorink"
+          role="status"
+          title={attach.error}
+          data-testid="assistant-attach-error"
+        >
+          {attach.error}
+        </p>
+      )}
+      {attach.attachments.length > 0 && (
+        <p className="px-4 pb-2 text-meta text-ink2" data-testid="assistant-attach-privacy">
+          {ATTACHMENT_PRIVACY_NOTE}
+        </p>
+      )}
       <ActivityContext.Provider value={session.activity}>
         <CardDockContext.Provider value={dock}>
           <CopilotChatView
@@ -270,8 +315,15 @@ export function AssistantLiveConversation({
             // Suppresses the library's generic greeting: this panel is bound to one
             // explicit scenario thread, and the welcome content above is the app's.
             hasExplicitThreadId
-            onSubmitMessage={sendMessage}
+            onSubmitMessage={submit}
             onStop={session.stop}
+            attachments={attach.attachments}
+            onRemoveAttachment={attach.removeAttachment}
+            onAddFile={() => attach.fileInputRef.current?.click()}
+            dragOver={attach.dragOver}
+            onDragOver={attach.handleDragOver}
+            onDragLeave={attach.handleDragLeave}
+            onDrop={attach.handleDrop}
           />
         </CardDockContext.Provider>
       </ActivityContext.Provider>
