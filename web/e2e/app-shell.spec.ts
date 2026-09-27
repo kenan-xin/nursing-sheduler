@@ -551,7 +551,10 @@ test.describe("T08 app shell", () => {
     await recordBackup(page);
     await mutate(page, { rangeStart: "2026-03-01" });
     expect(await backupStatus(page)).toBe("stale");
-    await page.waitForTimeout(800);
+    // Deterministic seam, not an arbitrary timeout: the reload must not outrun the
+    // in-flight durable write, so wait for the persist queue to settle to `saved`
+    // (the write flips it to `saving` synchronously at enqueue).
+    await waitForPersistSettled(page);
 
     await page.reload();
     await expect(page.getByTestId("home-screen")).toBeVisible();

@@ -28,6 +28,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  BRING_UP_STALL_MS,
   initializeScenarioAuthority,
   registerScenarioLifecycle,
   useHotStore,
@@ -36,7 +37,7 @@ import {
 import { OwnershipBanner } from "./ownership-banner";
 import { NEW_SCHEDULE_FAILED_MESSAGE, resetToNewSchedule } from "@/lib/roster";
 import { SkeletonCard } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { ConfirmDialog } from "./confirm-dialog";
 import { useUndoRedoShortcuts } from "./undo-redo-controls";
 import { usePersistenceStatusController } from "./persistence-status";
@@ -88,6 +89,27 @@ export function HydrationGate({ children, resetNewSchedule }: HydrationGateProps
       >
         <SkeletonCard />
         <SkeletonCard />
+        {/* u2o: the JS stall timer below is armed by the mount effect, so it cannot run
+            until the client hydrates -- and a script that never arrives (a hung chunk
+            request after a deploy, no console error) leaves this server-rendered
+            skeleton up forever. This copy is in the server markup and revealed by CSS
+            at the same deadline, so it needs no JavaScript; a plain link reloads. */}
+        <div
+          data-testid="hydration-slow"
+          className="invisible flex flex-col gap-4 text-center"
+          style={{ animation: `ns-reveal 0s ${BRING_UP_STALL_MS}ms forwards` }}
+        >
+          <h2 className="font-heading text-h3 font-semibold tracking-[-0.015em]">
+            Your schedule is taking too long to load
+          </h2>
+          <p className="text-body text-ink2">
+            Reload the page. If it keeps happening, close the other tabs of this app first. Nothing
+            has been lost.
+          </p>
+          <a href="" className={buttonVariants({ className: "self-center" })}>
+            Reload
+          </a>
+        </div>
       </div>
     );
   }

@@ -12,7 +12,6 @@
 // mutation. All validation/OFF-LEAVE/numeric-id logic lives in coverings-model.
 
 import { useEffect, useState } from "react";
-import type { ScenarioUiState } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
 import { CardEditorForm, CardEditorHardRuleNote } from "@/components/card-editor/card-editor-shell";
 import { FieldShell } from "@/components/card-editor/field-shell";
@@ -28,13 +27,14 @@ import {
   type CoveringErrors,
   type CoveringFormState,
   type CoveringRef,
+  type CoveringsScenarioInput,
   type CoveringSelectField,
   toggleRef,
   validateCoveringForm,
 } from "./coverings-model";
 
 interface CoveringFormProps {
-  state: ScenarioUiState;
+  state: CoveringsScenarioInput;
   mode: "add" | "edit";
   initialForm: CoveringFormState;
   onSave: (form: CoveringFormState) => void;

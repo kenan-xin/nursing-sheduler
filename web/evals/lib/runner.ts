@@ -3,7 +3,15 @@
 import { describe, expect, test } from "vitest";
 import baselineJson from "../baseline.json";
 import { ALL_CASES } from "../cases";
-import { cutByBudget, Ledger, plannedUsd, plus, recordingFetch, selectCases } from "./budget";
+import {
+  cutByBudget,
+  Ledger,
+  parseCaseIds,
+  plannedUsd,
+  plus,
+  recordingFetch,
+  selectCases,
+} from "./budget";
 import type { EvalCase } from "./case";
 import { gradeDeterministic } from "./graders";
 import { runTrial, type Seams } from "./harness";
@@ -33,19 +41,20 @@ const env = () => ({
   user: process.env.EVAL_USER_MODEL ?? "anthropic/claude-haiku-4.5",
   trials: positive("EVAL_TRIALS", 3),
   tags: process.env.EVAL_TAGS ? process.env.EVAL_TAGS.split(",") : null,
+  ids: parseCaseIds(process.env.EVAL_CASES, ALL_CASES),
   maxUsd: positive("EVAL_MAX_USD", DEFAULT_MAX_USD),
 });
 
 export function runCases(cases: EvalCase[], seams: Seams): void {
   const e = env();
-  const total = plannedUsd(selectCases(ALL_CASES, e.tags), e.trials, BASELINE);
+  const total = plannedUsd(selectCases(ALL_CASES, e.tags, e.ids), e.trials, BASELINE);
   if (total > e.maxUsd) {
     // Loud, before any spend: a silent partial run is worse than none.
     throw new Error(
       `planned eval cost $${total.toFixed(2)} is over EVAL_MAX_USD $${e.maxUsd}; raise the cap or narrow EVAL_TAGS`,
     );
   }
-  const selected = selectCases(cases, e.tags);
+  const selected = selectCases(cases, e.tags, e.ids);
   const ledger = new Ledger(
     total > 0 ? (e.maxUsd * plannedUsd(selected, e.trials, BASELINE)) / total : 0,
   );

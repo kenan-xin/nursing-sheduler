@@ -16,6 +16,44 @@ either maps to the pinned upstream revision or has a documented adaptation.
   the `5027e2f` refresh is governed by `upstream-public-diagnostics-refresh-2026-07-19`;
   the `d63519b` refresh is governed by the
   `d63519b-process-supervision-addendum` and ticket `U31`.
+- **Sync target (2026-09-25):** v1 branch `feature/genie` at `1bf4b85`. The old pin
+  `d63519b` is a genie commit, not a `dev` commit; its merge base with v1 `dev` is
+  `89190ab`. Genie contains all of `dev` through merge `1b6f7e5`. The upstream delta
+  for v2 is `d63519b..feature/genie`. Governing design:
+  `docs/superpowers/specs/2026-09-25-v1-genie-sync-design.md`.
+- **Requirements split (W0):** runtime `core/requirements.txt`, optional
+  `core/requirements-optional.txt`. v2 differences from genie: `ruamel.yaml` and
+  `pydantic` pinned; `pulp` in the optional file; the `ai/`-only packages omitted.
+
+## Upstream tracking table (from W1)
+
+`core/upstream-patches/manifest.toml` is the source of truth for which `core/` files
+track v1 `feature/genie` and how: `verbatim` (byte-identical) or `patched` (with the
+named patch files in `core/upstream-patches/`). `core/scripts/check_upstream_sync.py`
+checks it, and the `core` CI job runs that check through pytest. W1 patches: P0 fixture
+hash re-stamp (upstream bug, report it), P2-P3 `skillMix` and per-date overrides, P4
+`on_roster`. P1 `Person.temporary` was retired after W2 (bead `nursing-sheduler-pknr`).
+The web no longer writes it. Located Workspace errors stay in the v2-only
+`server/workspace.py` (spec X14).
+
+W2 adds the server layer. It adds 9 `verbatim` rows: `version.py`, `retry.py`,
+`process_tree.py`, `process_executor.py`, `request_limits.py`, `auth.py`,
+`solver_capabilities.py`, `solver_options.py` and `tests/test_retry.py`. It also adds 8
+`patched` rows. Each has one `W2-<file>.patch`. The patch header maps every hunk to a
+patch ID:
+
+- P5: Workspace boundary.
+- P6: event cursors.
+- P7: roster container.
+- P8: basis and INCONCLUSIVE.
+- P9: purpose queues.
+- P11: maintenance liveness.
+- P12: T19 fence bridge. W6 deletes it.
+- P13: `default_prettify=False`.
+- P14: diagnostic path mode and cleanup.
+
+`JOB_MAX_PENDING=8` and the diagnostic concurrency of 1 now live in `docker/compose.yml`
+and `scripts/dev.sh`. The web owns user-facing failure wording (`web/lib/bff/errors.ts`).
 
 ## Ported files (upstream → rebuild)
 
@@ -56,13 +94,11 @@ implementation after API parity is reached."
 | `server/scheduling_input.py` | Parse-once submission boundary: version dispatch, solver check, canonicalization; `MalformedInputError` → 400. |
 | `server/event_cursor.py` | Opaque, versioned, job-bound SSE cursor codec (`v1.<b64url(job)>.<b64url(native)>`, unpadded) and `EventCursorExpired`/`EventCursorInvalid`. |
 
-## Dependency pins (`core/requirements.txt`)
+## Dependency pins (`core/requirements.txt`, `core/requirements-optional.txt`)
 
 - `ruamel.yaml==0.19.1` and `pydantic==2.13.4` — the canonical-boundary versions
   that define the golden canonical bytes, validation locations, and 422 fixtures.
-- Added `redis` and `fakeredis`. Redis is imported lazily (memory mode never
-  imports it). `PuLP`/`HiGHS`/`SCIP` and any general solver selector are **not**
-  introduced.
+- `redis` is in the runtime file (imported lazily; memory mode never imports it). Since the W0 split (2026-09-25), `core/requirements.txt` holds the runtime pins and no test tools. `core/requirements-optional.txt` starts with `-r requirements.txt` and adds `pulp==3.3.2`, `highspy==1.12.0`, `pyscipopt==6.2.1`, `pytest==9.1.1`, `pytest-cov==7.1.0`, `fakeredis>=2,<3`, and `ruff==0.15.22`: W1 restores the upstream multi-solver library, while the product stays CP-SAT only at the server boundary (spec decision X4).
 
 ## Version stamping & Docker
 

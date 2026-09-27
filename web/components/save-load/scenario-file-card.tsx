@@ -14,7 +14,7 @@
 // actions are `secondary`, not `outline`: the prototype edges them with `--line`
 // (`:43-45`), and DESIGN.md §5 reserves `outline` for the heavier `--rule` edge.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { scenarioCommands } from "@/lib/store";
 import type { ScenarioUiState, ScenarioValidationIssue } from "@/lib/scenario";
@@ -41,7 +41,9 @@ function writeYamlFile(yaml: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-const COPY_LABEL_MS = 1500;
+// The Copy label window, matching the prototype's confirm timer
+// (ScreenSaveLoad.dc.html:249).
+const COPY_LABEL_MS = 2000;
 
 export interface ScenarioFileCardProps {
   /** The current committed draft — Download/Copy export exactly this. */
@@ -75,6 +77,10 @@ export function ScenarioFileCard({
     void scenarioCommands.recordBackup(backupFingerprint);
   const [copied, setCopied] = useState(false);
   const [issues, setIssues] = useState<ScenarioValidationIssue[] | null>(null);
+  // The "Copied!" revert timer, cleared on a repeat copy and on unmount so an
+  // earlier window can never flip the label back under a later one.
+  const copyTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(copyTimer.current), []);
 
   const handleDownload = () => {
     const result = performDownload(scenario, { writeFile: writeYamlFile, recordBackup });
@@ -103,8 +109,9 @@ export function ScenarioFileCard({
     setIssues(null);
     clipboardWrite
       ?.then(() => {
+        window.clearTimeout(copyTimer.current);
         setCopied(true);
-        window.setTimeout(() => setCopied(false), COPY_LABEL_MS);
+        copyTimer.current = window.setTimeout(() => setCopied(false), COPY_LABEL_MS);
       })
       .catch((err) => {
         console.error("Failed to copy to clipboard:", err);

@@ -3,10 +3,11 @@ import { OptimizeApiError } from "@/lib/query/optimize";
 import { classifyOptimizeError } from "@/lib/bff/errors";
 import type { JobResponse } from "@/lib/bff/types";
 import type { SseFrame } from "@/lib/query/sse";
-import type {
-  ActiveOptimizeSession,
-  SubmissionTransactionOutcome,
-  VolatileActivation,
+import {
+  OPTIMIZE_SESSION_SCHEMA_VERSION,
+  type ActiveOptimizeSession,
+  type SubmissionTransactionOutcome,
+  type VolatileActivation,
 } from "./session-transaction";
 import {
   buildStreamCallbacks,
@@ -25,7 +26,7 @@ function apiError(status: number, body: unknown): OptimizeApiError {
 }
 
 const activeRecord = (jobId: string): ActiveOptimizeSession => ({
-  schemaVersion: 2,
+  schemaVersion: OPTIMIZE_SESSION_SCHEMA_VERSION,
   ownerId: "own_1",
   phase: "active",
   anonymized: false,
@@ -33,6 +34,7 @@ const activeRecord = (jobId: string): ActiveOptimizeSession => ({
   peopleCount: 0,
   reverseMap: [],
   capture: { status: "staged", snapshotRef: "own_1", submissionOrdinal: 1 },
+  coverSheet: null,
   jobId,
 });
 
@@ -44,6 +46,7 @@ const volatile = (jobId: string): VolatileActivation => ({
     ["P1", 1],
     ["P2", 2],
   ],
+  coverSheet: null,
 });
 
 const frame = (event: string, data: string): SseFrame => ({ id: "cur_1", event, data });

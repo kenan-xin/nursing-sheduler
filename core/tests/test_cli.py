@@ -19,9 +19,9 @@
 
 # This test is mostly AI generated.
 
+import json
 import os
 import sys
-import json
 from pathlib import Path
 
 import pytest
@@ -124,15 +124,18 @@ def test_cli_writes_csv_output_with_timeout(tmp_path, monkeypatch, capsys):
 
     seen = {}
 
-    def fake_schedule(file_content, prettify, timeout, progress_callback, model_build_stats_callback):
+    def fake_schedule(file_content, prettify, timeout, solver, progress_callback, model_build_stats_callback):
         seen["schedule_args"] = {
             "file_content": file_content,
             "prettify": prettify,
             "timeout": timeout,
+            "solver": solver,
             "progress_callback": progress_callback,
             "model_build_stats_callback": model_build_stats_callback,
         }
-        return "fake_df", {"solution": True}, 123, "OPTIMAL", {"styles": {}, "comments": {}}
+        return cli.scheduler.ScheduleResult(
+            "fake_df", {"solution": True}, 123, "OPTIMAL", {"styles": {}, "comments": {}}
+        )
 
     def fake_export_to_csv(df, buffer):
         seen["export_df"] = df
@@ -159,6 +162,7 @@ def test_cli_writes_csv_output_with_timeout(tmp_path, monkeypatch, capsys):
         "file_content": input_content,
         "prettify": False,
         "timeout": 7,
+        "solver": "ortools/cp-sat",
         "progress_callback": seen["schedule_args"]["progress_callback"],
         "model_build_stats_callback": None,
     }
@@ -177,7 +181,7 @@ def test_cli_writes_progress_jsonl_output(tmp_path, monkeypatch, capsys):
     input_file.write_bytes(b"fake input payload")
     progress_file = tmp_path / "progress.jsonl"
 
-    def fake_schedule(file_content, prettify, timeout, progress_callback, model_build_stats_callback):
+    def fake_schedule(file_content, prettify, timeout, solver, progress_callback, model_build_stats_callback):
         progress_callback(
             SolverProgress(
                 source="ortools/cp-sat:solution-callback",
@@ -187,7 +191,13 @@ def test_cli_writes_progress_jsonl_output(tmp_path, monkeypatch, capsys):
                 cell_export_info={"comments": {(1, 2): ["a", "b"]}, "styles": {}},
             )
         )
-        return "fake_df", {"solution": True}, 12, "OPTIMAL", {"comments": {(1, 2): ["a", "b", "c"]}, "styles": {}}
+        return cli.scheduler.ScheduleResult(
+            "fake_df",
+            {"solution": True},
+            12,
+            "OPTIMAL",
+            {"comments": {(1, 2): ["a", "b", "c"]}, "styles": {}},
+        )
 
     monkeypatch.setattr(cli.scheduler, "schedule", fake_schedule)
     monkeypatch.setattr(
@@ -248,8 +258,8 @@ def test_cli_no_solution_exits_zero(tmp_path, monkeypatch, capsys):
     input_file = tmp_path / "input.yaml"
     input_file.write_text("apiVersion: alpha\n", encoding="utf-8")
 
-    def fake_schedule(file_content, prettify, timeout, progress_callback, model_build_stats_callback):
-        return None, None, None, "INFEASIBLE", {}
+    def fake_schedule(file_content, prettify, timeout, solver, progress_callback, model_build_stats_callback):
+        return cli.scheduler.ScheduleResult(None, None, None, "INFEASIBLE", {})
 
     monkeypatch.setattr(cli.scheduler, "schedule", fake_schedule)
     monkeypatch.setattr(sys, "argv", ["nurse-scheduling", str(input_file)])
@@ -268,8 +278,10 @@ def test_cli_writes_xlsx_output(tmp_path, monkeypatch, capsys):
     output_file = tmp_path / "result.xlsx"
     seen = {}
 
-    def fake_schedule(file_content, prettify, timeout, progress_callback, model_build_stats_callback):
-        return "df", {}, 0, "OPTIMAL", {"styles": {(1, 1): {"backgroundColor": "#ffffff"}}, "comments": {}}
+    def fake_schedule(file_content, prettify, timeout, solver, progress_callback, model_build_stats_callback):
+        return cli.scheduler.ScheduleResult(
+            "df", {}, 0, "OPTIMAL", {"styles": {(1, 1): {"backgroundColor": "#ffffff"}}, "comments": {}}
+        )
 
     def fake_export_to_excel(df, buffer, cell_export_info):
         seen["df"] = df
@@ -294,8 +306,10 @@ def test_cli_prints_final_comments_from_export_comments(tmp_path, monkeypatch, c
     input_file = tmp_path / "input.yaml"
     input_file.write_text("apiVersion: alpha\n", encoding="utf-8")
 
-    def fake_schedule(file_content, prettify, timeout, progress_callback, model_build_stats_callback):
-        return "df", {}, 0, "OPTIMAL", {"styles": {}, "comments": {(1, 2): ["first", "second"], (3, 4): ["third"]}}
+    def fake_schedule(file_content, prettify, timeout, solver, progress_callback, model_build_stats_callback):
+        return cli.scheduler.ScheduleResult(
+            "df", {}, 0, "OPTIMAL", {"styles": {}, "comments": {(1, 2): ["first", "second"], (3, 4): ["third"]}}
+        )
 
     monkeypatch.setattr(cli.scheduler, "schedule", fake_schedule)
     monkeypatch.setattr(sys, "argv", ["nurse-scheduling", str(input_file)])
@@ -309,7 +323,7 @@ def test_cli_show_model_build_stats_prints_scheduler_events(tmp_path, monkeypatc
     input_file = tmp_path / "input.yaml"
     input_file.write_text("apiVersion: alpha\n", encoding="utf-8")
 
-    def fake_schedule(file_content, prettify, timeout, progress_callback, model_build_stats_callback):
+    def fake_schedule(file_content, prettify, timeout, solver, progress_callback, model_build_stats_callback):
         assert progress_callback is None
         assert model_build_stats_callback is not None
         model_build_stats_callback(
@@ -346,7 +360,7 @@ def test_cli_show_model_build_stats_prints_scheduler_events(tmp_path, monkeypatc
                 preferenceType="shift request",
             )
         )
-        return "large dataframe", {"large": "solution"}, 123, "FEASIBLE", {}
+        return cli.scheduler.ScheduleResult("large dataframe", {"large": "solution"}, 123, "FEASIBLE", {})
 
     monkeypatch.setattr(cli.scheduler, "schedule", fake_schedule)
     monkeypatch.setattr(cli, "_get_app_version", lambda: "v9.8.7-test")

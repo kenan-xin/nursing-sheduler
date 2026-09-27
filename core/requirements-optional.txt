@@ -1,0 +1,32 @@
+# Optional dependencies for development, testing, and the extra solver backends.
+# Install with `pip install -r core/requirements-optional.txt`, which also pulls
+# in requirements.txt. The production images never install this file.
+# The PuLP/GLPK tests also need the `glpsol` binary: `glpk-utils` on
+# Debian/Ubuntu, `glpk` on Arch/CachyOS.
+-r requirements.txt
+# Solver backends beyond OR-Tools CP-SAT. The product uses CP-SAT only; these
+# keep the upstream multi-solver library and its tests runnable (spec X4).
+# Keep highspy aligned with the HiGHS ABI bundled by OR-Tools 9.15.
+pulp==3.3.2
+highspy==1.12.0
+pyscipopt==6.2.1
+# Direct import in `tests/catalogue_oracle.py` (`yaml.safe_dump`). It resolves
+# today only through `fastapi[standard]` -> `uvicorn[standard]`, so declare it
+# here: the oracle must not rely on a transitive that an upstream extras change
+# could drop. Left unpinned on purpose — the oracle asserts only
+# predicted-infeasible => INFEASIBLE, which is insensitive to which equivalent
+# YAML `safe_dump` emits.
+pyyaml
+# For CI. Exact pins keep the fresh-venv install and CI toolchain
+# reproducible. `fakeredis` is fenced below 3 instead of pinned exactly:
+# `stores/redis.py` branches on the fakeredis client class for its Lua-less
+# test path, so a major bump must be a deliberate change, while 2.x fixes
+# keep flowing. The currently resolving version is 2.38.0.
+pytest==9.1.1
+pytest-cov==7.1.0
+fakeredis>=2,<3
+# Ruff is intentionally pinned: Ruff's *default* rule set expands between
+# releases (e.g. 0.15.x -> 0.16.x widened it materially). The explicit
+# `tool.ruff.lint.select` in pyproject.toml keeps the contract honest even if
+# this pin is later bumped.
+ruff==0.15.22

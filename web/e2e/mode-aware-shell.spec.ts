@@ -7,10 +7,12 @@ import { expect, test, type Page } from "@playwright/test";
 // (already covered by app-shell-rebuild.spec.ts / app-shell.spec.ts):
 //  • Guided sidebar/Home hide the raw Constraints group;
 //    Advanced shows it, plus the new Rules destination.
-//  • The route-validity gate redirects an Advanced-only URL to Home once mode
-//    adoption completes — never before (no transient false redirect).
+//  • The route-validity gate redirects an Advanced-only URL to its Guided Rules
+//    context once mode adoption completes — never before (no transient false
+//    redirect).
 //  • Advanced-only → Guided is a draft-guarded atomic transaction (Confirm
-//    switches mode AND replaces to Home together; Cancel changes neither).
+//    switches mode AND replaces to the Rules context together; Cancel changes
+//    neither). qq0.14.1 replaced the original Home landing.
 //  • The scenario store stays byte-identical across every mode transition,
 //    including one that redirects.
 //  • Rules' "Edit in Advanced" performs the inverse transaction (switch to
@@ -230,18 +232,18 @@ test.describe("T08d — route-validity gate on direct URL visits", () => {
     expect(errors).toEqual([]);
   });
 
-  test("a Guided-default direct visit to an Advanced-only URL redirects to Home", async ({
+  test("a Guided-default direct visit to an Advanced-only URL redirects to its Guided Rules context", async ({
     page,
   }) => {
     await page.goto("/shift-type-requirements");
-    await expect(page.getByTestId("home-screen")).toBeVisible();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByTestId("rules-advanced-source")).toBeVisible();
+    await expect(page).toHaveURL(/\/rules$/);
     await expect(page.getByTestId("mode-toggle-guided")).toHaveAttribute("aria-selected", "true");
   });
 });
 
 test.describe("T08d — Advanced-only → Guided atomic transaction", () => {
-  test("with no open draft, Guided replaces to Home atomically", async ({ page }) => {
+  test("with no open draft, Guided replaces to the Rules context atomically", async ({ page }) => {
     await gotoReadyHome(page);
     await page.getByTestId("mode-toggle-advanced").click();
     await page.getByTestId("nav-link-/shift-type-requirements").click();
@@ -250,8 +252,8 @@ test.describe("T08d — Advanced-only → Guided atomic transaction", () => {
     await page.getByTestId("mode-toggle-guided").click();
     await expect(page.getByTestId("mode-toggle-guided")).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("heading", { name: "Unsaved changes" })).toBeHidden();
-    await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByTestId("home-screen")).toBeVisible();
+    await expect(page).toHaveURL(/\/rules$/);
+    await expect(page.getByTestId("rules-advanced-source")).toBeVisible();
   });
 
   test("with an open draft, Cancel leaves both mode and route unchanged, and restores pointer focus to Advanced (T08d repair P2)", async ({
@@ -289,7 +291,7 @@ test.describe("T08d — Advanced-only → Guided atomic transaction", () => {
     await closeTestDraft(page);
   });
 
-  test("with an open draft, Confirm switches mode and replaces to Home together", async ({
+  test("with an open draft, Confirm switches mode and replaces to the Rules context together", async ({
     page,
   }) => {
     await gotoReadyHome(page);
@@ -303,8 +305,8 @@ test.describe("T08d — Advanced-only → Guided atomic transaction", () => {
     await page.getByTestId("confirm-dialog-confirm").click();
 
     await expect(page.getByTestId("mode-toggle-guided")).toHaveAttribute("aria-selected", "true");
-    await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByTestId("home-screen")).toBeVisible();
+    await expect(page).toHaveURL(/\/rules$/);
+    await expect(page.getByTestId("rules-advanced-source")).toBeVisible();
   });
 
   test("the scenario store stays byte-identical across a redirecting mode switch", async ({
@@ -328,10 +330,138 @@ test.describe("T08d — Advanced-only → Guided atomic transaction", () => {
     const before = await storeSnapshot(page);
 
     await page.getByTestId("mode-toggle-guided").click();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(/\/rules$/);
+    await expect(page.getByTestId("rules-advanced-source")).toBeVisible();
     const after = await storeSnapshot(page);
 
     expect(after).toBe(before);
+  });
+});
+
+// qq0.14.1 — switching Advanced → Guided from an Advanced-only editor lands on
+// that editor's context in Guided Rules (not Home), names where the user came
+// from, and falls back honestly when the editor has no records to point to.
+const EMPTY_CARDS = {
+  requirements: [],
+  successions: [],
+  counts: [],
+  affinities: [],
+  coverings: [],
+};
+
+async function switchToGuidedFrom(page: Page, path: string) {
+  await page.getByTestId("mode-toggle-advanced").click();
+  await page.getByTestId(`nav-link-${path}`).click();
+  await expect(page).toHaveURL(new RegExp(`${path}$`));
+  await page.getByTestId("mode-toggle-guided").click();
+  await expect(page.getByTestId("mode-toggle-guided")).toHaveAttribute("aria-selected", "true");
+}
+
+test.describe("qq0.14.1 — context-preserving Advanced → Guided switch", () => {
+  test("every Advanced-only editor lands on its own Rules context", async ({ page }) => {
+    await gotoReadyHome(page);
+    const labels = [
+      "Staffing Requirements",
+      "Shift Successions",
+      "Shift Counts",
+      "Affinities",
+      "Shift Type Coverings",
+    ];
+    for (const [i, path] of ADVANCED_ONLY_PATHS.entries()) {
+      await switchToGuidedFrom(page, path);
+      await expect(page).toHaveURL(/\/rules$/);
+      await expect(page.getByTestId("rules-advanced-source")).toContainText(
+        `You came from ${labels[i]} in Advanced.`,
+      );
+    }
+  });
+
+  test("points at the matching category and scrolls it into view, without touching the store", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 600 });
+    await gotoReadyHome(page);
+    await mutate(page, {
+      cardsByKind: {
+        ...EMPTY_CARDS,
+        requirements: [{ uid: "r1", shiftType: "D", requiredNumPeople: 2, weight: -1 }],
+        coverings: [
+          { uid: "v1", preceptors: ["P1"], preceptees: ["P2"], shiftTypes: ["D"], weight: -1 },
+        ],
+      },
+    });
+    await page.getByTestId("mode-toggle-advanced").click();
+    await page.getByTestId("nav-link-/shift-type-coverings").click();
+    await expect(page).toHaveURL(/\/shift-type-coverings$/);
+    const before = await storeSnapshot(page);
+
+    await page.getByTestId("mode-toggle-guided").click();
+    await expect(page.getByTestId("rules-advanced-source")).toHaveText(
+      "You came from Shift Type Coverings in Advanced. Its rules are under Supervision below.",
+    );
+    await expect(page.getByTestId("rule-category-Supervision")).toBeInViewport();
+    expect(await storeSnapshot(page)).toBe(before);
+  });
+
+  test("a deleted source record falls back to an honest note at the top of Rules", async ({
+    page,
+  }) => {
+    await gotoReadyHome(page);
+    await mutate(page, {
+      cardsByKind: {
+        ...EMPTY_CARDS,
+        successions: [{ uid: "s1", person: ["P1"], pattern: ["N", "D"], weight: -1 }],
+      },
+    });
+    await page.getByTestId("mode-toggle-advanced").click();
+    await page.getByTestId("nav-link-/shift-type-successions").click();
+    await expect(page).toHaveURL(/\/shift-type-successions$/);
+    await mutate(page, { cardsByKind: EMPTY_CARDS });
+
+    await page.getByTestId("mode-toggle-guided").click();
+    await expect(page).toHaveURL(/\/rules$/);
+    await expect(page.getByTestId("rules-advanced-source")).toHaveText(
+      "You came from Shift Successions in Advanced. It has no records yet, so no rule below comes from it.",
+    );
+    await expect(page.getByTestId("rules-empty-state")).toBeVisible();
+  });
+
+  test("back and forward around a switch never revisit the Advanced-only URL in Guided", async ({
+    page,
+  }) => {
+    await gotoReadyHome(page);
+    await switchToGuidedFrom(page, "/shift-counts");
+    await expect(page).toHaveURL(/\/rules$/);
+
+    // The switch replaced the editor entry, so Back skips straight past it.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByTestId("home-screen")).toBeVisible();
+
+    // Forward returns to Rules in Guided; the orientation note was one-shot.
+    await page.goForward();
+    await expect(page).toHaveURL(/\/rules$/);
+    await expect(page.getByTestId("screen")).toHaveAttribute("data-screen", "rules");
+    await expect(page.getByTestId("mode-toggle-guided")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("rules-advanced-source")).toHaveCount(0);
+  });
+
+  test("Back onto an Advanced-only entry while in Guided resolves to the same Rules context", async ({
+    page,
+  }) => {
+    await gotoReadyHome(page);
+    await page.getByTestId("mode-toggle-advanced").click();
+    await page.getByTestId("nav-link-/shift-affinities").click();
+    await expect(page).toHaveURL(/\/shift-affinities$/);
+    await page.getByTestId("nav-link-/people").click();
+    await expect(page).toHaveURL(/\/people$/);
+    // /people survives the switch, so the history still holds /shift-affinities.
+    await page.getByTestId("mode-toggle-guided").click();
+    await expect(page).toHaveURL(/\/people$/);
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/rules$/);
+    await expect(page.getByTestId("rules-advanced-source")).toContainText("Affinities");
   });
 });
 

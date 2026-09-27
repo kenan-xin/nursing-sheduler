@@ -206,3 +206,47 @@ describe("CardListItem — change highlight", () => {
     expect(card).toHaveAttribute("data-change-highlight", "true");
   });
 });
+
+// Fidelity Batch 3 (bmw.3) — the secondary entry action. The prototype pairs a
+// FILLED primary Add with an OUTLINED secondary that carries the glyph naming its
+// own action (ScreenCards.dc.html:19-20), so the caller supplies the icon instead of
+// every consumer getting the generic Add plus.
+describe("CardEditorHeader — secondary entry action", () => {
+  it("renders it as an outline carrying the caller's icon", () => {
+    render(
+      <CardEditorHeader
+        {...HEADER_PROPS}
+        secondaryAction={{
+          label: "Add Contracted Hours",
+          formOpen: false,
+          onAdd: () => {},
+          testId: "add-contracted-toggle",
+          icon: <span data-testid="secondary-icon" />,
+        }}
+      />,
+    );
+    const button = screen.getByTestId("add-contracted-toggle");
+    const classes = Array.from(button.classList);
+    // `outline` is the heavier-edged L1 treatment on --rule, never the brand fill.
+    expect(classes).toContain("border-rule");
+    expect(classes).not.toContain("bg-brand");
+    expect(button.querySelector('[data-testid="secondary-icon"]')).not.toBeNull();
+  });
+
+  it("keeps the generic plus when the caller supplies no icon", () => {
+    render(
+      <CardEditorHeader
+        {...HEADER_PROPS}
+        secondaryAction={{
+          label: "Add Something",
+          formOpen: false,
+          onAdd: () => {},
+          testId: "add-secondary",
+        }}
+      />,
+    );
+    const button = screen.getByTestId("add-secondary");
+    expect(Array.from(button.classList)).toContain("border-rule");
+    expect(button.querySelector("svg")).not.toBeNull();
+  });
+});

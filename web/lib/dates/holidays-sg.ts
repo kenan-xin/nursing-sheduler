@@ -25,8 +25,8 @@ export interface SingaporeHolidayEntry {
 
 /**
  * The bundled English-only Singapore public holidays (2024–2027), chronological.
- * The supported import window is derived from this array's min/max (FR-DC-29), so
- * extending coverage is a matter of appending rows here.
+ * The supported import window is the whole calendar years of this array's
+ * min/max (FR-DC-29), so extending coverage is a matter of appending rows here.
  */
 export const SINGAPORE_HOLIDAYS: readonly SingaporeHolidayEntry[] = [
   { date: "2024-01-01", name: "New Year's Day", isObserved: false },
@@ -109,16 +109,22 @@ export function isSingaporeNonWorkDay(iso: IsoDate): boolean {
   return dow === 0 || dow === 6;
 }
 
-/** The supported import window `{ start, end }` — the dataset's min/max (FR-DC-29). */
+/**
+ * The supported import window `{ start, end }` — whole calendar years of the
+ * dataset's min/max (FR-DC-29). The dataset publishes complete years, so the
+ * days after the last holiday of the final year are known to be non-holidays too.
+ */
 export function getSupportedRange(): { start: IsoDate; end: IsoDate } | null {
   if (SINGAPORE_HOLIDAYS.length === 0) return null;
+  const first = SINGAPORE_HOLIDAYS[0].date;
+  const last = SINGAPORE_HOLIDAYS[SINGAPORE_HOLIDAYS.length - 1].date;
   return {
-    start: SINGAPORE_HOLIDAYS[0].date,
-    end: SINGAPORE_HOLIDAYS[SINGAPORE_HOLIDAYS.length - 1].date,
+    start: `${first.slice(0, 4)}-01-01`,
+    end: `${last.slice(0, 4)}-12-31`,
   };
 }
 
-/** Human label for the supported window, e.g. `2024-01-01 to 2027-12-25`. */
+/** Human label for the supported window, e.g. `2024-01-01 to 2027-12-31`. */
 export function getSupportLabel(): string {
   const supported = getSupportedRange();
   return supported ? `${supported.start} to ${supported.end}` : "no data loaded";
@@ -126,7 +132,8 @@ export function getSupportLabel(): string {
 
 /**
  * Whether a range is fully importable: both endpoints present and within the
- * dataset's min/max (lexicographic ISO comparison — spec 02 FR-DC-30).
+ * supported whole-calendar-year window (lexicographic ISO comparison — spec 02
+ * FR-DC-30).
  */
 export function isRangeSupported(range: DateRange): boolean {
   const supported = getSupportedRange();

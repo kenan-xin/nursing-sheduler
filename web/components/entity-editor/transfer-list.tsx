@@ -130,10 +130,17 @@ export function TransferList<V = string>({
   const addable = [...availGroups, ...availItems].filter((o) => !o.disabled);
 
   // Selected tokens in caller order; unknown values (not among options) still show.
+  // A value may legitimately repeat (backend member arrays allow multiplicity, so
+  // the entity editor preserves duplicates): each occurrence needs its own React
+  // key. The FIRST occurrence keeps the bare `keyOf` so existing keys stay stable;
+  // later ones get a `#n` occurrence suffix.
   const selTokens = selected
-    .map((value) => {
+    .map((value, index) => {
       const opt = optionOf(value);
+      const occurrence = selected.slice(0, index).filter((v) => sameValue(v, value)).length;
+      const key = keyOf(value);
       return {
+        key: occurrence === 0 ? key : `${key}#${occurrence}`,
         value,
         label: opt?.label ?? String(value),
         icon: opt?.icon,
@@ -145,6 +152,13 @@ export function TransferList<V = string>({
   const selItems = selTokens.filter((tk) => !tk.isGroup);
   const showSelSearch = selected.length > selFilterThreshold;
   const groupSectionLabel = "GROUPS";
+
+  // Clear each DISTINCT value once. `onToggle` flips a whole value, so toggling a
+  // duplicated value twice (once per occurrence) would re-add it — Clear all must
+  // iterate the distinct set, not the raw occurrence list.
+  const distinctSelected = selected.filter(
+    (value, index) => selected.findIndex((other) => sameValue(other, value)) === index,
+  );
 
   return (
     <div
@@ -237,7 +251,7 @@ export function TransferList<V = string>({
           {selGroups.length > 0 && <SectionLabel>{groupSectionLabel}</SectionLabel>}
           {selGroups.map((tk) => (
             <SelectedRow
-              key={keyOf(tk.value)}
+              key={tk.key}
               icon={tk.icon}
               label={tk.label}
               aria={removeAria(tk.label)}
@@ -249,7 +263,7 @@ export function TransferList<V = string>({
           )}
           {selItems.map((tk) => (
             <SelectedRow
-              key={keyOf(tk.value)}
+              key={tk.key}
               icon={tk.icon}
               label={tk.label}
               aria={removeAria(tk.label)}
@@ -266,7 +280,7 @@ export function TransferList<V = string>({
           <button
             type="button"
             data-testid={`transfer-clear-${idPrefix}`}
-            onClick={() => selected.forEach((v) => onToggle(v))}
+            onClick={() => distinctSelected.forEach((v) => onToggle(v))}
             className="flex items-center gap-2 rounded-none border-t border-line2 px-3 py-2 text-left text-meta font-semibold text-ink3 pointer-coarse:min-h-touch hover:bg-panel-alt"
           >
             <FaAnglesLeft className="size-3" /> Clear all

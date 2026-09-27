@@ -29,6 +29,7 @@ vi.mock("next/navigation", () => ({
 // rather than against the immediate-commit shortcut.
 vi.mock("./route-registry", () => ({
   isRouteValidForMode: () => false,
+  guidedFallbackPath: () => "/",
 }));
 
 const ACTIVE = "/dates";

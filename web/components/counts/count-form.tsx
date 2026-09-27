@@ -12,7 +12,6 @@
 // mutation. All validation/build/load logic lives in counts-model.
 
 import { useEffect, useRef, useState } from "react";
-import type { ScenarioUiState } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
 import { CardEditorForm } from "@/components/card-editor/card-editor-shell";
 import { FieldShell } from "@/components/card-editor/field-shell";
@@ -36,10 +35,11 @@ import {
   validateCountForm,
   type CountErrors,
   type CountFormState,
+  type CountScenarioInput,
 } from "./counts-model";
 
 interface CountFormProps {
-  state: ScenarioUiState;
+  state: CountScenarioInput;
   mode: "add" | "edit";
   initialForm: CountFormState;
   onSave: (form: CountFormState) => void;

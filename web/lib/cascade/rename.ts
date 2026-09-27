@@ -6,9 +6,9 @@
 //
 // Surfaces rewritten, per domain: the entity/group definition + same-domain group
 // members; the five preference cards + coefficient tuples; the person×date matrix;
-// people history (shift-type renames only); and the Export Layout rows (finding
-// #4 — the prototype gap). Each op is one pure transform; the store wires the
-// single undo/persist entry (T04 `mutateScenario`).
+// people history (shift-type renames only); the Export Layout rows (finding #4 —
+// the prototype gap); and the temporary-cover slice (d582). Each op is one pure
+// transform; the store wires the single undo/persist entry (T04 `mutateScenario`).
 
 import type {
   CoefficientEntry,
@@ -17,7 +17,12 @@ import type {
   SkillMixEntry,
   UiPerson,
   UiRequestCell,
+  UiTemporaryCover,
 } from "@/lib/scenario";
+// Deep import: the override-scope rule (a requirement's overrides must be dates it
+// still resolves) is shared with the date-group delete/membership paths, so it
+// lives beside `requirementDateIsos`, its authority.
+import { dropUncoveredOverrides } from "@/lib/rules/shortfalls";
 import { assertNoRenameCollision, type EntityDomain, type EntityRef } from "./domain";
 import { CARD_COEFFICIENT_FIELD, CARD_REF_FIELDS, type CardKind } from "./card-fields";
 import { renameRefTree, sameRef, type RefLeaf, type RefTree } from "./reference-tree";
@@ -142,6 +147,38 @@ function renameExportLayout(
 }
 
 /**
+ * Rewrite the temporary-cover slice (d582). A cover names a shift-type id and
+ * staff-group ids, so a rename in either domain follows through; its date is a
+ * full ISO value (never a span id), so a date-domain rename leaves it alone.
+ * Deletes are handled by `delete.ts`, which deliberately leaves covers in place —
+ * a dangling cover is flagged, never silently dropped. Reference identity is
+ * preserved when nothing changes, so the slice stays a no-op for dirty detection.
+ */
+function renameTemporaryCover(
+  covers: UiTemporaryCover[],
+  domain: EntityDomain,
+  oldId: EntityRef,
+  newId: string,
+): UiTemporaryCover[] {
+  if (domain === "date" || covers.length === 0) return covers;
+  let changed = false;
+  const next = covers.map((cover) => {
+    if (domain === "shift") {
+      if (!sameRef(cover.shiftType, oldId)) return cover;
+      changed = true;
+      return { ...cover, shiftType: newId };
+    }
+    if (!cover.groups.some((group) => sameRef(group, oldId))) return cover;
+    changed = true;
+    return {
+      ...cover,
+      groups: cover.groups.map((group) => (sameRef(group, oldId) ? newId : group)),
+    };
+  });
+  return changed ? next : covers;
+}
+
+/**
  * Rewrite the entity/group definition (its own id) and any same-domain group
  * members that reference it — nested group references cascade in place with member
  * positions preserved (spec 06 FR-RI-16/17, AC-RI-19). Returns the domain's
@@ -195,7 +232,7 @@ export function renameEntity(
   if (sameRef(oldId, newId)) return state;
 
   const cards = state.cardsByKind;
-  return {
+  const next: ScenarioUiState = {
     ...state,
     ...renameDefinitions(state, domain, oldId, newId),
     cardsByKind: {
@@ -209,7 +246,13 @@ export function renameEntity(
     },
     reqData: renameReqData(state.reqData, domain, oldId, newId),
     exportLayout: renameExportLayout(state.exportLayout, domain, oldId, newId),
+    temporaryCover: renameTemporaryCover(state.temporaryCover, domain, oldId, newId),
   };
+  // A date-group rename rewrites the group id and every reference to it, so the
+  // dates a requirement resolves to are unchanged and no override goes stale —
+  // reconciling anyway keeps the "date-domain definitions changed" rule uniform
+  // (it is a no-op today) and guards a rename that ever alters coverage (ze1).
+  return domain === "date" ? dropUncoveredOverrides(next) : next;
 }
 
 /** Acceptance-matrix alias for {@link renameEntity} (`applyRename(state, …)`). */

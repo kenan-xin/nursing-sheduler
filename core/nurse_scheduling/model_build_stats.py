@@ -28,6 +28,8 @@ from typing import Any
 
 from .context import Context
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class ModelBuildStats:
@@ -118,8 +120,12 @@ def get_model_entity_counts(ctx: Context) -> tuple[int, int]:
         if hasattr(model, "Proto"):
             proto = model.Proto()
             return len(proto.variables), len(proto.constraints)
-        if hasattr(solver, "variables") and hasattr(model, "constraints"):
-            return len(solver.variables), len(model.constraints)
+        if hasattr(model, "NumVariables") and hasattr(model, "NumConstraints"):
+            return model.NumVariables(), model.NumConstraints()
+        if hasattr(model, "get_num_variables") and hasattr(model, "get_num_linear_constraints"):
+            return model.get_num_variables(), model.get_num_linear_constraints()
+        if hasattr(solver, "variables") and hasattr(model, "numConstraints"):
+            return len(solver.variables), model.numConstraints()
 
     return len(ctx.model_vars), 0
 
@@ -152,7 +158,7 @@ def emit_model_build_stats(
             )
         )
     except Exception:
-        logging.exception("Model build stats callback failed")
+        logger.exception("Model build stats callback failed")
 
 
 def start_model_build_step(

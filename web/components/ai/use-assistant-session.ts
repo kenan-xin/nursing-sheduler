@@ -21,6 +21,7 @@ import { useAssistantTurnRunner } from "./copilotkit-core-access";
 import type { AgentSubscriber, Message } from "@ag-ui/client";
 import { AI_AGENT_ID } from "@/lib/ai/protocol";
 import {
+  deleteTurnMessages,
   persistThreadMessages,
   readThread,
   readThreadMessages,
@@ -31,8 +32,17 @@ import {
   setTurnState,
   settleTurnIfUnsettled,
 } from "@/lib/ai/assistant/history-repo";
-import { completeToolPairs, freezeMessages, toTransportThread } from "@/lib/ai/assistant/messages";
+import {
+  completeToolPairs,
+  freezeMessages,
+  toTransportThread,
+  toUserContent,
+} from "@/lib/ai/assistant/messages";
+import type { AssistantAttachmentV1 } from "@/lib/ai/assistant/records";
+import { IMAGE_REQUEST_BUDGET_CHARS } from "@/lib/ai/assistant/attachment-rules";
 import { readAssistantSettings } from "@/lib/ai/assistant/settings-repo";
+import { omittedMessageIds } from "@/lib/ai/assistant/compaction";
+import { compactHistory } from "./compact-history";
 
 /**
  * Write the panel's visible list and record that the list changed.
@@ -66,7 +76,8 @@ function publishVisibleIfOwned(
   publishVisible(agent, messages);
   return true;
 }
-import { buildAssistantContext } from "@/lib/ai/assistant/scenario-context";
+import { buildAssistantContext, pendingAtLaunch } from "@/lib/ai/assistant/scenario-context";
+import { offerYesNoCard } from "@/lib/ai/assistant/yes-no-card";
 import {
   authorizeLaunchAuthority,
   authorizeLaunchIdentity,
@@ -122,13 +133,22 @@ export interface AssistantSessionInput {
    * caller decides this from the thread's own state and this tab's ownership.
    */
   historical: boolean;
+  /**
+   * 2by.10: whether the selected model reads images. When it does not (or is not known
+   * to), stored images are named, not sent. Defaults to false.
+   */
+  imageInput?: boolean;
 }
 
 /**
  * What a live turn is doing, for the panel's status line. `null` when there is nothing
  * to say: no live turn, or reply text is already streaming onto the screen.
  */
-export type AssistantActivity = { kind: "thinking" } | { kind: "tool"; name: string } | null;
+export type AssistantActivity =
+  | { kind: "thinking" }
+  | { kind: "summarising" }
+  | { kind: "tool"; name: string }
+  | null;
 
 const THINKING: AssistantActivity = { kind: "thinking" };
 
@@ -153,6 +173,20 @@ function describeTurnActivity(messages: readonly Message[]): AssistantActivity {
   return THINKING;
 }
 
+/**
+ * What a caller may say about a send beyond its text.
+ *
+ * There is deliberately only one of these, and it is not a second send path: it names
+ * the settled turn this send REPLACES, which is how the failed-turn Retry replays a
+ * question through exactly the same gate, history and authority checks as the composer.
+ */
+export interface AssistantSendOptions {
+  /** The failed or interrupted turn whose own messages this send replaces. */
+  replaceTurnId?: string;
+  /** 2by.10: the composer's ready attachments. Sent only through the gate, like the text. */
+  attachments?: readonly AssistantAttachmentV1[];
+}
+
 export interface AssistantSession {
   messages: Message[];
   isRunning: boolean;
@@ -164,17 +198,22 @@ export interface AssistantSession {
   interrupting: boolean;
   /** A send is in flight, from prepare until its last write settles. */
   sending: boolean;
+  /** bead ypo: this thread's older messages are sent as a summary. */
+  summarised: boolean;
   /**
    * Resolves false only when refused before preparing: a historical conversation, or
    * a send already in flight. Refusals during preparation or launch are published
    * through the store and still resolve true.
    */
-  send(text: string): Promise<boolean>;
+  send(text: string, options?: AssistantSendOptions): Promise<boolean>;
   stop(): void;
 }
 
 export function useAssistantSession(input: AssistantSessionInput): AssistantSession {
   const agentId = localAgentId(input.threadId);
+  // Read at send time, so a model switch applies to the next turn without a new session.
+  const imageInput = useRef(false);
+  imageInput.current = input.imageInput ?? false;
   // THE PANEL CORE'S PUBLIC CONFIGURATION, AS DATA -- never the core itself.
   //
   // This hook used to hold the whole mutable core. Everything below reads from it; the
@@ -228,6 +267,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
   // Written only by the authorized turn's own callbacks, and only shown while a turn is
   // live, so a detached turn's late events cannot relabel the current one.
   const [turnActivity, setTurnActivity] = useState<AssistantActivity>(THINKING);
+  const [summarised, setSummarised] = useState(false);
 
   // Hydration. Runs per (real) agent instance: `useAgent` swaps `agent` for the
   // runtime-synced instance once `/info` resolves, and a provisional instance that
@@ -250,6 +290,9 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
       // disk would otherwise reach the visible panel and, through the next send's
       // history, the provider -- before any publication filter could run.
       publishVisibleIfOwned(agent, completeToolPairs(toTransportThread(records)), owned);
+    });
+    void readThread(input.threadId).then((thread) => {
+      if (!cancelled) setSummarised(Boolean(thread?.summary));
     });
     return () => {
       cancelled = true;
@@ -316,7 +359,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
   const [sendInFlight, setSendInFlight] = useState(false);
 
   const runSend = useCallback(
-    async (text: string) => {
+    async (text: string, options?: AssistantSendOptions) => {
       // Captured before anything can await: see `quarantine` for why a LAUNCH count,
       // and not the turn epoch, is what tells a revoked send from a superseded one.
       // Mutable: it moves to include THIS turn's own binding once it launches, so a
@@ -338,12 +381,14 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           turnEpoch: turnEpochForSend,
           busy: agent.isRunning,
           interrupting: isInterrupting(),
+          replaceTurnId: options?.replaceTurnId,
         },
         {
           readSettings: () => readAssistantSettings(),
           readWriterContext: () => readWriterContext(),
           selectActiveThread: (scenarioId) => selectActiveThread(scenarioId),
           readThreadMessages: (threadId) => readThreadMessages(threadId),
+          deleteTurnMessages: (turnId) => deleteTurnMessages(turnId),
           recordPreparingTurn: (turn) => recordPreparingTurn(turn),
           newRunId: () => crypto.randomUUID(),
           // The launch instance is stamped on every runtime response and reported by
@@ -445,12 +490,43 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
       // on this provider ingress too: `plan.history` is read straight from Dexie, so
       // this is the last point before a dangling call would be sent.
       publishVisible(agent, completeToolPairs(toTransportThread(plan.history)));
-      const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: plan.text };
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: toUserContent(plan.text, options?.attachments ?? null),
+      };
       agent.addMessage(userMessage);
       await persistThreadMessages([userMessage], {
         ...writeContext,
         createdAt: new Date().toISOString(),
       });
+
+      // bead ypo: a long thread is summarised here, in preparation. Every check below
+      // still runs after this await, so a Stop or Clear during it refuses the launch, and
+      // the summary write itself is fenced by this turn's generations.
+      // Any interruption (Stop, Clear, takeover, Disable) aborts the summary at once, so
+      // a stalled provider cannot keep this send -- and every later one -- in flight.
+      const summaryAbort = new AbortController();
+      const abortOnInterrupt = (state = useAssistantStore.getState()) => {
+        if (isInterrupting(state)) summaryAbort.abort();
+      };
+      abortOnInterrupt();
+      const unsubscribe = useAssistantStore.subscribe((state) => abortOnInterrupt(state));
+      let compacted;
+      try {
+        compacted = await compactHistory({
+          threadId: plan.threadId,
+          scenarioId: plan.scenarioId,
+          history: plan.history,
+          generations: plan,
+          signal: summaryAbort.signal,
+          onSummarising: () => setTurnActivity({ kind: "summarising" }),
+        });
+      } finally {
+        unsubscribe();
+      }
+      if (compacted.compactedNow) setSummarised(true);
+      setTurnActivity(THINKING);
 
       // THE FINAL AUTHORIZATION. Everything above this line is preparation, and every
       // await in it is a window in which Stop, Disable, Remove key, Clear, a scenario
@@ -569,7 +645,16 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
             documentRevision: plan.documentRevision,
             routePath: input.routePath,
             routeLabel: input.routeLabel,
+            // Read at launch: a card still up now was not applied before this message.
+            pending: pendingAtLaunch(
+              useAssistantStore.getState(),
+              turnEpochForSend,
+              plan.documentRevision,
+            ),
+            earlierSummary: compacted.summary?.text ?? null,
           }),
+          omitMessageIds: omittedMessageIds(plan.history, compacted.summary),
+          imageBudgetChars: imageInput.current ? IMAGE_REQUEST_BUDGET_CHARS : 0,
         }),
       );
 
@@ -712,6 +797,8 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
        * the conversation above it has answers in it.
        */
       let producedAssistantText = false;
+      /** The last reply's text, for the app's own Yes/No card (09x8). */
+      let lastAssistantText = "";
       const subscriber: AgentSubscriber = {
         onEvent: ({ event, input: runInput }) => {
           if (!ownsRun(runInput?.runId)) return;
@@ -751,6 +838,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           // Whitespace is not an answer a nurse can read.
           if (textMessageBuffer.trim().length === 0) return;
           producedAssistantText = true;
+          lastAssistantText = textMessageBuffer;
         },
         onRunFailed: ({ input: runInput }) => {
           if (!ownsRun(runInput?.runId)) return;
@@ -857,6 +945,8 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           await setTurnState(plan.turn.turnId, { state: "detached", settlement: "run_failed" });
           assistantActions.endTurn("run_failed", plan.turn.turnId);
         } else {
+          // Before the await: authority was checked just above and nothing can move it here.
+          offerYesNoCard(lastAssistantText, turnEpochForSend);
           await setTurnState(plan.turn.turnId, { state: "terminal", settlement: "completed" });
           assistantActions.endTurn("completed", plan.turn.turnId);
         }
@@ -909,7 +999,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
   );
 
   const send = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, options?: AssistantSendOptions): Promise<boolean> => {
       if (input.historical) {
         assistantActions.refuse("not_writer");
         return false;
@@ -921,7 +1011,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
       sending.current = true;
       setSendInFlight(true);
       try {
-        await runSend(text);
+        await runSend(text, options);
         return true;
       } finally {
         sending.current = false;
@@ -959,6 +1049,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
     connecting: !isReady,
     interrupting,
     sending: sendInFlight,
+    summarised,
     send,
     stop,
   };

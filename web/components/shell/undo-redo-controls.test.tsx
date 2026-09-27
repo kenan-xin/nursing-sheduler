@@ -3,7 +3,10 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
-import { UndoRedoControls } from "./undo-redo-controls";
+import { UndoRedoControls, useUndoRedoShortcuts } from "./undo-redo-controls";
+import { useNavGuardStore } from "./nav-guard-store";
+import { cardEditorDraftId } from "@/components/card-editor/card-editor-shell";
+import { CountsEditor } from "@/components/counts/counts-editor";
 import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/store/test-authority";
 
 // F3's shell-shared trigger fix (fix-shell-coarse-targets) added the real
@@ -35,6 +38,9 @@ async function settle() {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  // The nav-guard draft registry is module-level; clear it so an open draft in one
+  // case cannot leak into the shortcut behaviour another case asserts.
+  useNavGuardStore.setState({ drafts: new Map(), pendingIntent: null, open: false });
   await resetScenarioForTest();
   await drainScenarioCommands();
 });
@@ -108,5 +114,138 @@ describe("UndoRedoControls — disabled state and undo/redo cardinality (unchang
     await settle();
     expect(useScenarioStore.getState().staff).toHaveLength(1);
     expect(screen.getByTestId("redo-button")).toBeDisabled();
+  });
+});
+
+// AC-CH-09c: while a card-editor draft is open it OWNS Ctrl/Cmd-Z (and
+// Ctrl/Cmd+Shift+Z), so the global scenario history must not move beneath it —
+// and the browser's native input undo inside the open form's fields must keep
+// working, which means the shortcut must decline WITHOUT preventDefault.
+function ShortcutHarness() {
+  useUndoRedoShortcuts();
+  return null;
+}
+
+function pressCtrlZ(shift = false): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    shiftKey: shift,
+    bubbles: true,
+    cancelable: true,
+  });
+  act(() => {
+    document.dispatchEvent(event);
+  });
+  return event;
+}
+
+function pressCtrlY(): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", {
+    key: "y",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  act(() => {
+    document.dispatchEvent(event);
+  });
+  return event;
+}
+
+describe("useUndoRedoShortcuts — an open card-editor draft owns the undo keys (AC-CH-09c)", () => {
+  it("does not fire the global undo/redo while a card-editor draft is open, and leaves native input undo alone", async () => {
+    await act(async () => {
+      await scenarioCommands.mutate({ staff: [{ _k: "p1", id: 1, description: "Nurse A" }] });
+    });
+    const depthBefore = await historyLength();
+
+    render(<ShortcutHarness />);
+    const unregister = useNavGuardStore
+      .getState()
+      .registerDraft({ id: cardEditorDraftId("counts"), label: "counts editor" });
+
+    const undoSpy = vi.spyOn(scenarioCommands, "undo");
+    const redoSpy = vi.spyOn(scenarioCommands, "redo");
+
+    // Ctrl-Z: the open draft consumes it — global undo must not run, and the
+    // event must NOT be default-prevented (that would kill native field undo).
+    const z = pressCtrlZ();
+    expect(undoSpy).not.toHaveBeenCalled();
+    expect(z.defaultPrevented).toBe(false);
+
+    // Ctrl-Shift-Z likewise must not move the global history.
+    const shiftZ = pressCtrlZ(true);
+    expect(undoSpy).not.toHaveBeenCalled();
+    expect(shiftZ.defaultPrevented).toBe(false);
+
+    // Ctrl-Y (redo) is owned by the same open draft.
+    const y = pressCtrlY();
+    expect(redoSpy).not.toHaveBeenCalled();
+    expect(y.defaultPrevented).toBe(false);
+
+    // The global history is untouched.
+    expect(await historyLength()).toBe(depthBefore);
+
+    undoSpy.mockRestore();
+    redoSpy.mockRestore();
+    unregister();
+  });
+
+  it("fires the global undo again once the card-editor draft closes", async () => {
+    await act(async () => {
+      await scenarioCommands.mutate({ staff: [{ _k: "p1", id: 1, description: "Nurse A" }] });
+    });
+    const depthBefore = await historyLength();
+
+    render(<ShortcutHarness />);
+    const unregister = useNavGuardStore
+      .getState()
+      .registerDraft({ id: cardEditorDraftId("counts"), label: "counts editor" });
+    pressCtrlZ();
+    expect(await historyLength()).toBe(depthBefore);
+
+    unregister();
+    const z = pressCtrlZ();
+    expect(z.defaultPrevented).toBe(true);
+    await settle();
+    expect(await historyLength()).toBe(depthBefore - 1);
+  });
+});
+
+// The requirement-level case: the REAL Counts editor (Shift Count + Contracted
+// Hours) registers its open draft in the same registry, so opening its add form
+// suppresses the global shortcuts with no extra wiring in the editor.
+describe("an open Shift Counts / Contracted Hours draft owns the undo keys end-to-end (AC-CH-09c)", () => {
+  it("suppresses global undo while the real counts editor form is open", async () => {
+    await act(async () => {
+      await scenarioCommands.mutate({ staff: [{ _k: "p1", id: 1, description: "Nurse A" }] });
+    });
+    const depthBefore = await historyLength();
+
+    render(
+      <>
+        <ShortcutHarness />
+        <CountsEditor />
+      </>,
+    );
+
+    // No draft open: the shortcut still drives the global history.
+    expect(pressCtrlZ().defaultPrevented).toBe(true);
+    await settle();
+    expect(await historyLength()).toBe(depthBefore - 1);
+
+    // Open the real add form — the editor registers `card-editor:counts`.
+    fireEvent.click(screen.getByTestId("add-card-toggle"));
+    await act(async () => {});
+    expect(useNavGuardStore.getState().drafts.has(cardEditorDraftId("counts"))).toBe(true);
+
+    const depthWithDraft = await historyLength();
+    const undoSpy = vi.spyOn(scenarioCommands, "undo");
+    const z = pressCtrlZ();
+    expect(undoSpy).not.toHaveBeenCalled();
+    expect(z.defaultPrevented).toBe(false);
+    undoSpy.mockRestore();
+    expect(await historyLength()).toBe(depthWithDraft);
   });
 });

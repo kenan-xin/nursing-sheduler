@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 # Cancel superseded runs on the same ref.
@@ -11,26 +11,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
-    name: typecheck · lint · format · unit · build
+  # Fast gate (about 1 min). e2e waits only on this, not on unit/build, so
+  # Playwright starts early; unit and build still fail the run on their own.
+  static:
+    name: typecheck · lint · format
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@v7
       # Standard setup actions (no local-dev tool manager in CI): pnpm from
-      # web/package.json packageManager, node 24.14.0, and Python from
-      # .python-version (3.12.13, the project requirement the deploy guards and
-      # validate_origin.py's 3.10+ PEP 604 syntax both rely on).
-      - uses: pnpm/action-setup@v4
+      # web/package.json packageManager and node 24.14.0.
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.14.0
-      - uses: actions/setup-python@v5
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Lint
+        run: pnpm lint
+      - name: Format check
+        run: pnpm exec oxfmt --check .
+
+  # Vitest is the longest web step (about 7 min serial); two shards halve it.
+  unit:
+    name: unit (shard ${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.14.0
+      # Python from .python-version (3.12.13, the project requirement the deploy
+      # guards and validate_origin.py's 3.10+ PEP 604 syntax both rely on).
+      - uses: actions/setup-python@v7
         id: python
         with:
           python-version-file: .python-version
@@ -41,21 +70,12 @@ jobs:
         run: python3 --version
 
       # The differential oracle and dev-launcher.test.ts (real uvicorn backend)
-      # import the core package's dependencies.
+      # import the core package's dependencies; either shard may get them.
       - name: Install backend dependencies
         run: python3 -m pip install -r ../core/requirements.txt
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Format check
-        run: pnpm exec oxfmt --check .
 
       # Includes verify-deploy.test.ts, which runs docker/validate_origin.py via the
       # pinned python3 — the script's 3.10 PEP 604 guard AND the project's 3.12
@@ -65,49 +85,235 @@ jobs:
       - name: Unit tests
         env:
           PYTHON: ${{ steps.python.outputs.python-path }}
-        run: pnpm test
+        run: pnpm exec vitest run --shard=${{ matrix.shard }}/2
 
-      - name: Build
-        run: pnpm build
-
-  e2e:
-    name: e2e (playwright)
-    # PINNED, not `ubuntu-latest`. This job compares committed screenshot
-    # baselines, and a snapshot filename encodes the platform (`linux`) but NOT
-    # the distro version or the architecture — so a rolling alias can change the
-    # rendering environment underneath filenames that stay perfectly valid.
-    # GitHub documents `ubuntu-latest` as Ubuntu 24.04 x64 today, with 26.04
-    # already in public preview behind the same alias. The committed Linux
-    # baselines were generated and reviewed on Ubuntu 24.04 x64
-    # (mcr.microsoft.com/playwright:v1.61.1-noble, --platform linux/amd64), so
-    # this label is part of the baseline contract: moving it means regenerating
-    # and re-reviewing the Linux set in the new environment first.
-    runs-on: ubuntu-24.04
-    needs: checks
+  # Production build as its own job so it runs in parallel with the unit shards.
+  # No Python needed: next build never calls the backend.
+  build:
+    name: build
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.14.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+
+  core:
+    name: core (ruff · pytest · redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: core
+    services:
+      redis:
+        image: redis:8.8.0-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            core/requirements.txt
+            core/requirements-optional.txt
+      # PuLP/GLPK backend tests (restored in W1) call the glpsol binary; PuLP does
+      # not bundle it. Upstream test-core.yaml installs the same package.
+      - name: Install GLPK
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends glpk-utils
+      - name: Install backend dependencies
+        run: python3 -m pip install -r requirements-optional.txt
+      - name: Ruff lint
+        run: ruff check . ../docker
+      - name: Ruff format
+        run: ruff format --check . ../docker
+      # Real-Redis store variants skip unless NURSE_TEST_REDIS_URL is set.
+      # Serial on purpose: pytest-xdist on the 4-vCPU runner was slower (6m04s vs
+      # 4.9m) and starved the wall-clock solver/process tests. core is off the
+      # critical path, so it gains nothing from parallelism.
+      - name: Pytest (memory, fakeredis, real Redis)
+        env:
+          NURSE_TEST_REDIS_URL: redis://localhost:6379/0
+          PYTHONPATH: .
+        run: python3 -m pytest -q -rs
+      - name: Score ground-truth replay (patch P0)
+        env:
+          PYTHONPATH: .
+        run: python3 -m pytest -q tests/real/schedule_score_ground_truth.py
+
+  # Builds Next ONCE with the e2e env and ships it to every e2e job, so shards
+  # only start the server. It cannot reuse the `build` job's output:
+  # NEXT_PUBLIC_NS_TEST_BRIDGE is inlined at compile time and that build omits it.
+  e2e-build:
+    name: e2e build
+    runs-on: ubuntu-24.04
+    needs: static
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.14.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Same build-time env as the playwright webServer (both configs agree).
+      - name: Build (e2e env)
+        env:
+          NEXT_PUBLIC_APP_VERSION: "0.1.0"
+          NEXT_PUBLIC_NS_TEST_BRIDGE: "1"
+          NS_ENABLE_DEV_FIXTURES: "1"
+        run: pnpm build
+      # One tarball: keeps the standalone tree's symlinks and avoids
+      # upload-artifact's per-file cost and hidden-dir (.next) exclusion.
+      - name: Pack build
+        run: tar -cf next-e2e.tar --exclude=.next/cache .next
+      - uses: actions/upload-artifact@v7
+        with:
+          name: next-e2e-build
+          path: web/next-e2e.tar
+          retention-days: 1
+
+  e2e:
+    name: e2e (shard ${{ matrix.shard }}/4)
+    # PINNED on EVERY shard, not `ubuntu-latest`. This job compares committed
+    # screenshot baselines, and a snapshot filename encodes the platform
+    # (`linux`) but NOT the distro version or the architecture — so a rolling
+    # alias can change the rendering environment underneath filenames that stay
+    # perfectly valid. GitHub documents `ubuntu-latest` as Ubuntu 24.04 x64
+    # today, with 26.04 already in public preview behind the same alias. The
+    # committed Linux baselines were generated and reviewed on Ubuntu 24.04 x64
+    # (mcr.microsoft.com/playwright:v1.61.1-noble, --platform linux/amd64), so
+    # this label is part of the baseline contract: moving it means regenerating
+    # and re-reviewing the Linux set in the new environment first.
+    runs-on: ubuntu-24.04
+    needs: e2e-build
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.14.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Browsers are not cached: Playwright docs say restore time roughly equals
+      # the download, and only chromium is installed.
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+      - uses: actions/download-artifact@v8
+        with:
+          name: next-e2e-build
+          path: web
+      - name: Unpack build
+        run: tar -xf next-e2e.tar
+      # PW_PREBUILT: the webServer starts the shipped build instead of rebuilding.
+      # Workers stay at the audited 2 per 4-vCPU runner; shards add the speed.
+      - name: Run e2e
+        env:
+          PW_PREBUILT: "1"
+        run: pnpm exec playwright test --shard=${{ matrix.shard }}/4
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: web/blob-report
+          retention-days: 1
+
+  # Focused public-Next-dispatch gate for the /roster BFF route (B3 fixup), on
+  # the shared build. The base config excludes this spec because its
+  # `webServer` placeholder `BACKEND_API_URL=http://127.0.0.1:8000` would collide
+  # with a real backend; the focused config points the BFF at a private stub
+  # port (default 8765). Own runner, so it runs alongside the shards.
+  e2e-public-roster-dispatch:
+    name: e2e (public-roster-dispatch)
+    runs-on: ubuntu-24.04
+    needs: e2e-build
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.14.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
-      # playwright.config.ts webServer runs `pnpm build && pnpm start`.
-      - name: Run e2e
-        run: pnpm exec playwright test
-      # Focused public-Next-dispatch gate for the /roster BFF route (B3 fixup). The
-      # base config excludes this spec because its `webServer` placeholder
-      # `BACKEND_API_URL=http://127.0.0.1:8000` would collide with the CI runner's
-      # real services; the focused config reuses the same `pnpm build && pnpm start`
-      # launcher but points the BFF at a private stub port (default 8765). Runs
-      # AFTER the base gate so the two production builds cannot overlap; if this
-      # lane fails, the job fails (mirroring the verification artifact requirement).
+      - uses: actions/download-artifact@v8
+        with:
+          name: next-e2e-build
+          path: web
+      - name: Unpack build
+        run: tar -xf next-e2e.tar
       - name: Run public-roster-dispatch e2e
+        env:
+          PW_PREBUILT: "1"
         run: pnpm test:e2e:public-roster-dispatch
+
+  # One HTML report from all shard blobs. Runs even when a shard fails, so the
+  # failure is inspectable; shard jobs carry the pass/fail signal themselves.
+  e2e-report:
+    name: e2e report
+    if: ${{ !cancelled() }}
+    needs: e2e
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.14.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          path: web/all-blob-reports
+          pattern: blob-report-*
+          merge-multiple: true
+      - name: Merge reports
+        run: pnpm exec playwright merge-reports --reporter html ./all-blob-reports
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-html-report
+          path: web/playwright-report
+          retention-days: 14

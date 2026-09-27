@@ -1,0 +1,115 @@
+# W2 patch for core/nurse_scheduling/server/maintenance.py against genie 1bf4b85.
+# hunk: clock, liveness window, is_alive, is_healthy, success timestamp (P11)
+# hunk: repair_queue_residue on every pass (P9)
+
+diff --git a/core/nurse_scheduling/server/maintenance.py b/core/nurse_scheduling/server/maintenance.py
+index 2adb7af..95986ec 100644
+--- a/core/nurse_scheduling/server/maintenance.py
++++ b/core/nurse_scheduling/server/maintenance.py
+@@ -19,26 +19,48 @@
+ 
+ import logging
+ import threading
++import time
++from collections.abc import Callable
+ 
+ from .jobs.controller import JobController
+ from .retry import RepeatedFailure
+ 
+ server_logger = logging.getLogger("nurse_scheduling.server")
+ 
++MaintenanceClock = Callable[[], float]
++LIVENESS_INTERVAL_FACTOR = 5.0
++"""Missed-pass allowance before maintenance is considered unhealthy; above the 4x outage backoff cap."""
++
+ 
+ class JobMaintenance:
+     """Periodically expire lost-worker jobs, leases, and retained history."""
+ 
+-    def __init__(self, controller: JobController, *, interval_seconds: float):
++    def __init__(
++        self,
++        controller: JobController,
++        *,
++        interval_seconds: float,
++        clock: MaintenanceClock = time.monotonic,
++    ):
+         """Configure periodic job cleanup without starting its thread."""
+         self._controller = controller
+         """Controller that expires lost-worker jobs, leases, and retained history."""
+         self._interval_seconds = interval_seconds
+         """Delay between maintenance passes."""
++        self._clock = clock
++        """Monotonic clock used for liveness timing and deterministic tests."""
++        self._liveness_timeout_seconds = interval_seconds * LIVENESS_INTERVAL_FACTOR
++        """Age of the last successful pass beyond which readiness fails closed."""
+         self._stop = threading.Event()
+         """Signal that interrupts the maintenance wait and stops the loop."""
+         self._thread: threading.Thread | None = None
+         """Daemon maintenance thread, or `None` when no thread is retained."""
++        self._progress_lock = threading.Lock()
++        """Lock guarding the start and last-success timestamps."""
++        self._started_at: float | None = None
++        """Monotonic time the current loop started, before any pass completes."""
++        self._last_success_at: float | None = None
++        """Monotonic time of the most recent fully successful maintenance pass."""
+         self._failures = RepeatedFailure(base_delay_seconds=interval_seconds, max_delay_seconds=interval_seconds * 4)
+         """Quiets and slows repeated passes while the store is unavailable."""
+ 
+@@ -47,6 +69,9 @@ class JobMaintenance:
+         if self._thread is not None and self._thread.is_alive():
+             return
+         self._stop.clear()
++        with self._progress_lock:
++            self._started_at = self._clock()
++            self._last_success_at = None
+         self._thread = threading.Thread(target=self._run, name="job-maintenance", daemon=True)
+         self._thread.start()
+ 
+@@ -59,6 +84,27 @@ class JobMaintenance:
+         if self._thread is thread and (thread is None or not thread.is_alive()):
+             self._thread = None
+ 
++    def is_alive(self) -> bool:
++        """Return whether the maintenance thread is currently running."""
++        return self._thread is not None and self._thread.is_alive()
++
++    def is_healthy(self) -> bool:
++        """Return whether maintenance is live and making timely successful passes.
++
++        Healthy means the thread is running and a successful pass (or, before the
++        first pass, the loop start) happened within the liveness window. A stalled
++        thread or one that stopped completing passes reports unhealthy so `/health`
++        and `/ready` can fail closed while expired claims would otherwise never
++        become `worker_lost`.
++        """
++        if not self.is_alive():
++            return False
++        with self._progress_lock:
++            reference = self._last_success_at if self._last_success_at is not None else self._started_at
++        if reference is None:
++            return False
++        return (self._clock() - reference) <= self._liveness_timeout_seconds
++
+     def _run(self) -> None:
+         """Apply worker lease and retention cleanup at each interval.
+ 
+@@ -68,10 +114,18 @@ class JobMaintenance:
+             try:
+                 self._controller.expire_worker_claims()
+                 self._controller.expire_jobs()
++                # Admission and claim already repair residue before they can be
++                # misled by it, so this is not what keeps the queue correct. It is
++                # here so a QUIET store still converges: with no traffic, nothing
++                # else would ever reach the repair path, and an operator would have
++                # no record that residue had existed at all.
++                self._controller.repair_queue_residue()
+             except Exception:
+                 if self._failures.report():
+                     server_logger.exception("[server:maintenance] job retention check failed")
+                 continue
++            with self._progress_lock:
++                self._last_success_at = self._clock()
+             ended_failures = self._failures.recovered()
+             if ended_failures:
+                 server_logger.warning(

@@ -58,6 +58,7 @@ import type {
   AssistantThreadV1,
   AssistantTurnState,
   AssistantTurnV1,
+  ThreadSummaryV1,
 } from "./records";
 import type { Message } from "@ag-ui/client";
 
@@ -330,6 +331,7 @@ export async function persistThreadMessages(
                 content: canonical.content || prior.content,
                 toolCalls: canonical.toolCalls ?? prior.toolCalls,
                 toolCallId: canonical.toolCallId ?? prior.toolCallId,
+                attachments: canonical.attachments ?? prior.attachments ?? null,
               }
             : { ...canonical, seq: nextSeq++ },
         );
@@ -442,6 +444,34 @@ export async function setTurnState(
 }
 
 /**
+ * Store a thread's rolling summary (bead ypo). Fenced like every assistant write: a
+ * Clear that bumped the generation, or marked the thread cleared, drops it. A summary
+ * that would cover no more than the stored one is dropped too.
+ */
+export async function saveThreadSummary(
+  threadId: string,
+  scenarioId: string,
+  summary: ThreadSummaryV1,
+  generations: AssistantGenerationPair,
+  config: HistoryRepoConfig = {},
+): Promise<WriteOutcome> {
+  const { db, now } = resolve(config);
+  const result = await runFenced(
+    db,
+    ASSISTANT_WRITE_TABLES,
+    fromGenerationPair(scenarioId, generations),
+    async () => {
+      const thread = await db.assistantThreads.get(threadId);
+      if (!thread || thread.state === "cleared") return "missing" as const;
+      if ((thread.summary?.throughSeq ?? -1) >= summary.throughSeq) return "fenced" as const;
+      await db.assistantThreads.put({ ...thread, summary, updatedAt: now().toISOString() });
+      return "accepted" as const;
+    },
+  );
+  return result.outcome === "fenced" ? "fenced" : result.value;
+}
+
+/**
  * Delete every message on a thread that a normalized history would not contain.
  *
  * WHY SKIPPING IS NOT ENOUGH. `persistThreadMessages` upserts what it is given and
@@ -474,6 +504,42 @@ export async function scrubThreadHistory(
       await db.assistantMessages.bulkDelete(doomed.map((row) => row.messageId));
     }
     return { removed: doomed.length };
+  });
+
+  return result.outcome === "fenced" ? "fenced" : result.value;
+}
+
+/**
+ * Delete every message one turn wrote, so a retry can replace it instead of repeating it.
+ *
+ * WHY A RETRY NEEDS THIS AT ALL. `persistThreadMessages` upserts and never removes, so
+ * resending a failed turn's question would land the new copy BESIDE the old one and the
+ * user would read their own question twice. v1 fixed exactly this in its own
+ * `retryMessage` (`6966f31`); here the failed turn's question is on DISK, so the fix has
+ * to be one layer down.
+ *
+ * FENCED ON THE TURN'S OWN CAPTURE, exactly as `scrubThreadHistory` is: a Clear that
+ * moved the generations while the delete was in flight drops it, and the deletion pass
+ * that clear owns is not raced by this one. `"missing"` is an ordinary outcome too -- a
+ * turn a clear already deleted has nothing left to replace.
+ */
+export async function deleteTurnMessages(
+  turnId: string,
+  config: HistoryRepoConfig = {},
+): Promise<{ removed: number } | "fenced" | "missing"> {
+  const { db } = resolve(config);
+  const turn = await db.assistantTurns.get(turnId);
+  if (!turn) return "missing";
+
+  const captured = fromGenerationPair(turn.scenarioId, turn);
+  const result = await runFenced(db, ASSISTANT_WRITE_TABLES, captured, async () => {
+    // By the indexed `turnId` rather than by reading the thread: the rows this turn
+    // owns are the point, and every message row already carries the turn that wrote it.
+    const rows = await db.assistantMessages.where("turnId").equals(turnId).toArray();
+    if (rows.length > 0) {
+      await db.assistantMessages.bulkDelete(rows.map((row) => row.messageId));
+    }
+    return { removed: rows.length };
   });
 
   return result.outcome === "fenced" ? "fenced" : result.value;

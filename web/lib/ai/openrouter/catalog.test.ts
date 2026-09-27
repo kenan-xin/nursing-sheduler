@@ -52,7 +52,40 @@ describe("tool-capability filter", () => {
     const [model] = selectToolCapableModels(
       catalogPayload([{ id: "vendor/slug", name: "", supported_parameters: ["tools"] }]),
     );
-    expect(model).toEqual({ id: "vendor/slug", name: "vendor/slug", contextLength: null });
+    expect(model).toEqual({
+      id: "vendor/slug",
+      name: "vendor/slug",
+      contextLength: null,
+      imageInput: false,
+    });
+  });
+});
+
+describe("image input", () => {
+  it("marks the models that read images (2by.10)", () => {
+    const models = selectToolCapableModels({
+      data: [
+        {
+          id: "a/vision",
+          name: "Vision",
+          supported_parameters: ["tools"],
+          architecture: { input_modalities: ["text", "image"] },
+        },
+        {
+          id: "b/text",
+          name: "Text",
+          supported_parameters: ["tools"],
+          architecture: { input_modalities: ["text"] },
+        },
+        { id: "c/old", name: "Old", supported_parameters: ["tools"] },
+      ],
+    });
+    expect(Object.fromEntries(models.map((m) => [m.id, m.imageInput]))).toEqual({
+      "a/vision": true,
+      "b/text": false,
+      "c/old": false,
+    });
+    expect(FALLBACK_MODELS.every((m) => m.imageInput)).toBe(true);
   });
 });
 
@@ -68,9 +101,9 @@ describe("recommended default", () => {
   });
 
   it("falls back to the first row when the recommended slug is absent", () => {
-    expect(pickRecommended([{ id: "only/one", name: "Only", contextLength: null }])).toBe(
-      "only/one",
-    );
+    expect(
+      pickRecommended([{ id: "only/one", name: "Only", contextLength: null, imageInput: false }]),
+    ).toBe("only/one");
   });
 
   it("has nothing to recommend from an empty list", () => {
@@ -88,7 +121,7 @@ describe("fallback catalog", () => {
   });
 
   it("cannot be mutated through the returned list", () => {
-    fallbackCatalog().models.push({ id: "x", name: "x", contextLength: null });
+    fallbackCatalog().models.push({ id: "x", name: "x", contextLength: null, imageInput: false });
     expect(fallbackCatalog().models.length).toBe(FALLBACK_MODELS.length);
   });
 });
@@ -133,6 +166,8 @@ describe("fetching the live catalog", () => {
       )) as unknown as typeof fetch);
 
     expect(catalog.source).toBe("catalog");
-    expect(catalog.models).toEqual([{ id: "a/x", name: "X", contextLength: 1234 }]);
+    expect(catalog.models).toEqual([
+      { id: "a/x", name: "X", contextLength: 1234, imageInput: false },
+    ]);
   });
 });

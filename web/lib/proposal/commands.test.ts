@@ -89,6 +89,16 @@ describe("the rule arms' text states what the solver enforces", () => {
     expect(rest).toContain("copy the break of an existing shift of similar length");
   });
 
+  it("a count is a total over the dates, and days in a row is a shift sequence rule", () => {
+    // bead 3ew: 'at most 5 days in a row' became a count x <= 5 over the whole period.
+    for (const type of ["add_count_rule", "edit_count_rule"]) {
+      const text = arm(type).expression.description ?? "";
+      expect(text).toContain("never days in a row");
+      expect(text).toContain("add_succession_rule");
+      expect(text).toContain('"ALL" 6 times at "-infinity"');
+    }
+  });
+
   it("a count's weight rewards the expression holding", () => {
     const weight = arm("add_count_rule").weight.description ?? "";
     expect(weight).toContain("works against");
@@ -516,8 +526,8 @@ describe("parseAssistantCommands", () => {
 
   it("accepts the Staff-screen arms", () => {
     const result = parseAssistantCommands([
-      { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"], temporary: false },
-      { type: "edit_person", personId: 7, name: "7", groups: [], temporary: false },
+      { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"] },
+      { type: "edit_person", personId: 7, name: "7", groups: [] },
       { type: "remove_person", personId: "bo" },
       {
         type: "add_people_group",
@@ -540,11 +550,11 @@ describe("parseAssistantCommands", () => {
   it("refuses Staff-screen payloads the model must fix itself", () => {
     const refused: unknown[] = [
       // groups omitted: the model must send [] for "no groups".
-      [{ type: "add_person", name: "Cara", temporary: false }],
+      [{ type: "add_person", name: "Cara" }],
       // A description the Staff table cannot author.
-      [{ type: "add_person", name: "Cara", groups: [], temporary: false, description: "Agency" }],
+      [{ type: "add_person", name: "Cara", groups: [], description: "Agency" }],
       // name omitted on an edit: send the current name to keep it.
-      [{ type: "edit_person", personId: "ana", groups: [], temporary: false }],
+      [{ type: "edit_person", personId: "ana", groups: [] }],
       // description omitted on a group: send "" for none.
       [{ type: "add_people_group", groupId: "X", members: [] }],
       // members not a list.
@@ -565,6 +575,83 @@ describe("parseAssistantCommands", () => {
           members: [],
         },
       ],
+    ];
+    for (const payload of refused) {
+      expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
+    }
+  });
+
+  it("accepts the temporary-cover arms, trimming nothing on the wire", () => {
+    const result = parseAssistantCommands([
+      {
+        type: "add_temporary_cover",
+        name: "Haseena (Ward 3)",
+        date: "2026-10-14",
+        shiftType: "N",
+        groups: ["RN"],
+      },
+      {
+        type: "remove_temporary_cover",
+        name: "Haseena (Ward 3)",
+        date: "2026-10-14",
+        shiftType: "N",
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The host trims (the Staff form trims); the wire keeps what the model sent.
+    expect(result.commands[0]).toEqual({
+      type: "add_temporary_cover",
+      name: "Haseena (Ward 3)",
+      date: "2026-10-14",
+      shiftType: "N",
+      groups: ["RN"],
+    });
+  });
+
+  it("locked schema keys for add_temporary_cover and remove_temporary_cover", () => {
+    // Strict objects, like every other arm: an extra key is refused, not stripped, and
+    // every field the host reads is REQUIRED on the wire.
+    const add = assistantCommandSchema.safeParse({
+      type: "add_temporary_cover",
+      name: "Haseena (Ward 3)",
+      date: "2026-10-14",
+      shiftType: "N",
+      groups: [],
+    });
+    expect(add.success).toBe(true);
+    if (add.success) {
+      expect(Object.keys(add.data).sort()).toEqual(["date", "groups", "name", "shiftType", "type"]);
+    }
+    const remove = assistantCommandSchema.safeParse({
+      type: "remove_temporary_cover",
+      name: "Haseena (Ward 3)",
+      date: "2026-10-14",
+      shiftType: "N",
+    });
+    expect(remove.success).toBe(true);
+    if (remove.success) {
+      expect(Object.keys(remove.data).sort()).toEqual(["date", "name", "shiftType", "type"]);
+    }
+  });
+
+  it("refuses temporary-cover payloads the model must fix itself", () => {
+    const add = {
+      type: "add_temporary_cover",
+      name: "Haseena (Ward 3)",
+      date: "2026-10-14",
+      shiftType: "N",
+      groups: [],
+    };
+    const refused: unknown[] = [
+      // groups omitted: the model must send [] for "no groups".
+      [{ ...add, groups: undefined }],
+      // A date the wire schema refuses before the host can name it.
+      [{ ...add, date: "14 Oct" }],
+      // A field the host derives, never accepts.
+      [{ ...add, _k: "x" }],
+      // shiftType omitted on a removal: the cover identity is the three fields.
+      [{ type: "remove_temporary_cover", name: "Haseena (Ward 3)", date: "2026-10-14" }],
     ];
     for (const payload of refused) {
       expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);

@@ -18,6 +18,8 @@ import {
   type LeaveMove,
 } from "./rule-check";
 
+import { borrowContext, borrowDocument, borrowGrid } from "./swap-fixtures";
+
 const DATES = ["2026-10-07", "2026-10-08", "2026-10-09"];
 const s = (id: string): RosterDayState => ({ kind: "shift", shiftId: id });
 const OFF: RosterDayState = { kind: "off" };
@@ -252,6 +254,34 @@ describe("staffing requirements", () => {
   });
 });
 
+describe("skill mix", () => {
+  // Nights = Ana, Ben. Cy is neither. A floor of two on nights bans nobody.
+  const MIXED_NIGHTS = {
+    type: PREFERENCE_TYPE.shiftTypeRequirement,
+    description: "Two night nurses",
+    shiftType: "N",
+    requiredNumPeople: 2,
+    skillMix: [{ people: "Nights", minNumPeople: 2 }],
+    weight: -1,
+  } as CanonicalPreference;
+
+  it("flags a change that drops the floor while the head count still holds", () => {
+    // Both days have two on N; only the SECOND loses its second Night nurse.
+    const before = [[OFF, s("N"), OFF], [OFF, s("N"), OFF], idle()];
+    const after = [[OFF, s("N"), OFF], idle(), [OFF, s("N"), OFF]];
+    const result = check([MIXED_NIGHTS], before, after);
+    expect(result.hard.map((issue) => issue.message)).toEqual([
+      "8 Oct: “Two night nurses” has 1 of the 2 needed from Nights.",
+    ]);
+  });
+
+  it("does not blame a change that keeps the floor", () => {
+    const before = [[OFF, s("N"), OFF], idle(), idle()];
+    const after = [[OFF, s("N"), OFF], [OFF, s("N"), OFF], idle()];
+    expect(check([MIXED_NIGHTS], before, after).hard).toEqual([]);
+  });
+});
+
 describe("what it cannot check", () => {
   it("lists a hard affinity instead of calling it fine", () => {
     const pairing = {
@@ -309,6 +339,61 @@ describe("leave that moves with a trade", () => {
     );
     expect(result.hard.map((issue) => issue.message)).toEqual([
       "Ana must have leave on 9 Oct (moved from 7 Oct).",
+    ]);
+  });
+});
+
+// d582: a temporary cover is not a person. The model counts her through the ward need.
+describe("temporary cover", () => {
+  const haseena = {
+    name: "Haseena (Ward 3)",
+    date: "2026-10-08",
+    shiftType: "N",
+    groups: ["Nights"],
+  };
+  const priyaOff = () => [[OFF, OFF, OFF], borrowGrid()[1]];
+
+  it("checkRosterChange counts a temporary cover", () => {
+    const document = borrowDocument();
+    const scope = { people: [0], dates: [1] };
+    const bare = checkRosterChange(
+      buildRuleModel(document),
+      borrowContext(),
+      borrowGrid(),
+      priyaOff(),
+      scope,
+    );
+    expect(bare.hard.map((issue) => issue.message)).toEqual([
+      "8 Oct: “One night nurse” has 0 of the 1 needed.",
+    ]);
+    const covered = checkRosterChange(
+      buildRuleModel(document, { decrements: [], live: [haseena] }),
+      borrowContext(),
+      borrowGrid(),
+      priyaOff(),
+      scope,
+    );
+    expect(covered.hard).toEqual([]);
+  });
+
+  it("says the cover alongside a need the ward still falls short of", () => {
+    const document = {
+      ...borrowDocument(),
+      preferences: borrowDocument().preferences.map((preference) =>
+        preference.type === PREFERENCE_TYPE.shiftTypeRequirement
+          ? { ...preference, requiredNumPeople: 2 }
+          : preference,
+      ),
+    } as CanonicalScenarioDocument;
+    const result = checkRosterChange(
+      buildRuleModel(document, { decrements: [], live: [haseena] }),
+      borrowContext(),
+      borrowGrid(),
+      priyaOff(),
+      { people: [0], dates: [1] },
+    );
+    expect(result.hard.map((issue) => issue.message)).toEqual([
+      "8 Oct: “One night nurse” has 0 of the 1 needed from the ward (+1 cover).",
     ]);
   });
 });

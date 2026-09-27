@@ -6,10 +6,11 @@
 // and one persisted revision (T04 store discipline). All logic lives in
 // `counts-model`; this hook is only the store glue.
 
-import { useScenarioStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
+import { useScenarioStore, type ScenarioStoreState } from "@/lib/store";
 import type { CommandOutcome } from "@/lib/store";
 import { commitCardsSlice, commitCardsTransform } from "@/components/card-editor/commit-cards";
-import type { CountCard, ScenarioUiState } from "@/lib/scenario";
+import type { CountCard } from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 import {
@@ -18,11 +19,12 @@ import {
   reorderByDrop,
   withCardDisabled,
   type CountFormState,
+  type CountScenarioInput,
 } from "./counts-model";
 import { buildContractedCard, type ContractedFormState } from "./contracted-model";
 
 export interface CountsController {
-  state: ScenarioUiState;
+  state: CountScenarioInput;
   counts: CountCard[];
   /** Read the LIVE counts slice at call time (not a render snapshot) — the stale
    *  guard keys on its ref-identity change since the draft opened. */
@@ -52,10 +54,30 @@ export interface CountsController {
   setDisabled: (uid: string, value: boolean) => void;
 }
 
+/** The slices the Counts screen reads — the people/shift domains its selectors
+ *  offer, the dates it scopes them by, and the request pins its leave advisory
+ *  consults. `cardsByKind` is deliberately NOT among them: the count cards arrive
+ *  from their own subscription, so editing a covering or affinity card must not
+ *  re-render this editor (nor recompute its leave guard). */
+function pickCountScenario(state: ScenarioStoreState): CountScenarioInput {
+  return {
+    staff: state.staff,
+    staffGroups: state.staffGroups,
+    shifts: state.shifts,
+    shiftGroups: state.shiftGroups,
+    rangeStart: state.rangeStart,
+    rangeEnd: state.rangeEnd,
+    dateGroups: state.dateGroups,
+    reqData: state.reqData,
+  };
+}
+
 export function useCounts(): CountsController {
-  // The durable store state is a superset of `ScenarioUiState`, so it satisfies
-  // the pure model's input directly.
-  const state: ScenarioUiState = useScenarioStore((s) => s);
+  // `useShallow` compares the picked references, not the fresh wrapper object's
+  // identity — without it zustand v5 reads a new snapshot every render. The
+  // wrapper is otherwise stable, so a mutation outside these slices leaves `state`
+  // untouched and the screen neither re-renders nor re-runs its derivations.
+  const state = useScenarioStore(useShallow(pickCountScenario));
   const counts = useScenarioStore((s) => s.cardsByKind.counts);
 
   return {

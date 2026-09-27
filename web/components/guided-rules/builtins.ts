@@ -8,7 +8,9 @@ import type { GuidedRuleRow } from "./types";
 
 const MAX_ONE_SHIFT_PER_DAY_ID = "builtin:max-one-shift-per-day";
 
-export function projectBuiltinRules(state: ScenarioUiState): GuidedRuleRow[] {
+export function projectBuiltinRules(
+  state: Pick<ScenarioUiState, "maxOneShiftPerDay">,
+): GuidedRuleRow[] {
   return [
     {
       id: MAX_ONE_SHIFT_PER_DAY_ID,

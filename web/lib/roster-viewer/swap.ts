@@ -191,11 +191,25 @@ export const findSickCovers = (
 ) =>
   rankPartners(ctx, personIdx, dateIdxs, (q) => planSickCover(ctx, personIdx, q, dateIdxs), limit);
 
-/** Step 3: what a borrowed nurse must cover, and the skill group a requirement demands there. */
+/**
+ * Step 3: what a borrowed nurse must cover, and the skill group a requirement demands
+ * there. Only where the ward need is still short once the person is gone: a slot a
+ * temporary cover already fills (the model's ward need, d582) needs no borrow.
+ */
 export function borrowNeeds(ctx: SwapContext, personIdx: number, dateIdxs: readonly number[]) {
   return dateIdxs.flatMap((dateIdx) => {
     const cell = ctx.days[personIdx][dateIdx];
     if (cell.kind !== "shift") return [];
+    const after: RosterDayState[][] = ctx.days.map((row) => [...row]);
+    after[personIdx][dateIdx] = OFF;
+    const check = checkRosterChange(ctx.model, ctx.context, ctx.days, after, {
+      people: [personIdx],
+      dates: [dateIdx],
+    });
+    const short = check.hard.some(
+      (issue) => issue.staffing?.part === "short" || issue.staffing?.part === "mix",
+    );
+    if (!short) return [];
     const shiftIdx = ctx.model.shiftIndex.get(typedIdKey(cell.shiftId));
     const scoped = ctx.model.equations.find(
       (equation) =>
@@ -205,7 +219,11 @@ export function borrowNeeds(ctx: SwapContext, personIdx: number, dateIdxs: reado
         equation.shiftIndices.includes(shiftIdx) &&
         equation.dateIndices.has(dateIdx),
     );
-    return [{ dateIdx, shift: String(cell.shiftId), skillGroup: scoped?.qualifiedLabel ?? null }];
+    // A restricted shift no single staff group represents: no borrowed nurse can be
+    // qualified for it, so no borrow is offered. `qualifiedLabel` is a rendered
+    // `[RN, SN]`, never a group id the roster declares (bead nursing-sheduler-olu).
+    if (scoped && scoped.qualifiedGroup === null) return [];
+    return [{ dateIdx, shift: String(cell.shiftId), skillGroup: scoped?.qualifiedGroup ?? null }];
   });
 }
 
@@ -414,7 +432,9 @@ export function findCoverLadder(
   const trades = findTrades(ctx, personIdx, dateIdxs, reason);
   if (overtime.length > 0 || trades.length > 0) return { ...base, step: 2, overtime, trades };
   const borrow = borrowNeeds(ctx, personIdx, dateIdxs);
-  if (!options.noTemporaryNurse) return { ...base, step: 3, borrow };
+  // No borrow need means no group a temporary nurse could be qualified in, so step 3
+  // has no option: fall through to the short shift (bead nursing-sheduler-olu).
+  if (!options.noTemporaryNurse && borrow.length > 0) return { ...base, step: 3, borrow };
   return { ...base, step: 4, borrow, short: planShortShift(ctx, personIdx, dateIdxs, reason) };
 }
 

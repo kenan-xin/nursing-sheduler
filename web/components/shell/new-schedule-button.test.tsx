@@ -2,7 +2,8 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createEmptyScenarioUiState } from "@/lib/scenario";
+import { createEmptyScenarioUiState, serializeScenario } from "@/lib/scenario";
+import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 // INTEGRATION: `drainScenarioPersist` and the direct `resetToNewScenario` import are
 // gone — the persist seam was retired by T03, and this suite drives the reset through
 // the product's `resetToNewSchedule` and the test authority instead.
@@ -10,7 +11,7 @@ import { pickScenario, rosterStorage, scenarioCommands, useScenarioStore } from 
 import { NEW_SCHEDULE_FAILED_MESSAGE } from "@/lib/roster";
 import type { RosterDocument } from "@/lib/roster";
 import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
-import { StartOverCard } from "./new-schedule-button";
+import { EXAMPLE_SCHEDULE_FAILED_MESSAGE, StartOverCard } from "./new-schedule-button";
 import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 // Focused contract for the shared reset presenter. F2 is its sole VISUAL owner
@@ -214,5 +215,111 @@ describe("StartOverCard — v2 surface reading", async () => {
     expect(classes).toContain("rounded-pill");
     expect(classes).toContain("pointer-coarse:min-h-touch");
     expect(classes).toContain("pointer-coarse:min-w-touch");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F07 — the 87-person example choice. The example is deliberately NOT a second
+// reset protocol: it rides the SAME inbound pipeline as Upload and Edit-YAML
+// (`prepareScenarioLoad` → replacement/version confirm → `loadScenario`), so these
+// prove the card reaches that pipeline and its shared confirm / issue / warning
+// surfaces instead of inventing a parallel one.
+// ---------------------------------------------------------------------------
+
+/** A backend-valid YAML the example seam returns in place of the bundled file. */
+const EXAMPLE_YAML = serializeScenario(makeValidUiState());
+
+async function snapshot() {
+  await drainScenarioCommands();
+  return pickScenario(useScenarioStore.getState());
+}
+
+describe("StartOverCard — the 87-person example", () => {
+  it("offers both choices on the card", () => {
+    render(<StartOverCard />);
+    expect(screen.getByTestId("new-schedule-button")).toHaveTextContent("New schedule");
+    expect(screen.getByTestId("new-schedule-example")).toHaveTextContent("87-person example");
+  });
+
+  it("loads the example through the shared import path, reusing its replacement confirm", async () => {
+    await seedDirtyScenario();
+
+    render(<StartOverCard fetchExampleSchedule={async () => EXAMPLE_YAML} />);
+    fireEvent.click(screen.getByTestId("new-schedule-example"));
+
+    // The path's own replacement confirmation, not a bespoke dialog — and nothing
+    // is replaced until it is continued through.
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    await waitFor(async () => {
+      expect((await snapshot()).staff.map((person) => person.id)).toEqual(["Alice", "Bob"]);
+    });
+  });
+
+  it("keeps the current schedule when the example file cannot be fetched", async () => {
+    await seedDirtyScenario();
+    const before = await snapshot();
+
+    render(
+      <StartOverCard
+        fetchExampleSchedule={async () => {
+          throw new Error("network down");
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("new-schedule-example"));
+
+    expect(await screen.findByTestId("new-schedule-example-error")).toHaveTextContent(
+      EXAMPLE_SCHEDULE_FAILED_MESSAGE,
+    );
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it("keeps the current schedule and shows the load issues when the example cannot be imported", async () => {
+    await seedDirtyScenario();
+    const before = await snapshot();
+
+    render(<StartOverCard fetchExampleSchedule={async () => "::not a scenario::"} />);
+    fireEvent.click(screen.getByTestId("new-schedule-example"));
+
+    expect(await screen.findByTestId("scenario-export-issues")).toBeInTheDocument();
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it("shows a loading state while the example is being fetched", async () => {
+    let resolve!: (text: string) => void;
+    const pending = new Promise<string>((r) => {
+      resolve = r;
+    });
+    render(<StartOverCard fetchExampleSchedule={() => pending} />);
+
+    fireEvent.click(screen.getByTestId("new-schedule-example"));
+    await waitFor(() => expect(screen.getByTestId("new-schedule-example")).toBeDisabled());
+    expect(screen.getByTestId("new-schedule-example")).toHaveTextContent("Loading");
+
+    resolve(EXAMPLE_YAML);
+    await waitFor(() => expect(screen.getByTestId("new-schedule-example")).not.toBeDisabled());
+  });
+
+  it("rides the normal import path, not the empty reset — the previous run's roster residue survives", async () => {
+    // The coordinator's constraint: the example does whatever a normal import does
+    // (replace the SCENARIO) and no invented residue cut. So a committed roster from
+    // the previous run is left exactly as the Upload path would leave it.
+    const document = await fixtureRosterDocument();
+    const epoch = await rosterStorage.getClearEpoch();
+    await rosterStorage.commitCandidate<RosterDocument>({
+      jobId: "job-example",
+      submissionOrdinal: 1,
+      document,
+      expectedClearEpoch: epoch,
+    });
+
+    render(<StartOverCard fetchExampleSchedule={async () => EXAMPLE_YAML} />);
+    fireEvent.click(screen.getByTestId("new-schedule-example"));
+
+    await waitFor(async () => {
+      expect((await snapshot()).staff.map((person) => person.id)).toEqual(["Alice", "Bob"]);
+    });
+    expect(await rosterStorage.readWorking<RosterDocument>()).not.toBeNull();
+    expect(await rosterStorage.readCandidate<RosterDocument>("job-example")).not.toBeNull();
   });
 });

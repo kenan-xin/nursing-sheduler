@@ -2,7 +2,7 @@
 
 This is NOT a reimplementation of anything: it imports the *vendored* Python
 backend (`core/nurse_scheduling`) and drives its actual `load_data`, `schedule`,
-`group_map`, and `exporter` code so the TypeScript contract layer is checked
+`server.workspace.build_shift_type_index_map`, and `exporter` code so the TypeScript contract layer is checked
 against binding behavior rather than a memory of it.
 
 Protocol: read one JSON request object from stdin, write one JSON response object
@@ -28,11 +28,12 @@ _ROOT = os.path.abspath(os.path.join(_HERE, "..", "..", "..", ".."))
 sys.path.insert(0, os.path.join(_ROOT, "core"))
 
 import nurse_scheduling  # noqa: E402
-from nurse_scheduling import exporter, group_map  # noqa: E402
+from nurse_scheduling import exporter  # noqa: E402
 from nurse_scheduling.constants import ALL, MAP_DATE_KEYWORD_TO_FILTER, MAP_WEEKDAY_TO_STR  # noqa: E402
 from nurse_scheduling.loader import load_data  # noqa: E402
 from nurse_scheduling.models import DateRange, ShiftType, ShiftTypeGroup  # noqa: E402
 from nurse_scheduling.server.scheduling_errors import SchedulingContentError  # noqa: E402
+from nurse_scheduling.server.workspace import build_shift_type_index_map  # noqa: E402
 from nurse_scheduling.utils import parse_dates, parse_pids  # noqa: E402
 from nurse_scheduling.server.scheduling_input import (  # noqa: E402
     MalformedInputError,
@@ -84,12 +85,12 @@ def op_schedule(req):
 
 
 def op_shift_map(req):
-    """C3: the ordered shift-type id -> [indices] map (group_map). Verifies
+    """C3: the ordered shift-type id -> [indices] map (server.workspace). Verifies
     ALL/OFF/LEAVE expansion, definition-order construction, and forward-ref failure."""
     try:
         items = [ShiftType(id=i) for i in req["items"]]
         groups = [ShiftTypeGroup(id=g["id"], members=g["members"]) for g in req["groups"]]
-        result = group_map.build_shift_type_index_map(items, groups)
+        result = build_shift_type_index_map(items, groups)
         return {"ok": True, "map": {str(k): v for k, v in result.items()}}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e), "errorType": type(e).__name__}

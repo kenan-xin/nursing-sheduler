@@ -16,20 +16,30 @@
 // in the card dock above the composer (`assistant-card-dock.tsx`), which reaches the
 // live handlers only through the context this rendering provides.
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { CopilotChatMessageView, CopilotChatView } from "@copilotkit/react-core/v2";
 import type { Message } from "@ag-ui/client";
 import { readThreadMessages } from "@/lib/ai/assistant/history-repo";
 import { toTransportThread } from "@/lib/ai/assistant/messages";
+import { ATTACHMENT_PRIVACY_NOTE } from "@/lib/ai/assistant/attachment-rules";
+import { COMPACTION_NOTICE } from "@/lib/ai/assistant/compaction";
 import { describeInterruptionPhase, describeSettlement } from "@/lib/ai/assistant/lifecycle";
 import { describeRefusal } from "@/lib/ai/assistant/send-gate";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
-import { useAssistantSession, type AssistantActivity } from "./use-assistant-session";
+import {
+  useAssistantSession,
+  type AssistantActivity,
+  type AssistantSendOptions,
+} from "./use-assistant-session";
 import { useAssistantProposals } from "./use-assistant-proposals";
 import { useAssistantFollowUps } from "./use-assistant-follow-ups";
 import { CardDockContext, DockedComposer } from "./assistant-card-dock";
 import { AssistantReceipts } from "./assistant-receipts";
 import { ApplyNavigationNotice } from "./apply-navigation-notice";
+import { useAssistantRetry } from "./use-assistant-retry";
+import { useComposerAttachments } from "./use-composer-attachments";
+import { useModelImageInput } from "./use-model-image-input";
+import { Button } from "@/components/ui/button";
 import { Surface } from "@/components/ui/surface";
 
 /** The app's own welcome content. Local text; no provider request produces it. */
@@ -70,8 +80,13 @@ export function RefusalNotice() {
  * ("Stopping…" above "Stopped." reads as a contradiction). The wording itself lives in
  * `lifecycle.ts` beside the classes it describes, so a new settlement class cannot
  * ship without wording.
+ *
+ * `onRetry` is the HOST's, and only for the settlement that has one: it is the
+ * failed-turn Retry, and a notice rendered without it -- the historical panel, the
+ * interruption line -- simply states the fact and offers nothing. The wording already
+ * says "Send again to retry." for exactly the settlements this appears beside.
  */
-export function LifecycleNotice() {
+export function LifecycleNotice({ onRetry = null }: { onRetry?: (() => void) | null }) {
   const interruption = useAssistantStore((state) => state.interruption);
   const settlement = useAssistantStore((state) => state.lastSettlement);
 
@@ -92,14 +107,29 @@ export function LifecycleNotice() {
 
   if (!settlement) return null;
   return (
-    <p
-      className="px-4 pb-2 text-meta text-ink2"
-      role="status"
-      aria-live="polite"
-      data-testid="assistant-settlement"
-      data-settlement={settlement.settlement}
-    >
-      {describeSettlement(settlement.settlement, settlement.trigger)}
+    <div className="flex flex-wrap items-center gap-2 px-4 pb-2" role="status" aria-live="polite">
+      <p
+        className="text-meta text-ink2"
+        data-testid="assistant-settlement"
+        data-settlement={settlement.settlement}
+      >
+        {describeSettlement(settlement.settlement, settlement.trigger)}
+      </p>
+      {onRetry && (
+        <Button variant="secondary" size="sm" onClick={onRetry} data-testid="assistant-retry">
+          Retry
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** bead ypo: one quiet line while this thread carries a summary of older messages. */
+export function CompactionNotice({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <p className="px-4 pb-2 text-meta text-ink2" role="status" data-testid="assistant-compacted">
+      {COMPACTION_NOTICE}
     </p>
   );
 }
@@ -122,7 +152,7 @@ export const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
   get_roster: "Reading the roster…",
   find_swap_partners: "Looking for who can swap…",
   prepare_roster_swap: "Preparing a swap…",
-  prepare_borrowed_cover: "Preparing a temporary nurse…",
+  prepare_borrowed_cover: "Preparing a temporary cover…",
 };
 
 /**
@@ -133,7 +163,11 @@ export const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
 export function AssistantActivityStatus({ activity }: { activity: AssistantActivity }) {
   if (!activity) return null;
   const label =
-    activity.kind === "tool" ? (TOOL_ACTIVITY[activity.name] ?? "Working…") : "Thinking…";
+    activity.kind === "tool"
+      ? (TOOL_ACTIVITY[activity.name] ?? "Working…")
+      : activity.kind === "summarising"
+        ? "Summarising earlier messages…"
+        : "Thinking…";
   return (
     <p
       className="flex items-center gap-2 text-meta text-ink2"
@@ -161,14 +195,30 @@ export interface AssistantLiveConversationProps {
   threadId: string;
   routePath: string;
   routeLabel: string | null;
+  /**
+   * Reports whether this conversation currently holds any messages.
+   *
+   * The panel's header owns the transcript download control and gates it on this,
+   * because "is the conversation empty?" is a fact only the rendering knows -- the
+   * live one from its agent, the historical one from what it read.
+   */
+  onHasMessages?: (hasMessages: boolean) => void;
 }
 
 export function AssistantLiveConversation({
   threadId,
   routePath,
   routeLabel,
+  onHasMessages,
 }: AssistantLiveConversationProps) {
-  const session = useAssistantSession({ threadId, routePath, routeLabel, historical: false });
+  const imageInput = useModelImageInput();
+  const session = useAssistantSession({
+    threadId,
+    routePath,
+    routeLabel,
+    historical: false,
+    imageInput,
+  });
   // HOST STATE, HOST HANDLERS. The Preview and the receipts are host surfaces, not
   // entries in the transcript -- see the note in `proposal-preview-card.tsx`.
   const proposals = useAssistantProposals();
@@ -182,23 +232,80 @@ export function AssistantLiveConversation({
   const sendMessage = useAssistantFollowUps(
     running || session.sending,
     proposals.outcome,
-    (text: string) => {
+    (text: string, options?: AssistantSendOptions) => {
       assistantActions.clearChoices();
-      return session.send(text);
+      return options ? session.send(text, options) : session.send(text);
     },
   );
   const dock = useMemo(
     () => ({ onSend: sendMessage, disabled: running, proposals }),
     [sendMessage, running, proposals],
   );
+  // 2by.10. Only a composer submit carries files; cards and follow-ups send text alone.
+  // A send refused as busy keeps the queue, an accepted one clears it.
+  const attach = useComposerAttachments(imageInput);
+  const { ready, consume } = attach;
+  const submit = useCallback(
+    (text: string) => {
+      const files = ready();
+      if (files.length === 0) return void sendMessage(text);
+      void sendMessage(text, { attachments: files }).then((accepted) => {
+        if (accepted) consume();
+      });
+    },
+    [ready, consume, sendMessage],
+  );
+  // The failed turn's Retry, through the SESSION'S OWN send -- the same function the
+  // composer's path calls, given the failed turn's id so the gate replaces it. Deliberately
+  // not wrapped in another adapter: an adapter here is one more place a send option could
+  // be dropped, and the retry's whole contract is that it carries that id to the gate.
+  // It closes an open option card itself, for the same reason the composer does.
+  const retry = useAssistantRetry({
+    threadId,
+    send: session.send,
+    busy: running || session.sending,
+  });
+  const hasMessages = session.messages.length > 0;
+  useEffect(() => {
+    onHasMessages?.(hasMessages);
+  }, [hasMessages, onHasMessages]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-live-conversation">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      data-testid="assistant-live-conversation"
+      ref={attach.containerRef}
+    >
       {session.messages.length === 0 && <WelcomeState />}
       <RefusalNotice />
-      <LifecycleNotice />
+      <LifecycleNotice onRetry={retry.canRetry ? retry.retry : null} />
+      <CompactionNotice show={session.summarised} />
       <AssistantReceipts controller={proposals} />
       <ApplyNavigationNotice controller={proposals} />
+      <input
+        type="file"
+        multiple
+        hidden
+        ref={attach.fileInputRef}
+        accept={attach.accept}
+        onChange={attach.handleFileUpload}
+        data-testid="assistant-file-input"
+      />
+      {attach.error && (
+        <p
+          className="truncate px-4 pb-2 text-meta text-errorink"
+          role="status"
+          title={attach.error}
+          data-testid="assistant-attach-error"
+        >
+          {attach.error}
+        </p>
+      )}
+      {attach.attachments.length > 0 && (
+        <p className="px-4 pb-2 text-meta text-ink2" data-testid="assistant-attach-privacy">
+          {ATTACHMENT_PRIVACY_NOTE}
+        </p>
+      )}
       <ActivityContext.Provider value={session.activity}>
         <CardDockContext.Provider value={dock}>
           <CopilotChatView
@@ -215,8 +322,15 @@ export function AssistantLiveConversation({
             // Suppresses the library's generic greeting: this panel is bound to one
             // explicit scenario thread, and the welcome content above is the app's.
             hasExplicitThreadId
-            onSubmitMessage={sendMessage}
+            onSubmitMessage={submit}
             onStop={session.stop}
+            attachments={attach.attachments}
+            onRemoveAttachment={attach.removeAttachment}
+            onAddFile={() => attach.fileInputRef.current?.click()}
+            dragOver={attach.dragOver}
+            onDragOver={attach.handleDragOver}
+            onDragLeave={attach.handleDragLeave}
+            onDrop={attach.handleDrop}
           />
         </CardDockContext.Provider>
       </ActivityContext.Provider>
@@ -228,11 +342,14 @@ export interface AssistantHistoricalConversationProps {
   threadId: string;
   /** Why this thread is read-only, in the user's terms. */
   reason: string;
+  /** Reports whether the restored history holds any messages. See the live props. */
+  onHasMessages?: (hasMessages: boolean) => void;
 }
 
 export function AssistantHistoricalConversation({
   threadId,
   reason,
+  onHasMessages,
 }: AssistantHistoricalConversationProps) {
   const [messages, setMessages] = useState<Message[]>([]);
 
@@ -245,6 +362,11 @@ export function AssistantHistoricalConversation({
       cancelled = true;
     };
   }, [threadId]);
+
+  const hasMessages = messages.length > 0;
+  useEffect(() => {
+    onHasMessages?.(hasMessages);
+  }, [hasMessages, onHasMessages]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-historical-conversation">

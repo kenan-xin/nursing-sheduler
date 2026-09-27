@@ -167,6 +167,58 @@ describe("renameEntity — rewrites everywhere (spec 06 FR-RI-03..07)", () => {
     expect(after.staffGroups[0].id).toBe("TeamZ");
     expect(after.staffGroups[1].members).toEqual(["TeamZ", "P3"]); // nested ref rewritten
   });
+
+  it("a shift-type rename follows into the covers (d582)", () => {
+    const state: ScenarioUiState = {
+      ...fixture(),
+      temporaryCover: [
+        { name: "Haseena (Ward 3)", date: "2026-05-14", shiftType: "N", groups: [] },
+      ],
+    };
+    const after = renameEntity(state, "shift", "N", "Night");
+    expect(after.temporaryCover[0].shiftType).toBe("Night");
+  });
+
+  it("a staff-group rename follows into the covers (d582)", () => {
+    const state: ScenarioUiState = {
+      ...fixture(),
+      temporaryCover: [
+        {
+          name: "Haseena (Ward 3)",
+          date: "2026-05-14",
+          shiftType: "D",
+          groups: ["TeamA", "TeamB"],
+        },
+      ],
+    };
+    const after = renameEntity(state, "person", "TeamA", "TeamZ");
+    expect(after.temporaryCover[0].groups).toEqual(["TeamZ", "TeamB"]);
+    expect(after.temporaryCover[0].shiftType).toBe("D"); // untouched by a person rename
+  });
+
+  it("a date-group rename leaves covers alone (their dates are full ISO, not span ids)", () => {
+    const state: ScenarioUiState = {
+      ...fixture(),
+      temporaryCover: [
+        { name: "Haseena (Ward 3)", date: "2026-05-14", shiftType: "D", groups: [] },
+      ],
+    };
+    const after = renameEntity(state, "date", "WKND", "Vacation");
+    expect(after.temporaryCover).toEqual(state.temporaryCover);
+  });
+});
+
+describe("temporaryCover — a delete leaves covers alone (d582)", () => {
+  it("deleting a shift type leaves the cover in place", () => {
+    const state: ScenarioUiState = {
+      ...fixture(),
+      temporaryCover: [
+        { name: "Haseena (Ward 3)", date: "2026-05-14", shiftType: "N", groups: [] },
+      ],
+    };
+    const after = deleteEntity(state, "shift", "N");
+    expect(after.temporaryCover).toEqual(state.temporaryCover);
+  });
 });
 
 describe("deleteEntity — cascade + prune emptied preferences (findings #3/#4)", () => {
@@ -197,9 +249,13 @@ describe("deleteEntity — cascade + prune emptied preferences (findings #3/#4)"
     expect(jsonHas(after, "P1")).toBe(false);
   });
 
-  it("deleting a shift type blanks history positionally and prunes emptied cards/export", () => {
+  it("deleting a shift type truncates history to the usable suffix and prunes emptied cards/export", () => {
     const after = deleteEntity(fixture(), "shift", "N");
-    expect(after.staff[0].history).toEqual(["", "D"]); // FR-RI-09/AC-RI-06
+    // History is right-anchored, so every entry older than the newest deleted one
+    // is unusable too; a blank slot would be rejected by the producer and core
+    // (FR-RI-09, D7), so the usable suffix is what survives.
+    expect(after.staff[0].history).toEqual(["D"]);
+    expect(after.staff.flatMap((p) => p.history ?? [])).not.toContain("");
     expect(after.shiftGroups[0].members).toEqual(["D"]);
     // count card: countShiftTypes ["N"]→[] → dropped; its coefficient tuple gone too
     expect(after.cardsByKind.counts).toHaveLength(0);
@@ -207,6 +263,14 @@ describe("deleteEntity — cascade + prune emptied preferences (findings #3/#4)"
     expect(after.cardsByKind.successions[0].pattern).toEqual([["D"]]);
     // extra column countShiftTypes emptied → dropped
     expect(after.exportLayout.extraColumns).toHaveLength(0);
+  });
+
+  it("deleting the newest history entry drops that person's whole history", () => {
+    const state = createEmptyScenarioUiState("alpha");
+    state.staff = [{ id: "P1", history: ["N", "D"] }];
+    state.shifts = [{ id: "D" }, { id: "N" }];
+    const after = deleteEntity(state, "shift", "D");
+    expect(after.staff[0].history).toEqual([]);
   });
 
   it("deleting a group removes its definition and prunes it from nested groups", () => {
@@ -348,5 +412,60 @@ describe("skill mix follows its group", () => {
     const card = next.cardsByKind.requirements[0];
     expect(card.requiredNumPeople).toBe(2);
     expect(card.skillMix).toBeUndefined();
+  });
+});
+
+describe("date-domain cascade reconciles per-date overrides (ze1)", () => {
+  // A requirement's per-date overrides are each a concrete ISO date that must be
+  // one of the requirement's RESOLVED dates (the solver raises otherwise). A
+  // date-group delete/edit shrinks that coverage, so any override on a date the
+  // group no longer contributes would reach the solver stale. The range change
+  // already drops such overrides; the date-domain cascade must too.
+  //
+  // Range 2026-05-14…0520 is same-month, so generated date ids are `DD` and an
+  // authored group stores those span ids.
+  function seeded(): ScenarioUiState {
+    const state = createEmptyScenarioUiState("alpha");
+    state.rangeStart = "2026-05-14";
+    state.rangeEnd = "2026-05-20";
+    state.dateGroups = [{ id: "WKND", members: ["16", "17"] }];
+    state.cardsByKind = cards({
+      requirements: [
+        requirement("night", "N", 2, {
+          date: ["WKND", "2026-05-14"],
+          requiredNumPeopleOverrides: [
+            ["2026-05-14", 3],
+            ["2026-05-16", 1],
+          ],
+        }),
+      ],
+    });
+    return state;
+  }
+
+  it("deleting a date group drops the overrides on the dates it no longer covers", () => {
+    const after = deleteEntity(seeded(), "date", "WKND");
+    const card = after.cardsByKind.requirements[0];
+    // The group is gone from the card's Dates, so 16 May is no longer one of its
+    // dates; the literal 14 May override stays.
+    expect(card.date).toEqual(["2026-05-14"]);
+    expect(card.requiredNumPeopleOverrides).toEqual([["2026-05-14", 3]]);
+  });
+
+  it("removes the overrides field when no covered override is left", () => {
+    const state = seeded();
+    state.cardsByKind.requirements[0].requiredNumPeopleOverrides = [["2026-05-16", 1]];
+    const after = deleteEntity(state, "date", "WKND");
+    expect(after.cardsByKind.requirements[0]).not.toHaveProperty("requiredNumPeopleOverrides");
+  });
+
+  it("renaming a date group keeps every override (its dates are unchanged)", () => {
+    const after = renameEntity(seeded(), "date", "WKND", "Vacation");
+    const card = after.cardsByKind.requirements[0];
+    expect(card.date).toEqual(["Vacation", "2026-05-14"]);
+    expect(card.requiredNumPeopleOverrides).toEqual([
+      ["2026-05-14", 3],
+      ["2026-05-16", 1],
+    ]);
   });
 });

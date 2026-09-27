@@ -69,25 +69,56 @@ async function readField<T = unknown>(page: Page, key: string): Promise<T> {
   }, key);
 }
 
-/** Directly patch the store (seed groups, inject reserved ids). */
-async function patchStore(page: Page, groups: { id: string; members: (string | number)[] }[]) {
-  await page.evaluate(async (g) => {
-    const store = (
-      window as unknown as {
-        __nsStore: {
-          scenario(): {
-            dateGroups: { id: string; members: (string | number)[] }[];
+/** The scenario slice {@link patchStore} reads to compose its patch. */
+interface SeedState {
+  dateGroups: { id: string; members: (string | number)[] }[];
+  cardsByKind: Record<string, unknown>;
+}
+
+/** Additional scenario fields {@link patchStore} can seed beyond date groups. */
+interface SeedFields {
+  reqData?: unknown[];
+  exportLayout?: Record<string, unknown>;
+  cardsByKind?: Record<string, unknown>;
+}
+
+/**
+ * Directly patch the store (seed groups, inject reserved ids, seed matrix cells /
+ * export layout / rule cards). `groups` are APPENDED to the existing date groups;
+ * `extra` merges over the fields it names (`cardsByKind` by kind key). Seeded
+ * through the real command bus and awaited, so the durable commit has landed before
+ * the assertion (or a reload) that follows.
+ */
+async function patchStore(
+  page: Page,
+  groups: { id: string; members: (string | number)[] }[],
+  extra: SeedFields = {},
+) {
+  await page.evaluate(
+    async ({ groups: g, extra: e }) => {
+      const store = (
+        window as unknown as {
+          __nsStore: {
+            scenario(): SeedState;
+            commands: {
+              mutate(
+                patch: ((state: SeedState) => Record<string, unknown>) | Record<string, unknown>,
+              ): Promise<{ ok: boolean }>;
+            };
           };
-          commands: { mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }> };
-        };
-      }
-    ).__nsStore;
-    // Seeded through the real command bus and awaited, so the durable commit has
-    // landed before the assertion (or a reload) that follows.
-    await store.commands.mutate({
-      dateGroups: [...store.scenario().dateGroups, ...g],
-    });
-  }, groups);
+        }
+      ).__nsStore;
+      await store.commands.mutate((state) => ({
+        dateGroups: [...state.dateGroups, ...g],
+        ...(e.reqData !== undefined ? { reqData: e.reqData } : {}),
+        ...(e.exportLayout !== undefined ? { exportLayout: e.exportLayout } : {}),
+        ...(e.cardsByKind !== undefined
+          ? { cardsByKind: { ...state.cardsByKind, ...e.cardsByKind } }
+          : {}),
+      }));
+    },
+    { groups, extra },
+  );
 }
 
 /** A display-calendar day cell by its UTC ISO key. */
@@ -687,5 +718,100 @@ test.describe("R2a — v2 visual system on /dates", () => {
     const roster = await page.getByTestId("roster-period-card").boundingBox();
     const calendar = await page.getByTestId("calendar-view").boundingBox();
     expect(calendar!.y).toBeGreaterThanOrEqual(roster!.y + roster!.height - 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Range span-class change — the migration guardrail (bead nursing-sheduler-rxc,
+// follows the P0 nursing-sheduler-vgq). The pure transform is proven in
+// lib/dates/range-cascade.test.ts; this drives the REAL Dates UI so the wiring is
+// covered too: roster-period-card → dates-screen handleCommit →
+// mutateScenario(applyRangeChange). Extending a single-month July roster into
+// August flips the id span DD → MM-DD, so every July reference is RE-KEYED, not
+// removed. A regression that purges them — the pre-P0 behaviour — would lose a
+// real ward's matrix cells, group members and export columns silently, so this
+// journey asserts the exact migrated ids a unit test cannot reach through the UI.
+// ---------------------------------------------------------------------------
+
+test.describe("range span-class change migrates refs (rxc)", () => {
+  test("extending July into August migrates group, matrix and export refs — and the Counts rule survives via its group", async ({
+    page,
+  }) => {
+    await gotoDates(page);
+    await setRange(page, "2026-07-01", "2026-07-31"); // same month ⇒ DD ids
+
+    // Seed the three span-id surfaces (date-group members, matrix cells, export
+    // column) plus a Counts rule that references the date GROUP by id. A group id
+    // is span-independent, so the rule's survival is proven by its group's
+    // MEMBERSHIP migrating — never by a card date field, which is stored full-ISO
+    // and is not a span id (range-cascade.ts note; bead rxc critique).
+    await patchStore(page, [{ id: "Custom", members: ["01", "15", "31"] }], {
+      reqData: [{ kind: "request", person: "P1", date: "15", shiftType: "D", weight: 1 }],
+      exportLayout: {
+        formatting: [],
+        extraColumns: [
+          { type: "count", header: "Jul", countShiftTypes: ["D"], countDates: ["01", "15"] },
+        ],
+        extraRows: [],
+      },
+      cardsByKind: {
+        counts: [
+          {
+            uid: "cnt1",
+            person: "ALL",
+            countDates: ["Custom"],
+            countShiftTypes: "D",
+            expression: "x >= T",
+            target: 1,
+            weight: 1,
+          },
+        ],
+      },
+    });
+
+    // Sanity: the surfaces really committed as DD ids (guards against an assertion
+    // that would "pass" because nothing was ever seeded).
+    expect(
+      (await readField<{ id: string; members: string[] }[]>(page, "dateGroups")).find(
+        (g) => g.id === "Custom",
+      )!.members,
+    ).toEqual(["01", "15", "31"]);
+    expect(await readField(page, "reqData")).toEqual([
+      { kind: "request", person: "P1", date: "15", shiftType: "D", weight: 1 },
+    ]);
+
+    // Extend End into August through the REAL input — a same-year span change.
+    await page.getByTestId("range-end").fill("2026-08-15");
+    await page.waitForFunction(() => {
+      const st = (
+        window as unknown as {
+          __nsStore: { scenario(): { rangeEnd: string } };
+        }
+      ).__nsStore.scenario();
+      return st.rangeEnd === "2026-08-15";
+    });
+
+    // Every still-in-range ref MIGRATED DD → MM-DD; nothing was purged.
+    const groups = await readField<{ id: string; members: string[] }[]>(page, "dateGroups");
+    const custom = groups.find((g) => g.id === "Custom")!;
+    expect(custom.members).toEqual(["07-01", "07-15", "07-31"]);
+    expect(await readField(page, "reqData")).toEqual([
+      { kind: "request", person: "P1", date: "07-15", shiftType: "D", weight: 1 },
+    ]);
+    expect(
+      (await readField<{ extraColumns: { countDates: string[] }[] }>(page, "exportLayout"))
+        .extraColumns[0].countDates,
+    ).toEqual(["07-01", "07-15"]);
+
+    // The Counts rule still points at the group (its id is span-independent) and
+    // the group resolves to the same three July days — survival via MEMBERSHIP.
+    const { counts } = await readField<{ counts: { countDates: string[] }[] }>(page, "cardsByKind");
+    expect(counts[0].countDates).toEqual(["Custom"]);
+    expect(custom.members).toHaveLength(3);
+
+    // And the Dates UI re-rendered the surviving group with its migrated days — a
+    // purge would have left it "No days".
+    await expect(page.getByTestId("editable-group-Custom")).toBeVisible();
+    await expect(page.getByTestId("editable-group-Custom-count")).toHaveText("3 days");
   });
 });

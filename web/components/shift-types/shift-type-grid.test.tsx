@@ -311,6 +311,78 @@ describe("ShiftTypeGrid — staffing states", () => {
     expect(screen.queryByTestId("requirement-delete")).not.toBeInTheDocument();
   });
 
+  it("shows a rule's per-date exceptions beside the base Minimum", async () => {
+    await seed({
+      shifts: [{ id: "Day" }],
+      shiftGroups: [],
+      rangeStart: "2026-07-01",
+      rangeEnd: "2026-07-07",
+    });
+    await seedRequirements([
+      requirement({
+        requiredNumPeopleOverrides: [
+          ["2026-07-03", 1],
+          ["2026-07-05", 3],
+        ],
+      }),
+    ]);
+    render(<ShiftTypeGrid />);
+
+    // The base head count is untouched — the per-date exceptions sit beside it.
+    expect(screen.getByTestId("staffing-min-string:Day")).toHaveTextContent("2");
+    expect(screen.getByTestId("staffing-exceptions-string:Day")).toHaveTextContent(
+      "3 Jul: 1 · 5 Jul: 3",
+    );
+  });
+
+  it("shows exceptions for a read-only rule too", async () => {
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
+    await seedRequirements([
+      requirement({
+        qualifiedPeople: ["Seniors"],
+        requiredNumPeopleOverrides: [["2026-07-03", 1]],
+      }),
+    ]);
+    render(<ShiftTypeGrid />);
+
+    const region = screen.getByTestId("staffing-readonly-string:Day");
+    expect(within(region).getByTestId("staffing-exceptions-string:Day")).toHaveTextContent(
+      "3 Jul: 1",
+    );
+  });
+
+  it("surfaces per-date exceptions in the edit form under Minimum nurses and deep-links to Requirements", async () => {
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
+    await seedRequirements([
+      requirement({
+        requiredNumPeopleOverrides: [
+          ["2026-07-03", 1],
+          ["2026-07-05", 3],
+        ],
+      }),
+    ]);
+    render(<ShiftTypeGrid />);
+
+    fireEvent.click(screen.getByTestId("shift-edit-string:Day"));
+    const line = screen.getByTestId("shift-edit-string:Day-staffing-exceptions");
+    expect(line).toHaveTextContent("Exceptions: 3 Jul: 1 · 5 Jul: 3 — edit in Requirements");
+    expect(within(line).getByRole("link", { name: "edit in Requirements" })).toHaveAttribute(
+      "href",
+      "/shift-type-requirements",
+    );
+  });
+
+  it("omits the edit-form exceptions line when the rule has no per-date overrides", async () => {
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
+    await seedRequirements([requirement()]);
+    render(<ShiftTypeGrid />);
+
+    fireEvent.click(screen.getByTestId("shift-edit-string:Day"));
+    expect(
+      screen.queryByTestId("shift-edit-string:Day-staffing-exceptions"),
+    ).not.toBeInTheDocument();
+  });
+
   it("surfaces duplicate baselines while editing the first one", async () => {
     await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
     await seedRequirements([

@@ -8,7 +8,7 @@ import type { ScenarioUiState } from "@/lib/scenario";
 import type { ImportNormalizationTarget } from "@/lib/scenario/types";
 import type { JudgeItem, TranscriptEntry, TrialRecord } from "./trial";
 
-export const RUBRIC_VERSION = "2026-09-24.5";
+export const RUBRIC_VERSION = "2026-09-27.6";
 /** The app's screen names (components/shell/nav-config.ts), plain words for the judge. */
 const SCREENS =
   "Dates, Staff, Shifts or Shift types, Rules, Requests & Leave, Staffing requirements, " +
@@ -16,8 +16,10 @@ const SCREENS =
   "Roster, Save & Load";
 /** Judge agreement with hand labels, filled after the first calibration (spec §6.3). */
 export const CALIBRATION: string | null =
-  "31/37 on fixtures/judge-calibration.json, rubric .5, gpt-5-mini, 2026-09-24 (21/36 under .4); " +
-  "4 of the 6 misses are the exact-vs-preferred claim reading 'is set' as 'already set'.";
+  "rubric .6 (the app's run result shown), gpt-5-mini, 2026-09-27, two runs on " +
+  "fixtures/judge-calibration.json: 34/37 with a narrower run line, 36/37 with the final one " +
+  "(31/37 under .5). The judge is not deterministic at temperature 0, so read these as " +
+  "about 34-36/37, not an exact gain.";
 
 export const STANDARD_ITEMS: Record<string, string> = {
   short:
@@ -101,6 +103,18 @@ export function renderTranscript(
       }
       if (call.name === "prepare_scenario_change") lines.push("Preview shown to the user.");
       if (call.name === "request_optimize_run") lines.push("Run card shown to the user.");
+      if (call.name === "get_optimize_result") {
+        // What the app told the assistant, so repeating it is not judged a false claim (pu5).
+        try {
+          const run = JSON.parse(call.result ?? "") as {
+            heading?: string | null;
+            guidance?: string;
+          };
+          if (run.heading) lines.push(`App run result: ${run.heading}. ${run.guidance ?? ""}`);
+        } catch {
+          // A refusal or other plain text carries no run facts.
+        }
+      }
     }
   }
   if (r.appliedByHarness > 0) lines.push(`(The user pressed Apply ${r.appliedByHarness} time(s).)`);

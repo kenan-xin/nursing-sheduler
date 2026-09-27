@@ -26,6 +26,8 @@ import { useEffect } from "react";
 import { canMutateScenario, scenarioCommands, useAuthorityStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { FaRotateLeft, FaArrowRotateRight } from "@/components/icons";
+import { CARD_EDITOR_DRAFT_PREFIX } from "@/components/card-editor/card-editor-shell";
+import { useNavGuardStore } from "./nav-guard-store";
 
 function useUndoRedo() {
   const canUndo = useAuthorityStore((s) => s.canUndo && canMutateScenario(s));
@@ -107,13 +109,32 @@ export function UndoRedoControls() {
   );
 }
 
+// An open card-editor draft OWNS the undo keys (AC-CH-09c): the scenario history
+// must not move beneath a draft the user is still editing. Every card editor
+// already announces itself to the shared losable-draft registry
+// (`useCardEditorDraftGuard` → `card-editor:*`), so the shortcut reads that
+// registry rather than inventing a second "draft is open" signal. Synchronous,
+// like `hasLosableDrafts()`: the handler runs on a keydown, not a render.
+function cardEditorDraftOwnsUndoKeys(): boolean {
+  const prefix = `${CARD_EDITOR_DRAFT_PREFIX}:`;
+  for (const id of useNavGuardStore.getState().drafts.keys()) {
+    if (id.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
 // App-wide Ctrl/Cmd-Z / Ctrl/Cmd-Y shortcuts. Per spec FR-ST-21: ignored when
-// Alt or Shift is additionally held. Not suppressed inside form fields (FR-ST-22).
+// Alt or Shift is additionally held. Not suppressed inside form fields (FR-ST-22)
+// EXCEPT under an open card-editor draft: there the draft owns the chords, so the
+// handler declines WITHOUT preventDefault and the field's native undo still runs.
 export function useUndoRedoShortcuts(): void {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
+      // AC-CH-09c: an open card draft owns Ctrl/Cmd-Z and Ctrl/Cmd+Shift+Z. Return
+      // before preventDefault so the browser's native input undo is left intact.
+      if (cardEditorDraftOwnsUndoKeys()) return;
       // FR-ST-21: Alt or Shift additionally held disables both shortcuts.
       if (e.altKey || e.shiftKey) return;
 

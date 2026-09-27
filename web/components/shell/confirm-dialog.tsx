@@ -33,6 +33,12 @@ export interface ConfirmDialogProps {
   onOpenChange: (open: boolean) => void;
   title: string;
   description: string;
+  /**
+   * Optional `\n`-separated details rendered in a square, mono, `panel` box ahead
+   * of the description (prototype ScreenSaveLoad.dc.html:150). Only the Save/Load
+   * version gate passes it — every other confirm is unchanged.
+   */
+  detail?: string;
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: "default" | "destructive";
@@ -46,6 +52,7 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
+  detail,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   variant = "default",
@@ -66,8 +73,16 @@ export function ConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
         </AlertDialogHeader>
 
-        {/* Band 2 — body + optional consequence list */}
+        {/* Band 2 — optional mono detail box, description + optional consequence list */}
         <AlertDialogBody>
+          {detail ? (
+            <div
+              data-testid="confirm-dialog-detail"
+              className="whitespace-pre-line border border-line2 bg-panel px-3 py-2.5 font-mono text-meta text-ink2"
+            >
+              {detail}
+            </div>
+          ) : null}
           <AlertDialogDescription>{description}</AlertDialogDescription>
           {hasConsequences && (
             <ul

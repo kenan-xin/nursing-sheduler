@@ -49,7 +49,6 @@ const zPerson = z.strictObject({
   id: zRef,
   description: z.string().optional(),
   history: z.array(z.string()).optional(),
-  temporary: z.boolean().optional(),
 });
 
 const zPeopleGroup = z.strictObject({
@@ -296,7 +295,6 @@ export const producerScenarioSchema = z
     apiVersion: z.string(),
     description: z.string().optional(),
     dates: zDateContainer,
-    country: z.string().optional(),
     people: zPeopleContainer,
     shiftTypes: zShiftTypesContainer,
     preferences: z.array(zPreference),

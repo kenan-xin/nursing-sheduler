@@ -33,11 +33,46 @@ import {
   type PersonRef,
   type ShiftTypeGroupMember,
   type ShiftTypeId,
+  type UiTemporaryCover,
 } from "@/lib/scenario";
+// DIRECT LEAF IMPORT, not the `@/lib/scenario` barrel — `temporary-cover.ts` is
+// deliberately not re-exported there (import cycle, see its task report).
+import {
+  coverCredit,
+  groupClosureOf,
+  mixCredit,
+  wardNeed,
+  type CoverDecrement,
+  type CoverMixDecrement,
+  type CoverTarget,
+} from "@/lib/scenario/temporary-cover";
 // DIRECT LEAF IMPORTS, not the `@/lib/roster` barrel (see `tallies.ts`).
 import { parseSubmissionDocument } from "@/lib/roster/context";
 import { typedIdKey } from "@/lib/roster/day-state";
 import type { RosterContext, RosterDayGrid, RosterSubmission } from "@/lib/roster/types";
+
+/**
+ * One skill-mix floor on an equation: at least `minNumPeople` of `people` among
+ * the equation's own staff on each applicable date (spec
+ * 2026-09-24-skill-mix-rules.md). UNLIKE `qualifiedPeople` it bans nobody — the
+ * head count above still fixes the total, and a person in two floors' groups
+ * counts toward both.
+ */
+export interface RequirementMixFloor {
+  /** The authored group/person selector, rendered (`RN`). */
+  readonly label: string;
+  /** Resolved member indices, narrowed to the equation's qualified set. */
+  readonly people: ReadonlySet<number>;
+  readonly minNumPeople: number;
+  /**
+   * The staff group the authored `people` selector names, as a real staff-group
+   * id; the reserved `ALL` sentinel when it names everyone; null when it names no
+   * single group (a person id, or a list). A temporary cover credits this floor
+   * only through a group she is in — a person or a mixed list credits nothing,
+   * exactly as `temporary-cover.ts` reads the authored card.
+   */
+  readonly groupId: string | null;
+}
 
 /**
  * One backend staffing equation: a single `sum(...) == / >= required` constraint
@@ -69,6 +104,20 @@ export interface RequirementEquation {
   readonly weighted: boolean;
   /** The authored `qualifiedPeople` selector, rendered, or null when unscoped. */
   readonly qualifiedLabel: string | null;
+  /**
+   * The staff group the authored `qualifiedPeople` selector names, as a real group
+   * id, or null when it is unscoped or names no single staff group. A borrowed
+   * nurse joins THIS group; `qualifiedLabel` is a rendered `[RN, SN]` that no roster
+   * declares (bead nursing-sheduler-olu).
+   */
+  readonly qualifiedGroup: string | null;
+  /**
+   * EVERY staff group the authored `qualifiedPeople` selector names, as real group
+   * ids, or null when it is unscoped/`ALL`. The whole set, not just the first
+   * group: a temporary cover counts here when she is in any of them (or in a group
+   * that contains one).
+   */
+  readonly qualifiedGroupIds: ReadonlySet<string> | null;
   /** Resolved qualified person indices, or null when the equation is unscoped. */
   readonly qualifiedPeople: ReadonlySet<number> | null;
   /** The date indices this equation actually applies to. */
@@ -85,10 +134,23 @@ export interface RequirementEquation {
   readonly dateScopeResolved: boolean;
   /** The hard lower (or exact) target. */
   readonly required: number;
-  /** Date index -> that day's lower/exact target, from `requiredNumPeopleOverrides`. */
+  /**
+   * Date index -> that day's lower/exact target, from `requiredNumPeopleOverrides`
+   * AND from the temporary-cover ledger (d582). Sparse: a date with no exception
+   * has no entry and falls back to `required`.
+   */
   readonly requiredByDate: ReadonlyMap<number, number>;
+  /**
+   * Date index -> the live temporary-cover credit already subtracted from that
+   * day's need (d582). Sparse, parallel to `requiredByDate`. A cover is not a
+   * person, so this is the only trace of her in the equation — the coverage label
+   * reads it to show "2/2 from the ward · +1 cover".
+   */
+  readonly coverByDate: ReadonlyMap<number, number>;
   /** The soft upper target, or null when `required` is exact. */
   readonly preferred: number | null;
+  /** Resolved skill-mix floors, in authored order. Empty when none. */
+  readonly skillMix: readonly RequirementMixFloor[];
   /** Non-null when the equation cannot be evaluated, with a plain reason. */
   readonly unavailable: string | null;
 }
@@ -103,6 +165,35 @@ export interface RequirementModel {
    * `unavailable`, which is a resolvable document with one bad selector.
    */
   readonly reason: string | null;
+}
+
+/**
+ * The temporary-cover inputs to the model (d582). The submission is the SOLVER
+ * form, so a solved cover's lowering is already baked into its counts:
+ *
+ *   • `decrements` is what that solve subtracted — the roster file's ledger. It
+ *     throws away the clamp ambiguity the submitted count alone carries (a count
+ *     of 0 may be authored 0 or authored 1 with one cover on it).
+ *   • `live` is the covers the scenario holds RIGHT NOW, so a cover added after
+ *     the solve lowers the need at once and a solved cover later removed raises it
+ *     at once.
+ */
+export interface RequirementCover {
+  readonly decrements: readonly CoverDecrement[];
+  readonly live: readonly UiTemporaryCover[];
+}
+
+/** The shared empty `coverByDate` every equation without a cover carries. */
+const NO_COVER_BY_DATE: ReadonlyMap<number, number> = new Map();
+
+/** One skill-mix floor's verdict within a checked cell. */
+export interface RequirementMixCell {
+  readonly label: string;
+  /** Counted assignees who are members of the floor's group. */
+  readonly count: number;
+  readonly required: number;
+  /** How far below the floor, or 0. */
+  readonly short: number;
 }
 
 /** One equation's verdict on one day. */
@@ -121,6 +212,8 @@ export type RequirementCell =
       readonly over: number;
       /** Forbidden assignments outside the qualified set, or 0. */
       readonly unqualified: number;
+      /** Per-floor skill-mix counts, in authored order. Empty when none. */
+      readonly mix: readonly RequirementMixCell[];
       /** Whether ANY hard verdict failed. */
       readonly mismatch: boolean;
       /** People counted toward the numerator, in axis order. */
@@ -213,6 +306,23 @@ function unavailableEquation(
   return { ...base, unavailable: reason };
 }
 
+/** Whether a selector is the reserved `ALL` keyword (case-insensitive, as the backend reads it). */
+const isAllSelector = (ref: unknown): boolean =>
+  String(ref).toUpperCase() === RESERVED_SHIFT_TYPE.all;
+
+/**
+ * The staff group a skill-mix `people` selector names, or `ALL`, or null.
+ *
+ * Mirrors how `temporary-cover.ts` reads the authored card: a scalar group id (or
+ * `ALL`) is credit-bearing, while a person id or a multi-ref list is not — a
+ * mixed list is not a group a cover could join.
+ */
+function mixGroupId(selector: unknown, staffGroupIds: ReadonlySet<string>): string | null {
+  if (Array.isArray(selector)) return null;
+  if (isAllSelector(selector)) return RESERVED_SHIFT_TYPE.all;
+  return staffGroupIds.has(String(selector)) ? String(selector) : null;
+}
+
 /**
  * Derive the ephemeral equation model from a roster document's immutable
  * submission.
@@ -222,14 +332,23 @@ function unavailableEquation(
  */
 export function deriveRequirementModel(
   submission: Pick<RosterSubmission, "canonicalYaml">,
+  cover?: RequirementCover,
 ): RequirementModel {
   const parsed = parseSubmissionDocument(submission.canonicalYaml);
   if (!parsed.ok) return { equations: [], reason: parsed.reason };
-  return { equations: buildEquations(parsed.document), reason: null };
+  return { equations: buildEquations(parsed.document, cover), reason: null };
 }
 
-/** The equation list for an already-parsed canonical document. */
-export function buildEquations(document: CanonicalScenarioDocument): RequirementEquation[] {
+/**
+ * The equation list for an already-parsed canonical document.
+ *
+ * With a `cover`, the listed equations are the AUTHORED requirement with the
+ * ward need alongside it (spec §4) — see `applyCoversToEquations`.
+ */
+export function buildEquations(
+  document: CanonicalScenarioDocument,
+  cover?: RequirementCover,
+): RequirementEquation[] {
   const items = document.shiftTypes.items;
   const resolver = buildScenarioResolutionContext({
     staff: document.people.items,
@@ -241,6 +360,7 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
     dateGroups: document.dates.groups ?? [],
   });
   const allDates = resolver.resolveDates(RESERVED_SHIFT_TYPE.all);
+  const staffGroupIds = new Set((document.people.groups ?? []).map((group) => String(group.id)));
 
   const equations: RequirementEquation[] = [];
   document.preferences.forEach((preference, preferenceIndex) => {
@@ -280,6 +400,50 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
         ? null
         : selectorLabel(requirement.qualifiedPeople);
 
+    // The real staff group a borrow joins: the first authored token that names one
+    // of THIS scenario's staff groups. `qualifiedLabel` renders a list as `[RN, SN]`,
+    // which no roster declares, so a borrow in it is refused (bead nursing-sheduler-olu).
+    const qualifiedRefs =
+      requirement.qualifiedPeople === undefined || vacuousQualification
+        ? []
+        : Array.isArray(requirement.qualifiedPeople)
+          ? requirement.qualifiedPeople
+          : [requirement.qualifiedPeople];
+    const qualifiedGroupRef = qualifiedRefs.find((ref) => staffGroupIds.has(String(ref)));
+    const qualifiedGroup = qualifiedGroupRef === undefined ? null : String(qualifiedGroupRef);
+    // The whole authored set, because a temporary cover may be in ANY of the named
+    // groups (or a group containing one). A ref that names no staff group — a
+    // person id — is dropped, so a person-only selector yields an empty set and no
+    // cover ever counts in it.
+    const qualifiedGroupIds =
+      qualifiedRefs.length === 0
+        ? null
+        : new Set(qualifiedRefs.map(String).filter((ref) => staffGroupIds.has(ref)));
+
+    // Skill mix: independent hard floors on how many of a named group work the
+    // selected shifts. Nobody is banned, so they never alter the numerator's
+    // qualification — each adds its own `>= k` constraint per date, over the
+    // equation's OWN eligible staff (`p in qualified_ps_by_s[s]`).
+    const qualifiedSet = qualifiedResolution?.resolved === true ? qualifiedResolution.values : null;
+    const skillMixFloors: RequirementMixFloor[] = [];
+    let skillMixUnresolved: string | null = null;
+    for (const entry of requirement.skillMix ?? []) {
+      const members = resolver.resolvePeople(entry.people);
+      if (!members.resolved) {
+        skillMixUnresolved ??= selectorLabel(entry.people);
+        continue;
+      }
+      skillMixFloors.push({
+        label: selectorLabel(entry.people),
+        people:
+          qualifiedSet === null
+            ? members.values
+            : new Set([...members.values].filter((person) => qualifiedSet.has(person))),
+        minNumPeople: entry.minNumPeople,
+        groupId: mixGroupId(entry.people, staffGroupIds),
+      });
+    }
+
     // Coefficients are only legal when the selector normalizes to ONE group
     // (`_parse_shift_type_requirement_coefficients` raises otherwise).
     const coefficientEntries = requirement.shiftTypeCoefficients ?? [];
@@ -308,12 +472,16 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
         coefficients: shiftIndices.map(() => 1),
         weighted: false,
         qualifiedLabel,
-        qualifiedPeople: qualifiedResolution?.resolved === true ? qualifiedResolution.values : null,
+        qualifiedGroup,
+        qualifiedGroupIds,
+        qualifiedPeople: qualifiedSet,
         dateIndices: dateResolution.resolved ? dateResolution.values : new Set<number>(),
         dateScopeResolved: dateResolution.resolved,
         required: requirement.requiredNumPeople,
         requiredByDate,
+        coverByDate: NO_COVER_BY_DATE,
         preferred: requirement.preferredNumPeople ?? null,
+        skillMix: skillMixFloors,
       };
 
       const reason = equationFailure({
@@ -324,6 +492,7 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
         qualifiedRequested: requirement.qualifiedPeople !== undefined && !vacuousQualification,
         qualifiedResolved: qualifiedResolutionRaw?.resolved === true,
         coefficientsIllegal,
+        skillMixUnresolved,
         required: requirement.requiredNumPeople,
         scopeLabel: group.label,
       });
@@ -350,7 +519,168 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
       });
     });
   });
-  return equations;
+  return cover === undefined
+    ? equations
+    : applyCoversToEquations(document, resolver, equations, cover);
+}
+
+/**
+ * The AUTHORED skill-mix floors, rebuilt from a date copy the cover lowered.
+ *
+ * `applyCovers` submits only the floors that survive a cover: a floor it zeroes
+ * out is DROPPED from the copy (a 0 floor asks the solver for nothing), so the
+ * copy's positions no longer line up with the authored card's and cannot name the
+ * floor that went missing. The ledger carries the authored floor for exactly that
+ * reason — `entryIdx` names the authored position, `people`/`authored` the floor
+ * itself. A marked floor the copy still holds (`by < authored`) is read off the
+ * copy as usual; only a DROPPED one (`by === authored`, since every authored floor
+ * is at least 1) has to be resolved from the ledger.
+ *
+ * Only a date copy ever carries mix marks — `lowerPart` writes them with the split
+ * it makes for the covered date — so the copy's floors plus the dropped ones ARE
+ * the authored list, in authored order.
+ */
+function rebuildAuthoredFloors(
+  submitted: readonly RequirementMixFloor[],
+  marks: readonly CoverMixDecrement[],
+  equation: RequirementEquation,
+  resolver: ReturnType<typeof buildScenarioResolutionContext>,
+  staffGroupIds: ReadonlySet<string>,
+): RequirementMixFloor[] {
+  const byIndex = new Map(marks.map((mark) => [mark.entryIdx, mark]));
+  const dropped = marks.filter((mark) => mark.by >= mark.authored).length;
+  const floors: RequirementMixFloor[] = [];
+  let at = 0;
+  for (let entryIdx = 0; entryIdx < submitted.length + dropped; entryIdx += 1) {
+    const mark = byIndex.get(entryIdx);
+    if (mark === undefined || mark.by < mark.authored) {
+      const kept = submitted[at];
+      at += 1;
+      if (kept === undefined) continue;
+      floors.push(mark === undefined ? kept : { ...kept, minNumPeople: mark.authored });
+      continue;
+    }
+    const members = resolver.resolvePeople(mark.people);
+    if (!members.resolved) continue;
+    const qualified = equation.qualifiedPeople;
+    floors.push({
+      label: selectorLabel(mark.people),
+      people:
+        qualified === null
+          ? members.values
+          : new Set([...members.values].filter((person) => qualified.has(person))),
+      minNumPeople: mark.authored,
+      groupId: mixGroupId(mark.people, staffGroupIds),
+    });
+  }
+  return floors;
+}
+
+/**
+ * The authored requirement, then the ward need (spec §4).
+ *
+ * The ledger is undone FIRST: the submission is the solver form, so a solved
+ * cover's lowering is baked into its counts, and only the ledger can tell a
+ * clamp-to-0 from a real authored 0. The live credit is subtracted SECOND: a
+ * cover added after the solve lowers the need at once, and a solved cover later
+ * removed raises it at once. When the live set is the solved set the two steps
+ * cancel exactly, so a solved roster reads what the solver actually saw.
+ *
+ * The CARD-WIDE numbers (`preferred`, each skill-mix floor) drop only by a credit
+ * their equation carries on EVERY date it applies to. The solver's date split
+ * makes that the normal case; where a card-wide number would vary by day it is
+ * left authored, because stating one number for days that disagree is the
+ * invented quota this model refuses. `coverByDate` still carries the credit, so a
+ * reader can show it.
+ */
+function applyCoversToEquations(
+  document: CanonicalScenarioDocument,
+  resolver: ReturnType<typeof buildScenarioResolutionContext>,
+  equations: RequirementEquation[],
+  cover: RequirementCover,
+): RequirementEquation[] {
+  if (cover.decrements.length === 0 && cover.live.length === 0) return equations;
+  const staffGroups = document.people.groups ?? [];
+  const staffGroupIds = new Set(staffGroups.map((group) => String(group.id)));
+  const closure = groupClosureOf(staffGroups);
+  // A cover naming a group this scenario does not declare lowers nothing anywhere
+  // (the F3 unknown-group flag). Every other exclusion — an unknown or day-state
+  // shift, a date outside the period — falls out of matching and date resolution.
+  const live = cover.live.filter((entry) =>
+    entry.groups.every((group) => staffGroupIds.has(String(group))),
+  );
+
+  return equations.map((equation) => {
+    const requiredByDate = new Map(equation.requiredByDate);
+    const coverByDate = new Map<number, number>();
+    let skillMix = equation.skillMix.map((floor) => ({ ...floor }));
+    let required = equation.required;
+    let preferred = equation.preferred;
+    const dates = [...equation.dateIndices].sort((a, b) => a - b);
+    const target: CoverTarget = {
+      shiftIds: equation.shiftIds.map(String),
+      coefficients: equation.coefficients,
+      qualifiedGroups: equation.qualifiedGroupIds,
+    };
+
+    // 1. Undo the ledger: the authored requirement.
+    const mixMarks: CoverMixDecrement[] = [];
+    for (const mark of cover.decrements) {
+      if (mark.pref !== equation.preferenceIndex) continue;
+      const day = resolver.resolveDates(mark.iso);
+      if (!day.resolved) continue;
+      for (const dateIdx of day.values) {
+        requiredByDate.set(dateIdx, (requiredByDate.get(dateIdx) ?? required) + mark.required);
+      }
+      // A DATE-SCOPED equation whose count moved on the card itself (the solver's
+      // date split, not a per-date exception) carries its lowering in `required`,
+      // so the ledger has to move that too. `requiredByDate` already having an
+      // entry for the date means the lowering was written as an exception instead.
+      if (dates.length === 1 && !equation.requiredByDate.has(dates[0])) required += mark.required;
+      if (mark.preferred !== undefined) preferred = (preferred ?? 0) + mark.preferred;
+      if (mark.mix !== undefined) mixMarks.push(...mark.mix);
+    }
+    if (mixMarks.length > 0) {
+      skillMix = rebuildAuthoredFloors(skillMix, mixMarks, equation, resolver, staffGroupIds);
+    }
+
+    // 2. The live credit, per date.
+    const credits: { iso: string; credit: number }[] = [];
+    for (const iso of new Set(live.map((entry) => entry.date))) {
+      const credit = coverCredit(target, iso, live, closure);
+      if (credit === 0) continue;
+      const day = resolver.resolveDates(iso);
+      if (!day.resolved) continue;
+      const inScope = [...day.values].filter((dateIdx) => equation.dateIndices.has(dateIdx));
+      if (inScope.length === 0) continue;
+      credits.push({ iso, credit });
+      for (const dateIdx of inScope) {
+        requiredByDate.set(dateIdx, wardNeed(requiredByDate.get(dateIdx) ?? required, credit));
+        coverByDate.set(dateIdx, credit);
+      }
+    }
+
+    // 3. Card-wide numbers, only by a credit every applicable date carries.
+    const uniform =
+      credits.length > 0 &&
+      dates.length > 0 &&
+      dates.every((dateIdx) => coverByDate.get(dateIdx) === credits[0].credit)
+        ? credits[0].credit
+        : 0;
+    if (uniform > 0) {
+      const need = requiredByDate.get(dates[0]) ?? required;
+      if (preferred !== null) preferred = Math.max(need, preferred - uniform);
+      for (const floor of skillMix) {
+        if (floor.groupId === null) continue;
+        floor.minNumPeople = wardNeed(
+          floor.minNumPeople,
+          mixCredit(target, floor.groupId, credits[0].iso, live, closure),
+        );
+      }
+    }
+
+    return { ...equation, required, requiredByDate, coverByDate, preferred, skillMix };
+  });
 }
 
 /** The first reason this equation cannot be evaluated, or null when it can. */
@@ -362,6 +692,7 @@ function equationFailure(input: {
   qualifiedRequested: boolean;
   qualifiedResolved: boolean;
   coefficientsIllegal: boolean;
+  skillMixUnresolved: string | null;
   required: number;
   scopeLabel: string;
 }): string | null {
@@ -380,6 +711,9 @@ function equationFailure(input: {
   if (!input.dateResolved) return "its date selector does not resolve in this scenario";
   if (input.qualifiedRequested && !input.qualifiedResolved) {
     return "its qualified-people selector does not resolve in this scenario";
+  }
+  if (input.skillMixUnresolved !== null) {
+    return `its skill-mix group ${input.skillMixUnresolved} does not resolve in this scenario`;
   }
   if (input.coefficientsIllegal) {
     return "shift-type coefficients are only defined when the selector is one requirement group";
@@ -480,6 +814,17 @@ export function evaluateRequirementCell(
   const upper = equation.preferred ?? required;
   const short = Math.max(0, required - units);
   const over = Math.max(0, units - upper);
+  // A floor counts the SAME counted people the numerator does: a non-member
+  // still fills a shift place (nobody is banned), it just does not satisfy it.
+  const mix: RequirementMixCell[] = equation.skillMix.map((floor) => {
+    const count = counted.filter((personIdx) => floor.people.has(personIdx)).length;
+    return {
+      label: floor.label,
+      count,
+      required: floor.minNumPeople,
+      short: Math.max(0, floor.minNumPeople - count),
+    };
+  });
   return {
     status: "checked",
     units,
@@ -488,7 +833,8 @@ export function evaluateRequirementCell(
     short,
     over,
     unqualified: offenders.length,
-    mismatch: short > 0 || over > 0 || offenders.length > 0,
+    mix,
+    mismatch: short > 0 || over > 0 || offenders.length > 0 || mix.some((entry) => entry.short > 0),
     counted,
     offenders,
   };
@@ -601,7 +947,39 @@ export function exactShiftRequirement(
   shiftIdx: number,
   dateIdx: number,
 ): number | null {
-  let found: number | null = null;
+  const equation = exactShiftEquation(model, shiftIdx, dateIdx);
+  return equation === null ? null : (equation.requiredByDate.get(dateIdx) ?? equation.required);
+}
+
+/**
+ * The live temporary-cover credit the exact-shift lane reads alongside that
+ * target (d582), so a cell can read "2/2 from the ward · +1 cover".
+ *
+ * It comes from the SAME equation `exactShiftRequirement` resolves, so the two
+ * numbers on one cell can never come from two different requirements. 0 covers
+ * every case with no cover and every case where no per-shift claim exists.
+ */
+export function exactShiftCover(
+  model: RequirementModel,
+  shiftIdx: number,
+  dateIdx: number,
+): number {
+  const equation = exactShiftEquation(model, shiftIdx, dateIdx);
+  return equation === null ? 0 : (equation.coverByDate.get(dateIdx) ?? 0);
+}
+
+/**
+ * The one equation an exact-shift lane may take a number from, or null.
+ *
+ * Shared by `exactShiftRequirement` and `exactShiftCover` so both read the same
+ * equation — see `exactShiftRequirement` for why the rule is per `(shift, date)`.
+ */
+function exactShiftEquation(
+  model: RequirementModel,
+  shiftIdx: number,
+  dateIdx: number,
+): RequirementEquation | null {
+  let found: RequirementEquation | null = null;
   for (const equation of model.equations) {
     if (equation.unavailable !== null) continue;
     if (equation.shiftIndices.length !== 1 || equation.shiftIndices[0] !== shiftIdx) continue;
@@ -611,7 +989,7 @@ export function exactShiftRequirement(
     // A second equation applicable to THIS day makes the target ambiguous; the
     // backend applies both constraints, so there is no single number to show.
     if (found !== null) return null;
-    found = equation.requiredByDate.get(dateIdx) ?? equation.required;
+    found = equation;
   }
   return found;
 }

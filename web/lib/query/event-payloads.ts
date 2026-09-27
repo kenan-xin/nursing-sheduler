@@ -123,7 +123,7 @@ function isRuntimeIdentity(value: unknown): boolean {
     isRecord(value) &&
     hasExactKeys(value, RUNTIME_IDENTITY_KEYS) &&
     value.service_name === "nurse-scheduling-api" &&
-    value.api_version === "alpha" &&
+    value.api_version === "0.2.0" &&
     isNonEmptyString(value.app_version) &&
     isNonEmptyString(value.deployment_id) &&
     isNonEmptyString(value.instance_id) &&

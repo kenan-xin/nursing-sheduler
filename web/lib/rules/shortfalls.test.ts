@@ -8,7 +8,8 @@ import {
   toDateId,
 } from "./shortfalls";
 import { SCENARIOS, cards, leave, people, requirement, ward } from "./ward-fixtures.test-support";
-import type { ScenarioUiState } from "@/lib/scenario";
+import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
+import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
 
 describe("newRuleClash (att: two named groups on one shift)", () => {
   const icuWard = (extra: ReturnType<typeof requirement>[] = [], patch = {}) =>
@@ -510,6 +511,126 @@ describe("findStaffingShortfalls", () => {
       }),
     });
     expect(findStaffingShortfalls(state)).toEqual([]);
+  });
+
+  describe("temporary cover (d582)", () => {
+    const coverOn = (overrides: Partial<UiTemporaryCover> = {}): UiTemporaryCover =>
+      makeTemporaryCover({ date: "2026-11-05", shiftType: "N", ...overrides });
+    const covered = (state: ScenarioUiState, ...covers: UiTemporaryCover[]): ScenarioUiState => ({
+      ...state,
+      temporaryCover: covers,
+    });
+
+    it("counts a temporary cover", () => {
+      // Night on the 5th needs 3 of the 3 nurses; with a day nurse the day is one short.
+      const state = SCENARIOS.understaffedNight();
+      const [short] = findStaffingShortfalls(state);
+      expect(short).toMatchObject({ kind: "day_short", iso: "2026-11-05", required: 4 });
+      expect(short.coverCredit).toBeUndefined();
+
+      // Her credit lowers the night need on her date, and the day now fits.
+      expect(findStaffingShortfalls(covered(state, coverOn()))).toEqual([]);
+
+      // A night larger than she can close still reads short, and reports her credit.
+      const deeper = {
+        ...state,
+        cardsByKind: cards({
+          requirements: [
+            requirement("day", "D", 1),
+            requirement("night-05", "N", 4, {
+              date: ["2026-11-05"],
+              description: "Night on the 5th (high acuity)",
+            }),
+          ],
+        }),
+      };
+      const [still] = findStaffingShortfalls(covered(deeper, coverOn()));
+      expect(still).toMatchObject({ kind: "day_short", required: 4, available: 3, coverCredit: 1 });
+    });
+
+    it("credits a named requirement only for a cover in its group", () => {
+      // Every night needs 1 RN, and the only RN is on leave on the 3rd.
+      const state = SCENARIOS.onlyRnOnLeave();
+      const third = (covers: UiTemporaryCover[]) =>
+        findStaffingShortfalls(covered(state, ...covers)).filter((f) => f.iso === "2026-11-03");
+      const rn = coverOn({ date: "2026-11-03", groups: ["RN"] });
+
+      expect(third([])).toHaveLength(1);
+      expect(third([])[0].coverCredit).toBeUndefined();
+      expect(third([rn])).toEqual([]); // she counts as an RN: the night is covered
+      expect(third([coverOn({ date: "2026-11-03" })])).toHaveLength(1); // no group: she does not
+    });
+
+    it("does not lower a skill mix from outside its group", () => {
+      // Nights need 2, at least 2 of them RNs, and one of the two RNs is on leave on the 3rd.
+      const state = SCENARIOS.rnMixOnLeave();
+      const third = (covers: UiTemporaryCover[]) =>
+        findStaffingShortfalls(covered(state, ...covers)).filter((f) => f.iso === "2026-11-03");
+
+      expect(third([])).toHaveLength(1);
+      expect(third([coverOn({ date: "2026-11-03", groups: ["RN"] })])).toEqual([]);
+      // No group: she takes a place on the night but the RN floor does not budge.
+      expect(third([coverOn({ date: "2026-11-03" })])).toContainEqual(
+        expect.objectContaining({ kind: "requirement_short", mixPeople: "RN" }),
+      );
+    });
+
+    it("lowers nothing for a cover the ward cannot resolve", () => {
+      const state = SCENARIOS.understaffedNight();
+      const base = findStaffingShortfalls(state);
+      const unresolved = [
+        coverOn({ date: "2026-12-01" }), // outside the roster period
+        coverOn({ shiftType: "X" }), // no such shift type
+        coverOn({ groups: ["Ghost"] }), // no such staff group
+      ];
+      for (const cover of unresolved) {
+        expect(findStaffingShortfalls(covered(state, cover))).toEqual(base);
+      }
+    });
+
+    /**
+     * Spec F5: a slot with a cover that counts toward it never reads short. Per fixture
+     * ward and finding, book one cover per shift it names and per person it is missing,
+     * in the groups its own cards demand, and check the slot reads filled. Conflicts are
+     * left out: a cover lowers both sides of one, and the rules still disagree.
+     */
+    it("no slot with a matching cover reads short", () => {
+      const asList = (value: unknown): unknown[] =>
+        value == null ? [] : Array.isArray(value) ? value : [value];
+      for (const [name, build] of Object.entries(SCENARIOS)) {
+        const state = build();
+        const groups = new Set(state.staffGroups.map((group) => String(group.id)));
+        for (const finding of findStaffingShortfalls(state)) {
+          const iso = finding.iso;
+          if (iso === null || finding.kind === "requirement_conflict") continue;
+          const cardOf = (uid: string) =>
+            state.cardsByKind.requirements.find((card) => card.uid === uid);
+          const wanted = [
+            ...finding.ruleIds.flatMap((uid) => asList(cardOf(uid)?.qualifiedPeople)),
+            ...(finding.mixPeople ?? "").split(" and "),
+          ]
+            .map(String)
+            .filter((id) => groups.has(id));
+          const missing = Math.max(1, finding.required - finding.available);
+          const covers = finding.shiftTypes.flatMap((shiftType) =>
+            Array.from({ length: missing }, (_, k) => ({
+              name: `Cover ${shiftType}${k}`,
+              date: iso,
+              shiftType,
+              groups: [...new Set(wanted)],
+            })),
+          );
+          const after = findStaffingShortfalls(covered(state, ...covers));
+          const still = after.filter(
+            (f) =>
+              f.kind !== "requirement_conflict" &&
+              f.iso === iso &&
+              f.shiftTypes.some((shift) => finding.shiftTypes.includes(shift)),
+          );
+          expect(still, `${name}: ${finding.kind} on ${iso}`).toEqual([]);
+        }
+      }
+    });
   });
 });
 

@@ -66,8 +66,9 @@ export function isSquaredExpression(expression: string): boolean {
 }
 
 /** Substitute the target value into an expression string for display (FR-PR-55,
- *  the historical `describeExpressionTarget`). */
-export function substituteTarget(expression: string, target: number): string {
+ *  the historical `describeExpressionTarget`). `target` may be a raw draft string
+ *  (e.g. the field's blank placeholder `"T"`), so the substitution is `String`-based. */
+export function substituteTarget(expression: string, target: number | string): string {
   return expression.replace(/T/g, String(target));
 }
 

@@ -1,6 +1,5 @@
 import {
   AI_ERROR_CREDENTIALS_REQUIRED,
-  AI_ERROR_MESSAGE_PART_REJECTED,
   AI_KEY_HEADER,
   AI_MODEL_HEADER,
   COPILOT_AGENT_ID,
@@ -17,6 +16,8 @@ import {
   type AgentsFactory,
 } from "./copilotkit-runtime";
 import { streamText, type ToolSet } from "ai";
+
+import { ATTACHED_FILE_NOTE, hasFileAttachment, prepareAttachments } from "./attachments";
 
 // Request-scoped BYO OpenRouter agent (tech-plan "Credential and model transport").
 //
@@ -65,29 +66,6 @@ export class AiRuntimeError extends Error {
   }
 }
 
-/**
- * t0c9: true when every message's content is a string or a list of text parts only.
- *
- * CopilotKit converts audio, video, legacy `binary`, and any URL-sourced part into an
- * AI SDK file or image part, and the AI SDK DOWNLOADS a URL it cannot pass through --
- * from this server, with no private-address check. This app sends no media at all, so
- * anything but text is refused, on every role.
- */
-export function hasOnlyTextParts(messages: readonly unknown[]): boolean {
-  return messages.every((message) => {
-    const content = (message as { content?: unknown } | null)?.content;
-    if (content === undefined || content === null || typeof content === "string") return true;
-    return (
-      Array.isArray(content) &&
-      content.every(
-        (part: unknown) =>
-          (part as { type?: unknown } | null)?.type === "text" &&
-          typeof (part as { text?: unknown }).text === "string",
-      )
-    );
-  });
-}
-
 export function createOpenRouterAgent(
   request: Request,
   options: OpenRouterAgentOptions = {},
@@ -100,11 +78,6 @@ export function createOpenRouterAgent(
       // Defence in depth. `handler.ts` already rejects a keyless /run at the HTTP
       // boundary; this keeps the invariant true for any other caller of the factory.
       if (!credentials) throw new AiRuntimeError(AI_ERROR_CREDENTIALS_REQUIRED);
-      // t0c9: checked on the exact objects the converter receives. `handler.ts` gives
-      // the same refusal a clean 400 first.
-      if (!hasOnlyTextParts(input.messages)) {
-        throw new AiRuntimeError(AI_ERROR_MESSAGE_PART_REJECTED);
-      }
 
       const openrouter = createOpenAI({
         apiKey: credentials.apiKey,
@@ -120,8 +93,8 @@ export function createOpenRouterAgent(
         // attaches to every hop (standing instructions, the scenario, the screen) only
         // reaches the model if it is rendered here. It once was not: the model ran with
         // no system prompt and ended a feasibility turn with no text.
-        system: contextSystemPrompt(input.context),
-        messages: convertMessagesToVercelAISDKMessages(input.messages),
+        system: systemPrompt(input.context, hasFileAttachment(input.messages)),
+        messages: convertMessagesToVercelAISDKMessages(prepareAttachments(input.messages)),
         tools: toAppToolSet(convertToolsToVercelAITools(input.tools)),
         abortSignal,
         // Serial tool calls. Each frontend tool handler revalidates turn/lease epoch
@@ -130,6 +103,15 @@ export function createOpenRouterAgent(
       });
     },
   });
+}
+
+/** The context prompt, plus the attached-file note when the run carries a text file. */
+function systemPrompt(
+  context: readonly { description: string; value: string }[],
+  withFiles: boolean,
+): string | undefined {
+  const parts = [contextSystemPrompt(context), withFiles ? ATTACHED_FILE_NOTE : undefined];
+  return parts.filter(Boolean).join("\n") || undefined;
 }
 
 /**

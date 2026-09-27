@@ -45,14 +45,6 @@ export type RunPhase =
   | "error"
   | "cancelled";
 
-/** A single progress frame applied from the SSE stream (see T06). */
-export interface RunProgressEvent {
-  phase?: string;
-  progress?: number;
-  score?: number;
-  message?: string;
-}
-
 /** Current optimize-run snapshot. Ephemeral: lost on reload, never persisted. */
 export interface RunState {
   phase: RunPhase;

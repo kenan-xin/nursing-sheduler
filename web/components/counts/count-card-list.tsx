@@ -212,7 +212,7 @@ export function CountCardList({
                 {card.disabled && <Badge variant="neutral">Disabled</Badge>}
                 {contractedHours && (
                   <Badge variant="brand" data-testid={`count-contracted-badge-${index}`}>
-                    ◆ Contracted hours
+                    ◆ CONTRACTED HOURS
                   </Badge>
                 )}
                 {contractedHours && leaveGuardUids?.has(card.uid) && (

@@ -71,7 +71,7 @@ async function stubCatalog(page: Page) {
       headers: { "cache-control": "no-store" },
       body: JSON.stringify({
         source: "catalog",
-        models: [{ id: SENTINEL_MODEL, label: "Claude Sonnet 4.5" }],
+        models: [{ id: SENTINEL_MODEL, label: "Claude Sonnet 4.5", imageInput: true }],
       }),
     }),
   );
@@ -562,13 +562,14 @@ function assertCoherentChatUi(facts: ChatFacts, surface: "dock" | "sheet") {
   expect(facts.userBubble.width).toBeLessThan(facts.userBubble.transcriptWidth);
   expect(facts.userBubble.insetFromAssistant).toBeGreaterThan(16);
   expect(facts.userBubble.withinTranscript).toBe(true);
-  expect(facts.userBubble.fontFamily).toContain("Hanken Grotesk");
+  // next/font/local names the family after its variable (`hankenGrotesk`), not "Hanken Grotesk".
+  expect(facts.userBubble.fontFamily).toMatch(/hanken ?grotesk/i);
 
   expect(facts.assistantProse.found).toBe(true);
   // The assistant speaks in the app's own voice: warm ink, no bubble.
   expect(facts.assistantProse.color).toBe(facts.tokens.ink);
   expect(facts.assistantProse.background).toBe("rgba(0, 0, 0, 0)");
-  expect(facts.assistantProse.fontFamily).toContain("Hanken Grotesk");
+  expect(facts.assistantProse.fontFamily).toMatch(/hanken ?grotesk/i);
   // Genuinely wrapped prose, so the layout facts above are not about one short line.
   expect(facts.assistantProse.lineCount).toBeGreaterThan(2);
 
@@ -577,7 +578,7 @@ function assertCoherentChatUi(facts: ChatFacts, surface: "dock" | "sheet") {
   // A long code line must move INSIDE its own block. Left to the panel it would
   // either force horizontal page scroll or be silently cut (DESIGN.md §7 note 6).
   expect(facts.codeBlock.found).toBe(true);
-  expect(facts.codeBlock.monoFamily).toContain("Spline Sans Mono");
+  expect(facts.codeBlock.monoFamily).toMatch(/spline ?sans ?mono/i);
   expect(facts.codeBlock.ownScroller).toBe(true);
   expect(facts.codeBlock.withinTranscript).toBe(true);
 
@@ -709,6 +710,52 @@ for (const theme of ["light", "dark"] as const) {
       await page.getByTestId("copilot-chat-textarea").fill("and the Monday after that one?");
       await expect(page.getByTestId("copilot-send-button")).toBeEnabled();
       assertTypedComposerStaysContained(await readChatFacts(page, "assistant-dock"));
+    });
+
+    test("queues attachment chips without overflowing the composer (2by.10)", async ({ page }) => {
+      await page.setViewportSize(WIDE_VIEWPORT);
+      await activate(page);
+      await gotoReadyShell(page, "/dates");
+      await page.getByTestId("assistant-launcher").click();
+      await expect(page.getByTestId("assistant-dock")).toBeVisible();
+
+      const long = `${"very-long-roster-file-name-".repeat(5)}.csv`;
+      const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+      // The image is offered only once the catalog says this model reads images.
+      await expect(page.getByTestId("assistant-file-input")).toHaveAttribute(
+        "accept",
+        /image\/png/,
+      );
+      await page.getByTestId("assistant-file-input").setInputFiles([
+        { name: long, mimeType: "text/csv", buffer: Buffer.from("Ana,leave") },
+        { name: "ward.png", mimeType: "image/png", buffer: png },
+      ]);
+      await expect(page.getByTestId("assistant-attach-privacy")).toBeVisible();
+      const chips = page.getByTestId("copilot-attachment-queue").locator(":scope > *");
+      await expect(chips).toHaveCount(2);
+
+      // The long name is one line ending in an ellipsis, inside the dock, with the full
+      // name on hover.
+      const chip = chips.first();
+      await expect(chip).toHaveAttribute("title", long);
+      const name = chip.getByText(/very-long-roster-file-name/);
+      const fit = await name.evaluate((el) => ({
+        truncated: el.scrollWidth > el.clientWidth,
+        overflow: getComputedStyle(el).textOverflow,
+        lines: Math.round(
+          el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight),
+        ),
+      }));
+      expect(fit).toEqual({ truncated: true, overflow: "ellipsis", lines: 1 });
+      const [chipBox, dockBox] = await Promise.all([
+        chip.boundingBox(),
+        page.getByTestId("assistant-dock").boundingBox(),
+      ]);
+      expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(dockBox!.x + dockBox!.width);
+
+      // Removing a chip is the library's own control.
+      await chip.getByRole("button", { name: "Remove attachment" }).click();
+      await expect(chips).toHaveCount(1);
     });
 
     test("the narrow sheet is coherent, bounded and usable", async ({ page }) => {

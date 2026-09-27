@@ -24,6 +24,7 @@
 //     on how the previous one ended. The CODE survives — `run-display` still reads
 //     it to title the outcome "Worker lost" — only the derived claim is gone.
 
+import { jobFailureMessage } from "@/lib/bff/errors";
 import type { JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types";
 import {
   MAX_CURSOR_BYTES,
@@ -711,7 +712,9 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         startedAt: job.started_at,
         finishedAt: job.finished_at,
         // Authoritative: adopt the server error, or clear a prior job error.
-        error: job.error ? boundError("job", job.error.code, job.error.message) : null,
+        error: job.error
+          ? boundError("job", job.error.code, jobFailureMessage(job.error.code, job.error.message))
+          : null,
         download,
       };
     }
@@ -864,7 +867,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         jobId: null,
         queuePosition: null,
         controls: INITIAL_CONTROLS,
-        error: boundError("job", signal.code, signal.message),
+        error: boundError("job", signal.code, jobFailureMessage(signal.code, signal.message)),
         download: { ...view.download, status: "unavailable", artifactAvailable: false },
         log,
         seq,

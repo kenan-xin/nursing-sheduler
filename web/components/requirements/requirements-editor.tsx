@@ -10,7 +10,7 @@
 // single source of truth; the form is a transient draft that only touches state
 // through the `useRequirements` operations (one tracked mutation each).
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CardEditorScreen,
   CardEditorHeader,
@@ -182,7 +182,14 @@ export function RequirementsEditor() {
     op();
   }
 
-  const warnings = computeCoverageWarnings(state, requirements);
+  // Memoized on its real inputs: `state` is the narrowed slice
+  // `computeCoverageWarnings` reads, so this recomputes only when that slice or
+  // the requirement cards actually change — a covering edit no longer re-runs
+  // `O(requirements × dates × shiftTypes)` over the whole roster.
+  const warnings = useMemo(
+    () => computeCoverageWarnings(state, requirements),
+    [state, requirements],
+  );
 
   return (
     <CardEditorScreen screen="Staffing Requirements">

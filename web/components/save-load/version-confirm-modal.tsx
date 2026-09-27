@@ -18,6 +18,8 @@ export interface VersionConfirmModalProps {
   title: string;
   /** Pre-built combined replacement/version dialog body (`loadConfirmCopy`). */
   description: string;
+  /** File/current version pair for the mono detail box (`loadConfirmCopy`). */
+  detail?: string;
   onContinue: () => void;
 }
 
@@ -26,6 +28,7 @@ export function VersionConfirmModal({
   onOpenChange,
   title,
   description,
+  detail,
   onContinue,
 }: VersionConfirmModalProps) {
   return (
@@ -34,6 +37,7 @@ export function VersionConfirmModal({
       onOpenChange={onOpenChange}
       title={title}
       description={description}
+      detail={detail}
       confirmLabel="Continue"
       cancelLabel="Cancel"
       onConfirm={onContinue}

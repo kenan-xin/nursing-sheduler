@@ -7,9 +7,6 @@ people:
   items:
     - id: ana
     - id: ben
-    - id: Borrowed nurse 1
-      history: []
-      temporary: true
 shiftTypes:
   items:
     - id: D
@@ -27,6 +24,21 @@ preferences:
     requiredNumPeople: 1
     qualifiedPeople:
       - ALL
+    requiredNumPeopleOverrides:
+      - - 2026-11-01
+        - 0
+      - - 2026-11-02
+        - 0
+      - - 2026-11-03
+        - 0
+      - - 2026-11-04
+        - 0
+      - - 2026-11-05
+        - 0
+      - - 2026-11-06
+        - 0
+      - - 2026-11-07
+        - 0
     date:
       - ALL
     weight: -1

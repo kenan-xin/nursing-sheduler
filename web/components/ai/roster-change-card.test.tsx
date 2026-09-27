@@ -2,7 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
+import {
+  assistantActions,
+  turnAwaitsUserOnCard,
+  useAssistantStore,
+} from "@/lib/ai/assistant/store";
 import { useRosterChangeStore } from "@/lib/roster/change-request";
 import { RosterChangeCard } from "./roster-change-card";
 
@@ -119,6 +123,20 @@ describe("RosterChangeCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("a step-3 cover card needs no tick and books the cover on the Staff screen", async () => {
+    applyLinked.mockResolvedValue({ ok: true });
+    const linked = { proposalId: "p-3", assumptionIds: [], record: "staff" as const };
+    assistantActions.showRosterChange({ ...CHANGE, request: null, linked }, TURN);
+    renderCard();
+    expect(screen.getByText(/Opens the Staff screen and books the temporary cover/)).toBeVisible();
+    await userEvent.click(screen.getByTestId("roster-change-apply"));
+    await waitFor(() => expect(useAssistantStore.getState().activeRosterChange).toBeNull());
+    expect(applyLinked).toHaveBeenCalledWith(
+      expect.objectContaining({ request: null, linked }),
+      expect.anything(),
+    );
+  });
+
   it("says each half is undone in its own place", () => {
     assistantActions.showRosterChange(
       { ...CHANGE, linked: { proposalId: "p-1", assumptionIds: [], record: "leave" as const } },
@@ -137,6 +155,25 @@ describe("RosterChangeCard", () => {
     renderCard();
     expect(screen.queryByTestId("roster-change-apply")).toBeNull();
     expect(screen.getByText(/This offer has ended/)).toBeInTheDocument();
+  });
+
+  it("keeps Apply after a follow-up message, but not after Stop (0f0r)", () => {
+    assistantActions.showRosterChange(LINKED_CHANGE, TURN);
+    renderCard();
+    let epoch = 0;
+    act(() => {
+      epoch = assistantActions.nextTurnEpoch();
+    });
+    expect(screen.getByTestId("roster-change-apply")).toBeInTheDocument();
+    expect(cancel).not.toHaveBeenCalled();
+    // A card carried into the follow-up is not that turn's reply: an empty answer still fails.
+    expect(turnAwaitsUserOnCard(epoch)).toBe(false);
+
+    // Stop (closeGate) moves the epoch without carrying the card; the next send cannot revive it.
+    act(() => useAssistantStore.setState({ turnEpoch: epoch + 1 }));
+    act(() => void assistantActions.nextTurnEpoch());
+    expect(screen.queryByTestId("roster-change-apply")).toBeNull();
+    expect(cancel).toHaveBeenCalledWith("p-1");
   });
 
   it("keeps the roster as it is when the user cancels", async () => {

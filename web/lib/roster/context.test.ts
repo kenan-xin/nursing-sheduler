@@ -46,6 +46,19 @@ describe("parseSubmissionDocument", () => {
     });
   });
 
+  it("accepts and drops a legacy top-level `country` on a stored submission", () => {
+    // A roster captured by a pre-X9 build still carries `country` in its frozen
+    // `canonicalYaml`. The strict model dropped the field, so the stored-submission
+    // boundary accepts and drops it exactly as the import boundary does — the
+    // producer schema stays strict for every new document.
+    const legacy = `country: SG\n${fixtureSubmission().canonicalYaml}`;
+    const parsed = parseSubmissionDocument(legacy);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.document).not.toHaveProperty("country");
+    expect(parsed.document.people.items.map((person) => person.id)).toEqual(["P1", "P2"]);
+  });
+
   it("rejects an empty, unparseable, or non-canonical submission", () => {
     expect(parseSubmissionDocument("")).toMatchObject({ ok: false });
     expect(parseSubmissionDocument("{[")).toMatchObject({ ok: false });

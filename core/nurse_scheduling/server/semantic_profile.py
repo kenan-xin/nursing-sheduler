@@ -33,7 +33,7 @@ reinterpreted under the new semantics.
 SUBMISSION_CONTRACT_VERSION = "optimize-yaml-v1"
 """Version of the submission wire contract (exact strict YAML bytes + form fields)."""
 
-SOLVER_SEMANTIC_VERSION = "ortools/cp-sat@1"
+SOLVER_SEMANTIC_VERSION = "ortools/cp-sat@2"
 """Version of the solver's scheduling semantics. Bump on any meaning-changing model change."""
 
 BACKEND_CAPABILITY_VERSION = "nurse-scheduling-backend@1"

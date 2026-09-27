@@ -54,6 +54,14 @@ then an ordinary edit on the Roster screen: its Undo reverts the roster part, an
 includes it. A change that also touches the schedule (a leave move, the MC, a temporary nurse)
 has a second part: undo that from the change list.
 
+**(2026-09-27) Adding a nurse to staff.** When a schedule is short on many days of the
+period (more than three), the assistant can suggest adding a nurse to the staff list: a new
+starter, a transfer or a relief nurse on the roster for the whole period. It asks for her
+name first. Applying it opens the Staff screen and adds her there. The assistant then offers
+an Optimize run on a card. The run starts only when you press Run, and afterwards the
+assistant tells you whether the schedule can now be built. A nurse borrowed for a single
+shift is still a temporary cover, not a staff member.
+
 When nobody can take a shift, the assistant follows a four-step cover ladder and says
 which step it is on: (1) swap or cover within the ward; (2) ask a nurse who is off or on
 leave to come in, for overtime pay or off-in-lieu (the nurse must agree, and you tick
@@ -95,7 +103,19 @@ Ready, the following may be sent through OpenRouter to the model you chose:
 - anything you type, including staff names, leave, dates and local policy;
 - the complete relevant schedule — dates, people, shift types, rules, requests,
   identifiers and descriptions;
-- which screen you are on, and the conversation so far for that schedule.
+- which screen you are on, and the conversation so far for that schedule;
+- images and text files you attach to a message (PNG, JPEG, WebP or GIF up to 3.75 MB;
+  .txt, .csv or .md up to 200 KB; at most 4 per message, always with some typed text).
+  Images need a model that reads images; the panel says so when yours does not. An
+  attachment is part of the conversation, so it is sent again with each later message
+  until older messages are summarised. Each request carries at most four images' worth;
+  older images, and every image when the model cannot read them, are sent as their file
+  name only. The summary request names an attachment but does not send it;
+- in a long conversation, the older messages once more, so the model can write a short
+  summary of them. After that the summary is sent instead of those messages, and the panel
+  says "Earlier messages were summarised to keep this conversation going." Your own copy of
+  the conversation keeps every message until you clear it, and clearing deletes the summary
+  too.
 
 There is no per-message consent step and no local filter that promises to spot
 sensitive text first. OpenRouter may route your request to different downstream
@@ -111,7 +131,7 @@ tool argument, the conversation, or your schedule.
 | --- | --- |
 | Your OpenRouter key | This browser profile only, in the app's local database |
 | Model choice and AI preferences | This browser profile only |
-| Conversations, previews and receipts | This browser profile only, kept per schedule |
+| Conversations, attachments, previews and receipts | This browser profile only, kept per schedule |
 | Your schedule | Unchanged — the app's normal storage, separate from the chat |
 
 **The key is not encrypted.** Anyone who can use this browser profile can read it and
@@ -133,10 +153,10 @@ immediately:
 
 | Action | Effect |
 | --- | --- |
-| **Stop** (in the panel) | Ends the current answer. Anything already written stays, labelled as stopped. |
+| **Stop** (in the panel) | Ends the current answer. Anything already written stays, labelled as stopped. An unapplied Preview or roster change card stops with it; asking a follow-up question does not stop one. |
 | **Remove key** | Deletes the key at once. History and preferences are kept; the assistant becomes unavailable. |
 | **Replace key or model** | Stops current work first, then tests the new configuration. |
-| **Clear conversation history** | Deletes this schedule's messages, previews and receipts. Key, preferences and the schedule itself are kept. |
+| **Clear conversation history** | Deletes this schedule's messages and their attachments, previews and receipts. Key, preferences and the schedule itself are kept. |
 | **Clear all AI data** | Deletes the key and every local AI setting and conversation. Your schedule and roster are untouched. |
 | **AI features** switch off | Stops work, hides the assistant, keeps everything stored so turning it back on resumes where you were. |
 

@@ -14,6 +14,7 @@ describe("RequestsToolbar", () => {
         onSetMode={onSetMode}
         onOpenRequestsCsv={vi.fn()}
         onOpenHistoryCsv={vi.fn()}
+        onDownloadCsv={vi.fn()}
         clearOpen={false}
         onToggleClear={vi.fn()}
       />,
@@ -30,6 +31,7 @@ describe("RequestsToolbar", () => {
         onSetMode={vi.fn()}
         onOpenRequestsCsv={vi.fn()}
         onOpenHistoryCsv={vi.fn()}
+        onDownloadCsv={vi.fn()}
         clearOpen={false}
         onToggleClear={vi.fn()}
       />,
@@ -41,6 +43,7 @@ describe("RequestsToolbar", () => {
         onSetMode={vi.fn()}
         onOpenRequestsCsv={vi.fn()}
         onOpenHistoryCsv={vi.fn()}
+        onDownloadCsv={vi.fn()}
         clearOpen={false}
         onToggleClear={vi.fn()}
       />,
@@ -58,6 +61,7 @@ describe("RequestsToolbar", () => {
         onSetMode={vi.fn()}
         onOpenRequestsCsv={onOpenRequestsCsv}
         onOpenHistoryCsv={onOpenHistoryCsv}
+        onDownloadCsv={vi.fn()}
         clearOpen={false}
         onToggleClear={onToggleClear}
       />,
@@ -77,6 +81,7 @@ describe("RequestsToolbar", () => {
         onSetMode={vi.fn()}
         onOpenRequestsCsv={vi.fn()}
         onOpenHistoryCsv={vi.fn()}
+        onDownloadCsv={vi.fn()}
         clearOpen={false}
         onToggleClear={vi.fn()}
       />,
@@ -92,12 +97,44 @@ describe("RequestsToolbar", () => {
         onSetMode={vi.fn()}
         onOpenRequestsCsv={vi.fn()}
         onOpenHistoryCsv={vi.fn()}
+        onDownloadCsv={vi.fn()}
         clearOpen={false}
         onToggleClear={vi.fn()}
       />,
     );
     expect(screen.getByTestId("requests-open-requests-csv")).toBeInTheDocument();
     expect(screen.getByTestId("requests-open-history-csv")).toBeInTheDocument();
+  });
+
+  it("renders the Download CSV button in BOTH modes and wires it", () => {
+    const onDownloadCsv = vi.fn();
+    const { rerender } = render(
+      <RequestsToolbar
+        mode="normal"
+        onSetMode={vi.fn()}
+        onOpenRequestsCsv={vi.fn()}
+        onOpenHistoryCsv={vi.fn()}
+        onDownloadCsv={onDownloadCsv}
+        clearOpen={false}
+        onToggleClear={vi.fn()}
+      />,
+    );
+    // A download reads state (no FR-SR-34 weight constraint), so it is not gated
+    // to Quick Add mode the way the uploads are.
+    expect(screen.getByTestId("requests-download-csv")).toBeInTheDocument();
+    rerender(
+      <RequestsToolbar
+        mode="quick"
+        onSetMode={vi.fn()}
+        onOpenRequestsCsv={vi.fn()}
+        onOpenHistoryCsv={vi.fn()}
+        onDownloadCsv={onDownloadCsv}
+        clearOpen={false}
+        onToggleClear={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("requests-download-csv"));
+    expect(onDownloadCsv).toHaveBeenCalledOnce();
   });
 
   it("disables only the Requests CSV button when requestsCsvDisabled, with a reason tooltip", () => {
@@ -109,6 +146,7 @@ describe("RequestsToolbar", () => {
         onSetMode={vi.fn()}
         onOpenRequestsCsv={onOpenRequestsCsv}
         onOpenHistoryCsv={onOpenHistoryCsv}
+        onDownloadCsv={vi.fn()}
         clearOpen={false}
         onToggleClear={vi.fn()}
         requestsCsvDisabled
@@ -139,6 +177,7 @@ describe("RequestsToolbar — v2 pill segmented track", () => {
     onSetMode: vi.fn(),
     onOpenRequestsCsv: vi.fn(),
     onOpenHistoryCsv: vi.fn(),
+    onDownloadCsv: vi.fn(),
     clearOpen: false,
     onToggleClear: vi.fn(),
   };

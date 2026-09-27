@@ -32,11 +32,14 @@ export type RunRequestOutcome =
 export interface RunRequestState {
   pending: { requestedAt: number } | null;
   last: RunRequestOutcome | null;
+  /** The schedule's document revision the latest run was built from; null before any run. */
+  runRevision: number | null;
 }
 
 export const useRunRequestStore = create<RunRequestState>()(() => ({
   pending: null,
   last: null,
+  runRevision: null,
 }));
 
 export function requestOptimizeRun(now: number = Date.now()): void {
@@ -56,9 +59,12 @@ export function reportOptimizeRunRequest(outcome: RunRequestOutcome): void {
   useRunRequestStore.setState({ last: outcome });
 }
 
-/** A run started (by any route), so an earlier refusal no longer describes the screen. */
-export function clearOptimizeRunRequestOutcome(): void {
-  useRunRequestStore.setState({ last: null });
+/**
+ * A run started (by any route) from the schedule at `documentRevision`: an earlier
+ * refusal no longer describes the screen, and a later edit makes its result stale.
+ */
+export function noteOptimizeRunStarted(documentRevision: number): void {
+  useRunRequestStore.setState({ last: null, runRevision: documentRevision });
 }
 
 /** A POST in flight, or a server job that is queued, running or cancelling. */

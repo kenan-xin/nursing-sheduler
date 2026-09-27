@@ -17,6 +17,7 @@ import { FaCircleCheck, FaCircleExclamation, FaCircleInfo } from "@/components/i
 import {
   EXPRESSION_OPS,
   isSquaredExpression,
+  substituteTarget,
   type ExpressionFieldValue,
   type ExpressionTargetValue,
 } from "./expression-model";
@@ -46,7 +47,7 @@ export function ExpressionField({
   testId = "expression-field",
 }: ExpressionFieldProps) {
   const previewTarget = target === "" || target == null ? "T" : String(target);
-  const preview = expression.replace(/T/g, previewTarget);
+  const preview = substituteTarget(expression, previewTarget);
 
   return (
     <div className="flex flex-col gap-3" data-testid={testId}>

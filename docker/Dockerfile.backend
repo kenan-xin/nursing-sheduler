@@ -4,8 +4,8 @@
 #
 # Lean production runtime: ships ONLY the app package (nurse_scheduling/), never
 # core/tests/ or the vendored caches. The app runs from source via uvicorn
-# (no `pip install .`), and get_app_version() reads its version from the APP_VERSION
-# env var (baked at image build time; not from pyproject/metadata), so no test tree
+# (no `pip install .`), and get_app_version() reads its version from /app/.app-version,
+# written from APP_VERSION at image build time (not from pyproject/metadata), so no test tree
 # or project metadata is needed at runtime. The authoritative pytest+ruff gate
 # runs on host/CI (tech-plan §6 item 1).
 FROM python:3.12-slim
@@ -13,6 +13,8 @@ FROM python:3.12-slim
 ARG APP_VERSION
 RUN test -n "$APP_VERSION" || { echo "ERROR: APP_VERSION is empty — build via 'make build'" >&2; exit 1; }
 ENV APP_VERSION=${APP_VERSION}
+# Genie version.py and app.py read <repo>/.app-version (= /app here) before git.
+RUN mkdir -p /app && printf '%s\n' "$APP_VERSION" > /app/.app-version
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*

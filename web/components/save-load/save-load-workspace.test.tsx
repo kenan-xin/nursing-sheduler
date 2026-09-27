@@ -219,6 +219,11 @@ describe("SaveLoadWorkspace — Upload flow", () => {
 
     await screen.findByTestId("confirm-dialog-confirm");
     expect(screen.getByText(/1\.0\.0/)).toBeInTheDocument();
+    // The version pair renders in the shared confirm's mono detail box, not as
+    // run-on prose (prototype ScreenSaveLoad.dc.html:150).
+    const detail = screen.getByTestId("confirm-dialog-detail");
+    expect(detail).toHaveTextContent("File app version: 1.0.0");
+    expect(detail).toHaveTextContent(`Current app version: ${currentAppVersion()}`);
 
     fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
 

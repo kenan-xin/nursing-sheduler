@@ -1,7 +1,8 @@
 "use client";
 
 // Route-validity gate for direct URL visits (T08d, tech-plan §2). A bookmarked
-// or typed Advanced-only URL must redirect to Home once the persisted mode
+// or typed Advanced-only URL must redirect to its Guided destination
+// (`guidedFallbackPath`, qq0.14.1) once the persisted mode
 // preference has finished adopting — but never before: gating on the
 // transient server-default Guided render would bounce a stored Advanced
 // preference off its own Advanced-only URL before that preference has even
@@ -23,7 +24,8 @@ import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useAppMode, useModeAdoption } from "@/lib/mode/use-mode";
 import { useGuardedNavigation } from "./use-guarded-navigation";
-import { isRouteValidForMode } from "./route-registry";
+import { guidedFallbackPath, isRouteValidForMode } from "./route-registry";
+import { noteGuidedArrival } from "./guided-arrival";
 
 export function useRouteValidityGate(): void {
   const pathname = usePathname();
@@ -34,6 +36,7 @@ export function useRouteValidityGate(): void {
   useEffect(() => {
     if (adoption !== "ready") return;
     if (isRouteValidForMode(pathname, mode)) return;
-    replace("/");
+    noteGuidedArrival(pathname);
+    replace(guidedFallbackPath(pathname));
   }, [adoption, mode, pathname, replace]);
 }

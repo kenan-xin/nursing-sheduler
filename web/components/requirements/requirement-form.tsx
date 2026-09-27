@@ -13,7 +13,6 @@
 // mutation. All validation/build/load logic lives in requirements-model.
 
 import { useEffect, useRef, useState } from "react";
-import type { ScenarioUiState } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -45,12 +44,13 @@ import {
   validateRequirementForm,
   REQUIREMENT_MESSAGES,
   type RequirementErrors,
-  type SkillMixDraft,
   type RequirementFormState,
+  type RequirementScenarioInput,
+  type SkillMixDraft,
 } from "./requirements-model";
 
 interface RequirementFormProps {
-  state: ScenarioUiState;
+  state: RequirementScenarioInput;
   mode: "add" | "edit";
   initialForm: RequirementFormState;
   onSave: (form: RequirementFormState) => void;

@@ -27,7 +27,12 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { JobResponse } from "@/lib/bff/types";
-import { getScenarioAuthority, scenarioCommands, useHotStore } from "@/lib/store";
+import {
+  getScenarioAuthority,
+  scenarioCommands,
+  useAuthorityStore,
+  useHotStore,
+} from "@/lib/store";
 import { resetScenarioForTest } from "@/lib/store/test-authority";
 import type { PrepareOptimizeSubmissionResult } from "@/lib/scenario";
 import {
@@ -206,7 +211,7 @@ function onlineInfo(extra: Record<string, unknown> = {}) {
         ...extra,
         status: "ready",
         service_name: "nurse",
-        api_version: "alpha",
+        api_version: "0.2.0",
         app_version: "1.0.0",
         deployment_id: "d",
         instance_id: "i",
@@ -584,8 +589,12 @@ describe("OptimizeAndExportScreen — terminal release", () => {
   // that replaced them: the result is reported honestly, nothing is offered to
   // press, and the primary action is live.
   it.each([
-    ["process_timeout", () => processTimeoutJob, "timed out"],
-    ["worker_lost", () => workerLostJob, "Worker lost."],
+    ["process_timeout", () => processTimeoutJob, "did not finish within its time limit"],
+    [
+      "worker_lost",
+      () => workerLostJob,
+      "The optimisation worker stopped before the job completed.",
+    ],
   ])("row 3: a %s run reports honestly and leaves Optimize live", async (_label, job, message) => {
     await readyStore();
     routeTerminal(job());
@@ -769,7 +778,7 @@ describe("OptimizeAndExportScreen — G4 dedicated /roster route", () => {
 });
 describe("OptimizeAndExportScreen — assistant run request", () => {
   beforeEach(() => {
-    useRunRequestStore.setState({ pending: null, last: null });
+    useRunRequestStore.setState({ pending: null, last: null, runRevision: null });
   });
 
   /** Routes the run's traffic and counts POSTs, the one fact these cases assert. */
@@ -811,7 +820,13 @@ describe("OptimizeAndExportScreen — assistant run request", () => {
     renderScreen();
 
     await waitFor(() => expect(posts()).toBe(1));
-    expect(useRunRequestStore.getState()).toEqual({ pending: null, last: "started" });
+    // The run remembers which schedule revision it was built from (2vtv), so a later
+    // change marks its result as stale for the assistant.
+    expect(useRunRequestStore.getState()).toEqual({
+      pending: null,
+      last: "started",
+      runRevision: useAuthorityStore.getState().documentRevision,
+    });
   });
 
   it("reports not-ready and posts nothing when set-up is missing", async () => {

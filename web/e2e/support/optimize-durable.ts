@@ -2129,7 +2129,7 @@ export async function installOptimizeRoutes(
     config.info ??
     (() => ({
       status: 200,
-      body: { status: "ready", api_version: "alpha", app_version: "0.1.0" },
+      body: { status: "ready", api_version: "0.2.0", app_version: "0.1.0" },
     }));
 
   await page.route("**/api/**", async (route) => {

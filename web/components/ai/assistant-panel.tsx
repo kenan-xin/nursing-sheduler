@@ -9,6 +9,11 @@
 // immediate-Apply fix list is deliberately absent -- there is no Apply surface in
 // T04, and the closed flows override the prototype on that point.
 //
+// The header also carries the transcript download (bead 2by.9), left of Close and
+// shown only once the conversation has something in it. The prototype has no such
+// control and no panel menu; the placement was decided rather than inferred, and the
+// icon-button recipe matches the Close control beside it.
+//
 // WHY THIS IS NOT THE SHARED `Dialog`. The design system's overlay set has exactly
 // two geometries (a centred modal card and a LEFT-anchored navigation drawer). A
 // right-anchored sheet is a third, and adding it to the shared surface recipe would
@@ -23,6 +28,7 @@
 // thread, and restoring a prior identity restores that identity's own thread.
 
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -31,12 +37,15 @@ import {
   type RefObject,
 } from "react";
 import { usePathname } from "next/navigation";
-import { useAuthorityStore, useScenarioStore } from "@/lib/store";
-import { selectActiveThread } from "@/lib/ai/assistant/history-repo";
+import { assistantProposalCommands, useAuthorityStore, useScenarioStore } from "@/lib/store";
+import { readThreadMessages, selectActiveThread } from "@/lib/ai/assistant/history-repo";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
+import { buildTranscriptMarkdown, transcriptFilename } from "@/lib/ai/assistant/transcript";
+import { currentAppVersion } from "@/lib/scenario/app-version";
+import { downloadBlob } from "@/lib/utils/download";
 import { Button } from "@/components/ui/button";
 import { Surface } from "@/components/ui/surface";
-import { FaXmark } from "@/components/icons";
+import { FaDownload, FaXmark } from "@/components/icons";
 import { findNavItem } from "@/components/shell/nav-config";
 import {
   AssistantHistoricalConversation,
@@ -92,6 +101,36 @@ function PanelBody() {
   const threadId = useActiveThreadId(scenarioId);
   const reason = readOnlyReason(ownership);
 
+  // Whether the conversation has anything to export. Reported by whichever rendering
+  // is mounted, because that component is what knows its own messages, and reset on a
+  // thread change so a switch cannot leave a stale control on an empty conversation.
+  const [hasMessages, setHasMessages] = useState(false);
+  useEffect(() => setHasMessages(false), [threadId]);
+
+  // Read from DURABLE truth at the click, not from the rendering's projection: the
+  // file should describe the thread that exists, and the read is the same one the
+  // hydration path uses. The credential is not read here at all -- it is not an input
+  // to the builder -- so the file cannot carry it; see `transcript.ts`.
+  const downloadTranscript = useCallback(async () => {
+    if (!threadId) return;
+    const [messages, receipts] = await Promise.all([
+      readThreadMessages(threadId),
+      assistantProposalCommands.describeReceipts(),
+    ]);
+    const exportedAt = new Date();
+    const markdown = buildTranscriptMarkdown({
+      messages,
+      receipts: receipts.map((standing) => standing.receipt),
+      appVersion: currentAppVersion(),
+      exportedAt,
+      scenarioName,
+    });
+    downloadBlob(
+      new Blob([markdown], { type: "text/markdown;charset=utf-8" }),
+      transcriptFilename(exportedAt),
+    );
+  }, [threadId, scenarioName]);
+
   return (
     <>
       <div className="flex shrink-0 items-start gap-3 border-b border-line2 px-4 py-3">
@@ -105,6 +144,20 @@ function PanelBody() {
           </p>
         </div>
         <div className="flex-1" />
+        {/* Hidden while there is nothing to export: an action with no subject would
+            advertise a file of nothing. */}
+        {threadId !== null && hasMessages ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => void downloadTranscript()}
+            title="Download transcript"
+            data-testid="assistant-download-transcript"
+          >
+            <FaDownload aria-hidden />
+            <span className="sr-only">Download transcript</span>
+          </Button>
+        ) : null}
         <Button
           variant="ghost"
           size="icon"
@@ -119,7 +172,11 @@ function PanelBody() {
       {threadId === null ? (
         <p className="p-4 text-meta text-ink2">Opening this schedule&apos;s conversation…</p>
       ) : reason ? (
-        <AssistantHistoricalConversation threadId={threadId} reason={reason} />
+        <AssistantHistoricalConversation
+          threadId={threadId}
+          reason={reason}
+          onHasMessages={setHasMessages}
+        />
       ) : (
         // Re-keyed on the thread: a scenario switch replaces the whole conversation
         // rather than re-pointing a live agent at a different document's thread.
@@ -128,6 +185,7 @@ function PanelBody() {
           threadId={threadId}
           routePath={pathname}
           routeLabel={findNavItem(pathname)?.label ?? null}
+          onHasMessages={setHasMessages}
         />
       )}
     </>

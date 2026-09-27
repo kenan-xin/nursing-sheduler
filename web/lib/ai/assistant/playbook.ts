@@ -17,11 +17,11 @@
 // So a manager may soften or turn off a rest rule, always with REST_PRACTICE_WARNING,
 // and a repair may soften one (never delete it) after the ward-internal fixes.
 //
-// CONTROLLER RULINGS (2026-09-24, binding over the spec draft):
-// - No `mark_person_off` arm exists. The borrowed/float nurse repair is expressed
-//   with EXISTING arms: `add_person` with `temporary: true`, then `set_off_request`
-//   at weight "must" over the dates she is NOT covering (she is free only on the
-//   short dates, or has no days off at all for a whole-period loan).
+// CONTROLLER RULINGS (2026-09-24, binding over the spec draft; d582 of 2026-09-27):
+// - No `mark_person_off` arm exists, and a borrowed/float nurse is no longer a roster
+//   person. The repair books TEMPORARY COVERS (`add_temporary_cover`): one per short
+//   (date, shift), each a staffing credit on one date and one shift, so no rule, pin
+//   or roster cell names her and nothing else about the ward changes.
 // - Staffing requirements are EXACT counts (`qualifiedPeople` bans everyone else),
 //   so "lower a staffing minimum" means editing `requiredNumPeople` of an exact
 //   requirement via `edit_staffing_requirement` / `set_staffing_requirement_people`.
@@ -38,11 +38,28 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-24.9";
+export const PLAYBOOK_VERSION = "2026-09-27.3";
 
 /** Said on the Preview and in the reply whenever a change relaxes a rest rule. */
 export const REST_PRACTICE_WARNING =
   "This is a recommended rest practice, not a legal rule. Nurses may be more tired; consider a day off after nights.";
+
+/** Said in the reply whenever a change adds or sets a balance (as close to T as possible) rule. */
+export const BALANCE_RULE_NOTE =
+  "A fairness rule gives the optimiser more to weigh up: the run can take longer, and it may stop at its time limit with a usable roster that is not proven the best.";
+
+/**
+ * True when a change adds or sets a count rule of the balance kind (bead hnd). Only
+ * `|x - T|^2` counts: it is the one expression the solver scores as a squared gap per
+ * person, which is what slows a run. The other five (`x <= T`, `x = T`, ...) are a single
+ * yes/no per person, the same cost as any cap, whether or not the ward calls it fair.
+ */
+export function setsBalanceRule(commands: readonly AssistantCommandV1[]): boolean {
+  return commands.some(
+    (c) =>
+      (c.type === "add_count_rule" || c.type === "edit_count_rule") && c.expression === "|x - T|^2",
+  );
+}
 
 /** Employment Act: at most 12 WORKING hours a day incl. overtime (span minus the unpaid break). */
 export const MAX_DAILY_WORKING_MINUTES = 12 * 60;
@@ -178,6 +195,7 @@ export type RepairId =
   | "relax_count_rule"
   | "soften_rest_rule"
   | "borrow_temporary_nurse"
+  | "add_staff_member"
   | "ask_nurse_on_leave"
   | "run_one_short"
   | "split_long_shift";
@@ -259,20 +277,31 @@ export const REPAIRS: readonly RepairEntry[] = [
   },
   {
     id: "borrow_temporary_nurse",
-    title: "Borrow a float, agency or other-ward nurse for the short dates",
+    title: "Book a temporary cover nurse for the short dates",
     whenToUse: "The ward has too few free nurses on some dates.",
     disruption: "medium",
     confirmation: "lending_ward",
-    enforcedBy: "host_question",
-    // No `mark_person_off` arm exists: add the nurse with `temporary: true`, then pin
-    // her OFF (weight "must") over every date she is not covering, so she is free only
-    // on the short dates (controller ruling, 2026-09-24) -- or, for a whole-period
-    // loan, no days off at all. A "must" shift request puts her on the short shift, and
-    // a hard count rule she would inherit is narrowed to the ward's own staff in the
-    // same change.
-    opTypes: ["add_person", "set_off_request", "set_shift_request", "edit_count_rule"],
+    enforcedBy: "chat",
+    // A cover is a staffing credit, not a solver person (d582): the option books one
+    // `add_temporary_cover` per short (date, shift), so no roster cell, count rule or pin
+    // is needed. The lending ward is agreed in chat before the covers are shown.
+    opTypes: ["add_temporary_cover"],
     guardrail:
-      "Put her in a skill group only when the manager confirms her qualification. Never invent a name.",
+      "Put her in a staff group only when the manager confirms her qualification. Never invent a name.",
+  },
+  {
+    // bead 2vtv: a real staff member for the whole period, not a cover. The manager's
+    // Apply is the decision; the Staff screen shows the new row (iwo).
+    id: "add_staff_member",
+    title: "Add a nurse to the staff list for the whole period",
+    whenToUse:
+      "The ward is short on many days of the period, not just a bad day: a new starter, a transfer or a relief nurse on the roster.",
+    disruption: "medium",
+    confirmation: "manager",
+    enforcedBy: "apply",
+    opTypes: ["add_person"],
+    guardrail:
+      "Head count only: put her in a staff group only when the manager names it. Ask for her name; never invent one.",
   },
   {
     id: "ask_nurse_on_leave",
@@ -335,10 +364,11 @@ export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
   chronic: [
     "align_overlapping_requirements",
     "borrow_temporary_nurse",
+    "add_staff_member",
     "run_one_short",
     "split_long_shift",
   ],
-  // Spec: 1, 3, as hypotheses. A whole-period borrow is not a guess worth testing.
+  // Spec: 1, 3, as hypotheses. A blind borrow is not a guess worth testing.
   // Softening a rest rule comes last. Only here: the static check does not model rest
   // rules, so it never blames them for a proven gap.
   unexplained: ["soften_hard_request", "relax_count_rule", "soften_rest_rule"],
@@ -349,6 +379,7 @@ export const CHRONIC_DATE_COUNT = 3;
 export const MAX_CAP_RAISE = 2;
 export const MAX_OPTIONS = 3;
 export const MAX_BORROWED = 3;
+export const MAX_NEW_STAFF = 2;
 export const MAX_EXPLAINED_FINDINGS = 5;
 /** The strength a softened request gets (a finite weight the solver may break only if it must). */
 export const SOFT_REQUEST_WEIGHT = 10;
@@ -372,5 +403,6 @@ export const FEASIBILITY_INSTRUCTIONS: readonly string[] = [
   "Ask every needsFromUser question before preparing an option. Never invent an answer.",
   "After an infeasible Optimize run, test the options' operations with test_feasibility_candidates before calling any option tested. Otherwise call it untested.",
   "Prepare only the option the user picks. The app then asks for the agreement it needs, and the user applies it and runs Optimize again.",
+  `After the user applies a fix, offer a run with ${OPTIMIZE_RUN_TOOL} and never say a run has started; once it finishes, read ${OPTIMIZE_RESULT_TOOL} and say in one sentence whether the schedule can now be built.`,
   "Never suggest anything in safetyFloor, even if the user asks.",
 ];

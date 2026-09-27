@@ -2,6 +2,18 @@
 // Parity source: web-frontend/src/app/shift-requests/page.tsx
 // (validateShiftRequestCsvData ~409, validatePeopleHistoryCsvData ~536, shared parse ~665).
 // No React, no store writes — callers apply the returned deltas/entries themselves.
+//
+// `serializeShiftRequestCsv` is the inverse: it writes the matrix in exactly the
+// shape `validateShiftRequestCsv` reads, so an export re-imports unchanged.
+
+import {
+  RESERVED_SHIFT_TYPE,
+  isDayStateSelector,
+  type DateRef,
+  type PersonRef,
+  type UiRequestCell,
+} from "@/lib/scenario";
+import { resolveDayStatePrecedence } from "./requests-model";
 
 /** A weight value as produced by the shared weight parser: a valid weight is a
  *  finite `number` or exactly `Infinity`/`-Infinity`; any other string is raw
@@ -24,6 +36,9 @@ export interface ShiftRequestCsvOptions {
 export interface ShiftRequestDelta {
   personId: string;
   dateId: string;
+  /** A worked shift-type/group id, or a reserved day-state label (`OFF`/`LEAVE`)
+   *  as the matrix export writes them; the caller routes the day-states to a
+   *  leave/off cell rather than a worked request. */
   shiftType: string;
 }
 
@@ -127,14 +142,38 @@ function validateShiftRequestRows(
       const cellValue = dataRows[r][c];
       if (!cellValue) continue;
 
-      if (!validShiftTypeSet.has(cellValue)) {
-        return {
-          ok: false,
-          error: `Invalid shift type "${cellValue}" at row ${r + 1}, column ${c + 1}. Valid shift types: ${validShiftTypeIds.join(", ")}`,
-        };
+      // A cell is one day-state label (`OFF`/`LEAVE`, as the matrix export writes
+      // them) or one-or-more worked selectors joined with ` | ` (the export's
+      // several-entries-per-cell form). Splitting on `|` and trimming also accepts
+      // the unspaced `AM|PM` a hand-editor might type.
+      const tokens = cellValue
+        .split("|")
+        .map((token) => token.trim())
+        .filter((token) => token.length > 0);
+      const dayState = tokens.find(isDayStateSelector);
+
+      if (dayState !== undefined) {
+        if (tokens.length > 1) {
+          return {
+            ok: false,
+            error: `Cell at row ${r + 1}, column ${c + 1} mixes the day-state "${dayState}" with other entries; a cell is either one day-state (OFF/LEAVE) or shift types joined with " | ".`,
+          };
+        }
+        deltas.push({ personId, dateId: dateItemIds[c - 1], shiftType: dayState });
+        continue;
       }
 
-      deltas.push({ personId, dateId: dateItemIds[c - 1], shiftType: cellValue });
+      if (tokens.length === 0) continue;
+
+      for (const token of tokens) {
+        if (!validShiftTypeSet.has(token)) {
+          return {
+            ok: false,
+            error: `Invalid shift type "${token}" at row ${r + 1}, column ${c + 1}. Valid shift types: ${validShiftTypeIds.join(", ")}`,
+          };
+        }
+        deltas.push({ personId, dateId: dateItemIds[c - 1], shiftType: token });
+      }
     }
   }
 
@@ -168,6 +207,74 @@ export function validateShiftRequestCsv(
       error: "Error processing shift-requests CSV file. Please check the file format.",
     };
   }
+}
+
+// --- Matrix export (the FR-SR-36 inverse; export → edit → re-import) ---------
+
+export interface ShiftRequestCsvExportOptions {
+  /** Person refs, in row order; column 0 carries each one's string form. */
+  people: readonly PersonRef[];
+  /** Date-item refs, in column order (one column per item). */
+  dateItemIds: readonly DateRef[];
+}
+
+/**
+ * The CSV text for one coordinate's cells: a leave pin and an off-day are written
+ * as their reserved selector labels (`LEAVE`/`OFF`), a worked request as its
+ * shift-type/group id. Several coexisting worked entries join with ` | ` so a
+ * whole matrix cell survives one round-trip; an empty coordinate is blank.
+ * Duplicate encodings are collapsed so the emitted cell is always one the parser
+ * accepts.
+ */
+function encodeShiftRequestCell(cells: readonly UiRequestCell[]): string {
+  const entries = cells.map((cell) =>
+    cell.kind === "leave"
+      ? RESERVED_SHIFT_TYPE.leave
+      : cell.kind === "off"
+        ? RESERVED_SHIFT_TYPE.off
+        : cell.shiftType,
+  );
+  return [...new Set(entries)].join(" | ");
+}
+
+/**
+ * Serialize the requests matrix to CSV in the shape {@link validateShiftRequestCsv}
+ * reads: a `person,<date-item ids…>` header row, then one row per person, one
+ * column per date item. Cells are read through the SAME day-state precedence the
+ * matrix renders (LEAVE > OFF > worked), so what is exported is what the user
+ * sees, and several coexisting worked requests at one coordinate join with ` | `.
+ * An export therefore re-imports through the Requests CSV modal with the same
+ * (person, date, selector) cells. Weights are not part of the matrix format — the
+ * import applies the caller's weight — so they are not written.
+ *
+ * Group-person and date-group/`H-n` columns are out of scope: the import parser
+ * only reads the individual-people × date-item matrix (see the artifact).
+ */
+export function serializeShiftRequestCsv(
+  cells: readonly UiRequestCell[],
+  { people, dateItemIds }: ShiftRequestCsvExportOptions,
+): string {
+  // Precedence-resolve, then index by exact (person, date) identity — the same
+  // strict-equality keys `cellPreferenceSet` uses (no string coercion).
+  const byPerson = new Map<PersonRef, Map<DateRef, UiRequestCell[]>>();
+  for (const cell of resolveDayStatePrecedence(cells)) {
+    let byDate = byPerson.get(cell.person);
+    if (!byDate) byPerson.set(cell.person, (byDate = new Map()));
+    const at = byDate.get(cell.date);
+    if (at) at.push(cell);
+    else byDate.set(cell.date, [cell]);
+  }
+
+  const rows = [["person", ...dateItemIds.map(String)].join(",")];
+  for (const person of people) {
+    const byDate = byPerson.get(person);
+    const row = [String(person)];
+    for (const dateId of dateItemIds) {
+      row.push(encodeShiftRequestCell(byDate?.get(dateId) ?? []));
+    }
+    rows.push(row.join(","));
+  }
+  return rows.join("\n");
 }
 
 function validatePeopleHistoryRows(

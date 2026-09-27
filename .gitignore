@@ -27,3 +27,6 @@ docker/.env
 # superpowers brainstorm scratch — a live server's pid, log, port and token,
 # plus throwaway HTML. Local runtime state, never shared.
 /.superpowers/
+
+# build stamp written by the Docker build (W2)
+/.app-version

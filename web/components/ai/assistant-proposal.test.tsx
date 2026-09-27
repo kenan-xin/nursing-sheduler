@@ -15,7 +15,7 @@
 import "fake-indexeddb/auto";
 import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
@@ -43,7 +43,10 @@ import {
 // Preview -- and a real transport would add a provider, a core and a network seam to a
 // question that has nothing to do with any of them. Every other suite in this file drives
 // the real repository, the real adapter and the real cards, untouched.
-vi.mock("@copilotkit/react-core/v2", () => ({
+vi.mock("@copilotkit/react-core/v2", async (importOriginal) => ({
+  // 2by.10: the real attachment queue; it is plain React state and needs no provider.
+  useAttachments: (await importOriginal<typeof import("@copilotkit/react-core/v2")>())
+    .useAttachments,
   // The view renders its `input` slot, which is where the live rendering docks its cards.
   CopilotChatView: ({ input: Input }: { input?: ComponentType }) => (
     <div data-testid="chat-view-stub">{Input ? <Input /> : null}</div>
@@ -259,6 +262,34 @@ describe("Apply", () => {
     expect(await screen.findByTestId("proposal-blocks")).toHaveTextContent("stopped");
   });
 
+  it("stays applyable after a follow-up message (0f0r)", async () => {
+    await showProposal(SHRINK);
+    render(<HostSurface />);
+    await screen.findByTestId("assistant-proposal");
+
+    // The user asks a question about the Preview: the send claims the next epoch and the
+    // turn runs and ends. Nothing in the schedule moved, so Apply stays open.
+    act(() => {
+      const epoch = assistantActions.nextTurnEpoch();
+      assistantActions.beginTurn("turn-2", epoch);
+      assistantActions.endTurn("completed", "turn-2");
+    });
+
+    await waitFor(async () => expect(await screen.findByTestId("proposal-apply")).toBeEnabled());
+  });
+
+  it("stays stopped after Stop, even when a follow-up message is sent (0f0r)", async () => {
+    await showProposal(SHRINK);
+    render(<HostSurface />);
+    await screen.findByTestId("assistant-proposal");
+
+    await assistantActions.interrupt({ trigger: "stop", threadId: "thread-1", scenarioId: null });
+    act(() => void assistantActions.nextTurnEpoch());
+
+    await waitFor(async () => expect(await screen.findByTestId("proposal-apply")).toBeDisabled());
+    expect(await screen.findByTestId("proposal-blocks")).toHaveTextContent("stopped");
+  });
+
   it("blocks on an unsaved editor draft and names it", async () => {
     await showProposal(SHRINK);
     harness.hot.getState().setDraft("shift-type-editor", { id: "Day" });
@@ -345,6 +376,25 @@ describe("Apply", () => {
     });
     expect(result.ok).toBe(false);
     expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-30");
+  });
+
+  it("leaves no state update to land once its consumer has unmounted", async () => {
+    // WHAT CHANGED (nursing-sheduler-aeu). Apply's trailing reread is fired unawaited, so
+    // it can resume after the surface that started it is gone -- and, in the CI job this
+    // answers, after the environment those roots lived in is gone too. React reads `window`
+    // on the way into an update, so that late landing was `ReferenceError: window is not
+    // defined`: every test green, the job red. The host now abandons its async tail once
+    // unmounted, which is what this pins.
+    const { result, unmount } = renderHook(() => useAssistantProposals());
+    await act(async () => {});
+    unmount();
+
+    vi.stubGlobal("window", undefined);
+    try {
+      await expect(result.current.refresh()).resolves.toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -514,7 +564,11 @@ describe("the Preview's decision reads as option-card choices", () => {
     const { rerender } = live();
     const card = await screen.findByTestId("assistant-proposal");
 
-    expect(card).toHaveFocus();
+    // Awaited: the card is focused by an effect, so it lands one flush AFTER
+    // `findByTestId` sees the node in the tree. Asserting it synchronously races that
+    // flush and flakes under parallel-file CPU load (qq0.28.1) — mirrors the Apply wait
+    // below, which already awaits the same kind of transition.
+    await waitFor(() => expect(card).toHaveFocus());
     expect(screen.getByTestId("proposal-revise")).not.toHaveFocus();
     expect(screen.getByTestId("proposal-cancel")).not.toHaveFocus();
 

@@ -29,7 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { REST_PRACTICE_WARNING } from "@/lib/ai/assistant/playbook";
+import { BALANCE_RULE_NOTE, REST_PRACTICE_WARNING } from "@/lib/ai/assistant/playbook";
 import { proposalScenario } from "@/lib/proposal/test-support";
 import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import { createEmptyScenarioUiState } from "@/lib/scenario";
@@ -55,6 +55,11 @@ interface CapturedTool {
 
 const captured: CapturedTool[] = [];
 
+// The Preview's controller holds the host navigation (a cover Apply opens Staff).
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => "/",
+}));
 vi.mock("@copilotkit/react-core/v2", () => ({
   useFrontendTool: (definition: CapturedTool) => {
     if (!captured.some((tool) => tool.name === definition.name)) captured.push(definition);
@@ -185,6 +190,68 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     await mount();
     const { MAX_ASSISTANT_OPERATIONS } = await import("@/lib/proposal");
     expect(proposalTool().description).toContain(`${MAX_ASSISTANT_OPERATIONS} operations`);
+  });
+
+  it("tells the model to pass on the balance-rule note when it prepares a fairness rule", async () => {
+    await mount(SCENARIOS.restRuleTooTight());
+    const answer = await proposalTool().handler(
+      {
+        summary: "Share the nights fairly.",
+        operations: [
+          {
+            type: "add_count_rule",
+            description: "Fair nights",
+            people: ["ana", "ben"],
+            shiftTypes: ["N"],
+            dates: ["ALL"],
+            expression: "|x - T|^2",
+            target: 1,
+            weight: "-5",
+          },
+        ],
+      },
+      {},
+    );
+    expect(String(answer)).toContain("preview of this change is now shown");
+    expect(String(answer)).toContain(BALANCE_RULE_NOTE);
+    expect(String(answer)).not.toContain(REST_PRACTICE_WARNING);
+  });
+
+  it("names the screen Apply will open, so the model never guesses one", async () => {
+    // bead 3ew: with no name to hand the model said "the Succession rules screen".
+    const { useModeStore } = await import("@/lib/mode/mode");
+    useModeStore.setState({ mode: "advanced", adoption: "ready" });
+    // The sidebar's own name (nav-config), not the Preview's scope label ("Supervision").
+    const ward = SCENARIOS.restRuleTooTight();
+    await mount({
+      ...ward,
+      cardsByKind: {
+        ...ward.cardsByKind,
+        coverings: [
+          {
+            uid: "preceptor",
+            description: "Ana supervises Ben",
+            preceptors: ["ana"],
+            preceptees: ["ben"],
+            shiftTypes: ["N"],
+            weight: -Infinity,
+          } as unknown as (typeof ward.cardsByKind.coverings)[number],
+        ],
+      },
+    });
+    const off = {
+      summary: "You asked to turn off the supervision rule.",
+      operations: [
+        { type: "set_rule_enabled", ruleKind: "coverings", ruleId: "preceptor", enabled: false },
+      ],
+    };
+    const advanced = String(await proposalTool().handler(off, {}));
+    expect(advanced).toContain('Apply opens the "Shift Type Coverings" screen');
+    expect(advanced).not.toContain("Supervision");
+    useModeStore.setState({ mode: "guided", adoption: "ready" });
+    expect(String(await proposalTool().handler(off, {}))).toContain(
+      'Apply opens the "Rules" screen',
+    );
   });
 
   it("prepares turning off a rest rule, with the rest-practice warning on the Preview and in the reply", async () => {

@@ -51,7 +51,10 @@ export function useChoiceTools(agentId: string, turnEpoch: number): void {
       description:
         "ALWAYS call this instead of writing a question with options in text. " +
         "Show the user clickable options whenever you ask them to pick, for example between " +
-        "repair options after a failed run, or 'did you mean Ana, Ben Tan or Chloe Lim?'. " +
+        "repair options after a failed run, or 'did you mean Ana, Ben Tan or Chloe Lim?' " +
+        "whenever a name the user gave fits more than one person: never pick one yourself. " +
+        "A yes/no offer is a pick too: instead of ending a reply on 'Would you like me to " +
+        "prepare that?', offer 'Prepare it' and 'Not now' here. " +
         "The card also lets them type another answer. Their answer arrives as their next " +
         "message. Keep the question in this tool rather than repeating it at length in text. " +
         "You may batch up to four related questions in one card with moreQuestions, for " +

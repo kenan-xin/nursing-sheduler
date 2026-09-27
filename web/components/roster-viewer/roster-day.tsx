@@ -218,6 +218,9 @@ export function RosterDay({
                     cell.short > 0 ? `Short ${cell.short}` : null,
                     cell.over > 0 ? `Over ${cell.over}` : null,
                     cell.unqualified > 0 ? `Unqualified ${cell.unqualified}` : null,
+                    ...cell.mix
+                      .filter((floor) => floor.short > 0)
+                      .map((floor) => `${floor.label} short ${floor.short}`),
                   ].filter((label): label is string => label !== null)
                 : [];
             return (

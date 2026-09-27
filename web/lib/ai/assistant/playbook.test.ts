@@ -13,12 +13,15 @@ import {
   PLAYBOOK_VERSION,
   REPAIRS,
   REPAIR_ORDER,
+  BALANCE_RULE_NOTE,
   REST_PRACTICE_WARNING,
   SAFETY_FLOOR,
   SETUP_INSTRUCTIONS,
   SETUP_STEPS,
   relaxesRestRule,
+  setsBalanceRule,
 } from "./playbook";
+import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 
 describe("setup steps", () => {
   it("follow the Home guided order, then review", () => {
@@ -61,7 +64,36 @@ describe("setup steps", () => {
   });
 });
 
+describe("after a fix is applied (bead 2vtv)", () => {
+  it("offers a run through the card and reports whether the schedule can now be built", () => {
+    const line = FEASIBILITY_INSTRUCTIONS.find((l) => l.includes("request_optimize_run"));
+    expect(line).toMatch(/After the user applies a fix/);
+    expect(line).toMatch(/never say a run has started/);
+    expect(line).toMatch(/get_optimize_result/);
+    expect(line).toMatch(/whether the schedule can now be built/);
+  });
+});
+
 describe("repair catalogue", () => {
+  it("adds a regular staff member only for a chronic shortage, as the manager's Apply", () => {
+    const add = REPAIRS.find((repair) => repair.id === "add_staff_member")!;
+    expect(add).toMatchObject({
+      confirmation: "manager",
+      enforcedBy: "apply",
+      opTypes: ["add_person"],
+    });
+    expect(REPAIR_ORDER.chronic).toEqual([
+      "align_overlapping_requirements",
+      "borrow_temporary_nurse",
+      "add_staff_member",
+      "run_one_short",
+      "split_long_shift",
+    ]);
+    for (const situation of ["capped", "acute", "unexplained"] as const) {
+      expect(REPAIR_ORDER[situation]).not.toContain("add_staff_member");
+    }
+  });
+
   it("has a version, unique ids, and every ranked id exists", () => {
     expect(PLAYBOOK_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
     const ids = REPAIRS.map((repair) => repair.id);
@@ -109,6 +141,15 @@ describe("repair catalogue", () => {
     }
   });
 
+  it("books a temporary cover, agreed in chat, and never a roster person", () => {
+    const borrow = REPAIRS.find((repair) => repair.id === "borrow_temporary_nurse")!;
+    expect(borrow.enforcedBy).toBe("chat");
+    expect(borrow.confirmation).toBe("lending_ward");
+    expect(borrow.opTypes).toEqual(["add_temporary_cover"]);
+    expect(borrow.title).toMatch(/temporary cover/i);
+    expect(borrow.guardrail).toMatch(/group/);
+  });
+
   it("states the safety floor in ward words", () => {
     const text = SAFETY_FLOOR.join(" ");
     // Rest rules are guidance: they may be softened or turned off, never deleted.
@@ -150,6 +191,28 @@ describe("rest rules are guidance, not law", () => {
         { type: "set_rule_enabled", ruleKind: "counts", ruleId: "r", enabled: false },
       ]),
     ).toBe(false);
+  });
+
+  it("spots a change that adds or sets a balance rule, and nothing else", () => {
+    // bead hnd: a fairness rule can slow the run or end it without proof it is the best.
+    const count = (expression: string, type = "add_count_rule") =>
+      ({
+        type,
+        ruleId: "r",
+        description: "Fair nights",
+        people: ["ALL"],
+        shiftTypes: ["N"],
+        dates: ["ALL"],
+        expression,
+        target: 1,
+        weight: "-5",
+      }) as unknown as AssistantCommandV1;
+    expect(setsBalanceRule([count("|x - T|^2")])).toBe(true);
+    expect(setsBalanceRule([count("|x - T|^2", "edit_count_rule")])).toBe(true);
+    for (const linear of ["x <= T", "x >= T", "x = T", "x < T", "x > T"])
+      expect(setsBalanceRule([count(linear)]), linear).toBe(false);
+    expect(BALANCE_RULE_NOTE).toMatch(/take longer/);
+    expect(BALANCE_RULE_NOTE).toMatch(/not proven the best/);
   });
 
   it("measures the 12-hour daily limit in working hours, not the clock span", () => {
@@ -207,6 +270,6 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS[0]).not.toMatch(/all at once, in plain words/);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-24.9");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-27.3");
   });
 });

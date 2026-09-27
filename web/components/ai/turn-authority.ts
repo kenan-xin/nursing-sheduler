@@ -37,6 +37,7 @@ import {
   type SendPlan,
   type SendRefusal,
 } from "@/lib/ai/assistant/send-gate";
+import { describeImages } from "@/lib/ai/assistant/messages";
 import { readWriterContext, type WriterContext } from "@/lib/ai/assistant/writer-context";
 
 /**
@@ -234,6 +235,17 @@ export interface ProviderHopGuardDeps {
    * which is the isolation the store cannot give.
    */
   context?: readonly Context[];
+  /**
+   * bead ypo: messages a stored summary covers. Dropped from every hop's input only;
+   * the agent's own list (the panel, persistence) keeps them.
+   */
+  omitMessageIds?: ReadonlySet<string>;
+  /**
+   * 2by.10: the image base64 each hop may carry; older images beyond it are named
+   * (`describeImages`), and 0 names all of them (a model that cannot read images).
+   * Unset leaves the messages as they are. The agent's own list keeps every image.
+   */
+  imageBudgetChars?: number;
 }
 
 /**
@@ -302,7 +314,23 @@ export function createProviderHopGuard(agent: object, deps: ProviderHopGuardDeps
 
         // The approved snapshot rides the run input. Replaced rather than merged: the
         // context this turn was authorised under is the whole context it may send.
-        const authorizedInput = deps.context ? { ...input, context: [...deps.context] } : input;
+        const omit = deps.omitMessageIds;
+        const kept =
+          omit && omit.size > 0
+            ? input.messages.filter((message) => !omit.has(message.id))
+            : input.messages;
+        const authorizedInput = {
+          ...input,
+          ...(deps.context ? { context: [...deps.context] } : {}),
+          ...(kept !== input.messages || deps.imageBudgetChars !== undefined
+            ? {
+                messages:
+                  deps.imageBudgetChars === undefined
+                    ? kept
+                    : describeImages(kept, deps.imageBudgetChars),
+              }
+            : {}),
+        };
         delegated = next.run(authorizedInput).subscribe(subscriber);
       })();
 

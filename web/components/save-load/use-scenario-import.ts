@@ -34,6 +34,8 @@ export interface PendingImportConfirm {
   title: string;
   /** Combined replacement + version dialog body. */
   description: string;
+  /** FR-SL-19 file/current version pair for the mono detail box, when the version case applies. */
+  detail?: string;
   onContinue: () => void;
   onCancel: () => void;
 }

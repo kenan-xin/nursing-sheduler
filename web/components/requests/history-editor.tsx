@@ -100,9 +100,12 @@ export function HistoryEditor({
                 type="button"
                 aria-pressed={currentValue === option.id}
                 data-testid={`history-editor-option-${option.id}`}
+                // A long shift description is cut to the dialog width; the
+                // tooltip keeps the full label readable.
+                title={option.label}
                 onClick={() => onSet(option.id)}
                 className={cn(
-                  "h-9 border px-3 text-meta font-semibold",
+                  "h-9 max-w-full truncate border px-3 text-meta font-semibold",
                   currentValue === option.id
                     ? "border-brand bg-brandtint text-brandink"
                     : "border-line bg-transparent text-ink2 hover:bg-panel",

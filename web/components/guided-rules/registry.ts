@@ -9,10 +9,9 @@ import type {
   CoveringCard,
   GuidedRuleConstraintKind,
   RequirementCard,
-  ScenarioUiState,
   SuccessionCard,
 } from "@/lib/scenario";
-import type { GuidedRuleMapper, GuidedRuleRow } from "./types";
+import type { GuidedRuleMapper, GuidedRuleRow, GuidedRulesScenario } from "./types";
 import {
   affinitiesMapper,
   countsMapper,
@@ -72,7 +71,7 @@ function projectCard<TCard extends { uid: string; disabled?: boolean }>(
  * by: Always on, then Staffing levels → Shift sequences → Hours & contracts →
  * Who works together → Supervision.
  */
-export function projectGuidedRules(state: ScenarioUiState): GuidedRuleRow[] {
+export function projectGuidedRules(state: GuidedRulesScenario): GuidedRuleRow[] {
   const rows: GuidedRuleRow[] = [...projectBuiltinRules(state)];
 
   for (const card of state.cardsByKind.requirements) {

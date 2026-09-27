@@ -30,7 +30,7 @@ import { createEmptyScenarioUiState } from "@/lib/scenario";
 import { SENTINEL_KEY, TEST_MODEL, createAssistantHarness } from "@/lib/ai/assistant/test-support";
 import type { WriterContext } from "@/lib/ai/assistant/writer-context";
 import { useAssistantSession, type AssistantSession } from "./use-assistant-session";
-import { AssistantActivityStatus } from "./assistant-conversation";
+import { AssistantActivityStatus, CompactionNotice } from "./assistant-conversation";
 
 globalThis.ResizeObserver ??= class {
   observe() {}
@@ -223,6 +223,20 @@ describe("AssistantActivityStatus", () => {
   it("labels a running tool in the user's terms", () => {
     render(<AssistantActivityStatus activity={{ kind: "tool", name: TOOL_NAME }} />);
     expect(screen.getByRole("status").textContent).toContain("Reading your schedule…");
+  });
+
+  it("says it is summarising while a long thread is compacted (ypo)", () => {
+    render(<AssistantActivityStatus activity={{ kind: "summarising" }} />);
+    expect(screen.getByRole("status").textContent).toContain("Summarising earlier messages…");
+  });
+
+  it("shows the compaction notice only while the thread carries a summary (ypo)", () => {
+    const { rerender } = render(<CompactionNotice show={false} />);
+    expect(screen.queryByTestId("assistant-compacted")).toBeNull();
+    rerender(<CompactionNotice show />);
+    expect(screen.getByTestId("assistant-compacted").textContent).toBe(
+      "Earlier messages were summarised to keep this conversation going.",
+    );
   });
 
   it("renders nothing when there is no activity", () => {

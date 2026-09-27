@@ -86,6 +86,10 @@ export interface NavItem {
   guidedStep?: number;
   /** DL12 §2: reachable only in Advanced mode (raw Constraints group, Export Layout). */
   advancedOnly?: boolean;
+  /** qq0.14.1: where an `advancedOnly` route lands when Guided can't show it —
+   *  its own context in Guided Rules, not Home. Required on every advancedOnly
+   *  item (nav-config.test.ts); a future Export Layout entry maps to Optimise. */
+  guidedDestination?: string;
 }
 
 export interface NavGroup {
@@ -165,6 +169,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: FaClipboardList,
         blurb: "Nurses per shift & who may work it",
         advancedOnly: true,
+        guidedDestination: NAV_ROUTE_PATHS.rules,
       },
       {
         id: "shift-type-successions",
@@ -173,6 +178,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: FaArrowRightLong,
         blurb: "Forbid / encourage shift sequences",
         advancedOnly: true,
+        guidedDestination: NAV_ROUTE_PATHS.rules,
       },
       {
         id: "shift-counts",
@@ -181,6 +187,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: FaCalculator,
         blurb: "Rest days, night caps, hours balance",
         advancedOnly: true,
+        guidedDestination: NAV_ROUTE_PATHS.rules,
       },
       {
         id: "shift-affinities",
@@ -189,6 +196,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: FaPeopleArrows,
         blurb: "Keep people together or apart",
         advancedOnly: true,
+        guidedDestination: NAV_ROUTE_PATHS.rules,
       },
       {
         id: "shift-type-coverings",
@@ -197,6 +205,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: FaUserShield,
         blurb: "Preceptor supervision constraint",
         advancedOnly: true,
+        guidedDestination: NAV_ROUTE_PATHS.rules,
       },
     ],
   },

@@ -43,6 +43,7 @@ export {
 
 export {
   computeCoverage,
+  exactShiftCoverageLabel,
   uniformShiftRequirement,
   type CoverageGrid,
   type DayCoverage,
@@ -55,13 +56,17 @@ export {
   computeRequirementGrid,
   deriveRequirementModel,
   evaluateRequirementCell,
+  exactShiftCover,
   exactShiftRequirement,
   requirementDayHealth,
   summariseRequirements,
   type RequirementCell,
+  type RequirementCover,
   type RequirementEquation,
   type RequirementGrid,
   type RequirementHealth,
+  type RequirementMixCell,
+  type RequirementMixFloor,
   type RequirementModel,
   type RequirementSummary,
   type RosterAssignmentIndex,
@@ -82,6 +87,8 @@ export {
 export { shiftContextLabel, shiftTimeRange } from "./shift-label";
 
 export { buildProvenanceView, type ProvenanceView } from "./provenance";
+
+export { coverBandRows, type CoverBandRow, type CoverBandStatus } from "./cover-band";
 
 export {
   localCalendarDate,

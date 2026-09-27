@@ -7,15 +7,23 @@
 // baseline (globals.css), and the shell scales with the content it frames — the
 // e2e geometry check pins the scaled figure (nursing-sheduler-yea). Its job is
 // orientation, not controls: the mobile menu, a small product tile, the current
-// route crumb, the scenario context, the persistence status, and the (secondary)
-// global undo/redo. Mode, accent, theme, New-schedule and version have
-// moved to their owning surfaces (SideNav / display settings / Save & Load).
+// route crumb, the scenario context, the persistence status, the (secondary)
+// global undo/redo, and the always-visible theme control. Mode, accent,
+// New-schedule and version live on their owning surfaces (SideNav / display
+// settings / Save & Load).
+//
+// THEME (prototype D2). The prototype keeps the theme toggle in the top bar as
+// well as the rail footer (Nurse Scheduling v2.dc.html:252), so it stays
+// reachable on a phone without opening the nav drawer — the rail is `display:none`
+// below the 920px `nav` breakpoint, which made the footer copy drawer-only. Same
+// shared control as the footer, so the two cannot drift.
 
 import { usePathname } from "next/navigation";
 import { useScenarioStore } from "@/lib/store";
 import { useAppMode } from "@/lib/mode/use-mode";
 import { getNavGroupsForMode, getNavItemForMode } from "./nav-config";
 import { AssistantLauncher } from "@/components/ai/assistant-launcher";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { UndoRedoControls } from "./undo-redo-controls";
 import { PersistenceStatus } from "./persistence-status";
 import { MobileNav } from "./mobile-nav";
@@ -109,6 +117,9 @@ export function TopBar() {
         {/* Renders nothing until AI is enabled and Ready (T04). */}
         <AssistantLauncher />
         <UndoRedoControls />
+        {/* Always mounted, at every width — the rail footer copy is behind the
+            mobile drawer (D2). Rightmost, as in the prototype (v2.dc.html:252). */}
+        <ThemeToggle />
       </div>
     </header>
   );

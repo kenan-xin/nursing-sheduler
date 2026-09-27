@@ -37,7 +37,8 @@ const NOT_REGISTRY_GOVERNED: Record<string, string> = {
   get_roster: "Roster read: reads the saved roster the Roster screen shows",
   find_swap_partners: "Roster read: host-checked swap suggestions, writes nothing",
   prepare_roster_swap: "Roster swap: shows a host card; the USER applies it on the Roster screen",
-  prepare_borrowed_cover: "Borrowed cover: shows a host card; the USER applies the staff change",
+  prepare_borrowed_cover:
+    "Temporary cover: shows a host card; the USER books it on the Staff screen",
 };
 
 describe("assistant tool names", () => {

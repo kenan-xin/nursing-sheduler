@@ -122,6 +122,8 @@ export {
   type RosterFileMigration,
   type RosterVersionPolicy,
   type RosterVersionVerdict,
+  upgradeStoredRosterDocument,
+  validateStoredRosterDocument,
 } from "./schema-version";
 
 export {
@@ -150,6 +152,16 @@ export {
   type RosterImportOutcome,
   type WorkingPromotionOutcome,
 } from "./promote";
+
+export {
+  applyCoverSheet,
+  buildCoverSheetPlan,
+  PROVENANCE_SHEET_NAME,
+  type CoverSheetCountCredit,
+  type CoverSheetLayout,
+  type CoverSheetPlan,
+  type CoverSheetRow,
+} from "./cover-sheet";
 
 export {
   buildEditedCellPatches,

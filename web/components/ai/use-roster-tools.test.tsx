@@ -7,11 +7,14 @@ import {
   useAssistantStore,
 } from "@/lib/ai/assistant/store";
 import { generateDateItems } from "@/lib/dates/date-id";
+import { INITIAL_OPTIMIZE_RUN_VIEW } from "@/lib/optimize/run-view";
+import { useHotStore } from "@/lib/store";
 import { useRosterChangeStore } from "@/lib/roster/change-request";
 import { fixtureSubmission } from "@/lib/roster/test-fixtures";
 import { PREFERENCE_TYPE, type CanonicalScenarioDocument } from "@/lib/scenario";
 import {
   ashaRosterDocument,
+  borrowDocument,
   borrowRosterDocument,
   overtimeContext,
   overtimeDocument,
@@ -87,7 +90,7 @@ beforeEach(() => {
     candidateSource: { jobId: "job-1", candidateVersion: 1 },
   };
   fixture.pointer = { jobId: "job-1", candidateVersion: 1, submissionOrdinal: 1 };
-  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-14" };
+  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-14", temporaryCover: [] };
   fixture.prepare.mockReset().mockResolvedValue({
     ok: true,
     proposal: {
@@ -162,6 +165,32 @@ describe("get_roster", () => {
     );
   });
 
+  it("counts the scenario's live temporary cover", async () => {
+    // Priya is off on 8 Oct, so the night is empty until Haseena covers it.
+    const document = borrowRosterDocument();
+    fixture.working = {
+      document: {
+        ...document,
+        solvedDays: [[{ kind: "off" }, { kind: "off" }, { kind: "off" }], document.solvedDays[1]],
+      },
+      revision: 1,
+      candidateSource: { jobId: "job-1", candidateVersion: 1 },
+    };
+    fixture.scenario = {
+      rangeStart: "2026-10-07",
+      rangeEnd: "2026-10-14",
+      temporaryCover: [
+        { name: "Haseena (Ward 3)", date: "2026-10-08", shiftType: "N", groups: ["Nights"] },
+      ],
+    };
+    const answer = (await tool("get_roster").handler({}, {})) as {
+      rulesBrokenNow: string[];
+      temporaryCover?: string[];
+    };
+    expect(answer.rulesBrokenNow).toEqual([]);
+    expect(answer.temporaryCover).toEqual(["N on 2026-10-08: +1 cover (Haseena (Ward 3))"]);
+  });
+
   it("reports the last change outcome", async () => {
     useRosterChangeStore.setState({ pending: null, last: "roster-changed" });
     const answer = (await tool("get_roster").handler({}, {})) as { lastChange?: string };
@@ -193,6 +222,64 @@ describe("find_swap_partners", () => {
         {},
       ),
     ).toMatch(/outside this roster/);
+  });
+
+  describe("with no saved roster, the answer follows what the last run did (bead pu5)", () => {
+    // pu5: the one no-roster answer said 'offer a run', which sent an MC cover on a run's
+    // roster to a new run with no word that it can change everyone's shifts.
+    const runEnded = (outcome: "optimal" | "infeasible", downloaded = false) =>
+      useHotStore.getState().setRunView({
+        ...INITIAL_OPTIMIZE_RUN_VIEW,
+        lifecycle: "completed",
+        jobId: "job-unsaved",
+        outcome,
+        download: {
+          status: downloaded ? "downloaded" : "idle",
+          artifactAvailable: downloaded,
+          filename: null,
+        },
+      });
+    const bothTools = async () => [
+      String(await tool("find_swap_partners").handler(PRIYA_NIGHTS, {})),
+      String(await tool("get_roster").handler({}, {})),
+    ];
+    beforeEach(() => {
+      fixture.working = null;
+      fixture.pointer = null;
+    });
+    afterEach(() => useHotStore.getState().setRunView(INITIAL_OPTIMIZE_RUN_VIEW));
+
+    it("offers a run when no run has made a roster", async () => {
+      for (const outcome of [null, "infeasible"] as const) {
+        if (outcome) runEnded(outcome);
+        for (const answer of await bothTools()) {
+          expect(answer).toMatch(/request_optimize_run/);
+          expect(answer).not.toMatch(/made a roster/);
+        }
+      }
+    });
+
+    it("after a run made a roster the app has no copy of, warns instead of offering a run", async () => {
+      runEnded("optimal");
+      for (const answer of await bothTools()) {
+        expect(answer).toMatch(/made a roster/);
+        expect(answer).toMatch(/can change everyone's shifts/);
+        expect(answer).not.toMatch(/request_optimize_run/);
+        // Nothing says the file reached the user, so the answer does not either.
+        expect(answer).not.toMatch(/XLSX/);
+      }
+    });
+
+    it("names the XLSX only when the download is known to have happened", async () => {
+      runEnded("optimal", true);
+      for (const answer of await bothTools()) expect(answer).toMatch(/XLSX/);
+    });
+
+    it("asks for Load first when a newer run waits, whatever the last run did", async () => {
+      runEnded("optimal");
+      fixture.pointer = { jobId: "job-2", candidateVersion: 1, submissionOrdinal: 2 };
+      for (const answer of await bothTools()) expect(answer).toMatch(/press Load/);
+    });
   });
 
   it("refuses to swap while a newer run waits", async () => {
@@ -241,7 +328,7 @@ const useBorrow = () => {
     revision: 1,
     candidateSource: { jobId: "job-1", candidateVersion: 1 },
   };
-  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09" };
+  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09", temporaryCover: [] };
 };
 const useShort = () => {
   fixture.working = {
@@ -257,10 +344,34 @@ const BORROW_MEI = {
   person: "SN-Priya",
   dates: ["2026-10-08"],
   reason: "sick_or_emergency",
-  name: "Mei",
-  source: "relief_pool",
+  name: "Mei (Ward 6)",
   groups: [],
+  lenderConfirmed: true,
 };
+/** Priya works the night on 8 and 9 Oct, and each night needs one Nights nurse. */
+const useTwoNights = () => {
+  const base = borrowDocument();
+  const night = base.preferences[1];
+  const document = {
+    ...base,
+    preferences: [...base.preferences, { ...night, date: "2026-10-09" }],
+  } as CanonicalScenarioDocument;
+  const roster = borrowRosterDocument();
+  fixture.working = {
+    document: {
+      ...roster,
+      submission: fixtureSubmission(document, []),
+      solvedDays: [
+        [{ kind: "off" }, { kind: "shift", shiftId: "N" }, { kind: "shift", shiftId: "N" }],
+        roster.solvedDays[1],
+      ],
+    },
+    revision: 1,
+    candidateSource: { jobId: "job-1", candidateVersion: 1 },
+  };
+  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09", temporaryCover: [] };
+};
+const NO_ASSUMPTIONS = { ok: true, proposal: { proposalId: "p-2", assumptions: [] } };
 
 describe("the escalation ladder in the tools", () => {
   it("says step 1 when a swap or cover exists", async () => {
@@ -395,7 +506,119 @@ describe("the escalation ladder in the tools", () => {
     expect(fixture.prepare).not.toHaveBeenCalled();
   });
 
-  it("prepares step 3 with shipped ops and the skill group the night needs", async () => {
+  it("borrows into the real group a multi-member qualifiedPeople selector names (bead olu)", async () => {
+    const document = {
+      ...borrowDocument(),
+      preferences: borrowDocument().preferences.map((preference) =>
+        preference.type === PREFERENCE_TYPE.shiftTypeRequirement
+          ? { ...preference, qualifiedPeople: ["Nights", "SN-Priya"] }
+          : preference,
+      ),
+    } as CanonicalScenarioDocument;
+    fixture.working = {
+      document: {
+        ...borrowRosterDocument(),
+        submission: fixtureSubmission(document, []),
+      },
+      revision: 1,
+      candidateSource: { jobId: "job-1", candidateVersion: 1 },
+    };
+    fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09", temporaryCover: [] };
+    const found = (await tool("find_swap_partners").handler(
+      { person: "SN-Priya", dates: ["2026-10-08"], reason: "sick_or_emergency" },
+      {},
+    )) as { step: number; temporary: { skillGroups: string[] } };
+    expect(found.step).toBe(3);
+    expect(found.temporary.skillGroups).toEqual(["Nights"]);
+    fixture.prepare.mockResolvedValueOnce(NO_ASSUMPTIONS);
+    const answer = await tool("prepare_borrowed_cover").handler(
+      { ...BORROW_MEI, summary: "Borrow." },
+      {},
+    );
+    expect(answer).not.toMatch(/no card was shown/);
+    expect(fixture.prepare.mock.calls[0][0].commands[0]).toEqual({
+      type: "add_temporary_cover",
+      name: "Mei (Ward 6)",
+      date: "2026-10-08",
+      shiftType: "N",
+      groups: ["Nights"],
+    });
+  });
+
+  it("lenderConfirmed false refuses and shows no card", async () => {
+    useBorrow();
+    const answer = await tool("prepare_borrowed_cover").handler(
+      { ...BORROW_MEI, lenderConfirmed: false, summary: "Borrow." },
+      {},
+    );
+    expect(answer).toMatch(/lending ward/);
+    expect(answer).toMatch(/no card was shown/i);
+    expect(fixture.prepare).not.toHaveBeenCalled();
+    expect(useAssistantStore.getState().activeRosterChange).toBeNull();
+  });
+
+  it("two needs emit two covers", async () => {
+    useTwoNights();
+    fixture.prepare.mockResolvedValueOnce(NO_ASSUMPTIONS);
+    await tool("prepare_borrowed_cover").handler(
+      {
+        ...BORROW_MEI,
+        dates: ["2026-10-08", "2026-10-09"],
+        groups: ["RN"],
+        summary: "Borrow.",
+      },
+      {},
+    );
+    const covers = fixture.prepare.mock.calls[0][0].commands.filter(
+      (c: { type: string }) => c.type === "add_temporary_cover",
+    );
+    expect(covers).toEqual([
+      {
+        type: "add_temporary_cover",
+        name: "Mei (Ward 6)",
+        date: "2026-10-08",
+        shiftType: "N",
+        groups: ["RN", "Nights"],
+      },
+      {
+        type: "add_temporary_cover",
+        name: "Mei (Ward 6)",
+        date: "2026-10-09",
+        shiftType: "N",
+        groups: ["RN", "Nights"],
+      },
+    ]);
+    expect(useAssistantStore.getState().activeRosterChange?.view.title).toBe(
+      "Mei (Ward 6): Night on 8 Oct, Night on 9 Oct",
+    );
+  });
+
+  it("no add_person, pins or roster cells", async () => {
+    useBorrow();
+    fixture.prepare.mockResolvedValueOnce(NO_ASSUMPTIONS);
+    await tool("prepare_borrowed_cover").handler({ ...BORROW_MEI, summary: "Borrow." }, {});
+    const commands: { type: string; personId?: unknown }[] =
+      fixture.prepare.mock.calls[0][0].commands;
+    expect(commands.map((c) => c.type)).toEqual(["add_temporary_cover", "add_leave"]);
+    expect(commands.some((c) => c.personId === "Mei (Ward 6)")).toBe(false);
+    expect(useAssistantStore.getState().activeRosterChange?.request).toBeNull();
+  });
+
+  it("return names request_optimize_run, and the card shows with no lending-ward assumption", async () => {
+    useBorrow();
+    fixture.prepare.mockResolvedValueOnce(NO_ASSUMPTIONS);
+    const answer = await tool("prepare_borrowed_cover").handler(
+      { ...BORROW_MEI, summary: "Borrow." },
+      {},
+    );
+    expect(answer).toMatch(/request_optimize_run/);
+    expect(answer).not.toMatch(/roster row appears/);
+    const card = useAssistantStore.getState().activeRosterChange;
+    expect(card?.view.agreement).toBeNull();
+    expect(card?.linked).toEqual({ proposalId: "p-2", assumptionIds: [], record: "staff" });
+  });
+
+  it("one need emits exactly one add_temporary_cover with the skill group and the asking nurse's request", async () => {
     useBorrow();
     const found = (await tool("find_swap_partners").handler(
       { person: "SN-Priya", dates: ["2026-10-08"], reason: "sick_or_emergency" },
@@ -403,64 +626,24 @@ describe("the escalation ladder in the tools", () => {
     )) as { step: number; temporary: { needs: unknown[]; skillGroups: string[] } };
     expect(found.step).toBe(3);
     expect(found.temporary.skillGroups).toEqual(["Nights"]);
-    fixture.prepare.mockResolvedValueOnce({
-      ok: true,
-      proposal: {
-        proposalId: "p-2",
-        assumptions: [
-          {
-            assumptionId: "b-1",
-            type: "borrowed_staff_arranged",
-            question:
-              "Has the lending ward or agency confirmed Mei for 8 Oct, qualified as Nights?",
-          },
-        ],
-      },
-    });
+    fixture.prepare.mockResolvedValueOnce(NO_ASSUMPTIONS);
     const answer = await tool("prepare_borrowed_cover").handler(
       { ...BORROW_MEI, summary: "Borrow from Ward 6." },
       {},
     );
     expect(fixture.prepare.mock.calls[0][0].commands).toEqual([
-      { type: "add_person", name: "Mei", groups: ["Nights"], temporary: true },
       {
-        type: "set_off_request",
-        personId: "Mei",
-        startDate: "2026-10-07",
-        endDate: "2026-10-07",
-        weight: "must",
-      },
-      {
-        type: "set_off_request",
-        personId: "Mei",
-        startDate: "2026-10-09",
-        endDate: "2026-10-09",
-        weight: "must",
-      },
-      {
-        type: "set_shift_request",
-        personId: "Mei",
+        type: "add_temporary_cover",
+        name: "Mei (Ward 6)",
+        date: "2026-10-08",
         shiftType: "N",
-        startDate: "2026-10-08",
-        endDate: "2026-10-08",
-        weight: "must",
+        groups: ["Nights"],
       },
       { type: "add_leave", personId: "SN-Priya", startDate: "2026-10-08", endDate: "2026-10-08" },
     ]);
-    expect(fixture.prepare.mock.calls[0][0].rationale).toBe("Borrow from Ward 6. (relief pool)");
+    expect(fixture.prepare.mock.calls[0][0].rationale).toBe("Borrow from Ward 6.");
     const card = useAssistantStore.getState().activeRosterChange;
-    expect(card?.view.agreement).toBe(
-      "Has the lending ward or agency confirmed Mei for 8 Oct, qualified as Nights?",
-    );
-    expect(card?.request?.cells).toEqual([
-      {
-        personIdx: 0,
-        dateIdx: 1,
-        before: { kind: "shift", shiftId: "N" },
-        after: { kind: "leave" },
-      },
-    ]);
-    expect(card?.view.title).toBe("Mei (relief pool): Night on 8 Oct");
+    expect(card?.view.title).toBe("Mei (Ward 6): Night on 8 Oct");
     expect(card?.linked?.record).toBe("staff");
     expect(answer).toMatch(/nurse manager or nurse clinician/);
   });
@@ -484,15 +667,7 @@ describe("the escalation ladder in the tools", () => {
 
   it("frees the asking nurse at the next run when step 3 covers a swap", async () => {
     useBorrow();
-    fixture.prepare.mockResolvedValueOnce({
-      ok: true,
-      proposal: {
-        proposalId: "p-2",
-        assumptions: [
-          { assumptionId: "b-1", type: "borrowed_staff_arranged", question: "Confirmed Mei?" },
-        ],
-      },
-    });
+    fixture.prepare.mockResolvedValueOnce(NO_ASSUMPTIONS);
     const answer = await tool("prepare_borrowed_cover").handler(
       { ...BORROW_MEI, reason: "swap", summary: "Borrow." },
       {},
@@ -569,7 +744,7 @@ describe("the escalation ladder in the tools", () => {
       revision: 1,
       candidateSource: { jobId: "job-1", candidateVersion: 1 },
     };
-    fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09" };
+    fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09", temporaryCover: [] };
     const found = (await tool("find_swap_partners").handler(
       { person: "SN-Priya", dates: ["2026-10-08"], reason: "sick_or_emergency" },
       {},
@@ -642,13 +817,31 @@ describe("the escalation ladder in the tools", () => {
     expect(useAssistantStore.getState().activeRosterChange).toBeNull();
   });
 
-  it("refuses a borrow card when the host asked no lending-ward question", async () => {
+  it("says there is nothing to cover when a temporary cover already fills the shift", async () => {
     useBorrow();
-    const answer = await tool("prepare_borrowed_cover").handler(
-      { ...BORROW_MEI, summary: "Borrow." },
+    fixture.scenario = {
+      rangeStart: "2026-10-07",
+      rangeEnd: "2026-10-09",
+      temporaryCover: [
+        { name: "Haseena (Ward 3)", date: "2026-10-08", shiftType: "N", groups: ["Nights"] },
+      ],
+    };
+    const args = { person: "SN-Priya", dates: ["2026-10-08"], reason: "swap" };
+    const found = (await tool("find_swap_partners").handler(args, {})) as {
+      step: number;
+      short?: unknown;
+      nothingToCover?: boolean;
+      guidance: string;
+    };
+    expect(found.step).toBe(4);
+    expect(found.nothingToCover).toBe(true);
+    expect(found.short).toBeUndefined();
+    expect(found.guidance).toMatch(/nothing to cover/i);
+    const answer = await tool("prepare_roster_swap").handler(
+      { ...args, noTemporaryNurse: true, summary: "Short." },
       {},
     );
-    expect(answer).toMatch(/did not ask the lending ward/);
+    expect(answer).toMatch(/nothing to cover/i);
     expect(useAssistantStore.getState().activeRosterChange).toBeNull();
   });
 

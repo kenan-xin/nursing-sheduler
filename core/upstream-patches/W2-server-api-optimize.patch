@@ -1,0 +1,291 @@
+# W2 patch for core/nurse_scheduling/server/api/optimize.py against genie 1bf4b85.
+# hunk: CP-SAT-only parse_solver before the allowlist, coded YAML bound, canonical strict input (P5)
+# hunk: opaque cursor replay window and _enrich_state_event (P6)
+# hunk: roster container /xlsx and /roster (P7)
+# hunk: basis form fields and verify_basis_claim (P8)
+# hunk: purpose form field (P9)
+
+diff --git a/core/nurse_scheduling/server/api/optimize.py b/core/nurse_scheduling/server/api/optimize.py
+index 5da18e2..9d90caf 100644
+--- a/core/nurse_scheduling/server/api/optimize.py
++++ b/core/nurse_scheduling/server/api/optimize.py
+@@ -23,15 +23,30 @@ from io import BytesIO
+ from uuid import UUID, uuid4
+ 
+ from fastapi import APIRouter, File, Form, Header, HTTPException, Request, Response, UploadFile
+-from fastapi.responses import StreamingResponse
++from fastapi.responses import JSONResponse, StreamingResponse
+ from ruamel.yaml.error import YAMLError
+ from starlette.concurrency import run_in_threadpool
+ 
+ from ...loader import SchedulingDataTooComplexError, measure_yaml_expansion
+ from ..auth import create_stream_token
++from ..basis_admission import BasisClaim, verify_basis_claim
+ from ..config import ServerSettings
++from ..event_cursor import EventCursorExpired, EventCursorInvalid, encode_cursor
+ from ..jobs.controller import JobController
+-from ..jobs.models import JobState
++from ..jobs.models import JobEvent, JobPurpose, JobState
++from ..roster_container import (
++    decode_workbook,
++    parse_roster_container,
++    roster_view,
++    workbook_download_name,
++    workbook_media_type,
++)
++from ..scheduling_input import (
++    CODE_SCHEDULING_DATA_TOO_COMPLEX,
++    MalformedInputError,
++    canonicalize_submission,
++    parse_solver,
++)
+ from ..solver_capabilities import solver_supports_finish_now
+ from ..solver_options import normalize_solver_option
+ from .schemas import JobResponse, OptimizationOptionsResponse
+@@ -133,10 +148,26 @@ async def create_job(
+     prettify: bool | None = Form(None),
+     timeout: int | None = Form(None),
+     solver: str | None = Form(None, description="Solver value returned by GET /optimize/options"),
++    purpose: str = Form(
++        JobPurpose.ORDINARY.value,
++        description="Job purpose deciding queue priority and admission (T09).",
++    ),
++    basis_id: str | None = Form(None, description="Claimed OptimizeBasisV2 identity (T08)."),
++    input_sha256: str | None = Form(None, description="Claimed SHA-256 of the exact submitted bytes."),
++    submission_contract_version: str | None = Form(None),
++    workspace_schema_version: str | None = Form(None),
++    serializer_version: str | None = Form(None),
++    anonymization_mode: str | None = Form(None, description="Which anonymization transform produced the bytes."),
++    expected_solver_semantic_version: str | None = Form(None),
++    expected_backend_capability_version: str | None = Form(None),
++    parent_basis_id: str | None = Form(None, description="Ordinary parent basis a candidate derives from."),
++    transform_digest: str | None = Form(None, description="Digest of the validated transform for a candidate."),
+ ):
+     """Validate an optimization request and enqueue a durable job."""
+     settings = _settings(request)
+     content, input_name = await _read_input(file, yaml_content, settings.max_yaml_bytes)
++    # v2: the product is CP-SAT only (X4); a 422 unsupported_solver even if OPTIMIZE_SOLVERS widens.
++    parse_solver(solver if solver is not None else settings.default_solver)
+     try:
+         normalized_solver = normalize_solver_option(solver if solver is not None else settings.default_solver)
+     except ValueError:
+@@ -161,10 +192,45 @@ async def create_job(
+         await run_in_threadpool(measure_yaml_expansion, content)
+     except SchedulingDataTooComplexError as error:
+         request.state.invalid_reason = "yaml_expansion_bomb"
+-        raise HTTPException(status_code=400, detail=str(error)) from error
++        return JSONResponse(
++            status_code=400,
++            content={"error": {"code": CODE_SCHEDULING_DATA_TOO_COMPLEX, "message": str(error)}},
++        )
+     except YAMLError:
+         # The optimization reports the parse error usefully, so the request is still accepted.
+         pass
++    # Validated BEFORE the job exists, like every other admission check, so an
++    # unrecognized purpose is a request error rather than a job silently admitted
++    # as ordinary and given capacity a diagnostic was never entitled to.
++    try:
++        job_purpose = JobPurpose(purpose.strip().lower())
++    except ValueError as error:
++        raise HTTPException(status_code=400, detail="Unsupported job purpose") from error
++    try:
++        canonical_bytes = await run_in_threadpool(canonicalize_submission, content)
++    except MalformedInputError as error:
++        raise HTTPException(status_code=400, detail=str(error)) from error
++    # Verified against `content` — the EXACT bytes the client sent — not against
++    # `canonical_bytes`. The client's evidence is bound to what it submitted; the
++    # canonical form is an internal execution detail it never digested.
++    verified_basis = verify_basis_claim(
++        BasisClaim(
++            basis_id=basis_id,
++            input_sha256=input_sha256,
++            submission_contract_version=submission_contract_version,
++            workspace_schema_version=workspace_schema_version,
++            serializer_version=serializer_version,
++            anonymization_mode=anonymization_mode,
++            expected_solver_semantic_version=expected_solver_semantic_version,
++            expected_backend_capability_version=expected_backend_capability_version,
++            parent_basis_id=parent_basis_id,
++            transform_digest=transform_digest,
++        ),
++        received_bytes=content,
++        resolved_solver=normalized_solver,
++        resolved_prettify=prettify if prettify is not None else settings.default_prettify,
++        resolved_timeout_seconds=timeout_seconds,
++    )
+     # Unlike the synchronous endpoints below, create_job must remain async for
+     # upload reading. Offload its synchronous controller/store write so it cannot
+     # block the ASGI event loop.
+@@ -175,7 +241,9 @@ async def create_job(
+         solver=normalized_solver,
+         prettify=prettify if prettify is not None else settings.default_prettify,
+         timeout_seconds=timeout_seconds,
+-        input_bytes=content,
++        input_bytes=canonical_bytes,
++        basis=verified_basis,
++        purpose=job_purpose,
+         auth_credential_id=request.state.auth_credential_id,
+     )
+     response.headers["Location"] = f"/optimize/{job.id}"
+@@ -197,45 +265,86 @@ def get_job(request: Request, job_id: str):
+     return JobResponse.from_job(job, _events_token(request, job_id))
+ 
+ 
++def _enrich_state_event(controller: JobController, job_id: str, event: JobEvent) -> JobEvent:
++    """Attach terminal and control flags to a state-changed event from current job state."""
++    if event.type != "job.state_changed":
++        return event
++    job = controller.get_job(job_id)
++    event_state = JobState(str(event.data["state"]))
++    supports_finish_now = solver_supports_finish_now(job.request.solver)
++    cancel_requested = bool(event.data.get("cancel_requested", False))
++    early_completion_requested = bool(event.data.get("early_completion_requested", False))
++    return replace(
++        event,
++        data={
++            **event.data,
++            "terminal": event_state.terminal,
++            "controls": {
++                "cancellable": not event_state.terminal and not cancel_requested,
++                "early_completion_available": event_state == JobState.RUNNING
++                and supports_finish_now
++                and not early_completion_requested,
++            },
++        },
++    )
++
++
+ @events_router.get("/optimize/{job_id}/events")
+ def stream_events(request: Request, job_id: str, last_event_id: str | None = Header(None)):
+-    """Replay and stream job events after the client's last event ID.
++    """Replay and stream job events after the client's last event cursor.
+ 
+-    Disconnecting closes only this response stream; the durable job continues.
++    The raw `Last-Event-ID` never reaches the streaming loop: the store validates
++    and snapshots the replay window first, returning normative pre-stream errors
++    for expired or invalid cursors. Every emitted `id` is the opaque job-bound
++    cursor. Disconnecting closes only this response stream; the durable job continues.
+     """
+     controller = _controller(request)
+     controller.get_job(job_id)
++    requested_cursor = last_event_id or None
++    try:
++        window = controller.prepare_event_replay(job_id, requested_cursor)
++    except EventCursorExpired as expired:
++        return JSONResponse(
++            status_code=409,
++            content={
++                "error": {
++                    "code": "event_cursor_expired",
++                    "message": "Requested event history is no longer retained.",
++                    "oldest_event_id": expired.oldest_public_cursor,
++                }
++            },
++        )
++    except EventCursorInvalid:
++        return JSONResponse(
++            status_code=400,
++            content={
++                "error": {
++                    "code": "invalid_event_cursor",
++                    "message": "Last-Event-ID is not valid for this job.",
++                }
++            },
++        )
++
++    def to_frame(event: JobEvent) -> str:
++        """Enrich, encode the public cursor, and serialize one event as an SSE frame."""
++        enriched = _enrich_state_event(controller, job_id, event)
++        if enriched.id is not None:
++            enriched = replace(enriched, id=encode_cursor(job_id, enriched.id))
++        return format_sse_event(enriched)
+ 
+     def generate():
+-        """Yield SSE frames, blocking up to the configured keepalive interval."""
++        """Yield the prepared replay batch, then live frames until the job is terminal."""
++        for event in window.initial_events:
++            yield to_frame(event)
+         for event in controller.stream_events(
+             job_id,
+-            after_id=last_event_id,
++            after_id=window.next_cursor,
+             keepalive_seconds=_settings(request).sse_keepalive_seconds,
+         ):
+             if event is None:
+                 yield ": keepalive\n\n"
+                 continue
+-            if event.type == "job.state_changed":
+-                job = controller.get_job(job_id)
+-                event_state = JobState(str(event.data["state"]))
+-                supports_finish_now = solver_supports_finish_now(job.request.solver)
+-                cancel_requested = bool(event.data.get("cancel_requested", False))
+-                early_completion_requested = bool(event.data.get("early_completion_requested", False))
+-                event = replace(
+-                    event,
+-                    data={
+-                        **event.data,
+-                        "terminal": event_state.terminal,
+-                        "controls": {
+-                            "cancellable": not event_state.terminal and not cancel_requested,
+-                            "early_completion_available": event_state == JobState.RUNNING
+-                            and supports_finish_now
+-                            and not early_completion_requested,
+-                        },
+-                    },
+-                )
+-            yield format_sse_event(event)
++            yield to_frame(event)
+ 
+     return StreamingResponse(
+         generate(),
+@@ -258,13 +367,45 @@ def finish_job_now(request: Request, job_id: str):
+     return JobResponse.from_job(job, _events_token(request, job_id))
+ 
+ 
++def _roster_container(request: Request, job_id: str) -> dict:
++    """Load and parse the job's single roster-container artifact.
++
++    Raises:
++        JobNotFoundError: If the job does not exist.
++        JobArtifactNotReadyError: If the job produced no artifact.
++        RosterContainerInvalidError: If the stored artifact is unreadable.
++    """
++    controller = _controller(request)
++    job = controller.get_job(job_id)
++    artifact = controller.get_artifact(job_id, job.artifact_name or "roster.json")
++    return parse_roster_container(artifact.content)
++
++
+ @router.get("/optimize/{job_id}/xlsx")
+ def download_xlsx(request: Request, job_id: str):
+-    """Download the XLSX artifact produced by a completed job."""
+-    job = _controller(request).get_job(job_id)
+-    artifact = _controller(request).get_artifact(job_id, job.artifact_name or "schedule.xlsx")
+-    headers = {"Content-Disposition": f'attachment; filename="{artifact.name}"'}
+-    return StreamingResponse(BytesIO(artifact.content), media_type=artifact.media_type, headers=headers)
++    """Stream the workbook embedded in a completed job's roster container.
++
++    The bytes are byte-identical to what the exporter produced; the filename and
++    media type are synthesized from the container rather than echoed verbatim.
++    """
++    container = _roster_container(request, job_id)
++    filename = workbook_download_name(container)
++    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
++    return StreamingResponse(
++        BytesIO(decode_workbook(container)),
++        media_type=workbook_media_type(container),
++        headers=headers,
++    )
++
++
++@router.get("/optimize/{job_id}/roster")
++def get_roster(request: Request, job_id: str):
++    """Return the structured roster container without the embedded workbook bytes.
++
++    Reached by URL convention: `JobResponse.links` intentionally carries no
++    roster field, so the public job schema stays unchanged.
++    """
++    return JSONResponse(content=roster_view(_roster_container(request, job_id)))
+ 
+ 
+ @router.delete("/optimize/{job_id}", status_code=204)

@@ -13,6 +13,10 @@
 
 import type { ScenarioUiState } from "@/lib/scenario";
 import { deleteEntity, renameEntity } from "@/lib/cascade";
+// Deep import: a date group's membership IS a set of dates, so editing it changes
+// which dates a requirement resolves to and can stale a per-date override. The
+// rule lives beside `requirementDateIsos`, its authority.
+import { dropUncoveredOverrides } from "@/lib/rules/shortfalls";
 import type { EditorGroup, EntityDescriptor, EntityId, EditorItemBase } from "./descriptor";
 import { sortMembersByItemOrder } from "./membership";
 import { getUniqueCopyLabel } from "./duplicate-label";
@@ -308,7 +312,12 @@ export function setGroupMembers<TItem extends EditorItemBase>(
   if (sameSequence(groups[idx].members, members)) return state;
   const next = groups.slice();
   next[idx] = { ...groups[idx], members };
-  return descriptor.writeState(state, { groups: next });
+  const written = descriptor.writeState(state, { groups: next });
+  // A date group's members are dates; removing one shrinks the dates every
+  // requirement naming the group resolves to, so a per-date override it no longer
+  // covers is dropped (an unchanged membership returned above, so this only runs
+  // when coverage may have changed). Other domains carry no such rule.
+  return descriptor.domain === "date" ? dropUncoveredOverrides(written) : written;
 }
 
 /**

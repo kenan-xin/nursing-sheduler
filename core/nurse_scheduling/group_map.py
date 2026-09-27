@@ -1,13 +1,12 @@
-"""Ordered shift-type group map and contracted-hours (marked shift count) validation.
+"""Contracted-hours (marked shift count) validation.
 
-This module owns the single ordered shift-type ``id -> [indices]`` map used by
-both scheduler context setup (`scheduler.py`) and scenario-root contracted-hours
-validation (`models.NurseSchedulingData.validate_model`). Sharing one builder
-guarantees a marked shift count's selectors expand through the identical
-semantics the solver later uses (DL09 D5/D13).
+The validator receives the ordered shift-type ``id -> indices`` map that
+`models._validate_and_compile_schedule` compiles for the solver, so a marked
+shift count's selectors expand through the identical semantics the solver later
+uses (DL09 D5/D13).
 
 Only `constants` is imported here so that `models` can import this module without
-a circular import (`utils` imports `models`).
+a circular import.
 """
 
 # This file is part of Nurse Scheduling Project, see <https://github.com/j3soon/nurse-scheduling>.
@@ -29,43 +28,7 @@ a circular import (`utils` imports `models`).
 
 import math
 
-from .constants import ALL, OFF, OFF_sid, LEAVE, LEAVE_sid
-
-
-def build_shift_type_index_map(items, groups) -> dict:
-    """Build the ordered shift-type ``id -> [indices]`` map.
-
-    Insertion order is items, then the ALL/OFF/LEAVE keywords, then groups in
-    definition order. Groups resolve through the map built so far, so a member
-    that is not yet defined — a forward reference, a cycle, or an unknown id —
-    fails immediately. The first ordered-map construction failure is therefore
-    authoritative: a forward reference is reported before any later cycle label
-    (DL09 D5).
-
-    Worked shift types map to their index; ``ALL`` expands to the worked shift
-    types only (excluding OFF/LEAVE); ``OFF``/``LEAVE`` map to their reserved
-    sentinels. The result matches what the solver builds in scheduler setup.
-    """
-    map_sid_s: dict = {}
-    n_shift_types = len(items)
-    for s in range(n_shift_types):
-        map_sid_s[items[s].id] = [s]
-    # ALL intentionally expands to worked shift types only (excludes both the
-    # OFF and LEAVE day-states).
-    map_sid_s[ALL] = list(range(n_shift_types))
-    map_sid_s[OFF] = [OFF_sid]
-    map_sid_s[LEAVE] = [LEAVE_sid]
-    for group in groups:
-        indices: set = set()
-        for member in group.members:
-            if member not in map_sid_s:
-                raise ValueError(
-                    f"Shift type group {group.id!r} references undefined shift type or group ID {member!r} "
-                    f"(forward reference, cycle, or unknown id)."
-                )
-            indices.update(map_sid_s[member])
-        map_sid_s[group.id] = sorted(indices)
-    return map_sid_s
+from .constants import ALL, OFF, OFF_sid
 
 
 def _validate_policy_encoding(preference) -> None:
@@ -155,10 +118,10 @@ def _validate_coverage(preference, map_sid_s: dict, group_ids: set) -> None:
         raise ValueError("A contracted-hours coefficient does not correspond to any selected shift type.")
 
 
-def validate_contracted_hours(shift_types_container, preferences) -> None:
+def validate_contracted_hours(map_sid_s, shift_type_groups, preferences) -> None:
     """Validate every marked (contracted-hours) shift count in a scenario.
 
-    Builds the shared ordered shift-type map once and validates each marked
+    Uses the compiled ordered shift-type map and validates each marked
     preference's policy encoding and explicit coefficient coverage. A no-op when
     no shift count carries the ``hoursContract`` marker, so unmarked scenarios
     keep their existing load behavior. The marker itself stays solver-inert; this
@@ -168,8 +131,7 @@ def validate_contracted_hours(shift_types_container, preferences) -> None:
     if not marked:
         return
 
-    map_sid_s = build_shift_type_index_map(shift_types_container.items, shift_types_container.groups)
-    group_ids = {group.id for group in shift_types_container.groups}
+    group_ids = {group.id for group in shift_type_groups}
     for preference in marked:
         _validate_policy_encoding(preference)
         _validate_coverage(preference, map_sid_s, group_ids)

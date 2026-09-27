@@ -129,7 +129,7 @@ describe("consistency with the shipped route registry", () => {
   });
 
   it("every Advanced-only route declares readiness.mode = advanced", () => {
-    // A direct visit to an `advancedOnly` route is redirected to Home by
+    // A direct visit to an `advancedOnly` route is redirected to Guided Rules by
     // `useRouteValidityGate` once the stored preference adopts. A row that
     // forgot this would verify Home's DOM while believing it was on the editor.
     for (const item of ALL_NAV_ITEMS) {

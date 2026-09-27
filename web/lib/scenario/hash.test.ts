@@ -104,6 +104,7 @@ describe("canonicalHash", () => {
       cardsByKind: { requirements: [], successions: [], counts: [], affinities: [], coverings: [] },
       reqData: [],
       exportLayout: { formatting: [], extraColumns: [], extraRows: [] },
+      temporaryCover: [],
     };
     const before = canonicalHash(toCanonicalScenarioDocument(state));
     // Change only a React key — an F2-only field the projection strips.

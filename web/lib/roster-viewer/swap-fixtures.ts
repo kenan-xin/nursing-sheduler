@@ -100,7 +100,7 @@ export function priyaContext(): RosterContext {
  */
 export function priyaRosterDocument(): RosterDocument {
   return {
-    schemaVersion: "roster-file/1",
+    schemaVersion: "roster-file/2",
     provenance: {
       solverStatus: "OPTIMAL",
       score: 0,
@@ -119,6 +119,7 @@ export function priyaRosterDocument(): RosterDocument {
       historyCols: 0,
       prettify: false,
     },
+    cover: { entries: [], decrements: [] },
     frozenXlsx: new Blob([]),
   };
 }

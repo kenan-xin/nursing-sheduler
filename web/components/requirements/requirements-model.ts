@@ -56,6 +56,20 @@ import {
 } from "@/lib/rules";
 import { requirementDateIsos } from "@/lib/rules/shortfalls";
 
+/**
+ * The scenario fields the Requirements screen reads: the people and shift-type
+ * domains it offers, and the date range/groups it scopes them by. A `Pick` rather
+ * than the whole `ScenarioUiState` because it is ALSO the shape of the screen's
+ * store subscription (`useRequirements`) and of the `computeCoverageWarnings`
+ * memo's dependency — narrowing all three to the SAME set is what makes an
+ * unrelated edit (a card of another kind, a staff name) neither re-render the
+ * editor nor recompute its coverage banner.
+ */
+export type RequirementScenarioInput = Pick<
+  ScenarioUiState,
+  "staff" | "staffGroups" | "shifts" | "shiftGroups" | "rangeStart" | "rangeEnd" | "dateGroups"
+>;
+
 /** Verbatim validation messages (spec 05 "Shift Type Requirements" validation table). */
 export const REQUIREMENT_MESSAGES = {
   shiftTypeEmpty: "At least one shift type must be selected",
@@ -169,7 +183,9 @@ const SYNTHETIC_ALL_PEOPLE = { id: RESERVED_SHIFT_TYPE.all, description: "Every 
  * group (spec 05 FR-PR-26 — the backend treats an omitted `qualifiedPeople` as
  * every person, and the editor lets that be authored explicitly as `[ALL]`).
  */
-export function buildQualifiedPeopleTransferOptions(state: ScenarioUiState): {
+export function buildQualifiedPeopleTransferOptions(
+  state: Pick<ScenarioUiState, "staff" | "staffGroups">,
+): {
   items: TransferOption<PersonRef>[];
   groups: TransferOption<PersonRef>[];
 } {
@@ -204,7 +220,7 @@ export interface ShiftTypeSingleSelectOption {
  */
 export function shiftGroupReachesDayState(
   groupId: ShiftTypeRef,
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shiftGroups">,
   seen: ReadonlySet<string> = new Set(),
 ): boolean {
   const key = String(groupId);
@@ -229,7 +245,9 @@ export function shiftGroupReachesDayState(
  * `disabled` (a covering/count-style structural constraint: selectors are
  * string-only).
  */
-export function buildRequirementShiftTypeOptions(state: ScenarioUiState): {
+export function buildRequirementShiftTypeOptions(
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
+): {
   items: ShiftTypeSingleSelectOption[];
   groups: ShiftTypeSingleSelectOption[];
 } {
@@ -256,7 +274,9 @@ export function buildRequirementShiftTypeOptions(state: ScenarioUiState): {
  * Structurally excludes OFF/LEAVE/ALL entirely — Requirements has no synthetic
  * keyword rows, unlike Counts (FR-PR-70, EDGE-PR-07).
  */
-export function buildRequirementShiftTypeDomain(state: ScenarioUiState): CoefficientDomain {
+export function buildRequirementShiftTypeDomain(
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
+): CoefficientDomain {
   const stringItemIds = state.shifts
     .filter((s): s is typeof s & { id: string } => typeof s.id === "string")
     .filter((s) => !isDayStateSelector(s.id))
@@ -286,14 +306,19 @@ export function parseRequirementInteger(raw: string): RequirementNumberValue {
 }
 
 /** The roster ISO dates a draft's Dates selection covers: the choices for an exception row. */
-export function requirementCoveredIsos(state: ScenarioUiState, dates: DateRef[]): string[] {
+export function requirementCoveredIsos(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd" | "dateGroups">,
+  dates: DateRef[],
+): string[] {
   return requirementDateIsos(state, { date: dates });
 }
 
 // --- Date-scope adapters (identical shape to the Counts/Coverings seeds) ---
 
 /** The auto-derived date-scope chips (ALL / WEEKDAY / WEEKEND / day-of-week). */
-export function buildDateScopeAutoScopes(state: ScenarioUiState): DateScopeOption[] {
+export function buildDateScopeAutoScopes(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd">,
+): DateScopeOption[] {
   const items = generateDateItems({ start: state.rangeStart, end: state.rangeEnd });
   return deriveDateGroups(items)
     .filter((g) => g.members.length > 0)
@@ -301,7 +326,9 @@ export function buildDateScopeAutoScopes(state: ScenarioUiState): DateScopeOptio
 }
 
 /** Authored date groups as date-scope chips. */
-export function buildDateScopeDateGroups(state: ScenarioUiState): DateScopeOption[] {
+export function buildDateScopeDateGroups(
+  state: Pick<ScenarioUiState, "dateGroups">,
+): DateScopeOption[] {
   return state.dateGroups.map((g) => ({ id: String(g.id), label: labelFor(g.id, g.description) }));
 }
 
@@ -321,7 +348,9 @@ export function expandDateRange(rangeStart: string, rangeEnd: string): string[] 
 }
 
 /** In-range concrete dates for the "specific dates" text field, chronological. */
-export function buildDateScopeDateItems(state: ScenarioUiState): DateScopeItem[] {
+export function buildDateScopeDateItems(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd">,
+): DateScopeItem[] {
   return expandDateRange(state.rangeStart, state.rangeEnd).map((iso) => ({
     id: iso,
     dayOfMonth: Number(iso.slice(8)),
@@ -498,6 +527,22 @@ export function skillMixFloor(card: Pick<RequirementCardBody, "skillMix">): numb
 }
 
 /**
+ * A draft's exception rows as the card stores them: an exception equal to the rule's own
+ * number says nothing, so it is dropped (as `preferredNumPeople` is), and what is left is
+ * ordered by date. Shared with the assistant's one-date arm, which writes these rows onto
+ * the card it already holds rather than rebuilding the whole card (bead e6n).
+ */
+export function savedOverrides(
+  rows: readonly OverrideRow[],
+  requiredNumPeople: RequirementNumberValue,
+): RequirementOverride[] {
+  return rows
+    .filter((row) => row.requiredNumPeople !== requiredNumPeople)
+    .map((row): RequirementOverride => [row.date, row.requiredNumPeople as number])
+    .sort(([a], [b]) => a.localeCompare(b));
+}
+
+/**
  * Assemble the saved requirement card from a validated draft (spec 05 FR-PR-20..26,
  * EDGE-PR-03). The weight/preferred pair is FORCED when preferred does not differ
  * from required — `preferredNumPeople` omitted and `weight` stamped `-1` — even if
@@ -530,10 +575,7 @@ export function buildRequirementCard(
       }),
     );
   // An exception equal to the rule's own number says nothing: drop it, as preferred is dropped.
-  const overrides = form.requiredNumPeopleOverrides
-    .filter((row) => row.requiredNumPeople !== form.requiredNumPeople)
-    .map((row): RequirementOverride => [row.date, row.requiredNumPeople as number])
-    .sort(([a], [b]) => a.localeCompare(b));
+  const overrides = savedOverrides(form.requiredNumPeopleOverrides, form.requiredNumPeople);
   if (overrides.length > 0) body.requiredNumPeopleOverrides = overrides;
   return { uid, ...body };
 }
@@ -661,7 +703,7 @@ interface CoverageClaim {
  */
 function requirementEquationGroups(
   shiftType: RequirementCard["shiftType"],
-  state: ScenarioUiState,
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
 ): Set<string>[] {
   const selectors = Array.isArray(shiftType) ? shiftType : [shiftType];
   return selectors.map((selector) => expandShiftTypeRefs(flattenShiftTypeRefs(selector), state));
@@ -727,7 +769,7 @@ function labelForDateSet(
  * genuinely do stack.
  */
 export function computeCoverageWarnings(
-  state: ScenarioUiState,
+  state: RequirementScenarioInput,
   requirements: readonly RequirementCard[],
 ): CoverageWarnings {
   const dateItems = generateDateItems({ start: state.rangeStart, end: state.rangeEnd });

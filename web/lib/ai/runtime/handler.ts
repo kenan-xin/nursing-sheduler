@@ -1,11 +1,10 @@
 import {
   AI_DETACH_REASON_INSTANCE_MISMATCH,
+  AI_ERROR_ATTACHMENT_REJECTED,
   AI_ERROR_CREDENTIALS_REQUIRED,
-  AI_ERROR_MESSAGE_PART_REJECTED,
   AI_ERROR_REQUEST_TOO_LARGE,
   AI_KEY_HEADER,
   COPILOT_RUNTIME_BASE_PATH,
-  MAX_RUN_REQUEST_BYTES,
   MAX_STOP_REQUEST_BYTES,
   RUNTIME_INSTANCE_HEADER,
 } from "./containment";
@@ -19,11 +18,13 @@ import {
   type RouteInfo,
 } from "./copilotkit-runtime";
 
+import { MAX_RUN_REQUEST_BYTES } from "@/lib/ai/assistant/attachment-rules";
+
+import { AttachmentRejectedError, prepareAttachments } from "./attachments";
 import { assertSingleWebInstance } from "./deployment";
 import { getRuntimeInstanceId } from "./instance-identity";
 import {
   createAgentsFactory,
-  hasOnlyTextParts,
   readAiCredentials,
   type OpenRouterAgentOptions,
 } from "./openrouter-agent";
@@ -138,42 +139,52 @@ function guardRoute(request: Request, route: RouteInfo, instanceId: string): Res
 }
 
 /**
- * t0c9: a body, read ONCE through a byte ceiling; for a run, its message parts checked.
+ * 2by.10 / t0c9: a body, read ONCE through a byte ceiling, then (for a run) checked.
  *
- * Over `limit` -- by declared length, or by bytes counted as they stream when none is
- * declared -- the request is refused before anything past the ceiling is buffered. A
- * run's message part other than text is refused with a 400 (the agent factory checks
- * again on the converted input). CopilotKit then gets a new Request over the same
- * bytes. A body that is not JSON is CopilotKit's to reject. Responses carry codes only.
+ * Over `limit` -- by its declared length, or by the bytes counted as they stream when
+ * no length is declared -- the request is refused before anything is buffered past the
+ * ceiling. A run's attachments must then pass `prepareAttachments` (type allowlist,
+ * size, count, content). CopilotKit then gets a new Request over the SAME bytes, so the
+ * body is held once rather than cloned. A body that is not JSON is CopilotKit's to
+ * reject. Responses carry the app code only, never content.
  */
 async function guardBody(
   request: Request,
   limit: number,
-  checkParts: boolean,
+  checkAttachments: boolean,
 ): Promise<Request | Response> {
   const tooLarge = () => jsonResponse({ error: AI_ERROR_REQUEST_TOO_LARGE }, 413);
   if (Number(request.headers.get("content-length")) > limit) return tooLarge();
   const bytes = await readCapped(request.body, limit);
   if (bytes === null) return tooLarge();
-  if (checkParts && !runHasOnlyTextParts(bytes)) {
-    return jsonResponse({ error: AI_ERROR_MESSAGE_PART_REJECTED }, 400);
-  }
-  return new Request(request.url, {
-    method: request.method,
-    headers: request.headers,
-    body: bytes,
-    signal: request.signal,
-  });
-}
+  if (!checkAttachments) return rebuilt(request, bytes);
 
-function runHasOnlyTextParts(bytes: Uint8Array): boolean {
   let messages: unknown;
   try {
     messages = (JSON.parse(new TextDecoder().decode(bytes)) as { messages?: unknown })?.messages;
   } catch {
     messages = null;
   }
-  return !Array.isArray(messages) || hasOnlyTextParts(messages);
+  if (Array.isArray(messages)) {
+    try {
+      prepareAttachments(messages);
+    } catch (error) {
+      if (error instanceof AttachmentRejectedError) {
+        return jsonResponse({ error: AI_ERROR_ATTACHMENT_REJECTED }, 400);
+      }
+      throw error;
+    }
+  }
+  return rebuilt(request, bytes);
+}
+
+function rebuilt(request: Request, bytes: Uint8Array<ArrayBuffer>): Request {
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: bytes,
+    signal: request.signal,
+  });
 }
 
 /** The whole stream, or null (and the stream cancelled) once it passes `limit` bytes. */

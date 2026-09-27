@@ -47,6 +47,21 @@ describe("prepareScenarioLoad — happy path", () => {
   });
 });
 
+describe("prepareScenarioLoad — persisted scenario repair", () => {
+  it("repairs a history slot an earlier build blanked, instead of reporting it unknown", () => {
+    const doc = toCanonicalScenarioDocument(makeValidUiState());
+    const alice = doc.people.items.find((person) => person.id === "Alice")!;
+    alice.history = ["N", "", "D"]; // the blank a pre-D7 shift-type delete left behind
+    const raw = stringify(doc, YAML_OPTIONS);
+
+    const result = prepareScenarioLoad(raw);
+
+    expect(result.issues).toEqual([]);
+    // History is right-anchored: only the suffix newer than the blank is usable.
+    expect(result.target!.staff.find((person) => person.id === "Alice")!.history).toEqual(["D"]);
+  });
+});
+
 describe("prepareScenarioLoad — blocking issues", () => {
   it("a YAML syntax error surfaces on the issue channel with no doc", async () => {
     const result = prepareScenarioLoad("preferences: [unterminated, flow");

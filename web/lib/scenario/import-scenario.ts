@@ -13,6 +13,7 @@ import { parse } from "yaml";
 // for a TYPE only, so it is cycle-free.
 import { generateDateItems, type DateRange } from "@/lib/dates/date-id";
 import { importScenarioSchema, type ImportScenarioParsed } from "./schemas/import";
+import { truncateHistoryAtBlankEntries } from "./person-history";
 import {
   PREFERENCE_TYPE,
   RESERVED_SHIFT_TYPE,
@@ -192,7 +193,6 @@ function normalizeImport(data: ImportScenarioParsed): ImportNormalizationTarget 
       apiVersion: data.apiVersion,
       appVersion: str(data.appVersion),
       description: str(data.description),
-      country: str(data.country),
     }),
     staff: data.people.items.map(normalizePerson),
     staffGroups: (data.people.groups ?? []).map(normalizePeopleGroup),
@@ -211,6 +211,9 @@ function normalizeImport(data: ImportScenarioParsed): ImportNormalizationTarget 
         []) as unknown as ImportNormalizationTarget["exportLayout"]["extraRows"],
     },
     cardsByKind,
+    // A strict canonical document never carries temporary covers: they are a
+    // display-only, web-applied credit (d582) that never reaches the solver model.
+    temporaryCover: [],
   };
   if (maxOneShiftPerDay !== undefined) target.maxOneShiftPerDay = maxOneShiftPerDay;
   return target;
@@ -243,8 +246,12 @@ function normalizePerson(p: ImportScenarioParsed["people"]["items"][number]): Ui
   return clean({
     id: p.id,
     description: str(p.description),
-    history: p.history ?? undefined,
-    temporary: p.temporary === true ? true : undefined,
+    // Repair the blank slots an earlier build's shift-type deletion left in a
+    // persisted scenario (FR-RI-09 before decision D7): history is right-anchored,
+    // so only the suffix newer than the newest blank is usable, and a blank is
+    // rejected by the producer and core. Repairing here — rather than reporting it
+    // — is what keeps such a file loadable.
+    history: p.history ? truncateHistoryAtBlankEntries(p.history) : undefined,
   });
 }
 function normalizePeopleGroup(g: {

@@ -1,0 +1,209 @@
+# W2 patch for core/nurse_scheduling/server/diagnostic.py against genie 1bf4b85.
+# hunk: api_path_mode config, _path builder, every request path, report field, CLI flag (P14)
+# hunk: cleanup treats GET/DELETE 404 as confirmed deletion (P14)
+
+diff --git a/core/nurse_scheduling/server/diagnostic.py b/core/nurse_scheduling/server/diagnostic.py
+index e09e200..ed7daff 100644
+--- a/core/nurse_scheduling/server/diagnostic.py
++++ b/core/nurse_scheduling/server/diagnostic.py
+@@ -77,6 +77,12 @@ DEFAULT_TARGET_URL = "https://api.nursescheduling.org"
+ DEFAULT_SCENARIO_PATH = (
+     Path(__file__).resolve().parents[2] / "tests/testcases/real/large-ward-with-87-people-2025-11.yaml"
+ )
++# The target may speak either the private backend contract (unprefixed `/info`,
++# `/optimize/**`) or the deployed same-origin BFF contract, whose Next routes live
++# under `/api`. One prefix drives EVERY diagnostic request through one path builder,
++# so no endpoint is special-cased and the two contracts never mix.
++API_PATH_PREFIXES = {"backend": "", "bff": "/api"}
++DEFAULT_API_PATH_MODE = "backend"
+ TERMINAL_STATES = {"completed", "cancelled", "failed"}
+ QUEUED_JOB_TARGET = 5
+ PHASE_NAMES = (
+@@ -138,9 +144,13 @@ class DiagnosticConfig:
+     submit_interval_seconds: float = 0.25
+     auth_token: str | None = None
+     """Shared token sent to a target that requires authentication."""
++    api_path_mode: str = DEFAULT_API_PATH_MODE
+ 
+     def __post_init__(self) -> None:
+         """Reject unsafe or unusable diagnostic settings."""
++        if self.api_path_mode not in API_PATH_PREFIXES:
++            allowed = ", ".join(sorted(API_PATH_PREFIXES))
++            raise ValueError(f"DIAGNOSTIC_API_PATH_MODE must be one of: {allowed}")
+         target = self.target_url.rstrip("/")
+         parsed = urlsplit(target)
+         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+@@ -179,6 +189,11 @@ class DiagnosticConfig:
+             raise ValueError("DIAGNOSTIC_AUTH_TOKEN requires DIAGNOSTIC_TARGET_URL to use HTTPS")
+         object.__setattr__(self, "auth_token", auth_token or None)
+ 
++    @property
++    def api_prefix(self) -> str:
++        """Return the normalized path prefix for the configured API-path mode."""
++        return API_PATH_PREFIXES[self.api_path_mode]
++
+     @classmethod
+     def from_env(
+         cls,
+@@ -186,10 +201,14 @@ class DiagnosticConfig:
+         target_url: str | None = None,
+         scenario_path: Path | None = None,
+         report_dir: Path | None = None,
++        api_path_mode: str | None = None,
+     ) -> "DiagnosticConfig":
+         """Load a diagnostic configuration from environment variables."""
+         return cls(
+             target_url=target_url or os.getenv("DIAGNOSTIC_TARGET_URL", DEFAULT_TARGET_URL),
++            api_path_mode=(api_path_mode or os.getenv("DIAGNOSTIC_API_PATH_MODE", DEFAULT_API_PATH_MODE))
++            .strip()
++            .lower(),
+             scenario_path=scenario_path or Path(os.getenv("DIAGNOSTIC_SCENARIO_PATH", str(DEFAULT_SCENARIO_PATH))),
+             report_dir=report_dir or Path(os.getenv("DIAGNOSTIC_REPORT_DIR", "/tmp/nurse-scheduling-diagnostics")),
+             info_samples=_positive_int_env("DIAGNOSTIC_INFO_SAMPLES", 100),
+@@ -270,6 +289,19 @@ class PublicDiagnostic:
+         self.phase_durations_seconds = {name: 0.0 for name in PHASE_NAMES}
+         self._state_lock = threading.Lock()
+ 
++    def _path(self, *segments: str) -> str:
++        """Build one target-relative request path under the configured API prefix.
++
++        Every diagnostic request routes through here, so the backend (`/info`,
++        `/optimize/**`) and BFF (`/api/info`, `/api/optimize/**`) contracts differ
++        only by the single configured prefix. Segments are joined defensively so a
++        stray leading/trailing slash can never produce a double slash or drop the
++        prefix.
++        """
++        parts = (self.config.api_prefix, *segments)
++        cleaned = [segment.strip("/") for segment in parts if segment.strip("/")]
++        return "/" + "/".join(cleaned)
++
+     def _new_client(self) -> httpx.Client:
+         """Create a client with an independent connection pool."""
+         return httpx.Client(
+@@ -444,7 +476,7 @@ class PublicDiagnostic:
+         try:
+             with self._new_client() as client:
+                 response = client.get(
+-                    "/info",
++                    self._path("info"),
+                     params={"diagnosticSample": uuid4().hex},
+                     headers={"Cache-Control": "no-cache", "Connection": "close"},
+                     timeout=timeout_seconds or self.config.request_timeout_seconds,
+@@ -630,7 +662,7 @@ class PublicDiagnostic:
+             scenario = self.config.scenario_path.read_bytes()
+             with self._new_client() as client:
+                 response = client.post(
+-                    "/optimize",
++                    self._path("optimize"),
+                     files={"file": (input_name, scenario, "application/yaml")},
+                     data={
+                         "solver": "ortools/cp-sat",
+@@ -679,7 +711,7 @@ class PublicDiagnostic:
+         try:
+             with self._new_client() as client:
+                 response = client.get(
+-                    f"/optimize/{job_id}",
++                    self._path("optimize", job_id),
+                     headers={"Connection": "close"},
+                     timeout=timeout_seconds or self.config.request_timeout_seconds,
+                 )
+@@ -785,7 +817,7 @@ class PublicDiagnostic:
+                 self._new_client() as client,
+                 client.stream(
+                     "GET",
+-                    f"/optimize/{job_id}/events",
++                    self._path("optimize", job_id, "events"),
+                     headers={"Accept": "text/event-stream", "Connection": "close"},
+                     timeout=timeout,
+                 ) as response,
+@@ -845,7 +877,7 @@ class PublicDiagnostic:
+         try:
+             with self._new_client() as client:
+                 response = client.post(
+-                    f"/optimize/{job_id}/{control}",
++                    self._path("optimize", job_id, control),
+                     headers={"Connection": "close"},
+                 )
+         except httpx.HTTPError as error:
+@@ -1045,7 +1077,7 @@ class PublicDiagnostic:
+         try:
+             with self._new_client() as client:
+                 response = client.post(
+-                    f"/optimize/{job.id}/cancel",
++                    self._path("optimize", job.id, "cancel"),
+                     timeout=self._cleanup_request_timeout(deadline),
+                 )
+         except httpx.HTTPError as error:
+@@ -1082,10 +1114,18 @@ class PublicDiagnostic:
+         try:
+             with self._new_client() as client:
+                 response = client.get(
+-                    f"/optimize/{job.id}",
++                    self._path("optimize", job.id),
+                     timeout=self._cleanup_request_timeout(deadline),
+                 )
+                 if response.status_code == 404:
++                    # A cleanup GET returning 404 is authoritative proof the job is
++                    # gone — retention/operator removal, or a committed DELETE whose
++                    # 204 was lost before it arrived (DELETE is not an atomic
++                    # request/ack exchange). Confirmed absence IS successful cleanup,
++                    # so mark it deleted and stop retrying instead of churning until
++                    # the deadline and reporting a false partial. This idempotence is
++                    # what keeps cleanup residue-free in both backend and BFF modes.
++                    job.deleted = True
+                     return
+                 body = self._json_object(response) if response.status_code == 200 else None
+                 if body is None:
+@@ -1097,7 +1137,7 @@ class PublicDiagnostic:
+                     return
+                 if state not in TERMINAL_STATES:
+                     control = client.post(
+-                        f"/optimize/{job.id}/cancel",
++                        self._path("optimize", job.id, "cancel"),
+                         timeout=self._cleanup_request_timeout(deadline),
+                     )
+                     if control.status_code not in {202, 404}:
+@@ -1107,10 +1147,13 @@ class PublicDiagnostic:
+                         )
+                     return
+                 deleted = client.delete(
+-                    f"/optimize/{job.id}",
++                    self._path("optimize", job.id),
+                     timeout=self._cleanup_request_timeout(deadline),
+                 )
+-                if deleted.status_code == 204:
++                # 204 is a successful delete; 404 means the job vanished between this
++                # GET and DELETE (retention/operator or a racing delete) — the same
++                # confirmed absence, so both count as done rather than residue.
++                if deleted.status_code in {204, 404}:
+                     job.deleted = True
+                     return
+                 self._record_request_error(
+@@ -1265,6 +1308,7 @@ class PublicDiagnostic:
+                 "runId": self.run_id,
+                 "startedAt": self.started_at.isoformat(),
+                 "finishedAt": finished_at.isoformat(),
++                "apiPathMode": self.config.api_path_mode,
+                 "expectedConcurrency": self.config.expected_concurrency,
+                 "parallelRequests": self.config.parallel_requests,
+                 "submittedJobs": len(self.jobs),
+@@ -1367,6 +1411,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+     parser.add_argument("--target-url", help="Public backend base URL")
+     parser.add_argument("--scenario", type=Path, help="YAML scenario to submit")
+     parser.add_argument("--report-dir", type=Path, help="Directory for structured JSON reports")
++    parser.add_argument(
++        "--api-path-mode",
++        choices=sorted(API_PATH_PREFIXES),
++        help="Target contract: 'backend' (private, unprefixed) or 'bff' (same-origin '/api/*').",
++    )
+     return parser.parse_args(argv)
+ 
+ 
+@@ -1378,6 +1427,7 @@ def _run(argv: list[str] | None = None) -> int:
+             target_url=args.target_url,
+             scenario_path=args.scenario,
+             report_dir=args.report_dir,
++            api_path_mode=args.api_path_mode,
+         )
+         config.report_dir.mkdir(parents=True, exist_ok=True)
+     except (OSError, ValueError) as error:

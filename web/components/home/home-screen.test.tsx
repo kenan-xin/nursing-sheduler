@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { HomeScreen } from "./home-screen";
 import { useModeStore } from "@/lib/mode/mode";
 import { useNavGuardStore } from "@/components/shell/nav-guard-store";
-import { scenarioCommands, useHotStore } from "@/lib/store";
+import { scenarioCommands, useHotStore, useScenarioStore } from "@/lib/store";
 import { INITIAL_OPTIMIZE_RUN_VIEW } from "@/lib/optimize/run-view";
 import { getRosterCaptureGate } from "@/lib/optimize/roster-capture-app";
 import { resetScenarioForTest } from "@/lib/store/test-authority";
@@ -128,6 +128,32 @@ describe("HomeScreen — typography and copy", () => {
     expect(classesOf(heading)).toContain("tracking-[-0.015em]");
     expect(classesOf(heading)).not.toContain("tracking-tight");
     expect(classesOf(heading)).not.toContain("font-extrabold");
+  });
+});
+
+describe("HomeScreen — the rules tile reads 'RULES ON' (prototype D3)", () => {
+  it("labels the fifth tile 'RULES ON' and shows the enabled count, not the total", async () => {
+    // One enabled card plus two disabled ones: the total (3) and the enabled
+    // count (built-in + 1 = 2) differ, so a total-based value cannot pass.
+    await act(async () => {
+      const cardsByKind = useScenarioStore.getState().cardsByKind;
+      await scenarioCommands.mutate({
+        cardsByKind: {
+          ...cardsByKind,
+          requirements: [
+            { uid: "c1", shiftType: "AM", requiredNumPeople: 1, weight: 1 },
+            { uid: "c2", shiftType: "AM", requiredNumPeople: 2, weight: 1, disabled: true },
+            { uid: "c3", shiftType: "PM", requiredNumPeople: 1, weight: 1, disabled: true },
+          ],
+        },
+      });
+    });
+    render(<HomeScreen />);
+
+    // The label is Title Case in the DOM; the strip uppercases it in CSS.
+    const tile = screen.getByText("Rules On").parentElement!;
+    expect(tile.firstElementChild?.textContent).toBe("2");
+    expect(screen.queryByText("Rules")).toBeNull();
   });
 });
 

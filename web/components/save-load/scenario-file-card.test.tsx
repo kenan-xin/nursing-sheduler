@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { prepareScenarioLoad, serializeScenario } from "@/lib/scenario";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import { loadScenario, pickScenario, useScenarioStore } from "@/lib/store";
@@ -142,5 +142,36 @@ describe("ScenarioFileCard — Copy clipboard failure (FR-SL-09)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("scenario-copy-button")).toHaveTextContent("Copied!"),
     );
+  });
+
+  it('holds "Copied!" for the prototype\'s 2s window, then reverts', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    vi.useFakeTimers();
+    try {
+      renderCard();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("scenario-copy-button"));
+      });
+      const button = screen.getByTestId("scenario-copy-button");
+      expect(button).toHaveTextContent("Copied!");
+
+      // Not yet reverted one tick under the 2s label window.
+      await act(async () => {
+        vi.advanceTimersByTime(1999);
+      });
+      expect(button).toHaveTextContent("Copied!");
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(button).toHaveTextContent("Copy");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

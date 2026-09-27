@@ -5,6 +5,7 @@ import {
   ashaContext,
   ashaDocument,
   ashaGrid,
+  borrowRosterDocument,
   overtimeContext,
   overtimeDocument,
   overtimeGrid,
@@ -51,6 +52,22 @@ describe("readRosterForAssistant", () => {
     expect(read).toMatchObject({ status: "ready", newerRunWaiting: true });
   });
 
+  it("upgrades a roster-file/1 roster stored by an older build (d582)", async () => {
+    const { cover: _dropped, ...v1 } = priyaRosterDocument();
+    const read = await readRosterForAssistant({
+      readWorking: async () =>
+        ({ ...row, document: { ...v1, schemaVersion: "roster-file/1" } }) as never,
+      readCurrentCandidate: async () => pointer,
+    });
+    expect(read).toMatchObject({
+      status: "ready",
+      document: { schemaVersion: "roster-file/2", cover: { entries: [], decrements: [] } },
+    });
+    if (read.status !== "ready") return;
+    // And it reads: the summary walks the (upgraded) document without throwing.
+    expect(summarizeRoster(read.document, {}, false)).toMatchObject({ status: "ready" });
+  });
+
   it("says unavailable, not empty, when storage cannot be read", async () => {
     const read = await readRosterForAssistant({
       readWorking: async () => {
@@ -73,6 +90,29 @@ describe("summarizeRoster", () => {
     expect(summary.dates).toEqual(["2026-10-08", "2026-10-09"]);
     expect(summary.rows).toEqual([{ person: "SN-Priya", days: ["N", "N"] }]);
     expect(summary.rulesBrokenNow).toEqual([]);
+  });
+
+  it("roster summary counts a temporary cover", () => {
+    // Priya is off on 8 Oct, so the night is empty; Haseena covers it.
+    const document = {
+      ...borrowRosterDocument(),
+      solvedDays: [
+        [{ kind: "off" as const }, { kind: "off" as const }, { kind: "off" as const }],
+        borrowRosterDocument().solvedDays[1],
+      ],
+    };
+    const bare = summarizeRoster(document, {}, false);
+    if (typeof bare === "string") throw new Error(bare);
+    expect(bare.rulesBrokenNow).toEqual(["8 Oct: “One night nurse” has 0 of the 1 needed."]);
+    expect(bare.temporaryCover).toBeUndefined();
+
+    const live = [
+      { name: "Haseena (Ward 3)", date: "2026-10-08", shiftType: "N", groups: ["Nights"] },
+    ];
+    const covered = summarizeRoster(document, {}, false, { decrements: [], live });
+    if (typeof covered === "string") throw new Error(covered);
+    expect(covered.rulesBrokenNow).toEqual([]);
+    expect(covered.temporaryCover).toEqual(["N on 2026-10-08: +1 cover (Haseena (Ward 3))"]);
   });
 
   it("refuses an unknown name and lists who is on the roster", () => {
@@ -160,20 +200,20 @@ describe("ladder views", () => {
     expect(view.agreement).toBe("SN-Kai agreed to come in on 8 Oct for overtime pay.");
   });
 
-  it("says where a temporary nurse comes from", () => {
+  it("books a temporary cover under the name the user gave", () => {
     const view = buildBorrowView(
-      "SN-Tan",
-      "relief_pool",
-      [],
-      [{ date: "8 Oct", shift: "N" }],
-      null,
+      "Haseena (Ward 3)",
+      ["RN"],
+      [{ date: "8 Oct", shift: "Night" }],
       "Short on nights.",
     );
-    expect(view.title).toBe("SN-Tan (relief pool): N on 8 Oct");
+    expect(view.heading).toBe("Book a temporary cover?");
+    expect(view.title).toBe("Haseena (Ward 3): Night on 8 Oct");
     expect(view.notes[0]).toBe(
-      "Adds SN-Tan (relief pool) as temporary staff, off on every other date.",
+      "Adds temporary cover Haseena (Ward 3): Night on 8 Oct. The ward needs one fewer nurse on that shift, and the cover counts as RN.",
     );
     expect(view.notes).toContain("Please let your nurse manager or nurse clinician know.");
+    expect(view.agreement).toBeNull();
   });
 
   it("asks for the nurse manager's sign-off to run one short", () => {

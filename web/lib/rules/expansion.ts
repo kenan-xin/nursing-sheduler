@@ -21,7 +21,7 @@ import {
   type ScenarioUiState,
   type ShiftTypeRef,
   type UiDateGroup,
-} from "@/lib/scenario";
+} from "@/lib/scenario/types";
 
 /** A derived/authored date group reduced to the fields expansion needs. */
 export interface DerivedGroupLike {

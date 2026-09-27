@@ -7,7 +7,17 @@
 // set IS the constraint set, and a row never holds a value the source record
 // does not.
 
-import type { GuidedRuleConstraintKind } from "@/lib/scenario";
+import type { GuidedRuleConstraintKind, ScenarioUiState } from "@/lib/scenario";
+
+/**
+ * The scenario fields the Rules screen actually reads: the five constraint
+ * collections the registry projects a row from, and the built-in rule's own
+ * label. A `Pick` rather than the whole `ScenarioUiState` because it is ALSO the
+ * shape of the screen's store subscription (`useGuidedRules`) — narrowing both to
+ * the same set is what keeps an edit to any OTHER slice (a staff name, a shift
+ * colour) from re-rendering, and reprojecting, this screen.
+ */
+export type GuidedRulesScenario = Pick<ScenarioUiState, "cardsByKind" | "maxOneShiftPerDay">;
 
 /** One numeric field a mapper declares eligible for the Guided inline Adjust
  *  control, with its current value and validator. People/shift-type/date fields

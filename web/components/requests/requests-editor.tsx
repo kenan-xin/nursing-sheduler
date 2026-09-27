@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import { toast } from "sonner";
+import { useShallow } from "zustand/react/shallow";
 import { FaCircleInfo, FaLayerGroup, FaTableCells } from "@/components/icons";
 // Not re-exported from the icon barrel (icons.tsx is owned by a concurrently
 // edited ticket) — imported directly per the project's react-icons/fa6
@@ -30,9 +31,19 @@ import { HistoryEditor, type HistoryOption } from "./history-editor";
 import { RequestsCsvModal } from "./requests-csv-modal";
 import { CurrentRequestsTable, type CurrentRequestRow } from "./current-requests-table";
 import { CurrentHistoryTable, type CurrentHistoryPerson } from "./current-history-table";
-import { cellPreferenceSet, resolveDayStatePrecedence, weightDisplayLabel } from "./requests-model";
-import { validatePeopleHistoryCsv, validateShiftRequestCsv } from "./requests-csv";
-import { useRequests } from "./use-requests";
+import {
+  cellPreferenceSet,
+  historyValueAt,
+  resolveDayStatePrecedence,
+  weightDisplayLabel,
+} from "./requests-model";
+import {
+  serializeShiftRequestCsv,
+  validatePeopleHistoryCsv,
+  validateShiftRequestCsv,
+} from "./requests-csv";
+import { downloadBlob } from "@/lib/utils/download";
+import { useRequests, pickRequestsScenario } from "./use-requests";
 
 type ConfirmState = { text: string; onConfirm: () => void } | null;
 type CsvKind = "requests" | "history" | null;
@@ -55,7 +66,9 @@ const RESERVED_TARGET_LABELS: Record<string, string> = {
 };
 
 export function RequestsEditor() {
-  const state = useScenarioStore((s) => s);
+  // The same read shape the controller subscribes to (`use-requests`), so this
+  // screen no longer re-renders on edits to slices it does not read at all.
+  const state = useScenarioStore(useShallow(pickRequestsScenario));
   const [mode, setMode] = useState<"normal" | "quick">("normal");
   const [quickSelectedIds, setQuickSelectedIds] = useState<string[]>([]);
   const [quickWeightText, setQuickWeightText] = useState("0");
@@ -126,7 +139,12 @@ export function RequestsEditor() {
 
   const historyOptions: HistoryOption[] = useMemo(
     () => [
-      ...state.shifts.map((s) => ({ id: String(s.id), label: String(s.id) })),
+      // `id — description` (bare id when undescribed), matching the entity
+      // editor's member labels and this file's own paint/cell target names.
+      ...state.shifts.map((s) => ({
+        id: String(s.id),
+        label: s.description ? `${s.id} — ${s.description}` : String(s.id),
+      })),
       { id: "OFF", label: "OFF" },
       { id: "LEAVE", label: "LEAVE" },
     ],
@@ -276,6 +294,18 @@ export function RequestsEditor() {
     );
   }
 
+  // FR-SR-36 inverse: serialize the current matrix in the exact matrix shape the
+  // Requests CSV import reads, so an export → edit → re-import keeps the same
+  // (person, date, selector) cells. Individual people × date items only — the
+  // group rows and date-group/`H-n` columns have no CSV representation.
+  function handleDownloadCsv() {
+    const csv = serializeShiftRequestCsv(state.reqData, {
+      people: state.staff.map((p) => p.id),
+      dateItemIds: columns.filter((c) => c.kind === "date-item").map((c) => c.ref),
+    });
+    downloadBlob(new Blob([csv], { type: "text/csv" }), "shift-requests.csv");
+  }
+
   // --- Clear data ------------------------------------------------------------
   function askConfirm(text: string, onConfirm: () => void) {
     setConfirm({ text, onConfirm });
@@ -377,9 +407,7 @@ export function RequestsEditor() {
     : undefined;
   const activeHistoryValue =
     historyEditor && activeHistoryPerson
-      ? ((activeHistoryPerson.history ?? [])[
-          historyEditor.historyIndex - (historyCount - (activeHistoryPerson.history?.length ?? 0))
-        ] ?? null)
+      ? historyValueAt(activeHistoryPerson, historyEditor.historyIndex, historyCount)
       : null;
 
   if (!hasRequiredData) {
@@ -470,6 +498,7 @@ export function RequestsEditor() {
         onSetMode={setMode}
         onOpenRequestsCsv={() => setCsvOpen("requests")}
         onOpenHistoryCsv={() => setCsvOpen("history")}
+        onDownloadCsv={handleDownloadCsv}
         clearOpen={clearOpen}
         onToggleClear={() => setClearOpen((v) => !v)}
         requestsCsvDisabled={requestsCsvDisabled}

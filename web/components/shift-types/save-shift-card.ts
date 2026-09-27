@@ -11,6 +11,7 @@ import {
   isAllDates,
   isAllScope,
   requirementsForShiftType,
+  type RequirementCoverageState,
   type RequirementMatch,
 } from "@/lib/rules";
 import {
@@ -34,6 +35,18 @@ import {
   type RequirementPatch,
 } from "@/components/requirements/requirement-patch";
 import { shiftTypesDescriptor } from "./shift-types-descriptor";
+
+/**
+ * The scenario fields the Shifts screen reads — and, because the staffing summary
+ * resolves requirement coverage against the SAME dates, everything this module's
+ * card-state helpers read: the item/group lists, the dates `dateContext` scopes
+ * against, and the requirement cards (`RequirementCoverageState`). Narrower than
+ * `ScenarioUiState` on purpose: it is the shape of the grid's store subscription,
+ * so a slice this screen does not read can never re-render it. A full
+ * `ScenarioUiState` still satisfies it (the durable write paths pass one).
+ */
+export type ShiftTypesScenario = RequirementCoverageState &
+  Pick<ScenarioUiState, "rangeStart" | "rangeEnd" | "dateGroups">;
 
 export interface ShiftCardFields {
   code: string;
@@ -167,14 +180,14 @@ export type StaffingCardState =
       explanation: string;
     };
 
-function dateContext(state: ScenarioUiState) {
+function dateContext(state: ShiftTypesScenario) {
   return {
     range: { start: state.rangeStart, end: state.rangeEnd },
     dateGroups: state.dateGroups,
   };
 }
 
-function isEditableBaseline(state: ScenarioUiState, match: RequirementMatch): boolean {
+function isEditableBaseline(state: ShiftTypesScenario, match: RequirementMatch): boolean {
   return (
     match.kind === "DIRECT-SIMPLE" &&
     isAllScope(match.card.qualifiedPeople) &&
@@ -192,7 +205,7 @@ function pluralNurses(value: number): string {
   return `${value} nurse${value === 1 ? "" : "s"}`;
 }
 
-function describeRule(state: ScenarioUiState, match: RequirementMatch): string {
+function describeRule(state: ShiftTypesScenario, match: RequirementMatch): string {
   const card = match.card;
   const required = pluralNurses(card.requiredNumPeople);
   const directRefs = flattenShiftTypeRefs(card.shiftType).map(String);
@@ -213,7 +226,7 @@ function describeRule(state: ScenarioUiState, match: RequirementMatch): string {
 }
 
 function contextChips(
-  state: ScenarioUiState,
+  state: ShiftTypesScenario,
   baseline: RequirementCard,
   matches: RequirementMatch[],
 ): string[] {
@@ -259,7 +272,7 @@ function contextChips(
  * Disabled cards have already been excluded by `requirementsForShiftType`.
  */
 export function resolveStaffingCardState(
-  state: ScenarioUiState,
+  state: ShiftTypesScenario,
   id: ShiftTypeId,
 ): StaffingCardState {
   const stringId = String(id);

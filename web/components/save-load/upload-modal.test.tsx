@@ -46,6 +46,32 @@ describe("UploadModal — extension validation (FR-SL-10 / V1)", () => {
   });
 });
 
+describe("UploadModal — an unreadable file is reported, not swallowed", () => {
+  let alertSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    alertSpy.mockRestore();
+    cleanup();
+  });
+
+  it("surfaces a read failure and hands nothing on", async () => {
+    const { onFile } = renderModal();
+    const file = new File(["content"], "scenario.yaml", { type: "text/yaml" });
+    Object.defineProperty(file, "text", { value: () => Promise.reject(new Error("unreadable")) });
+
+    await userEvent.upload(screen.getByTestId("upload-file-input"), file);
+
+    await waitFor(() =>
+      expect(alertSpy).toHaveBeenCalledWith("Could not read the file. Please try again."),
+    );
+    expect(onFile).not.toHaveBeenCalled();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The shared-overlay half (F3). This modal is a dumb file picker: it delegates
 // exactly once per action and never decides anything about the load. The

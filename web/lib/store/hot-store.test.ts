@@ -20,18 +20,18 @@ async function commitCount(harness: Awaited<ReturnType<typeof installTestAuthori
 }
 
 describe("hot store never triggers a durable write", () => {
-  it("100 SSE progress updates cause 0 durable scenario commits", async () => {
+  it("100 run-state updates cause 0 durable scenario commits", async () => {
     const harness = await installTestAuthority();
     const baseline = await commitCount(harness);
     const hot = createHotStore();
 
     for (let i = 0; i < 100; i++) {
-      hot.getState().pushProgress({ phase: "running", progress: i / 100 });
+      hot.getState().setRun({ phase: "running", progress: i / 100 });
     }
     hot.getState().setRun({ phase: "running", progress: 0.99 });
     await flush();
 
-    expect(hot.getState().progress).toHaveLength(100);
+    expect(hot.getState().run.progress).toBe(0.99);
     expect(await commitCount(harness)).toBe(baseline);
   });
 
@@ -49,7 +49,7 @@ describe("hot store never triggers a durable write", () => {
     expect(hot.getState().drafts).toEqual({});
   });
 
-  it("resetEphemeral clears run/runView/progress/ui/drafts/paint but keeps hydrationStatus", () => {
+  it("resetEphemeral clears run/runView/ui/drafts/paint but keeps hydrationStatus", () => {
     const hot = createHotStore();
     hot.getState().setHydrationStatus("ready");
     hot.getState().setRun({ phase: "running", jobId: "job-1" });
@@ -60,7 +60,6 @@ describe("hot store never triggers a durable write", () => {
         peopleCount: 3,
       }),
     );
-    hot.getState().pushProgress({ progress: 0.5 });
     hot.getState().setUi({ selectedPerson: "p1" });
     hot.getState().setDraft("d", { x: 1 });
     hot.getState().beginPaint();
@@ -70,7 +69,6 @@ describe("hot store never triggers a durable write", () => {
 
     expect(hot.getState().run.phase).toBe("idle");
     expect(hot.getState().runView).toEqual(INITIAL_OPTIMIZE_RUN_VIEW);
-    expect(hot.getState().progress).toEqual([]);
     expect(hot.getState().ui).toEqual({});
     expect(hot.getState().drafts).toEqual({});
     expect(hot.getState().paint).toBeNull();

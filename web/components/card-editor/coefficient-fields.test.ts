@@ -4,6 +4,7 @@ import {
   coefficientIntegerErrorMessage,
   coefficientOverlapMessage,
   coefficientValueFor,
+  derivedCoefficientHintText,
   eligibleCoefficientIds,
   parseCoefficientInput,
   sortIdsByEntryOrder,
@@ -220,5 +221,102 @@ describe("M1 — typed member identity (number vs string) in expansion/coverage/
       shared,
     );
     expect(result.overlapError).toBe(coefficientOverlapMessage("G", "H", 1));
+  });
+});
+
+describe("F14 — nested group expansion is transitive with a cycle guard", () => {
+  // WORK nests inside ALL_WORK: a group member may itself be a group id, so
+  // expansion must recurse (not just one level) or a parent group never covers
+  // its grandchildren.
+  const nested: CoefficientDomain = {
+    items: [{ id: "D" }, { id: "N" }, { id: "E" }],
+    groups: [
+      { id: "WORK", members: ["D", "N"] },
+      { id: "ALL_WORK", members: ["WORK", "E"] },
+    ],
+  };
+
+  it("makes leaf items and a fully-covered child group eligible when the parent is selected", () => {
+    expect(eligibleCoefficientIds(["ALL_WORK"], nested)).toEqual([
+      "D",
+      "N",
+      "E",
+      "WORK",
+      "ALL_WORK",
+    ]);
+  });
+
+  it("expands identically when the parent group is declared before its child (reordered)", () => {
+    const parentFirst: CoefficientDomain = {
+      items: nested.items,
+      groups: [
+        { id: "ALL_WORK", members: ["WORK", "E"] },
+        { id: "WORK", members: ["D", "N"] },
+      ],
+    };
+    expect(eligibleCoefficientIds(["ALL_WORK"], parentFirst)).toEqual([
+      "D",
+      "N",
+      "E",
+      "ALL_WORK",
+      "WORK",
+    ]);
+  });
+
+  it("detects the overlap a nested parent shares with one of its leaves", () => {
+    const result = validateCoefficientPairs(
+      ["D", "ALL_WORK"],
+      [
+        ["D", 2],
+        ["ALL_WORK", 3],
+      ],
+      nested,
+    );
+    expect(result.errorsById).toEqual({});
+    expect(result.overlapError).toBe(coefficientOverlapMessage("D", "ALL_WORK", "D"));
+  });
+
+  it("does not hang on a pure cycle, which expands to nothing", () => {
+    const cyclic: CoefficientDomain = {
+      items: [{ id: "D" }],
+      groups: [
+        { id: "A", members: ["B"] },
+        { id: "B", members: ["A"] },
+      ],
+    };
+    expect(eligibleCoefficientIds(["A"], cyclic)).toEqual([]);
+  });
+
+  it("still expands a non-cyclic sibling member through a cyclic parent", () => {
+    const cyclic: CoefficientDomain = {
+      items: [{ id: "D" }, { id: "E" }],
+      groups: [
+        { id: "A", members: ["B", "E"] },
+        { id: "B", members: ["A"] },
+      ],
+    };
+    // A → {B, E}; B → {A} is the back-edge, so A expands to {E} alone: E and A
+    // become eligible, without hanging.
+    expect(eligibleCoefficientIds(["A"], cyclic)).toEqual(["E", "A"]);
+  });
+});
+
+describe("derivedCoefficientHintText — per-row working-time hints (9a8)", () => {
+  it("reads a worked shift's half-hour derivation from its hours", () => {
+    expect(derivedCoefficientHintText({ minutes: 480, credit: false })).toBe(
+      "8h × 2 · from working time",
+    );
+    // An odd half-hour count keeps its half: 510 min is 8.5h × 2 = 17 half-hours.
+    expect(derivedCoefficientHintText({ minutes: 510, credit: false })).toBe(
+      "8.5h × 2 · from working time",
+    );
+  });
+
+  it("reads a paid-leave credit as a credit, not a worked shift", () => {
+    expect(derivedCoefficientHintText({ minutes: 480, credit: true })).toBe("8h credit · editable");
+  });
+
+  it("falls back to the set-by-hand message when the source has no working time", () => {
+    expect(derivedCoefficientHintText(undefined)).toBe("no working time — set manually");
   });
 });

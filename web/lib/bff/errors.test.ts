@@ -5,6 +5,7 @@ import {
   extractStructuredError,
   isExactJobGoneError,
   isExactJobGoneResponse,
+  jobFailureMessage,
   OptimizeApiError,
 } from "@/lib/bff/errors";
 
@@ -43,6 +44,23 @@ describe("classifyOptimizeError — unrouted upstream path", () => {
 });
 
 describe("classifyOptimizeError — code-first", () => {
+  it("classifies the upstream body-size middleware as too-large", () => {
+    expect(
+      classifyOptimizeError(413, envelope({ code: "request_too_large", message: "x" })).kind,
+    ).toBe("too-large");
+  });
+
+  it("owns the wording of known job failures and passes unknown ones through", () => {
+    expect(jobFailureMessage("cancelled", "Optimization cancelled.")).toBe(
+      "Optimisation cancelled.",
+    );
+    expect(jobFailureMessage("worker_lost", "x")).toBe(
+      "The optimisation worker stopped before the job completed.",
+    );
+    expect(jobFailureMessage("some_new_code", "Backend text.")).toBe("Backend text.");
+    expect(jobFailureMessage(null, "Backend text.")).toBe("Backend text.");
+  });
+
   it("classifies job_not_found as recovery, regardless of endpoint", () => {
     expect(
       classifyOptimizeError(404, envelope({ code: "job_not_found", message: "gone" }), "poll").kind,
@@ -128,6 +146,13 @@ describe("classifyOptimizeError — code-first", () => {
     expect(
       classifyOptimizeError(503, envelope({ code: "backend_unready", message: "x" })).kind,
     ).toBe("backend-unready");
+  });
+
+  it("classifies the YAML expansion bound as request-invalid", () => {
+    expect(
+      classifyOptimizeError(400, envelope({ code: "scheduling_data_too_complex", message: "x" }))
+        .kind,
+    ).toBe("request-invalid");
   });
 
   it("treats an unrecognized structured code as server-error (5xx) or unknown", () => {

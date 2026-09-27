@@ -24,11 +24,23 @@ export function buildUpstreamHeaders(request: Request, extra?: Record<string, st
   return headers;
 }
 
+// A `path` reaches a log label with a caller-controlled segment (a URL-decoded
+// `[id]`). A raw CR/LF would forge a second log line, so escape the line breaks
+// (and TAB, for a single tidy line) at the sink — every caller is then safe by
+// construction, whatever it interpolated. Mirrors the basis serializer's escaping.
+function logSafePath(path: string): string {
+  return path
+    .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\t/g, "\\t");
+}
+
 // The private backend URL must never reach the browser (DL11 D1). Log it
 // server-side; return a generic code-first 502 the client can classify
 // (`backend_unreachable`) without leaking the upstream address.
 export function backendUnreachable(error: unknown, path: string): Response {
-  console.error(`[bff] upstream unreachable: ${path}`, error);
+  console.error(`[bff] upstream unreachable: ${logSafePath(path)}`, error);
   return Response.json(
     { error: { code: "backend_unreachable", message: "The scheduling service is unreachable." } },
     { status: 502, headers: { "cache-control": "no-store" } },

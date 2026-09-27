@@ -259,13 +259,15 @@ class StoreLimits:
             raise ValueError("ordinary_reserved_slots must satisfy 0 <= reserve < max_pending")
 
 
-STOPPABLE_SOLVERS = frozenset({"ortools/cp-sat"})
-"""Solvers that cooperatively observe cancellation and early-completion requests.
+@dataclass(frozen=True)
+class ServerActivity:
+    """Aggregate job and worker activity exposed by the server."""
 
-The rebuild exposes only CP-SAT, so this is the single supported entry rather than
-the upstream family of MPSolver/MathOpt backends."""
-
-
-def solver_supports_stop(solver: str) -> bool:
-    """Return whether a running solver can observe a stop request."""
-    return solver.strip().lower() in STOPPABLE_SOLVERS
+    queued_jobs: int
+    """Jobs waiting for a worker."""
+    running_jobs: int
+    """Jobs actively executing."""
+    cancelling_jobs: int
+    """Jobs still occupying a worker while cancellation completes."""
+    online_workers: int
+    """Workers with an unexpired shared lease."""

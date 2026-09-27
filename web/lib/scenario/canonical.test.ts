@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyScenarioUiState, toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
-import { PREFERENCE_TYPE, type ScenarioUiState } from "@/lib/scenario/types";
+import { PREFERENCE_TYPE, type ScenarioUiState, type UiPerson } from "@/lib/scenario/types";
 
 // A representative durable UI state exercising every slice and every F2 marker.
 function makeUiState(): ScenarioUiState {
   return {
-    meta: { apiVersion: "alpha", description: "Feb 2026 ward", country: "SG" },
+    meta: { apiVersion: "alpha", description: "Feb 2026 ward" },
     rangeStart: "2026-02-01",
     rangeEnd: "2026-02-28",
     staff: [
@@ -81,6 +81,17 @@ function makeUiState(): ScenarioUiState {
       extraRows: [],
     },
     maxOneShiftPerDay: { description: "structural" },
+    // d582: a display-only temporary cover. She is never a solver person, so the
+    // canonical projection must ignore this slice entirely.
+    temporaryCover: [
+      {
+        _k: "c0",
+        name: "Haseena (Ward 3)",
+        date: "2026-02-10",
+        shiftType: "LD",
+        groups: ["Seniors"],
+      },
+    ],
   };
 }
 
@@ -90,7 +101,8 @@ describe("toCanonicalScenarioDocument", () => {
 
     expect(doc.apiVersion).toBe("alpha");
     expect(doc.description).toBe("Feb 2026 ward");
-    expect(doc.country).toBe("SG");
+    // `country` left the strict model (v1 sync X9); the projection can never emit it.
+    expect(doc).not.toHaveProperty("country");
     expect(doc.dates.range).toEqual({ startDate: "2026-02-01", endDate: "2026-02-28" });
     expect(doc.dates.groups).toEqual([{ id: "week1", members: ["2026-02-01~2026-02-07"] }]);
     expect(doc.people.items).toEqual([
@@ -242,19 +254,31 @@ describe("toCanonicalScenarioDocument", () => {
   });
 });
 
-describe("the temporary flag", () => {
-  it("emits temporary only for a temporary person", () => {
+describe("people", () => {
+  it("emits no temporary field", () => {
     const state = makeUiState();
-    state.staff = [
-      { id: "Float", temporary: true },
-      { id: "Own", temporary: false },
-      { id: "Plain" },
-    ];
+    // A stray flag from an older build's store is never written out (d582).
+    state.staff = [{ id: "Float", temporary: true } as UiPerson, { id: "Plain" }];
     expect(toCanonicalScenarioDocument(state).people.items).toEqual([
-      { id: "Float", temporary: true },
-      { id: "Own" },
+      { id: "Float" },
       { id: "Plain" },
     ]);
+  });
+});
+
+describe("temporaryCover", () => {
+  it("covers never reach the canonical document", () => {
+    // `makeUiState` carries one cover; the projection must return identical
+    // canonical bytes with or without it.
+    const withCovers = makeUiState();
+    const withoutCovers: ScenarioUiState = { ...withCovers, temporaryCover: [] };
+    expect(toCanonicalScenarioDocument(withCovers)).toEqual(
+      toCanonicalScenarioDocument(withoutCovers),
+    );
+  });
+
+  it("builds an empty slice in the zero value", () => {
+    expect(createEmptyScenarioUiState().temporaryCover).toEqual([]);
   });
 });
 

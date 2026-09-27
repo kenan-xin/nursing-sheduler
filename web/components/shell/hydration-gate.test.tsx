@@ -2,6 +2,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 
 // The recoverable-error branch is the shell's rarest rendered state: it needs a
 // corrupt IndexedDB record to appear at all, so it is exactly the surface a
@@ -40,7 +41,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { HydrationGate } from "./hydration-gate";
-import { rosterStorage, useHotStore } from "@/lib/store";
+import { BRING_UP_STALL_MS, rosterStorage, useHotStore } from "@/lib/store";
 import { NEW_SCHEDULE_FAILED_MESSAGE } from "@/lib/roster";
 import { OPTIMIZE_RETIRE_PENDING_STORAGE_KEY, OPTIMIZE_SESSION_STORAGE_KEY } from "@/lib/optimize";
 import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
@@ -113,6 +114,33 @@ describe("HydrationGate — stalled restore (dna)", () => {
     expect(screen.getByRole("button", { name: /reload/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /reset/i })).toBeNull();
     expect(screen.queryByTestId("gated-children")).toBeNull();
+  });
+});
+
+// u2o: live, the first load after a deploy sat at RESTORING for 15s+ and the dna Reload
+// surface never came. That surface is armed by the gate's mount EFFECT, so it cannot
+// exist until the client has hydrated -- and the server-rendered page (hot store
+// `unhydrated`) is exactly the skeleton the user was left looking at. The stall
+// affordance must therefore already be in the server markup, revealed by time alone.
+describe("HydrationGate — stall surface before hydration (u2o)", () => {
+  it("server-renders a time-revealed Reload that needs no JavaScript", () => {
+    useHotStore.setState({ hydrationStatus: "unhydrated" });
+    document.body.innerHTML = renderToString(
+      <HydrationGate>
+        <div data-testid="gated-children" />
+      </HydrationGate>,
+    );
+    const slow = document.querySelector<HTMLElement>('[data-testid="hydration-slow"]');
+    expect(slow, "the server markup has no stall surface").not.toBeNull();
+    // Hidden until the same deadline the post-hydration timer uses, then revealed by CSS.
+    expect(slow!.className).toContain("invisible");
+    expect(slow!.style.animation).toContain("ns-reveal");
+    expect(slow!.style.animation).toContain(`${BRING_UP_STALL_MS}ms`);
+    // A plain link: it reloads whether or not React ever attached a handler.
+    const reload = slow!.querySelector("a");
+    expect(reload?.textContent).toMatch(/reload/i);
+    expect(reload?.getAttribute("href")).toBe("");
+    expect(slow!.textContent).not.toMatch(/reset/i);
   });
 });
 

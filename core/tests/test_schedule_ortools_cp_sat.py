@@ -1,4 +1,4 @@
-"""Schedule regression tests for the nurse scheduling engine."""
+"""Schedule regression test wrapper for the OR-Tools/CP-SAT backend."""
 
 # This file is part of Nurse Scheduling Project, see <https://github.com/j3soon/nurse-scheduling>.
 #
@@ -20,5 +20,5 @@
 from .schedule_test_helper import run_schedule_regression_test
 
 
-def test_schedule():
-    run_schedule_regression_test()
+def test_schedule_ortools():
+    run_schedule_regression_test("ortools/cp-sat")

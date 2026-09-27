@@ -74,7 +74,7 @@ async function seed(page: Page, patch: Record<string, unknown>) {
  *  so seeding immediately after `goto` races it (cf. app-shell-rebuild.spec).
  *  Shift Type Coverings is Advanced-only since T08d (DL12 §2); adopt the
  *  stored Advanced preference first so the route-validity gate doesn't
- *  redirect this direct visit to Home under the Guided default. */
+ *  redirect this direct visit to Guided Rules under the Guided default. */
 async function gotoReady(page: Page) {
   await page.addInitScript(() => localStorage.setItem("ns-app-mode", "advanced"));
   await page.goto("/shift-type-coverings");

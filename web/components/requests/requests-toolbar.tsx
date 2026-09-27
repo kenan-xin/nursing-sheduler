@@ -15,7 +15,7 @@
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { FaFileArrowUp } from "@/components/icons";
+import { FaDownload, FaFileArrowUp } from "@/components/icons";
 // Not re-exported from the icon barrel (icons.tsx is owned by a concurrently
 // edited ticket) — imported directly per the project's react-icons/fa6
 // convention (see upload-modal.tsx).
@@ -28,6 +28,8 @@ export interface RequestsToolbarProps {
   onSetMode: (m: "normal" | "quick") => void;
   onOpenRequestsCsv: () => void;
   onOpenHistoryCsv: () => void;
+  /** Serializes the current requests matrix to CSV for export → re-import. */
+  onDownloadCsv: () => void;
   clearOpen: boolean;
   onToggleClear: () => void;
   /** FR-SR-34: within Quick Add mode, Requests CSV also needs a valid weight. */
@@ -41,6 +43,7 @@ export function RequestsToolbar({
   onSetMode,
   onOpenRequestsCsv,
   onOpenHistoryCsv,
+  onDownloadCsv,
   clearOpen,
   onToggleClear,
   requestsCsvDisabled = false,
@@ -122,6 +125,20 @@ export function RequestsToolbar({
           </Button>
         </>
       )}
+      {/* Export sits beside the CSV uploads, but unlike them it is NOT gated to
+          Quick Add mode: the FR-SR-34 quick-paint-only rule constrains what an
+          upload may write, and a download reads the current matrix without
+          writing anything, so it stays available while editing individual
+          cells. (Clear data, the row's other always-on control, does the same.) */}
+      <Button
+        variant="secondary"
+        size="sm"
+        data-testid="requests-download-csv"
+        onClick={onDownloadCsv}
+      >
+        <FaDownload />
+        Download CSV
+      </Button>
       <Button
         variant="destructive-outline"
         size="sm"

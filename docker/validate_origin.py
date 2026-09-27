@@ -157,10 +157,7 @@ def origin_violation(value: str, mode: str) -> str | None:
         return "empty"
     # Reject control data (C0, DEL, C1) and any whitespace anywhere; a browser would
     # strip or reject these, so their presence means the raw is not canonical.
-    if any(
-        ord(ch) < 0x20 or ord(ch) == 0x7F or 0x80 <= ord(ch) <= 0x9F or ch.isspace()
-        for ch in value
-    ):
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F or 0x80 <= ord(ch) <= 0x9F or ch.isspace() for ch in value):
         return "contains control or whitespace characters"
 
     match = _SCHEME_RE.match(value)

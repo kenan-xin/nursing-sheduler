@@ -28,7 +28,8 @@ import { Surface, surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 import { rangeDayCount } from "@/lib/dates";
 import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
-import type { CardsByKind } from "@/lib/scenario";
+import { applyCovers } from "@/lib/scenario/temporary-cover";
+import { countEnabledRules } from "@/lib/scenario";
 import {
   drainScenarioCommands,
   readAuthoritativeScenarioOwnership,
@@ -41,7 +42,7 @@ import {
   OPTIMIZE_TIMEOUT_MAX_SECONDS,
   OPTIMIZE_TIMEOUT_MIN_SECONDS,
   acquireSessionStorage,
-  clearOptimizeRunRequestOutcome,
+  noteOptimizeRunStarted,
   createAttemptRegistry,
   createOptimizeObservability,
   deriveOptimizeReadiness,
@@ -67,8 +68,10 @@ import {
   type UseOptimizeServerInfoDeps,
   type UseOptimizeTerminalDeps,
 } from "@/lib/optimize";
+import { toCoverEntries } from "@/lib/roster/cover-sheet";
 import { CaptureNotice } from "./capture-notice";
 import { Callout } from "./callout";
+import { CoverPreflight } from "./cover-preflight";
 import { ReadinessBanner } from "./readiness-banner";
 import { RunEventLog } from "./run-event-log";
 import { RunOptionsForm } from "./run-options-form";
@@ -76,25 +79,6 @@ import { RunStatusPanel } from "./run-status-panel";
 import { ServerIdentity } from "./server-identity";
 
 const TIMEOUT_ERROR = "Solver timeout must be a valid positive integer.";
-
-/**
- * RULES ON — the count of ENABLED rule cards (not the total), mirroring the
- * Guided Rules screen's own "{onCount} OF {total} RULES ON" semantics
- * (`components/guided-rules/rules-screen.tsx`): the always-on built-in
- * structural rule (`components/guided-rules/builtins.ts` — exactly one today,
- * "at most one shift per day", never disableable) plus every card across the
- * five constraint kinds whose `disabled` flag is not set.
- */
-function countEnabledRules(cardsByKind: CardsByKind): number {
-  const BUILTIN_RULE_COUNT = 1;
-  const enabledCards =
-    cardsByKind.requirements.filter((card) => !card.disabled).length +
-    cardsByKind.successions.filter((card) => !card.disabled).length +
-    cardsByKind.counts.filter((card) => !card.disabled).length +
-    cardsByKind.affinities.filter((card) => !card.disabled).length +
-    cardsByKind.coverings.filter((card) => !card.disabled).length;
-  return BUILTIN_RULE_COUNT + enabledCards;
-}
 
 /** Parse the timeout field, enforcing an integer within the settled bounds. */
 function parseTimeoutInput(raw: string): { ok: true; value: number } | { ok: false } {
@@ -339,7 +323,9 @@ export function OptimizeAndExportScreen({
   );
 
   // B2-2 — the scenario stat grid (NURSES / DAYS / SHIFTS / RULES ON) rendered
-  // with the run settings (proto ScreenGenerate.dc.html:32-37).
+  // with the run settings (proto ScreenGenerate.dc.html:32-37). RULES ON is the
+  // ENABLED count, the same number the Guided Rules screen and Home report —
+  // `countEnabledRules` is the one owner of that rule (lib/scenario/rule-counts.ts).
   const cardsByKind = useScenarioStore((state) => state.cardsByKind);
   const runOptionsStats = useMemo(
     () => ({
@@ -476,9 +462,19 @@ export function OptimizeAndExportScreen({
       );
       return null;
     }
-    const document = toCanonicalScenarioDocument(useScenarioStore.getState());
+    // ONE applyCovers run builds both the solver input and the ledger the roster
+    // keeps, so the roster knows exactly what this solve subtracted (d582).
+    const scenario = useScenarioStore.getState();
+    const applied = applyCovers(scenario);
+    const document = toCanonicalScenarioDocument(applied.state);
     return {
       document,
+      cover: {
+        // The shared projection, so the entries staged with the submission and the
+        // rows the raw download writes are built from ONE reading of the cards.
+        entries: toCoverEntries(scenario.temporaryCover),
+        decrements: applied.decrements,
+      },
       anonymize,
       prettify,
       timeout: parsed.value,
@@ -522,7 +518,8 @@ export function OptimizeAndExportScreen({
     // attempt exists, so the old run can never observe itself as current again.
     abandonCurrentAttempt("spa");
     const attempt = attempts.start();
-    clearOptimizeRunRequestOutcome();
+    // `buildSubmitInput` drained and reconciled, so this is the revision the run is built from.
+    noteOptimizeRunStarted(useAuthorityStore.getState().documentRevision);
 
     runStartRef.current = Date.now();
     emittedTerminalRef.current = null;
@@ -678,6 +675,7 @@ export function OptimizeAndExportScreen({
       </div>
 
       <ReadinessBanner issues={readiness.issues} />
+      <CoverPreflight />
       {startFailed ? (
         <Callout tone="error" placement="page" data-testid="optimize-start-failed" alert>
           Optimisation could not start. Click Optimize to try again. If it keeps happening, start a

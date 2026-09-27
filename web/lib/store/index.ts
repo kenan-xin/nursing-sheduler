@@ -122,6 +122,7 @@ export {
 export { commitPaintGesture } from "./paint";
 
 export {
+  BRING_UP_STALL_MS,
   initializeScenarioAuthority,
   loadScenario,
   newScenario,
@@ -148,7 +149,6 @@ export {
   type HydrationStatus,
   type RunPhase,
   type RunState,
-  type RunProgressEvent,
   type PaintCellKey,
   type StagedCoordinate,
   type StagedDayState,

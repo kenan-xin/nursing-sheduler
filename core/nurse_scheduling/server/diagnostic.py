@@ -52,9 +52,9 @@
 
 import argparse
 import json
+import logging
 import math
 import os
-import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -69,6 +69,9 @@ from uuid import uuid4
 
 import httpx
 
+from .auth import AUTH_TOKEN_ENV_NAME
+
+DIAGNOSTIC_LOGGER = logging.getLogger("nurse_scheduling.diagnostic")
 
 DEFAULT_TARGET_URL = "https://api.nursescheduling.org"
 DEFAULT_SCENARIO_PATH = (
@@ -128,7 +131,7 @@ class DiagnosticConfig:
     report_dir: Path = Path("/tmp/nurse-scheduling-diagnostics")
     info_samples: int = 100
     parallel_requests: int = 10
-    expected_concurrency: int = 1
+    expected_concurrency: int = 3
     max_jobs: int = 128
     queue_stable_seconds: float = 10.0
     startup_timeout_seconds: float = 120.0
@@ -139,6 +142,8 @@ class DiagnosticConfig:
     job_timeout_seconds: int = 60 * 60
     poll_seconds: float = 0.5
     submit_interval_seconds: float = 0.25
+    auth_token: str | None = None
+    """Shared token sent to a target that requires authentication."""
     api_path_mode: str = DEFAULT_API_PATH_MODE
 
     def __post_init__(self) -> None:
@@ -179,6 +184,10 @@ class DiagnosticConfig:
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be positive")
         object.__setattr__(self, "target_url", target)
+        auth_token = (self.auth_token or "").strip()
+        if auth_token and parsed.scheme != "https":
+            raise ValueError("DIAGNOSTIC_AUTH_TOKEN requires DIAGNOSTIC_TARGET_URL to use HTTPS")
+        object.__setattr__(self, "auth_token", auth_token or None)
 
     @property
     def api_prefix(self) -> str:
@@ -204,7 +213,7 @@ class DiagnosticConfig:
             report_dir=report_dir or Path(os.getenv("DIAGNOSTIC_REPORT_DIR", "/tmp/nurse-scheduling-diagnostics")),
             info_samples=_positive_int_env("DIAGNOSTIC_INFO_SAMPLES", 100),
             parallel_requests=_positive_int_env("DIAGNOSTIC_PARALLEL_REQUESTS", 10),
-            expected_concurrency=_positive_int_env("DIAGNOSTIC_EXPECTED_CONCURRENCY", 1),
+            expected_concurrency=_positive_int_env("DIAGNOSTIC_EXPECTED_CONCURRENCY", 3),
             max_jobs=_positive_int_env("DIAGNOSTIC_MAX_JOBS", 128),
             queue_stable_seconds=_positive_float_env("DIAGNOSTIC_QUEUE_STABLE_SECONDS", 10.0),
             startup_timeout_seconds=_positive_float_env("DIAGNOSTIC_STARTUP_TIMEOUT_SECONDS", 120.0),
@@ -215,6 +224,7 @@ class DiagnosticConfig:
             job_timeout_seconds=_positive_int_env("DIAGNOSTIC_JOB_TIMEOUT_SECONDS", 60 * 60),
             poll_seconds=_positive_float_env("DIAGNOSTIC_POLL_SECONDS", 0.5),
             submit_interval_seconds=_positive_float_env("DIAGNOSTIC_SUBMIT_INTERVAL_SECONDS", 0.25),
+            auth_token=os.getenv("DIAGNOSTIC_AUTH_TOKEN") or os.getenv(AUTH_TOKEN_ENV_NAME),
         )
 
 
@@ -299,8 +309,15 @@ class PublicDiagnostic:
             timeout=self.config.request_timeout_seconds,
             follow_redirects=False,
             transport=self.transport,
-            headers={"User-Agent": "nurse-scheduling-public-diagnostic/1"},
+            headers=self._client_headers(),
         )
+
+    def _client_headers(self) -> dict[str, str]:
+        """Build the headers shared by every diagnostic request."""
+        headers = {"User-Agent": "nurse-scheduling-public-diagnostic/1"}
+        if self.config.auth_token is not None:
+            headers["Authorization"] = f"Bearer {self.config.auth_token}"
+        return headers
 
     def _add_finding(self, level: str, code: str, message: str) -> None:
         """Append one deduplicated finding."""
@@ -796,49 +813,51 @@ class PublicDiagnostic:
             self.config.request_timeout_seconds, read=min(read_seconds, self.config.request_timeout_seconds)
         )
         try:
-            with self._new_client() as client:
-                with client.stream(
+            with (
+                self._new_client() as client,
+                client.stream(
                     "GET",
                     self._path("optimize", job_id, "events"),
                     headers={"Accept": "text/event-stream", "Connection": "close"},
                     timeout=timeout,
-                ) as response:
-                    if response.status_code == 404:
-                        self.visibility_split = True
-                        self._fail(
-                            "job_visibility_split",
-                            "A newly created job event stream returned 404 through the public endpoint.",
-                        )
-                        return False
-                    if response.status_code != 200:
-                        self._record_request_error(f"GET events {job_id}", f"HTTP {response.status_code}")
-                        return False
-                    self.event_jobs_checked.add(job_id)
-                    for line in response.iter_lines():
-                        if line.startswith("id:"):
-                            event_id = line.partition(":")[2].strip()
-                        elif line.startswith("event:"):
-                            event_type = line.partition(":")[2].strip()
-                        elif line.startswith("data:"):
-                            data_lines.append(line.partition(":")[2].lstrip())
-                        elif not line:
-                            payload: Any = None
-                            if data_lines:
-                                try:
-                                    payload = json.loads("\n".join(data_lines))
-                                except json.JSONDecodeError:
-                                    pass
-                            if isinstance(payload, dict):
-                                self._observe_event_identity(job_id, event_id, payload)
-                                if (
-                                    stop_on_score
-                                    and event_type == "job.progressed"
-                                    and isinstance(payload.get("score"), (int, float))
-                                ):
-                                    return True
-                            event_id = None
-                            event_type = None
-                            data_lines = []
+                ) as response,
+            ):
+                if response.status_code == 404:
+                    self.visibility_split = True
+                    self._fail(
+                        "job_visibility_split",
+                        "A newly created job event stream returned 404 through the public endpoint.",
+                    )
+                    return False
+                if response.status_code != 200:
+                    self._record_request_error(f"GET events {job_id}", f"HTTP {response.status_code}")
+                    return False
+                self.event_jobs_checked.add(job_id)
+                for line in response.iter_lines():
+                    if line.startswith("id:"):
+                        event_id = line.partition(":")[2].strip()
+                    elif line.startswith("event:"):
+                        event_type = line.partition(":")[2].strip()
+                    elif line.startswith("data:"):
+                        data_lines.append(line.partition(":")[2].lstrip())
+                    elif not line:
+                        payload: Any = None
+                        if data_lines:
+                            try:
+                                payload = json.loads("\n".join(data_lines))
+                            except json.JSONDecodeError:
+                                pass
+                        if isinstance(payload, dict):
+                            self._observe_event_identity(job_id, event_id, payload)
+                            if (
+                                stop_on_score
+                                and event_type == "job.progressed"
+                                and isinstance(payload.get("score"), (int, float))
+                            ):
+                                return True
+                        event_id = None
+                        event_type = None
+                        data_lines = []
         except httpx.ReadTimeout:
             return False
         except httpx.HTTPError as error:
@@ -1180,14 +1199,14 @@ class PublicDiagnostic:
                 if len(queued_ids) >= QUEUED_JOB_TARGET and not self.visibility_split:
                     with self._measure_phase("queue_transition"):
                         self._exercise_queue_transition(queued_ids)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             self._record_request_error("unexpected diagnostic error", f"{type(error).__name__}: {error}")
             self._mark_inconclusive("unexpected_error", "The diagnostic stopped after an unexpected internal error.")
         finally:
             try:
                 with self._measure_phase("cleanup"):
                     self._request_cleanup_cancellations()
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001
                 self._record_request_error("unexpected cleanup cancellation error", f"{type(error).__name__}: {error}")
                 self._mark_inconclusive(
                     "cleanup_cancellation_error",
@@ -1201,7 +1220,7 @@ class PublicDiagnostic:
                         if needs_accepted or needs_runner:
                             self._collect_job_identities(job.id)
                     self._analyze_runtime_identities()
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001
                 self._record_request_error("unexpected identity analysis error", f"{type(error).__name__}: {error}")
                 self._mark_inconclusive(
                     "identity_analysis_error",
@@ -1211,7 +1230,7 @@ class PublicDiagnostic:
                 try:
                     with self._measure_phase("cleanup"):
                         self._cleanup_jobs()
-                except Exception as error:
+                except Exception as error:  # noqa: BLE001
                     self._record_request_error("unexpected cleanup error", f"{type(error).__name__}: {error}")
                     self._mark_inconclusive(
                         "cleanup_error",
@@ -1363,6 +1382,24 @@ def print_report(report: dict[str, Any], report_path: Path | None = None) -> Non
         print(f"report={report_path}")
 
 
+def log_report(report: dict[str, Any]) -> None:
+    """Send the diagnostic summary and findings through structured logging."""
+    outcome = str(report["summary"]["outcome"])
+    log_summary = {
+        "pass": DIAGNOSTIC_LOGGER.info,
+        "fail": DIAGNOSTIC_LOGGER.error,
+        "inconclusive": DIAGNOSTIC_LOGGER.warning,
+    }[outcome]
+    log_summary("[diagnostic] %s", format_summary(report))
+    for finding in report["findings"]:
+        log_finding = DIAGNOSTIC_LOGGER.error if finding["level"] == "error" else DIAGNOSTIC_LOGGER.warning
+        log_finding(
+            "[diagnostic] finding code=%s message=%s",
+            finding["code"],
+            finding["message"],
+        )
+
+
 def exit_code(report: dict[str, Any]) -> int:
     """Map report outcomes to stable process exit codes."""
     return {"pass": 0, "fail": 1, "inconclusive": 2}[str(report["summary"]["outcome"])]
@@ -1382,7 +1419,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
+def _run(argv: list[str] | None = None) -> int:
     """Run one diagnostic process."""
     args = _parse_args(argv)
     try:
@@ -1394,7 +1431,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         config.report_dir.mkdir(parents=True, exist_ok=True)
     except (OSError, ValueError) as error:
-        print(f"FAIL configuration: {error}", file=sys.stderr)
+        DIAGNOSTIC_LOGGER.error("[diagnostic] configuration failed error=%s", error)
         return 1
 
     report = PublicDiagnostic(config).run()
@@ -1402,9 +1439,16 @@ def main(argv: list[str] | None = None) -> int:
         report_path = write_report(report, config.report_dir)
     except OSError as error:
         report_path = None
-        print(f"WARNING report_write_failed: {error}", file=sys.stderr)
+        DIAGNOSTIC_LOGGER.warning("[diagnostic] report write failed error=%s", error)
     print_report(report, report_path)
+    log_report(report)
     return exit_code(report)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run diagnostics."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    return _run(argv)
 
 
 if __name__ == "__main__":

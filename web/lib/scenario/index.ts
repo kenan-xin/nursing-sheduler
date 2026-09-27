@@ -9,6 +9,7 @@ export * from "./types";
 export { createEmptyScenarioUiState, toCanonicalScenarioDocument } from "./canonical";
 export { canonicalHash, canonicalStringify } from "./hash";
 export { currentAppVersion } from "./app-version";
+export { countEnabledRules } from "./rule-counts";
 
 // T05 — serialization/validation boundary (F2), import path, anonymize transform.
 export {

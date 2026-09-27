@@ -163,7 +163,6 @@ function readSection(domain: Domain): unknown {
         rangeStart: scenario.rangeStart,
         rangeEnd: scenario.rangeEnd,
         dateGroups: scenario.dateGroups,
-        country: scenario.meta.country ?? null,
       };
     case "staff":
       return { people: scenario.staff, peopleGroups: scenario.staffGroups };

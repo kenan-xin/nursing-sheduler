@@ -6,10 +6,15 @@ import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
+import { downloadBlob } from "@/lib/utils/download";
 import { RequestsEditor } from "./requests-editor";
 import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
+// The Download CSV path ends in a real browser blob download; assert on the
+// captured Blob/filename instead of touching the DOM.
+vi.mock("@/lib/utils/download", () => ({ downloadBlob: vi.fn() }));
 
 // jsdom has no ResizeObserver and never lays out elements — stub both so the
 // virtualized matrix renders its rows (mirrors requests-matrix.test.tsx).
@@ -166,6 +171,23 @@ describe("RequestsEditor — history item set includes OFF/LEAVE (P1)", () => {
     // A rejected upload mutates nothing.
     expect(await staffHistory("Aisha")).toEqual([]);
     expect(await staffHistory("Chloe")).toEqual([]);
+  });
+});
+
+describe("RequestsEditor — history option labels name the shift (FR-SR-19)", () => {
+  it("labels a worked item `id — description`, falling back to the bare id", async () => {
+    await seed({
+      ...BASE_SEED,
+      shifts: [{ id: "AM", description: "Morning" }, { id: "PM" }],
+    });
+    render(<RequestsEditor />);
+    fireEvent.click(screen.getByTestId("hist-Aisha-0"));
+
+    // A described shift reads like the entity editor's member labels; an
+    // undescribed one keeps the bare id; OFF/LEAVE keep their reserved labels.
+    expect(screen.getByTestId("history-editor-option-AM")).toHaveTextContent("AM — Morning");
+    expect(screen.getByTestId("history-editor-option-PM")).toHaveTextContent(/^PM$/);
+    expect(screen.getByTestId("history-editor-option-OFF")).toHaveTextContent(/^OFF$/);
   });
 });
 
@@ -367,5 +389,27 @@ describe("RequestsEditor — leave copy (FR-SR-48)", async () => {
     await seed(BASE_SEED);
     render(<RequestsEditor />);
     expect(screen.queryByText(/credits 8h/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("RequestsEditor — Download CSV", () => {
+  it("serializes the matrix in the import shape and downloads it", async () => {
+    await seed({
+      ...BASE_SEED,
+      reqData: [
+        { kind: "request", person: "Aisha", date: "01", shiftType: "AM", weight: 5 },
+        { kind: "leave", person: "Chloe", date: "02" },
+        { kind: "off", person: "Chloe", date: "03", weight: -2 },
+      ],
+    });
+    render(<RequestsEditor />);
+    fireEvent.click(screen.getByTestId("requests-download-csv"));
+
+    expect(downloadBlob).toHaveBeenCalledOnce();
+    const [blob, filename] = vi.mocked(downloadBlob).mock.calls[0];
+    expect(filename).toBe("shift-requests.csv");
+    expect(await blob.text()).toBe(
+      ["person,01,02,03", "Aisha,AM,,", "Chloe,,LEAVE,OFF"].join("\n"),
+    );
   });
 });

@@ -183,3 +183,15 @@ describe("CountCardList — contracted-hours human-hours summary (ds1)", () => {
     expect(within(card).queryByText("1h")).toBeNull();
   });
 });
+
+// Fidelity Batch 3 (bmw.3) — the badge casing.
+describe("CountCardList — contracted-hours badge (bmw.3)", () => {
+  it("reads '◆ CONTRACTED HOURS', uppercase in the text and not only in CSS", () => {
+    render(<CountCardList counts={[exactContractedCard]} {...NOOP_PROPS} />);
+    const badge = screen.getByTestId("count-contracted-badge-0");
+    // ScreenCards.dc.html:482 spells the label uppercase in its markup.
+    expect(badge.textContent).toBe("◆ CONTRACTED HOURS");
+    // …and it stays uppercase under the badge's own casing axis, so the two agree.
+    expect(Array.from(badge.classList)).toContain("uppercase");
+  });
+});

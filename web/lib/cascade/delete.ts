@@ -8,8 +8,10 @@
 // members (emptied groups are LEFT for normal empty-group validation — FR-RI-17);
 // the five preference cards (filter fields → drop when a required field empties);
 // the person×date matrix (a cell losing its person/date/worked-shift is dropped);
-// people history (deleted shift-type ids blank to `""`, positions preserved —
-// FR-RI-09); and the Export Layout rows (filter → drop emptied — FR-RI-12).
+// people history (truncated at the newest deleted shift-type id, keeping the
+// usable suffix — FR-RI-09, decision D7); and the Export Layout rows (filter →
+// drop emptied — FR-RI-12). A date-GROUP delete also drops any per-date
+// requirement override on a date the group no longer contributes (ze1).
 
 import type {
   CardsByKind,
@@ -20,6 +22,13 @@ import type {
   UiPerson,
   UiRequestCell,
 } from "@/lib/scenario";
+// Deep import: the history rule (FR-RI-09) is shared with the import path's
+// repair of blank slots, so it lives beside the scenario contract it defines.
+import { truncateHistoryAfterUnusable } from "@/lib/scenario/person-history";
+// Deep import: the override-scope rule (a requirement's overrides must be dates it
+// still resolves) is shared with the date-group membership edit, so it lives
+// beside `requirementDateIsos`, its authority.
+import { dropUncoveredOverrides } from "@/lib/rules/shortfalls";
 import type { EntityDomain, EntityRef } from "./domain";
 import {
   CARD_COEFFICIENT_FIELD,
@@ -99,11 +108,16 @@ function pruneReqData(
   });
 }
 
-/** Blank deleted shift-type ids in history to `""`, preserving positions (FR-RI-09). */
+/** Truncate each person's history at the newest deleted shift-type id (FR-RI-09).
+ *  History is right-anchored, so only the suffix newer than that id stays usable;
+ *  a blank slot would be rejected by the producer and core (D7). */
 function pruneHistory(staff: UiPerson[], deleted: ReadonlySet<RefLeaf>): UiPerson[] {
   return staff.map((person) =>
     person.history?.some((h) => deleted.has(h))
-      ? { ...person, history: person.history.map((h) => (deleted.has(h) ? "" : h)) }
+      ? {
+          ...person,
+          history: truncateHistoryAfterUnusable(person.history, (h) => deleted.has(h)),
+        }
       : person,
   );
 }
@@ -164,7 +178,7 @@ function pruneExportLayout(
  * Remove the deleted entity/group from its container and prune the id from every
  * same-domain group's members. An emptied group is left in place for normal
  * empty-group validation (FR-RI-17); the cascade never flattens it. For a
- * shift-type delete this also blanks history (FR-RI-09).
+ * shift-type delete this also truncates history (FR-RI-09).
  */
 function pruneDefinitions(
   state: ScenarioUiState,
@@ -213,13 +227,24 @@ export function deleteEntity(
     affinities: pruneCards(cards.affinities, "affinities", domain, deleted),
     coverings: pruneCards(cards.coverings, "coverings", domain, deleted),
   };
-  return {
+  const next: ScenarioUiState = {
     ...state,
     ...pruneDefinitions(state, domain, deleted),
     cardsByKind: nextCardsByKind,
     reqData: pruneReqData(state.reqData, domain, deleted),
     exportLayout: pruneExportLayout(state.exportLayout, domain, deleted),
   };
+  // Deleting an authored date group shrinks the dates every requirement naming it
+  // resolves to, so a per-date override on a date only that group contributed is
+  // now stale — drop it rather than let it reach the solver and fail generically.
+  // Date ids themselves are never deleted here (the range cascade removes them and
+  // reconciles separately), so this is scoped to authored groups.
+  return domain === "date" && isAuthoredDateGroup(state, id) ? dropUncoveredOverrides(next) : next;
+}
+
+/** Whether `id` names an authored date group (not a generated in-range date id). */
+function isAuthoredDateGroup(state: ScenarioUiState, id: EntityRef): boolean {
+  return state.dateGroups.some((group) => group.id === id);
 }
 
 /** Acceptance-matrix alias for {@link deleteEntity} (`applyDelete(state, …)`). */

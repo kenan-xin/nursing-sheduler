@@ -194,3 +194,36 @@ describe("useRequests — Requests-CSV import preserves typed person identity (P
     expect(await reqCellsAt(NUMERIC_ID, "01")).toHaveLength(0);
   });
 });
+
+describe("useRequests — Requests-CSV import routes day-state labels (export round-trip)", () => {
+  async function reqCellsAt(person: string, date: string) {
+    await drainScenarioCommands();
+    return useScenarioStore
+      .getState()
+      .reqData.filter((c) => c.person === person && c.date === date);
+  }
+
+  it("stages OFF/LEAVE deltas as off/leave cells (not request cells named OFF/LEAVE)", async () => {
+    const { result } = renderHook(() =>
+      useRequests({ quickPaintSelectedIds: [], quickPaintWeightText: "0" }),
+    );
+    const deltas: ShiftRequestDelta[] = [
+      { personId: "Aisha", dateId: "01", shiftType: "LEAVE" },
+      { personId: "Aisha", dateId: "02", shiftType: "OFF" },
+      { personId: "Aisha", dateId: "03", shiftType: "AM" },
+    ];
+    act(() => result.current.applyRequestsCsv(deltas, 5));
+
+    const leave = await reqCellsAt("Aisha", "01");
+    expect(leave).toHaveLength(1);
+    expect(leave[0]).toMatchObject({ kind: "leave" });
+
+    const off = await reqCellsAt("Aisha", "02");
+    expect(off).toHaveLength(1);
+    expect(off[0]).toMatchObject({ kind: "off", weight: 5 });
+
+    const request = await reqCellsAt("Aisha", "03");
+    expect(request).toHaveLength(1);
+    expect(request[0]).toMatchObject({ kind: "request", shiftType: "AM", weight: 5 });
+  });
+});

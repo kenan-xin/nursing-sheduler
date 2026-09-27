@@ -52,6 +52,28 @@ import {
 } from "@/components/card-editor/weight-value";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
 
+/**
+ * The scenario fields the Counts screen reads: the people and shift-type domains
+ * its selectors offer, the dates it scopes them by, and `reqData` — the leave pins
+ * the contracted-hours uncredited-leave advisory is computed against. A `Pick`
+ * rather than the whole `ScenarioUiState` because it is ALSO the shape of the
+ * screen's store subscription (`useCounts`) and of its forms' `state` prop:
+ * narrowing all three to the SAME set is what keeps an edit to any OTHER slice (a
+ * shift's working time, the scenario name) from re-rendering — and reprojecting —
+ * this screen.
+ */
+export type CountScenarioInput = Pick<
+  ScenarioUiState,
+  | "staff"
+  | "staffGroups"
+  | "shifts"
+  | "shiftGroups"
+  | "rangeStart"
+  | "rangeEnd"
+  | "dateGroups"
+  | "reqData"
+>;
+
 /** Verbatim validation messages (spec 05 "Shift Counts" validation table). */
 export const COUNT_MESSAGES = {
   person: "At least one person must be selected",
@@ -119,7 +141,7 @@ function labelFor(id: PersonRef | ShiftTypeRef, description?: string): string {
 
 /** People options: staff items + people groups (spec 05 FR-PR-51) — unrestricted,
  *  unlike the shift-type selector below. */
-export function buildPeopleTransferOptions(state: ScenarioUiState): {
+export function buildPeopleTransferOptions(state: Pick<ScenarioUiState, "staff" | "staffGroups">): {
   items: TransferOption<PersonRef>[];
   groups: TransferOption<PersonRef>[];
 } {
@@ -147,7 +169,9 @@ const SYNTHETIC_SHIFT_GROUP = { id: RESERVED_SHIFT_TYPE.all, description: "Every
  * shift-type entity id is disabled with an actionable reason (structural — see
  * `COUNT_MESSAGES.numericShiftId`).
  */
-export function buildCountShiftTypeTransferOptions(state: ScenarioUiState): {
+export function buildCountShiftTypeTransferOptions(
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
+): {
   items: TransferOption<CountShiftTypeOptionValue>[];
   groups: TransferOption<CountShiftTypeOptionValue>[];
 } {
@@ -185,7 +209,9 @@ export function buildCountShiftTypeTransferOptions(state: ScenarioUiState): {
  * is structurally coefficient-eligible per FR-PR-70 — Counts has no special-case
  * exclusion (LEAVE, OFF, and even ALL each get a coefficient row once selected).
  */
-export function buildCountShiftTypeDomain(state: ScenarioUiState): CoefficientDomain {
+export function buildCountShiftTypeDomain(
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
+): CoefficientDomain {
   // Coefficient SOURCES are string-only (`CoefficientEntry`/`ShiftTypeRef`): only
   // string shift items + the synthetic OFF/LEAVE keywords can be selected/persisted.
   const stringItemIds = state.shifts
@@ -209,7 +235,9 @@ export function buildCountShiftTypeDomain(state: ScenarioUiState): CoefficientDo
 }
 
 /** The auto-derived date-scope chips (ALL / WEEKDAY / WEEKEND / day-of-week). */
-export function buildDateScopeAutoScopes(state: ScenarioUiState): DateScopeOption[] {
+export function buildDateScopeAutoScopes(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd">,
+): DateScopeOption[] {
   const items = generateDateItems({ start: state.rangeStart, end: state.rangeEnd });
   return deriveDateGroups(items)
     .filter((g) => g.members.length > 0)
@@ -217,7 +245,9 @@ export function buildDateScopeAutoScopes(state: ScenarioUiState): DateScopeOptio
 }
 
 /** Authored date groups as date-scope chips. */
-export function buildDateScopeDateGroups(state: ScenarioUiState): DateScopeOption[] {
+export function buildDateScopeDateGroups(
+  state: Pick<ScenarioUiState, "dateGroups">,
+): DateScopeOption[] {
   return state.dateGroups.map((g) => ({ id: String(g.id), label: labelFor(g.id, g.description) }));
 }
 
@@ -237,7 +267,9 @@ export function expandDateRange(rangeStart: string, rangeEnd: string): string[] 
 }
 
 /** In-range concrete dates for the "specific dates" text field, chronological. */
-export function buildDateScopeDateItems(state: ScenarioUiState): DateScopeItem[] {
+export function buildDateScopeDateItems(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd">,
+): DateScopeItem[] {
   return expandDateRange(state.rangeStart, state.rangeEnd).map((iso) => ({
     id: iso,
     dayOfMonth: Number(iso.slice(8)),

@@ -90,7 +90,6 @@ function mapPerson(person: UiPerson): CanonicalPerson {
     id: person.id,
     description: person.description,
     history: person.history,
-    temporary: person.temporary === true ? true : undefined,
   });
 }
 
@@ -259,7 +258,7 @@ function mapPreferences(source: ProjectableScenario): CanonicalPreference[] {
         // `ALL` is intentionally allowed: `shiftType: ALL` is a backend-valid
         // "work any shift" worked-day request. Group selectors whose expansion
         // includes OFF/LEAVE are NOT detected here — that is a C3-class semantic
-        // refinement (needs group_map expansion) and is T05's producer-validation
+        // refinement (needs shift-type map expansion) and is T05's producer-validation
         // responsibility, fully detectable post-projection from the canonical
         // doc's `shiftTypes.groups` + the selector.
         if (isDayStateSelector(cell.shiftType)) {
@@ -325,7 +324,6 @@ export function projectScenarioDocument(source: ProjectableScenario): CanonicalS
       range: { startDate: source.rangeStart, endDate: source.rangeEnd },
       groups: dateGroups.length > 0 ? dateGroups : undefined,
     }),
-    country: source.meta.country,
     people: compact({
       items: source.staff.map(mapPerson),
       groups: peopleGroups.length > 0 ? peopleGroups : undefined,
@@ -374,5 +372,6 @@ export function createEmptyScenarioUiState(apiVersion = "alpha"): ScenarioUiStat
     },
     reqData: [],
     exportLayout: { formatting: [], extraColumns: [], extraRows: [] },
+    temporaryCover: [],
   };
 }

@@ -9,17 +9,52 @@
  */
 export type CoefficientMemberId = number | string;
 
+/** How a coefficient source derives from WORKING TIME — the minutes it contributes,
+ *  and whether those minutes are a fixed paid-leave CREDIT rather than a worked
+ *  shift's time. Carried on a {@link CoefficientEntity} only by a domain that
+ *  derives coefficients (guided Contracted Hours); a generic count / requirement
+ *  domain omits it, so no hint is shown for its rows. */
+export interface CoefficientDerivation {
+  /** Working minutes the coefficient derives from (a shift's duration, or the
+   *  paid-leave credit). Always a positive multiple of the half-hour step. */
+  minutes: number;
+  /** The minutes are a fixed paid-leave CREDIT, not a worked shift's time — the
+   *  row hint copy differs (`credit` vs `× 2 · from working time`). */
+  credit: boolean;
+}
+
 /** One coefficient-domain entity. A coefficient SOURCE id is always a string (the
  *  persisted `CoefficientEntry` / `ShiftTypeRef` is string-only), so numeric shift
  *  items are never modelled as items here — they only ever appear as typed group
  *  `members`. */
 export interface CoefficientEntity {
   id: string;
+  /** The source's working-time derivation, for a domain that derives coefficients
+   *  (guided Contracted Hours). Absent ⇒ no derivation info (a generic domain shows
+   *  no hint) — NOT the same as a derivable domain's non-derivable row, which the
+   *  renderer shows as the set-by-hand message. */
+  derivation?: CoefficientDerivation;
 }
 
-/** One coefficient-domain group; `members` are the concrete member ids it expands
- *  to, kept at their AUTHORED type (numeric stays numeric) so expansion/coverage/
- *  overlap match the backend exactly (M1). */
+/**
+ * The per-row working-time hint beside a derived coefficient input (guided
+ * Contracted Hours, ScreenCards): a worked shift reads `"{hours}h × 2 · from
+ * working time"` — its half-hour coefficient is twice its hours — and a paid-leave
+ * day reads `"{hours}h credit · editable"`. Hours render as a plain JS number
+ * (`8`, `8.5`), matching the prototype's raw interpolation. An absent derivation is
+ * the NON-DERIVABLE source (no working time on the half-hour grid): its coefficient
+ * must be set by hand, so it reads `"no working time — set manually"`.
+ */
+export function derivedCoefficientHintText(derivation?: CoefficientDerivation): string {
+  if (!derivation) return "no working time — set manually";
+  const hours = derivation.minutes / 60;
+  return derivation.credit ? `${hours}h credit · editable` : `${hours}h × 2 · from working time`;
+}
+
+/** One coefficient-domain group; `members` are the ids it expands to — a member
+ *  may itself name another group (a group of groups), expanded transitively — kept
+ *  at their AUTHORED type (numeric stays numeric) so expansion/coverage/overlap
+ *  match the backend exactly (M1). */
 export interface CoefficientGroup {
   id: string;
   members: readonly CoefficientMemberId[];
@@ -43,7 +78,27 @@ export type CoefficientPair = [string, CoefficientDraftValue];
 function expandedIdsById(domain: CoefficientDomain): Map<string, readonly CoefficientMemberId[]> {
   const map = new Map<string, readonly CoefficientMemberId[]>();
   for (const item of domain.items) map.set(item.id, [item.id]);
-  for (const group of domain.groups) map.set(group.id, [...new Set(group.members)]);
+  const groupsById = new Map(domain.groups.map((group) => [group.id, group]));
+  const visiting = new Set<string>();
+
+  // A member may itself name another group (a group of groups), so expand
+  // transitively. `visiting` breaks a cycle by contributing nothing for the
+  // back-edge, and the result is cached so each group expands once.
+  const expand = (member: CoefficientMemberId): readonly CoefficientMemberId[] => {
+    if (typeof member !== "string") return [member];
+    const cached = map.get(member);
+    if (cached) return cached;
+    const group = groupsById.get(member);
+    if (!group) return [member];
+    if (visiting.has(member)) return [];
+    visiting.add(member);
+    const members = [...new Set(group.members.flatMap(expand))];
+    visiting.delete(member);
+    map.set(member, members);
+    return members;
+  };
+
+  for (const group of domain.groups) expand(group.id);
   return map;
 }
 
@@ -64,8 +119,8 @@ export function sortIdsByEntryOrder(ids: readonly string[], domain: CoefficientD
 
 /**
  * Eligible coefficient ids (FR-PR-70): every item whose id is in the expanded
- * selection, plus every non-empty group whose members are ALL in the expanded
- * selection — in canonical entry order (EDGE-PR-11).
+ * selection, plus every non-empty group whose (transitively) expanded members are
+ * ALL in the expanded selection — in canonical entry order (EDGE-PR-11).
  */
 export function eligibleCoefficientIds(
   selection: readonly string[],
@@ -80,7 +135,12 @@ export function eligibleCoefficientIds(
     // group is covered for group-eligibility but never returned/persisted itself.
     ...domain.items.filter((item) => selectedExpanded.has(item.id)).map((item) => item.id),
     ...domain.groups
-      .filter((g) => g.members.length > 0 && g.members.every((m) => selectedExpanded.has(m)))
+      .filter((g) => {
+        // Test the group's EXPANDED members, so a parent whose members are
+        // themselves groups is eligible exactly when its whole subtree is covered.
+        const members = expanded.get(g.id) ?? [];
+        return members.length > 0 && members.every((m) => selectedExpanded.has(m));
+      })
       .map((g) => g.id),
   ];
 }

@@ -17,20 +17,23 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from datetime import datetime
 from dataclasses import replace
+from datetime import datetime, timezone
 from io import BytesIO
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from ruamel.yaml.error import YAMLError
 from starlette.concurrency import run_in_threadpool
 
+from ...loader import SchedulingDataTooComplexError, measure_yaml_expansion
+from ..auth import create_stream_token
 from ..basis_admission import BasisClaim, verify_basis_claim
 from ..config import ServerSettings
 from ..event_cursor import EventCursorExpired, EventCursorInvalid, encode_cursor
 from ..jobs.controller import JobController
-from ..jobs.models import JobEvent, JobPurpose, JobState, solver_supports_stop
+from ..jobs.models import JobEvent, JobPurpose, JobState
 from ..roster_container import (
     decode_workbook,
     parse_roster_container,
@@ -38,12 +41,20 @@ from ..roster_container import (
     workbook_download_name,
     workbook_media_type,
 )
-from ..scheduling_input import SUPPORTED_SOLVER, MalformedInputError, canonicalize_submission, parse_solver
-from .schemas import JobResponse
+from ..scheduling_input import (
+    CODE_SCHEDULING_DATA_TOO_COMPLEX,
+    MalformedInputError,
+    canonicalize_submission,
+    parse_solver,
+)
+from ..solver_capabilities import solver_supports_finish_now
+from ..solver_options import normalize_solver_option
+from .schemas import JobResponse, OptimizationOptionsResponse
 from .sse import format_sse_event
 
-
 router = APIRouter()
+# The event stream authorizes through a URL token as well, so it carries its own dependency.
+events_router = APIRouter()
 CLIENT_ID_COOKIE_NAME = "nurse_scheduling_client_id"
 """Cookie used to correlate jobs from the same browser for diagnostics."""
 CLIENT_ID_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
@@ -53,6 +64,22 @@ CLIENT_ID_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 def _controller(request: Request) -> JobController:
     """Return the application-scoped job controller."""
     return request.app.state.job_controller
+
+
+def _events_token(request: Request, job_id: str) -> str | None:
+    """Mint the stream credential embedded in a job's events link, when authentication is on."""
+    registry = request.app.state.auth_registry
+    if not registry.enabled:
+        return None
+    credential_id = request.state.auth_credential_id
+    credential = registry.get(credential_id)
+    if credential is None:
+        raise RuntimeError("authenticated request has no matching credential")
+    return create_stream_token(
+        credential.token,
+        job_id,
+        ttl_seconds=_settings(request).stream_token_ttl_seconds,
+    )
 
 
 def _settings(request: Request) -> ServerSettings:
@@ -83,7 +110,7 @@ async def _read_input(
     else:
         assert yaml_content is not None
         content = yaml_content.encode("utf-8")
-        input_name = f"nurse-scheduling-{datetime.now().strftime('%Y%m%d%H%M%S')}.yaml"
+        input_name = f"nurse-scheduling-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.yaml"
     if len(content) > max_bytes:
         raise HTTPException(status_code=413, detail="Scheduling YAML is too large")
     return content, input_name
@@ -104,7 +131,9 @@ def _client_id(request: Request, response: Response) -> str:
             max_age=CLIENT_ID_COOKIE_MAX_AGE_SECONDS,
             httponly=True,
             samesite="lax",
-            secure=request.url.scheme == "https",
+            # A TLS-terminating proxy forwards plain HTTP, so the scheme alone cannot
+            # tell whether the browser reached this deployment over HTTPS.
+            secure=_settings(request).cookie_secure or request.url.scheme == "https",
             path="/",
         )
     return client_id
@@ -114,11 +143,11 @@ def _client_id(request: Request, response: Response) -> str:
 async def create_job(
     request: Request,
     response: Response,
-    file: UploadFile | None = File(None, description="YAML file with scheduling data"),
+    file: UploadFile | None = File(None, description="YAML file with scheduling data"),  # noqa: B008
     yaml_content: str | None = Form(None, description="YAML content as a string"),
     prettify: bool | None = Form(None),
     timeout: int | None = Form(None),
-    solver: str = Form(SUPPORTED_SOLVER, description="Only ortools/cp-sat is available."),
+    solver: str | None = Form(None, description="Solver value returned by GET /optimize/options"),
     purpose: str = Form(
         JobPurpose.ORDINARY.value,
         description="Job purpose deciding queue priority and admission (T09).",
@@ -134,26 +163,42 @@ async def create_job(
     parent_basis_id: str | None = Form(None, description="Ordinary parent basis a candidate derives from."),
     transform_digest: str | None = Form(None, description="Digest of the validated transform for a candidate."),
 ):
-    """Validate an optimization request and enqueue a durable job.
-
-    All content validation, the CP-SAT-only solver check, canonical strict
-    conversion, and immutable-basis verification happen before `create_job`, so a
-    rejected request never consumes pending or retained capacity. The stored input
-    is the canonical strict YAML, which the worker later reparses and revalidates.
-
-    A basis claim is optional. When present it is recomputed here from the bytes
-    actually received and the server's own live semantic profile and RESOLVED
-    options; a disagreement is rejected before the job exists (T08).
-    """
+    """Validate an optimization request and enqueue a durable job."""
     settings = _settings(request)
     content, input_name = await _read_input(file, yaml_content, settings.max_yaml_bytes)
+    # v2: the product is CP-SAT only (X4); a 422 unsupported_solver even if OPTIMIZE_SOLVERS widens.
+    parse_solver(solver if solver is not None else settings.default_solver)
+    try:
+        normalized_solver = normalize_solver_option(solver if solver is not None else settings.default_solver)
+    except ValueError:
+        normalized_solver = ""
+    if normalized_solver not in settings.solver_ids:
+        choices = ", ".join(settings.solver_ids)
+        raise HTTPException(status_code=400, detail=f"Solver must be one of: {choices}")
     timeout_seconds = timeout if timeout is not None else settings.default_timeout_seconds
-    if timeout_seconds <= 0 or timeout_seconds > settings.max_timeout_seconds:
+    if timeout_seconds < settings.min_timeout_seconds or timeout_seconds > settings.max_timeout_seconds:
+        # Clients discover this range from GET /optimize/options, so exceeding it is reported.
+        request.state.invalid_reason = "timeout_out_of_range"
         raise HTTPException(
             status_code=400,
-            detail=f"Optimisation timeout must be between 1 and {settings.max_timeout_seconds} seconds",
+            detail=(
+                "Optimization timeout must be between "
+                f"{settings.min_timeout_seconds} and {settings.max_timeout_seconds} seconds"
+            ),
         )
-    canonical_solver = parse_solver(solver)
+    try:
+        # Read only once the free checks above have passed, so a request that was going to be
+        # rejected never pays for it, and off the event loop because the data is untrusted.
+        await run_in_threadpool(measure_yaml_expansion, content)
+    except SchedulingDataTooComplexError as error:
+        request.state.invalid_reason = "yaml_expansion_bomb"
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": CODE_SCHEDULING_DATA_TOO_COMPLEX, "message": str(error)}},
+        )
+    except YAMLError:
+        # The optimization reports the parse error usefully, so the request is still accepted.
+        pass
     # Validated BEFORE the job exists, like every other admission check, so an
     # unrecognized purpose is a request error rather than a job silently admitted
     # as ordinary and given capacity a diagnostic was never entitled to.
@@ -182,8 +227,8 @@ async def create_job(
             transform_digest=transform_digest,
         ),
         received_bytes=content,
-        resolved_solver=canonical_solver,
-        resolved_prettify=prettify,
+        resolved_solver=normalized_solver,
+        resolved_prettify=prettify if prettify is not None else settings.default_prettify,
         resolved_timeout_seconds=timeout_seconds,
     )
     # Unlike the synchronous endpoints below, create_job must remain async for
@@ -193,22 +238,31 @@ async def create_job(
         _controller(request).create_job,
         input_name=input_name,
         client_id=_client_id(request, response),
-        solver=canonical_solver,
-        prettify=prettify,
+        solver=normalized_solver,
+        prettify=prettify if prettify is not None else settings.default_prettify,
         timeout_seconds=timeout_seconds,
         input_bytes=canonical_bytes,
         basis=verified_basis,
         purpose=job_purpose,
+        auth_credential_id=request.state.auth_credential_id,
     )
     response.headers["Location"] = f"/optimize/{job.id}"
     response.headers["Retry-After"] = "1"
-    return JobResponse.from_job(job)
+    return JobResponse.from_job(job, _events_token(request, job.id))
+
+
+@router.get("/optimize/options", response_model=OptimizationOptionsResponse)
+def get_optimization_options(request: Request, response: Response):
+    """Return the run options advertised and enforced by this deployment."""
+    response.headers["Cache-Control"] = "no-store"
+    return OptimizationOptionsResponse.from_settings(_settings(request))
 
 
 @router.get("/optimize/{job_id}", response_model=JobResponse)
 def get_job(request: Request, job_id: str):
     """Return the current job representation."""
-    return JobResponse.from_job(_controller(request).get_job(job_id))
+    job = _controller(request).get_job(job_id)
+    return JobResponse.from_job(job, _events_token(request, job_id))
 
 
 def _enrich_state_event(controller: JobController, job_id: str, event: JobEvent) -> JobEvent:
@@ -217,7 +271,7 @@ def _enrich_state_event(controller: JobController, job_id: str, event: JobEvent)
         return event
     job = controller.get_job(job_id)
     event_state = JobState(str(event.data["state"]))
-    supports_stop = solver_supports_stop(job.request.solver)
+    supports_finish_now = solver_supports_finish_now(job.request.solver)
     cancel_requested = bool(event.data.get("cancel_requested", False))
     early_completion_requested = bool(event.data.get("early_completion_requested", False))
     return replace(
@@ -226,18 +280,16 @@ def _enrich_state_event(controller: JobController, job_id: str, event: JobEvent)
             **event.data,
             "terminal": event_state.terminal,
             "controls": {
-                "cancellable": not event_state.terminal
-                and (event_state == JobState.QUEUED or supports_stop)
-                and not cancel_requested,
+                "cancellable": not event_state.terminal and not cancel_requested,
                 "early_completion_available": event_state == JobState.RUNNING
-                and supports_stop
+                and supports_finish_now
                 and not early_completion_requested,
             },
         },
     )
 
 
-@router.get("/optimize/{job_id}/events")
+@events_router.get("/optimize/{job_id}/events")
 def stream_events(request: Request, job_id: str, last_event_id: str | None = Header(None)):
     """Replay and stream job events after the client's last event cursor.
 
@@ -304,13 +356,15 @@ def stream_events(request: Request, job_id: str, last_event_id: str | None = Hea
 @router.post("/optimize/{job_id}/cancel", status_code=202, response_model=JobResponse)
 def cancel_job(request: Request, job_id: str):
     """Cancel a queued job or request cancellation of a running job."""
-    return JobResponse.from_job(_controller(request).cancel_job(job_id))
+    job = _controller(request).cancel_job(job_id)
+    return JobResponse.from_job(job, _events_token(request, job_id))
 
 
 @router.post("/optimize/{job_id}/finish-now", status_code=202, response_model=JobResponse)
 def finish_job_now(request: Request, job_id: str):
     """Ask a supported running solver to return its current result."""
-    return JobResponse.from_job(_controller(request).request_early_completion(job_id))
+    job = _controller(request).request_early_completion(job_id)
+    return JobResponse.from_job(job, _events_token(request, job_id))
 
 
 def _roster_container(request: Request, job_id: str) -> dict:

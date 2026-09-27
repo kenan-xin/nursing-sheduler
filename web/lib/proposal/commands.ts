@@ -33,7 +33,7 @@
 // Staff screen's own primitives over `peopleDescriptor` (`addItem`, `renameItem`,
 // `deleteItem`, `addGroup`, `renameGroup`, `updateGroupFields`, `deleteGroup`,
 // `writeItemGroups`, `writeGroupMembers`). A nurse borrowed from another ward is
-// expressed with EXISTING arms: `add_person` with `temporary: true` for the float nurse, then
+// expressed with EXISTING arms: `add_person` for the float nurse, then
 // `set_off_request` with weight `"must"` painted over the surrounding dates so they
 // are only available on the days they are actually here (see
 // `operations.test.ts`'s "borrows one RN" case). `add_person`'s new person can be
@@ -256,13 +256,12 @@ export type AssistantCommandV1 =
       ruleId: string;
     }
   /** Add one person -- the Staff screen's "Add nurse" row: a name and the staff groups they join. */
-  | { type: "add_person"; name: string; groups: string[]; temporary: boolean }
+  | { type: "add_person"; name: string; groups: string[] }
   /**
-   * Rename one person, set EXACTLY which staff groups they are in, and whether they
-   * are temporary -- the Staff row's Edit. A name equal to the current id text is not
-   * a rename.
+   * Rename one person and set EXACTLY which staff groups they are in -- the Staff row's
+   * Edit. A name equal to the current id text is not a rename.
    */
-  | { type: "edit_person"; personId: PersonRef; name: string; groups: string[]; temporary: boolean }
+  | { type: "edit_person"; personId: PersonRef; name: string; groups: string[] }
   /** Remove one person and every reference to them -- the Staff row's Delete. */
   | { type: "remove_person"; personId: PersonRef }
   /** Add one staff group -- the Staff groups "New group" form. */
@@ -281,7 +280,23 @@ export type AssistantCommandV1 =
       members: PersonRef[];
     }
   /** Remove one staff group and every reference to it -- the group's Delete. */
-  | { type: "remove_people_group"; groupId: string };
+  | { type: "remove_people_group"; groupId: string }
+  /**
+   * Book one temporary cover -- the Staff screen's "Add temporary cover" form: a named
+   * nurse from another ward, ONE date, one shift she works and the staff groups she
+   * counts as. She is a staffing credit, never a solver person: her date's need drops by
+   * one and no staff row, request or rule names her. A second cover for the same name on
+   * the same date is refused, in the form's own words.
+   */
+  | {
+      type: "add_temporary_cover";
+      name: string;
+      date: string;
+      shiftType: string;
+      groups: string[];
+    }
+  /** Remove one temporary cover, named by its three identity fields -- the Staff row's Delete. */
+  | { type: "remove_temporary_cover"; name: string; date: string; shiftType: string };
 
 /** A request strength: a finite number, or a hard pin. JSON cannot carry an infinity, so the pins are words. */
 export type RequestWeight = number | "must" | "never";
@@ -315,6 +330,8 @@ export const ASSISTANT_COMMAND_TYPES = [
   "add_people_group",
   "edit_people_group",
   "remove_people_group",
+  "add_temporary_cover",
+  "remove_temporary_cover",
 ] as const satisfies readonly AssistantCommandType[];
 
 // EXHAUSTIVE IN BOTH DIRECTIONS. `satisfies` above proves every listed name is a real
@@ -470,7 +487,9 @@ function countFields() {
       .describe(
         'How each person\'s count x relates to the target T: "x <= T" at most, "x >= T" at ' +
           'least, "x = T" exactly, "x < T" fewer than, "x > T" more than, "|x - T|^2" as ' +
-          'close to T as possible (needs a weight of 0 or less, never "infinity").',
+          'close to T as possible (needs a weight of 0 or less, never "infinity"). x is a ' +
+          "total over the dates, never days in a row: for at most 5 days in a row, any " +
+          'shift, use add_succession_rule with "ALL" 6 times at "-infinity".',
       ),
     target: z.number().describe("The target T, a whole number of zero or more, e.g. 5."),
     weight: countWeightSchema(),
@@ -750,13 +769,6 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
           "shift-count rules; for someone here only a few days, narrow those rules with " +
           "edit_count_rule in the same change.",
       ),
-    temporary: z
-      .boolean()
-      .describe(
-        "true for a nurse borrowed from another ward, the float pool or an agency; false for " +
-          "the ward's own staff, including a new hire. A temporary nurse makes the preview ask " +
-          "the lending ward to confirm the loan before Apply.",
-      ),
   }),
   z.strictObject({
     type: z.enum(["edit_person"]),
@@ -771,12 +783,6 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
           "removed. Send their current groups to keep them. Rules that target a group they " +
           "join also bind them, including hard hours and shift-count rules; for someone here " +
           "only a few days, narrow those rules with edit_count_rule in the same change.",
-      ),
-    temporary: z
-      .boolean()
-      .describe(
-        "Whether they are borrowed from another ward, the float pool or an agency. Send " +
-          "their current value to keep it.",
       ),
   }),
   z.strictObject({
@@ -824,6 +830,39 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
         "The staff group to remove. Rules that only target this group go too; the preview " +
           "lists them.",
       ),
+  }),
+  z.strictObject({
+    type: z.enum(["add_temporary_cover"]),
+    name: z
+      .string()
+      .describe(
+        "The nurse's name as the Staff list should show it, with the ward she comes from in " +
+          'brackets, e.g. "Haseena (Ward 3)". She is a TEMPORARY COVER, not a person: no staff ' +
+          "row, no requests and no rules name her, and she is never a nurse who can be put on " +
+          "the roster. A cover already booked for the same name and date is refused.",
+      ),
+    date: isoDateSchema.describe("The one date she covers, YYYY-MM-DD."),
+    shiftType: z
+      .string()
+      .describe(
+        "The shift-type id she works on that date, exactly as the Shifts screen shows it, " +
+          "e.g. N. One shift a day: a second cover for the same nurse on the same date is refused.",
+      ),
+    groups: z
+      .array(z.string())
+      .describe(
+        'Staff groups she counts as on that date, e.g. ["RN"]. Each must exist. Send [] for ' +
+          "none. A card restricted to a group she is not in is not lowered by her, and the " +
+          "preview says so.",
+      ),
+  }),
+  z.strictObject({
+    type: z.enum(["remove_temporary_cover"]),
+    name: z.string().describe("The nurse's name exactly as the Staff list shows it."),
+    date: isoDateSchema.describe("That cover's date, YYYY-MM-DD."),
+    shiftType: z
+      .string()
+      .describe("That cover's shift-type id. All three fields must match one cover."),
   }),
 ]);
 

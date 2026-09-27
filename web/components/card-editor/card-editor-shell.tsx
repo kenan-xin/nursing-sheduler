@@ -59,6 +59,17 @@ export function CardEditorScreen({
   );
 }
 
+/** Prefix of every card-editor losable-draft registry id. The global undo/redo
+ *  shortcuts read this family to recognise an OPEN card draft, which OWNS
+ *  Ctrl/Cmd-Z/Y so scenario history never moves beneath it (AC-CH-09c). */
+export const CARD_EDITOR_DRAFT_PREFIX = "card-editor";
+
+/** The losable-draft registry id for a card editor of `kind`. One spelling, so
+ *  the guard that registers it and the shortcut that reads it cannot drift. */
+export function cardEditorDraftId(kind: string): string {
+  return `${CARD_EDITOR_DRAFT_PREFIX}:${kind}`;
+}
+
 /**
  * Register the shared losable-draft guard while a card-editor add/edit form is
  * visible (FR-PR-06). An open draft holds unsaved work that is not a durable
@@ -67,7 +78,7 @@ export function CardEditorScreen({
  * editor (Counts seed + the R/S/A clones) calls this with its own kind + `!!draft`.
  */
 export function useCardEditorDraftGuard(kind: string, active: boolean): void {
-  useLosableDraft(`card-editor:${kind}`, active, `${kind} editor`);
+  useLosableDraft(cardEditorDraftId(kind), active, `${kind} editor`);
 }
 
 /**
@@ -163,12 +174,18 @@ export function CardEditorHeader({
   onAdd: () => void;
   /** Optional second entry action rendered beside the primary Add (e.g. Counts'
    *  "Add Contracted Hours"). Backward-compatible: editors that omit it are
-   *  unchanged. `formOpen` toggles the button's icon like the primary one. */
+   *  unchanged. `formOpen` toggles the button's icon like the primary one.
+   *
+   *  It is an OUTLINE button in both states — the prototype's secondary entry action
+   *  is the outlined file-contract button beside a filled primary Add
+   *  (ScreenCards.dc.html:19-20) — so the caller chooses only the icon that names
+   *  its own action; omitting it keeps the generic Add glyph. */
   secondaryAction?: {
     label: string;
     formOpen: boolean;
     onAdd: () => void;
     testId?: string;
+    icon?: React.ReactNode;
   };
   /** Optional per-editor instructions panel (FR-PR-02). When present, a help
    *  toggle is rendered beside the title; the panel is collapsed by default. */
@@ -230,13 +247,14 @@ export function CardEditorHeader({
           </Button>
           {secondaryAction ? (
             <Button
-              variant={secondaryAction.formOpen ? "outline" : "default"}
+              variant="outline"
               size="lg"
               data-testid={secondaryAction.testId ?? "add-secondary-toggle"}
               aria-expanded={secondaryAction.formOpen}
               onClick={secondaryAction.onAdd}
             >
-              {secondaryAction.formOpen ? <FaXmark /> : <FaPlus />} {secondaryAction.label}
+              {secondaryAction.formOpen ? <FaXmark /> : (secondaryAction.icon ?? <FaPlus />)}{" "}
+              {secondaryAction.label}
             </Button>
           ) : null}
         </div>

@@ -13,6 +13,7 @@ import { useParameterlessModelVisibleTool } from "./register-model-visible-tool"
 import {
   pickScenario,
   readAuthoritativeScenarioOwnership,
+  useAuthorityStore,
   useHotStore,
   useScenarioStore,
 } from "@/lib/store";
@@ -39,6 +40,8 @@ export interface OptimizeRunSummary {
   finishedAt: string | null;
   downloaded: boolean;
   rosterSaved: boolean;
+  /** The run was built from an earlier version of the schedule than the one now open. */
+  stale: boolean;
   guidance: string;
 }
 
@@ -58,7 +61,16 @@ function guidanceFor(
   view: OptimizeRunView,
   rosterSaved: boolean,
   lastRequest: RunRequestOutcome | null,
+  stale: boolean,
 ): string {
+  // 2vtv: after an Apply the screen still shows the old run until the user presses Run.
+  if (stale && !isRunLive(view.lifecycle)) {
+    return (
+      "This result is from a run made before the latest change to the schedule, so it says " +
+      "nothing about the schedule as it is now. Do not report it. If a run card is showing, " +
+      "wait for the user to press Run; otherwise offer one with request_optimize_run."
+    );
+  }
   if (view.lifecycle === "idle") {
     if (lastRequest !== null && lastRequest !== "started") {
       return `${REQUEST_REFUSAL[lastRequest]} Tell the user, and help them fix it.`;
@@ -79,7 +91,7 @@ function guidanceFor(
       case "optimal":
       case "feasible":
         return (
-          "A roster was produced. Its XLSX file downloads in the browser, as for any run; if " +
+          "The schedule can be built now: a roster was produced. Its XLSX file downloads in the browser, as for any run; if " +
           "it did not, the user can press Download again on the Optimise screen. " +
           (rosterSaved
             ? "It is also saved in the app: the user can open it with Open & adjust roster."
@@ -87,7 +99,7 @@ function guidanceFor(
         );
       case "infeasible":
         return (
-          "The rules as written cannot all be met, so no roster exists. The solver does not " +
+          "The rules as written cannot all be met, so no roster exists. The optimiser does not " +
           "say which rule is responsible. Call suggest_feasibility_options with " +
           "afterInfeasibleRun true: name a cause only when it reports a certain gap, and never " +
           "otherwise. Then use test_feasibility_candidates to test its options on copies."
@@ -111,6 +123,7 @@ export function summarizeOptimizeRun(
   view: OptimizeRunView,
   rosterSaved: boolean,
   lastRequest: RunRequestOutcome | null,
+  stale = false,
 ): OptimizeRunSummary {
   return {
     status: view.lifecycle,
@@ -125,7 +138,8 @@ export function summarizeOptimizeRun(
     finishedAt: view.finishedAt,
     downloaded: view.download.status === "downloaded",
     rosterSaved,
-    guidance: guidanceFor(view, rosterSaved, lastRequest),
+    stale,
+    guidance: guidanceFor(view, rosterSaved, lastRequest, stale),
   };
 }
 
@@ -185,12 +199,17 @@ export function useOptimizeTools(agentId: string, turnEpoch: number): void {
       agentId,
       description:
         "Read how the latest optimiser run on the Optimise screen is going or how it ended: " +
-        "its status, the solver verdict (optimal, feasible, infeasible or inconclusive), any " +
+        "its status, the optimiser's verdict (optimal, feasible, infeasible or inconclusive), any " +
         "error, and whether a roster was saved. It reports only what that screen shows and " +
         "never starts or changes a run.",
       handler: async () => {
         const view = useHotStore.getState().runView;
-        return summarizeOptimizeRun(view, isRosterSaved(view), useRunRequestStore.getState().last);
+        const { last, runRevision } = useRunRequestStore.getState();
+        const stale =
+          view.lifecycle !== "idle" &&
+          runRevision !== null &&
+          runRevision !== useAuthorityStore.getState().documentRevision;
+        return summarizeOptimizeRun(view, isRosterSaved(view), last, stale);
       },
     },
     [agentId, turnEpoch],

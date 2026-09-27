@@ -12,7 +12,6 @@
 // mutation. All validation/build/load logic lives in successions-model.
 
 import { useEffect, useRef, useState } from "react";
-import type { ScenarioUiState } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
 import { CardEditorForm } from "@/components/card-editor/card-editor-shell";
 import { FieldShell } from "@/components/card-editor/field-shell";
@@ -31,10 +30,11 @@ import {
   validateSuccessionForm,
   type SuccessionErrors,
   type SuccessionFormState,
+  type SuccessionsScenarioInput,
 } from "./successions-model";
 
 interface SuccessionFormProps {
-  state: ScenarioUiState;
+  state: SuccessionsScenarioInput;
   mode: "add" | "edit";
   initialForm: SuccessionFormState;
   onSave: (form: SuccessionFormState) => void;

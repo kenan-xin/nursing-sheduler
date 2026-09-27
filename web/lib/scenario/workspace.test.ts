@@ -20,7 +20,7 @@ import {
   WORKSPACE_VERSION,
 } from "./workspace";
 import { prepareScenarioLoad } from "./prepare-scenario-load";
-import { makeValidUiState } from "./test-fixtures";
+import { makeTemporaryCover, makeValidUiState } from "./test-fixtures";
 import { PREFERENCE_TYPE } from "./types";
 
 // A minimal, optimize-ready Workspace document mirroring the T19 Python fixture,
@@ -291,6 +291,19 @@ preferences: []
 });
 
 describe("workspace strict projection", () => {
+  it("accepts country in an old saved file and drops it from the strict projection", () => {
+    // v1 sync X9: the strict model dropped `country`, so an old Workspace backup that
+    // still carries it loads — but the projected strict document never emits it.
+    const withCountry = READY_WORKSPACE.replace(
+      "apiVersion: alpha\n",
+      "apiVersion: alpha\ncountry: SG\n",
+    );
+    const result = convert(withCountry);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(serializeCanonicalDocument(result.document)).not.toMatch(/country/);
+  });
+
   it("converts a ready workspace and strips disabled records + authoring metadata", () => {
     const result = convert(READY_WORKSPACE);
     expect(result.status).toBe("ok");
@@ -376,6 +389,18 @@ describe("workspace full-authoring round trip (hydration, separate from strict p
     expect(incompleteLoaded.issues).toEqual([]);
     expect(incompleteLoaded.target?.rangeStart).toBe("");
     expect(incompleteLoaded.target?.rangeEnd).toBe("");
+  });
+
+  it("accepts country in an old saved file and drops it on import", () => {
+    // The import boundary still ACCEPTS `country` so pre-X9 backups load, but it
+    // never carries the value into the keyless import target (v1 sync X9).
+    const withCountry = READY_WORKSPACE.replace(
+      "apiVersion: alpha\n",
+      "apiVersion: alpha\ncountry: SG\n",
+    );
+    const loaded = prepareScenarioLoad(withCountry);
+    expect(loaded.issues).toEqual([]);
+    expect(loaded.target?.meta).not.toHaveProperty("country");
   });
 
   it("routes a legacy (no workspaceVersion) file through the unchanged legacy path", () => {
@@ -477,17 +502,58 @@ describe("workspace serialization wire form", () => {
     // No YAML anchors (`&name`) or aliases (`*name`) — repeated values by value.
     expect(yaml).not.toMatch(/[&*][A-Za-z0-9]/);
   });
+});
 
-  it("keeps a temporary person through a Workspace backup", () => {
+describe("workspace temporary cover (d582)", () => {
+  // The cover applied by the web app (spec §1/§2): an optional top-level list that
+  // only ever rides in a Workspace backup. An empty list is omitted so every
+  // cover-free file stays byte-identical and loadable in every build.
+  const cover = makeTemporaryCover({
+    _k: "cover-row-1",
+    name: "Haseena (Ward 3)",
+    date: "2026-05-14",
+    shiftType: "D",
+    groups: ["Seniors"],
+  });
+
+  it("serializes no temporaryCover key when empty (bytes unchanged)", () => {
     const state = makeValidUiState();
-    state.staff = [{ id: "Alice", history: ["D"], temporary: true }, { id: "Bob" }];
     const yaml = serializeWorkspace(state);
-    expect(yaml).toMatch(/temporary: true/);
-    const loaded = prepareScenarioLoad(yaml);
-    expect(loaded.issues).toEqual([]);
-    expect(loaded.target?.staff).toEqual([
-      { id: "Alice", history: ["D"], temporary: true },
-      { id: "Bob" },
+    expect(yaml).not.toMatch(/temporaryCover/);
+    // An explicit empty slice serializes identically to an absent one: the key is
+    // omitted, never emitted empty.
+    expect(serializeWorkspace({ ...state, temporaryCover: [] })).toBe(yaml);
+  });
+
+  it("round-trips covers through the workspace", () => {
+    const state = makeValidUiState();
+    state.temporaryCover = [cover];
+
+    // Emission carries the four authored fields and never the F2 React key.
+    const document = buildWorkspaceDocument(state);
+    expect(document.temporaryCover).toEqual([
+      { name: "Haseena (Ward 3)", date: "2026-05-14", shiftType: "D", groups: ["Seniors"] },
     ]);
+
+    // Hydration restores the covers into authoring state (an optimize-ready backup:
+    // the strict projection later rejects the non-empty list, but a LOAD is fine).
+    const loaded = prepareScenarioLoad(serializeWorkspace(state));
+    expect(loaded.issues).toEqual([]);
+    expect(loaded.target?.temporaryCover).toEqual([
+      { name: "Haseena (Ward 3)", date: "2026-05-14", shiftType: "D", groups: ["Seniors"] },
+    ]);
+  });
+
+  it("strict projection rejects a non-empty cover at temporaryCover", () => {
+    const state = makeValidUiState();
+    state.temporaryCover = [cover];
+    const result = convert(serializeWorkspace(state));
+    expect(result.status).toBe("invalid");
+    if (result.status !== "invalid") return;
+    expect(result.issues).toContainEqual({
+      path: ["temporaryCover"],
+      code: "invalid_value",
+      message: "Temporary cover is applied by the web app. Submit the strict document it produces.",
+    });
   });
 });
