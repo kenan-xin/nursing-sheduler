@@ -11,11 +11,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 
+// WARM THE MODULE GRAPH AT FILE SCOPE -- the fix for the 5 s timeout, not a raised
+// budget.
+//
+// `renderBridge()` below re-imports the bridge after `vi.resetModules()` so the
+// build-time compile-out constant is re-read for each case. The FIRST of those imports
+// also pays Vite's transform of the entire assistant graph behind the component
+// (`@/lib/ai/assistant/store` -> clear-repo, repair-options, interruption, lifecycle,
+// runtime-stop, Dexie, zustand, `@ag-ui/client`). Measured under a full
+// `vitest run lib/ai components/ai`: that cold transform costs ~6.1 s while it contends
+// with the 96 other test files' transforms, and only ~60 ms once it is cached. Inside a
+// test body it therefore blows the 5 s per-test budget for whichever case runs first --
+// the flake this file was filed for. The dynamic import is not the slow part
+// (re-evaluation is ~60 ms); the COLD TRANSFORM is.
+//
+// A static import here does that transform -- and one evaluation -- during the file's
+// import phase, which no per-test timeout bounds. Every per-case dynamic import
+// afterwards is the cheap re-evaluation, so each case is back to ~60 ms. The module is
+// a pure component/constant definition with no import-time side effects, and nothing
+// renders from this instance.
+import "./assistant-test-bridge";
+
 afterEach(() => {
   cleanup();
   delete window.__nsAssistant;
   delete window.__NS_ENABLE_TEST_BRIDGE;
-  vi.resetModules();
   vi.unstubAllEnvs();
 });
 
@@ -27,6 +47,12 @@ async function renderBridge() {
 
 describe("the assistant bridge is compiled out of ordinary production", () => {
   beforeEach(() => {
+    // Reset BEFORE the case, not after it. The file-scope warm import leaves an
+    // instance in the registry that was evaluated with `NODE_ENV=test`, so the first
+    // case has to invalidate it before its own dynamic import re-reads the constant;
+    // an `afterEach`-only reset (the original shape) left that stale instance in place
+    // for case one and only helped cases two and three.
+    vi.resetModules();
     vi.stubEnv("NODE_ENV", "production");
   });
 
