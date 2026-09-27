@@ -20,6 +20,7 @@ import io
 import json
 import os
 import sys
+import time
 
 # Import the vendored backend regardless of cwd: this file lives at
 # <root>/web/lib/scenario/differential/oracle.py; the backend is at <root>/core.
@@ -76,10 +77,14 @@ def op_load(req):
 
 def op_schedule(req):
     """C3: run the real scheduler/context setup. Rejections raised during model
-    build (OFF/LEAVE misuse, unknown ids, coverage) surface as {ok: false}."""
+    build (OFF/LEAVE misuse, unknown ids, coverage) surface as {ok: false}.
+    An optional `timeout` (seconds) is the job's solver budget; `seconds` is wall time."""
     try:
-        _df, _sol, _score, status, _cell = nurse_scheduling.schedule(req["yaml"].encode("utf-8"))
-        return {"ok": True, "status": status}
+        started = time.monotonic()
+        _df, _sol, _score, status, _cell = nurse_scheduling.schedule(
+            req["yaml"].encode("utf-8"), timeout=req.get("timeout")
+        )
+        return {"ok": True, "status": status, "seconds": round(time.monotonic() - started, 2)}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e), "errorType": type(e).__name__}
 
