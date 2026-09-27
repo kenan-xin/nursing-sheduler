@@ -58,6 +58,7 @@ import type {
   AssistantThreadV1,
   AssistantTurnState,
   AssistantTurnV1,
+  ThreadSummaryV1,
 } from "./records";
 import type { Message } from "@ag-ui/client";
 
@@ -438,6 +439,34 @@ export async function setTurnState(
     return "accepted" as const;
   });
 
+  return result.outcome === "fenced" ? "fenced" : result.value;
+}
+
+/**
+ * Store a thread's rolling summary (bead ypo). Fenced like every assistant write: a
+ * Clear that bumped the generation, or marked the thread cleared, drops it. A summary
+ * that would cover no more than the stored one is dropped too.
+ */
+export async function saveThreadSummary(
+  threadId: string,
+  scenarioId: string,
+  summary: ThreadSummaryV1,
+  generations: AssistantGenerationPair,
+  config: HistoryRepoConfig = {},
+): Promise<WriteOutcome> {
+  const { db, now } = resolve(config);
+  const result = await runFenced(
+    db,
+    ASSISTANT_WRITE_TABLES,
+    fromGenerationPair(scenarioId, generations),
+    async () => {
+      const thread = await db.assistantThreads.get(threadId);
+      if (!thread || thread.state === "cleared") return "missing" as const;
+      if ((thread.summary?.throughSeq ?? -1) >= summary.throughSeq) return "fenced" as const;
+      await db.assistantThreads.put({ ...thread, summary, updatedAt: now().toISOString() });
+      return "accepted" as const;
+    },
+  );
   return result.outcome === "fenced" ? "fenced" : result.value;
 }
 

@@ -234,6 +234,11 @@ export interface ProviderHopGuardDeps {
    * which is the isolation the store cannot give.
    */
   context?: readonly Context[];
+  /**
+   * bead ypo: messages a stored summary covers. Dropped from every hop's input only;
+   * the agent's own list (the panel, persistence) keeps them.
+   */
+  omitMessageIds?: ReadonlySet<string>;
 }
 
 /**
@@ -302,7 +307,14 @@ export function createProviderHopGuard(agent: object, deps: ProviderHopGuardDeps
 
         // The approved snapshot rides the run input. Replaced rather than merged: the
         // context this turn was authorised under is the whole context it may send.
-        const authorizedInput = deps.context ? { ...input, context: [...deps.context] } : input;
+        const omit = deps.omitMessageIds;
+        const authorizedInput = {
+          ...input,
+          ...(deps.context ? { context: [...deps.context] } : {}),
+          ...(omit && omit.size > 0
+            ? { messages: input.messages.filter((message) => !omit.has(message.id)) }
+            : {}),
+        };
         delegated = next.run(authorizedInput).subscribe(subscriber);
       })();
 

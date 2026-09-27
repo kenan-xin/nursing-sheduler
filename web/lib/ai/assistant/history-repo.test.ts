@@ -6,14 +6,22 @@ import {
   detachStaleTurns,
   persistThreadMessages,
   readLatestTurn,
+  readThread,
   readThreadMessages,
   readThreadsForScenario,
   recordPreparingTurn,
+  saveThreadSummary,
   selectActiveThread,
   setTurnState,
 } from "./history-repo";
+import { beginClear, finishClear } from "./clear-repo";
 import { toTransportThread } from "./messages";
-import { createAssistantHarness, TEST_MODEL, type AssistantHarness } from "./test-support";
+import {
+  createAssistantHarness,
+  dumpDatabase,
+  TEST_MODEL,
+  type AssistantHarness,
+} from "./test-support";
 
 function context(harness: AssistantHarness, threadId: string, scenarioId: string) {
   return {
@@ -492,5 +500,66 @@ describe("deleting the messages one turn created", () => {
     await expect(deleteTurnMessages(failed.turnId, harness.config)).resolves.toBe("fenced");
     const records = await readThreadMessages(thread.threadId, harness.config);
     expect(records.map((r) => r.content)).toContain("and the 16th?");
+  });
+});
+
+describe("thread summary (bead ypo)", () => {
+  const summary = {
+    text: "Ana asked for 3 Nov off.",
+    throughSeq: 7,
+    createdAt: "2026-09-27T00:00:00.000Z",
+  };
+  const fresh = { globalGeneration: 0, scenarioGeneration: 0 };
+
+  it("stores the summary on the live thread and replaces it on the next compaction", async () => {
+    const harness = createAssistantHarness();
+    const thread = await selectActiveThread("scenario-a", harness.config);
+    expect(
+      await saveThreadSummary(thread.threadId, "scenario-a", summary, fresh, harness.config),
+    ).toBe("accepted");
+    const next = { ...summary, text: "Later.", throughSeq: 20 };
+    expect(
+      await saveThreadSummary(thread.threadId, "scenario-a", next, fresh, harness.config),
+    ).toBe("accepted");
+    expect((await readThread(thread.threadId, harness.config))?.summary).toEqual(next);
+  });
+
+  it("drops a summary for a cleared thread or a stale generation", async () => {
+    const harness = createAssistantHarness();
+    const thread = await selectActiveThread("scenario-a", harness.config);
+    const stale = { globalGeneration: 9, scenarioGeneration: 9 };
+    expect(
+      await saveThreadSummary(thread.threadId, "scenario-a", summary, stale, harness.config),
+    ).toBe("fenced");
+    await harness.db.assistantThreads.update(thread.threadId, { state: "cleared" });
+    expect(
+      await saveThreadSummary(thread.threadId, "scenario-a", summary, fresh, harness.config),
+    ).toBe("missing");
+    expect((await harness.db.assistantThreads.get(thread.threadId))?.summary ?? null).toBeNull();
+  });
+
+  it("is deleted by Clear conversation history", async () => {
+    const harness = createAssistantHarness();
+    const thread = await selectActiveThread("scenario-a", harness.config);
+    await saveThreadSummary(thread.threadId, "scenario-a", summary, fresh, harness.config);
+    await finishClear(await beginClear("history", "scenario-a", harness.config), harness.config);
+    expect(JSON.stringify(await dumpDatabase(harness.db))).not.toContain(
+      "Ana asked for 3 Nov off.",
+    );
+  });
+
+  it("never moves backwards", async () => {
+    const harness = createAssistantHarness();
+    const thread = await selectActiveThread("scenario-a", harness.config);
+    await saveThreadSummary(
+      thread.threadId,
+      "scenario-a",
+      { ...summary, throughSeq: 20 },
+      fresh,
+      harness.config,
+    );
+    expect(
+      await saveThreadSummary(thread.threadId, "scenario-a", summary, fresh, harness.config),
+    ).toBe("fenced");
   });
 });

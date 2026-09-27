@@ -6,9 +6,17 @@
 // public and keyless, and the probe must be callable while no configuration is
 // stored yet. Neither may ever share the chat route's agent, thread, or history.
 
-import { AI_SETUP_CODES, AI_KEY_HEADER, AI_MODEL_HEADER } from "@/lib/ai/protocol";
+import { z } from "zod";
+
+import {
+  AI_SETUP_CODES,
+  AI_KEY_HEADER,
+  AI_MODEL_HEADER,
+  MAX_SUMMARY_INPUT_CHARS,
+} from "@/lib/ai/protocol";
 import { fetchModelCatalog, type ModelCatalog } from "./catalog";
 import { probeCredentials } from "./probe";
+import { summarizeConversation } from "./summarize";
 
 /**
  * Every response from these routes.
@@ -97,4 +105,32 @@ export async function handleProbeRequest(
   // A rejected probe is a successful ANSWER, not a transport failure: the client
   // renders guidance from the code, so a non-200 would only invite a retry loop.
   return contained(result);
+}
+
+const summaryBody = z.object({
+  previousSummary: z.string().max(8_000).nullable(),
+  transcript: z.string().min(1).max(MAX_SUMMARY_INPUT_CHARS),
+});
+
+/** `POST /api/ai/openrouter/summarize` (bead ypo). The key is a transient header, as for the probe. */
+export async function handleSummaryRequest(
+  request: Request,
+  options: ProbeHandlerOptions = {},
+): Promise<Response> {
+  const apiKey = request.headers.get(AI_KEY_HEADER)?.trim();
+  const model = request.headers.get(AI_MODEL_HEADER)?.trim();
+  if (!apiKey || !model) {
+    return contained({ ok: false, code: AI_SETUP_CODES.credentialsRequired }, 400);
+  }
+  const parsed = summaryBody.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return contained({ ok: false, code: AI_SETUP_CODES.summaryInvalid });
+  return contained(
+    await summarizeConversation({
+      apiKey,
+      model,
+      ...parsed.data,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      ...(request.signal ? { signal: request.signal } : {}),
+    }),
+  );
 }

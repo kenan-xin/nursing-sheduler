@@ -891,6 +891,124 @@ describe("dirty history already on disk", () => {
   });
 });
 
+describe("a long thread (bead ypo)", () => {
+  /** 12 old user/answer pairs of 6,000 characters: over COMPACT_AT_CHARS. Mounted after. */
+  async function mountLongThread(summaryAnswer: unknown) {
+    const summaryCalls = await seedAndMount(summaryAnswer);
+    await act(async () => {
+      await session.current!.send("new question");
+    });
+    await settle();
+    return { hop: agent.clones.at(-1)!.hopInputs[0]!, summaryCalls };
+  }
+
+  async function seedAndMount(summaryAnswer: unknown) {
+    for (let i = 0; i < 12; i++) {
+      for (const row of [
+        {
+          messageId: `u${i}`,
+          seq: i * 2,
+          role: "user",
+          content: `old question ${i} ${"q".repeat(6_000)}`,
+        },
+        { messageId: `a${i}`, seq: i * 2 + 1, role: "assistant", content: `old answer ${i}` },
+      ]) {
+        await harness.db.assistantMessages.put({
+          schemaVersion: 1,
+          threadId,
+          scenarioId: SCENARIO_ID,
+          toolCalls: null,
+          toolCallId: null,
+          modelId: null,
+          turnId: null,
+          globalGeneration: 0,
+          scenarioGeneration: 0,
+          createdAt: new Date().toISOString(),
+          ...row,
+        } as never);
+      }
+    }
+    // Only the summary route is answered here; every other request keeps this file's fetch.
+    const harnessFetch = globalThis.fetch;
+    const summaryCalls: RequestInit[] = [];
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(url).includes("/api/ai/openrouter/summarize")) return harnessFetch(url, init);
+      summaryCalls.push(init ?? {});
+      return typeof summaryAnswer === "function"
+        ? (summaryAnswer as (init?: RequestInit) => Promise<Response>)(init)
+        : new Response(JSON.stringify(summaryAnswer));
+    }) as typeof fetch;
+    cleanup();
+    agent = new ScriptedAgent();
+    realAgent.current = agent;
+    render(<Host />);
+    await waitFor(() => expect(agent.messages.length).toBe(24));
+    agent.shape = "answer";
+    agent.answer = "ok";
+    return summaryCalls;
+  }
+
+  it("sends summary + the 4 recent turns on the FIRST hop, and the panel keeps everything", async () => {
+    const { hop, summaryCalls } = await mountLongThread({ ok: true, summary: "EARLIER-SUMMARY" });
+    expect(summaryCalls).toHaveLength(1);
+    expect(String(summaryCalls[0].body)).toContain("old question 0");
+    expect(String(summaryCalls[0].body)).not.toContain(SENTINEL_KEY);
+
+    const sent = JSON.stringify(hop.messages);
+    expect(sent).not.toContain("old question 0");
+    expect(sent).not.toContain("old question 7");
+    for (const kept of [8, 9, 10, 11]) expect(sent).toContain(`old question ${kept}`);
+    expect(sent).toContain("new question");
+    expect(JSON.stringify(hop.context)).toContain("EARLIER-SUMMARY");
+
+    // The panel and the durable history are untouched.
+    expect(JSON.stringify(agent.messages)).toContain("old question 0");
+    expect(
+      await harness.db.assistantMessages.where("threadId").equals(threadId).count(),
+    ).toBeGreaterThanOrEqual(25);
+    expect((await harness.db.assistantThreads.get(threadId))?.summary?.text).toBe(
+      "EARLIER-SUMMARY",
+    );
+    expect(session.current!.summarised).toBe(true);
+  });
+
+  it("Stop during a stalled summary aborts it and frees the panel at once (ypo review 1)", async () => {
+    // OpenRouter stalls: the summary answers only when its request is aborted.
+    const stalled = (init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("Aborted", "AbortError")),
+        );
+      });
+    const summaryCalls = await seedAndMount(stalled);
+    let done = false;
+    act(() => {
+      void session.current!.send("new question").then(() => {
+        done = true;
+      });
+    });
+    await waitFor(() => expect(summaryCalls).toHaveLength(1));
+    act(() => session.current!.stop());
+    await waitFor(() => expect(done).toBe(true));
+    await settle();
+    expect(summaryCalls[0].signal?.aborted).toBe(true);
+    // Nothing reached the provider, and the panel is free for the next send.
+    expect(agent.clones).toHaveLength(0);
+    expect(session.current!.sending).toBe(false);
+    expect(session.current!.summarised).toBe(false);
+  });
+
+  it("still sends the turn, with the full history and no notice, when the summary fails", async () => {
+    const { hop } = await mountLongThread({ ok: false, code: "ai_provider_declined" });
+    const sent = JSON.stringify(hop.messages);
+    expect(sent).toContain("old question 0");
+    expect(sent).toContain("new question");
+    expect(JSON.stringify(hop.context)).not.toContain("earlier part of this conversation");
+    expect(session.current!.summarised).toBe(false);
+    expect((await lastTurn())?.terminalReason).toBe("completed");
+  });
+});
+
 describe("Clear all against a live turn", () => {
   // Clear is the strictest of the triggers: not "this turn's rows must not land" but
   // "no assistant content may exist at all afterwards, and nothing may put it back".
