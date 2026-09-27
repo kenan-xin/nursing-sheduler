@@ -6,7 +6,14 @@ import { Button } from "@/components/ui/button";
 import { useChangeHighlightStore } from "@/lib/change-highlight/store";
 import { useModeStore } from "@/lib/mode/mode";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
-import { pickScenario, scenarioCommands, useScenarioStore } from "@/lib/store";
+import {
+  pickScenario,
+  scenarioCommands,
+  useAuthorityStore,
+  useHotStore,
+  useScenarioStore,
+} from "@/lib/store";
+import type { ScenarioSeed } from "./harness";
 import { withResetTransientStores, withScenarioStore, withToaster } from "./harness";
 
 // Harness self-checks (bead w0e.2). Hidden from the sidebar, run by `pnpm test:stories`.
@@ -41,6 +48,40 @@ export const FreshScenario: Story = {
     await expect(await canvas.findByText("staff:0")).toBeVisible();
     const ours = (await indexedDB.databases()).filter((db) => db.name?.startsWith("storybook-"));
     await expect(ours).toHaveLength(1);
+  },
+};
+
+const TWO_STAFF: ScenarioSeed = pickScenario(makeValidUiState());
+
+// Bucket C stories declare their scenario as data; the global hook installs it.
+export const ParameterSeed: Story = {
+  parameters: { scenario: TWO_STAFF },
+  play: async ({ canvas }) => {
+    await expect(await canvas.findByText("staff:2")).toBeVisible();
+    await expect(useHotStore.getState().hydrationStatus).toBe("ready");
+    await expect(useAuthorityStore.getState().canUndo).toBe(true); // a patch seed is one mutate
+  },
+};
+
+export const ParameterOverride: Story = {
+  parameters: { scenario: "empty" },
+  play: async ({ canvas }) => {
+    await expect(await canvas.findByText("staff:0")).toBeVisible();
+    await expect(useAuthorityStore.getState().canUndo).toBe(false);
+    const ours = (await indexedDB.databases()).filter((db) => db.name?.startsWith("storybook-"));
+    await expect(ours).toHaveLength(1);
+  },
+};
+
+// Declared right after a scenario story, with NO scenario of its own: the previous
+// story's projection, hydration status and ownership must all be gone.
+export const TornDown: Story = {
+  play: async ({ canvas }) => {
+    await expect(await canvas.findByText("staff:0")).toBeVisible();
+    await expect(useHotStore.getState().hydrationStatus).toBe("unhydrated");
+    await expect(useAuthorityStore.getState().ownership).toBe("unknown");
+    const ours = (await indexedDB.databases()).filter((db) => db.name?.startsWith("storybook-"));
+    await expect(ours).toHaveLength(0);
   },
 };
 
