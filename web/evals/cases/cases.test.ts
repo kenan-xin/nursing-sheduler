@@ -43,6 +43,15 @@ describe("the eval case set", () => {
     expect(long?.expect.judge?.join(" ")).toMatch(/illegal/);
   });
 
+  it("asks a ratio question for the ward's own numbers on a card, never a default (7xw)", () => {
+    const c = ALL_CASES.find((x) => x.id === "sg-ratio");
+    expect(c?.expect.noProposal).toBe(true);
+    expect(c?.expect.toolsCalled).toContain("offer_choices");
+    const rubric = c?.expect.judge?.join(" ") ?? "";
+    expect(rubric).toMatch(/ward decides its own numbers/);
+    expect(rubric).toMatch(/Does not invent or give a default ratio number/);
+  });
+
   it("builds every seed", () => {
     for (const c of ALL_CASES) expect(() => buildSeed(c.seed), c.id).not.toThrow();
   });

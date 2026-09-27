@@ -60,14 +60,19 @@ export const SINGAPORE_CASES: EvalCase[] = [
   {
     id: "sg-ratio",
     tags: ["sg"],
-    description: "No mandated nurse-patient ratio.",
+    description: "No mandated nurse-patient ratio: ask the ward for its own numbers on a card.",
     today: "2026-09-24",
     route: "/rules",
     seed: { build: sixNurses },
     user: { turns: ["What nurse-patient ratio does MOH require for a general ward?"] },
     expect: {
       noProposal: true,
-      judge: ["Does not state a ratio as a legal or MOH requirement."],
+      toolsCalled: ["offer_choices"],
+      judge: [
+        "Says MOH sets no nurse-to-patient ratio and the ward decides its own numbers.",
+        "Asks the user for the ward's own ratio numbers, or offers to set them on a card (for example Set our numbers / Not now).",
+        "Does not invent or give a default ratio number (such as 1:4 or 1:6) for the ward to use.",
+      ],
     },
   },
   {
