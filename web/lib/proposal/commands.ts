@@ -280,7 +280,23 @@ export type AssistantCommandV1 =
       members: PersonRef[];
     }
   /** Remove one staff group and every reference to it -- the group's Delete. */
-  | { type: "remove_people_group"; groupId: string };
+  | { type: "remove_people_group"; groupId: string }
+  /**
+   * Book one temporary cover -- the Staff screen's "Add temporary cover" form: a named
+   * nurse from another ward, ONE date, one shift she works and the staff groups she
+   * counts as. She is a staffing credit, never a solver person: her date's need drops by
+   * one and no staff row, request or rule names her. A second cover for the same name on
+   * the same date is refused, in the form's own words.
+   */
+  | {
+      type: "add_temporary_cover";
+      name: string;
+      date: string;
+      shiftType: string;
+      groups: string[];
+    }
+  /** Remove one temporary cover, named by its three identity fields -- the Staff row's Delete. */
+  | { type: "remove_temporary_cover"; name: string; date: string; shiftType: string };
 
 /** A request strength: a finite number, or a hard pin. JSON cannot carry an infinity, so the pins are words. */
 export type RequestWeight = number | "must" | "never";
@@ -314,6 +330,8 @@ export const ASSISTANT_COMMAND_TYPES = [
   "add_people_group",
   "edit_people_group",
   "remove_people_group",
+  "add_temporary_cover",
+  "remove_temporary_cover",
 ] as const satisfies readonly AssistantCommandType[];
 
 // EXHAUSTIVE IN BOTH DIRECTIONS. `satisfies` above proves every listed name is a real
@@ -810,6 +828,39 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
         "The staff group to remove. Rules that only target this group go too; the preview " +
           "lists them.",
       ),
+  }),
+  z.strictObject({
+    type: z.enum(["add_temporary_cover"]),
+    name: z
+      .string()
+      .describe(
+        "The nurse's name as the Staff list should show it, with the ward she comes from in " +
+          'brackets, e.g. "Haseena (Ward 3)". She is a TEMPORARY COVER, not a person: no staff ' +
+          "row, no requests and no rules name her, and she is never a nurse who can be put on " +
+          "the roster. A cover already booked for the same name and date is refused.",
+      ),
+    date: isoDateSchema.describe("The one date she covers, YYYY-MM-DD."),
+    shiftType: z
+      .string()
+      .describe(
+        "The shift-type id she works on that date, exactly as the Shifts screen shows it, " +
+          "e.g. N. One shift a day: a second cover for the same nurse on the same date is refused.",
+      ),
+    groups: z
+      .array(z.string())
+      .describe(
+        'Staff groups she counts as on that date, e.g. ["RN"]. Each must exist. Send [] for ' +
+          "none. A card restricted to a group she is not in is not lowered by her, and the " +
+          "preview says so.",
+      ),
+  }),
+  z.strictObject({
+    type: z.enum(["remove_temporary_cover"]),
+    name: z.string().describe("The nurse's name exactly as the Staff list shows it."),
+    date: isoDateSchema.describe("That cover's date, YYYY-MM-DD."),
+    shiftType: z
+      .string()
+      .describe("That cover's shift-type id. All three fields must match one cover."),
   }),
 ]);
 

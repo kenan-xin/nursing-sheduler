@@ -121,6 +121,8 @@ const PROPOSAL_OPERATIONS = [
   "add_people_group",
   "edit_people_group",
   "remove_people_group",
+  "add_temporary_cover",
+  "remove_temporary_cover",
 ] as const;
 
 /**
