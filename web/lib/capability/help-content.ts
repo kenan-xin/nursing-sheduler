@@ -406,7 +406,9 @@ export const CAPABILITY_ENTRIES = [
       "Once it is on, the assistant can read the set-up you have open, explain how the app " +
       "works, and suggest which rule expresses a policy you describe. It can also prepare " +
       "changes — the roster period, turning any rule on or off, adding, editing or deleting " +
-      "staffing requirements, shift sequence rules and shift count rules, deleting any rule, " +
+      "staffing requirements, shift sequence rules, shift count rules, pairing rules (who " +
+      "works together or apart) and supervision rules (a senior on shift with a new nurse), " +
+      "deleting any rule, " +
       "moving leave, adding new shifts and shift groups, adding, renaming or removing staff " +
       "and staff groups, marking someone off for a run of days, and recording leave, day-off " +
       "and shift requests — which you review and apply yourself. It can also offer to run the " +
@@ -417,8 +419,8 @@ export const CAPABILITY_ENTRIES = [
       "if she can cover, or allowing one more night this period. Anything that needs someone to " +
       "agree is asked before you can apply it. If you ask it to turn off or soften a rest rule, " +
       "it prepares that with a short note that rest rules are recommended practice, not law. " +
-      "It cannot change the roster on its own, it cannot yet create pairing or supervision " +
-      "rules, and it cannot edit or delete existing shifts. It is not a source of employment, " +
+      "It cannot change the roster on its own, and it cannot edit or delete existing " +
+      "shifts. It is not a source of employment, " +
       "legal or clinical-safety authority.",
     concepts: [
       "assistant",

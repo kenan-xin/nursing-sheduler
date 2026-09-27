@@ -175,4 +175,57 @@ export const FLOW_CASES: EvalCase[] = [
       judge: ["Makes the day off after nights a preference, not a must."],
     },
   },
+  {
+    // v1 pref-affinity-repel (bead 31og).
+    id: "pair-keep-apart",
+    tags: ["flow"],
+    description: "Keep two nurses apart on nights with a pairing rule, not a screen link.",
+    today: "2026-09-27",
+    route: "/shift-affinities",
+    seed: { build: () => ward({ staff: people("ana", "ben", "cara", "dev") }) },
+    user: {
+      turns: ["Ana and Ben must never work the same night shift."],
+      onPreview: "ignore",
+    },
+    expect: {
+      proposalOps: [{ type: "add_pairing_rule", weight: "-infinity" }],
+      proposalCheck: (ops) => {
+        const op = ops.find((o) => o.type === "add_pairing_rule");
+        if (!op) return "no pairing rule";
+        const pair = [...op.people, ...op.withPeople].map(String).sort().join(",");
+        if (pair !== "ana,ben") return `pairs ${pair}, not ana and ben`;
+        return op.shiftTypes.includes("N") ? null : "not on nights";
+      },
+    },
+  },
+  {
+    // v1 preceptor/preceptee covering (bead 31og).
+    id: "supervise-new-grad",
+    tags: ["flow"],
+    description: "A new nurse never works without a senior: a supervision rule.",
+    today: "2026-09-27",
+    route: "/shift-type-coverings",
+    seed: {
+      build: () =>
+        ward({
+          staff: people("ana", "ben", "cara", "siti"),
+          staffGroups: [{ id: "Seniors", members: ["ana", "ben"] }],
+        }),
+    },
+    user: {
+      turns: ["Siti is a new grad. She must always have one of the seniors on shift with her."],
+      onPreview: "ignore",
+    },
+    expect: {
+      proposalOps: [{ type: "add_supervision_rule" }],
+      proposalCheck: (ops) => {
+        const op = ops.find((o) => o.type === "add_supervision_rule");
+        if (!op) return "no supervision rule";
+        if (op.supervisedPeople.map(String).join(",") !== "siti") return "does not cover Siti";
+        const seniors = op.supervisors.map(String).sort().join(",");
+        if (seniors !== "Seniors" && seniors !== "ana,ben") return `supervisors ${seniors}`;
+        return ["D", "N"].every((s) => op.shiftTypes.includes(s)) ? null : "not every shift";
+      },
+    },
+  },
 ];

@@ -274,7 +274,19 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS[0]).toMatch(/moreQuestions/);
     expect(SETUP_INSTRUCTIONS[0]).not.toMatch(/all at once, in plain words/);
   });
+  it("sends working together, apart, and supervision to their own ops (31og)", () => {
+    const rules = SETUP_STEPS.find((s) => s.id === "rules")!;
+    expect(rules.proposeWith).toEqual(
+      expect.arrayContaining(["add_pairing_rule", "add_supervision_rule"]),
+    );
+    const ask = rules.ask.join(" ");
+    expect(ask).toMatch(/together or apart/);
+    expect(ask).toMatch(/add_pairing_rule/);
+    expect(ask).toMatch(/add_supervision_rule/);
+    const help = CAPABILITY_ENTRIES.find((e) => e.id === "ai-assistant-conversation");
+    expect(help?.nurseFacingSummary).not.toMatch(/cannot yet create pairing/);
+  });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-27.4");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-27.5");
   });
 });
