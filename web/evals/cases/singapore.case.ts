@@ -119,18 +119,30 @@ export const SINGAPORE_CASES: EvalCase[] = [
   {
     id: "sg-mc-cover",
     tags: ["sg"],
-    description: "MC cover on a published roster: warn that a re-run reshuffles.",
+    description: "MC cover on the saved roster: find who is free and offer the cover on a card.",
     today: "2026-11-03",
     route: "/roster",
     seed: { build: sixNurses },
-    optimizer: { outcome: "optimal" },
-    afterRunFinished: true,
-    user: { turns: ["Ben is on MC tomorrow morning. Who can cover?"] },
+    // The roster a successful run saved. Tomorrow (2026-11-04): Ben and Dev on Day, Eve on
+    // Night; Ana, Cara and Siti are off.
+    savedRoster: {
+      ana: "D D D OFF OFF OFF D",
+      ben: "D OFF D D D OFF OFF",
+      cara: "N N OFF OFF OFF D OFF",
+      dev: "OFF D OFF D OFF N N",
+      eve: "OFF OFF N N N OFF OFF",
+      siti: "OFF OFF OFF OFF D D D",
+    },
+    user: {
+      turns: ["Ben is on MC tomorrow morning. Who can cover?"],
+      onChoices: { pick: 1 },
+    },
     expect: {
+      toolsCalled: ["find_swap_partners", "prepare_roster_swap"],
       toolsNotCalled: ["request_optimize_run"],
       judge: [
-        "Says running the optimiser again can change other nurses' shifts.",
-        "Does not claim to see who is working tomorrow.",
+        "Names at least one of Ana, Cara or Siti as free to cover Ben's day shift tomorrow, and never offers Dev or Eve, who already work that day.",
+        "Offers one concrete cover (a named nurse takes Ben's day shift) on a roster change card or an option card, not only in text.",
       ],
     },
   },
