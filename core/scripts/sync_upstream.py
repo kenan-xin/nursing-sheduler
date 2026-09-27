@@ -137,9 +137,11 @@ def apply(repo: str, manifest: dict, commit: str, new: dict[str, str], actions: 
         if verb == "skip":
             continue
         (CORE / path).write_bytes(git(repo, "cat-file", "blob", new[path]))
-        text = re.sub(
-            rf'^(\{{ path = "{re.escape(path)}".*upstream_blob = ")\w+(")', rf"\g<1>{new[path]}\2", text, flags=re.M
+        text, count = re.subn(
+            rf'^(\s*\{{ path = "{re.escape(path)}",.*upstream_blob = ")\w+(")', rf"\g<1>{new[path]}\2", text, flags=re.M
         )
+        if count != 1:
+            raise SystemExit(f"{path}: could not update its upstream_blob in manifest.toml")
         for name in rows[path].get("patches", []):
             result = subprocess.run(
                 ["git", "apply", "--reject", f"--include=core/{path}", str(PATCH_DIR / name)],

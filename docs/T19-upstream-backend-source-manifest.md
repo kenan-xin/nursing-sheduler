@@ -141,8 +141,9 @@ It also prints a `PROBLEM` line, and `--apply` refuses to run, when:
 `--apply` writes the files, moves `upstream_commit` and the blob SHAs in the manifest to
 the new commit, and rebuilds each patch file against the new genie blobs. The `#`
 header lines of each patch stay. If a patch does not apply, it leaves `*.rej` files. Fix
-the file by hand, run `python -m scripts.sync_upstream --repo ~/work/nurse-scheduling
---refresh-patches`, and update the patch header if the hunks changed. Then run the
+the file by hand, delete the `*.rej` files, run `python -m scripts.sync_upstream --repo
+~/work/nurse-scheduling --refresh-patches`, and update the patch header if the hunks
+changed. Then run the
 check and the suite. Also read the genie commit log for the range. A change in an
 `excluded` file, or in a v2-only area, can still matter (for example a new `/info` key).
 
@@ -151,6 +152,13 @@ Dry run on the current pins (`1bf4b85` to `origin/feature/genie`, which is `1bf4
 `excluded` glob, and every recorded blob matches the genie tree. `--refresh-patches` on
 the current pins rebuilt every patch file byte for byte, except the stale P2-P3 line
 numbers noted above.
+
+`--apply` was also tried in a scratch worktree against a made-up genie commit on top of
+`1bf4b85`. The commit changed `cli.py` (verbatim), `server/config.py` (patched) and
+added a file under `ai/` (excluded). The script copied `cli.py`, copied `config.py` and
+re-applied its patch, skipped the `ai/` file, and the check then passed with 0 problems.
+A second made-up commit changed a line inside the `config.py` patch context. The script
+then stopped with a `.rej` file, as described above.
 
 ### Upstream candidates
 
