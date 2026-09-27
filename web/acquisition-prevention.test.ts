@@ -175,6 +175,20 @@ const FIXTURES: Fixture[] = [
     expect: ["no-restricted-imports"],
     because: "Generic filesystem capability",
   },
+  {
+    family: "static filesystem import in a Storybook story",
+    file: "probe.stories.tsx",
+    source: 'import { readFileSync } from "node:fs";\nexport const probe = readFileSync;\n',
+    expect: ["no-restricted-imports"],
+    because: "Generic filesystem capability",
+  },
+  {
+    family: "require(fs) inside a hidden .storybook config directory",
+    file: ".storybook/probe.ts",
+    source: 'export const probe = () => require("node:fs");\n',
+    expect: ["test-capability-acquisition"],
+    because: "filesystem, module-loader or parser capability",
+  },
 ];
 
 /**
@@ -237,6 +251,7 @@ function writeFixtures(): void {
   // the fixture exercises the `evals/**` scope row rather than the top-level one.
   mkdirSync(join(FIXTURE_DIR, "support"), { recursive: true });
   mkdirSync(join(FIXTURE_DIR, "evals"), { recursive: true });
+  mkdirSync(join(FIXTURE_DIR, ".storybook"), { recursive: true });
   for (const fixture of FIXTURES) {
     writeFileSync(join(FIXTURE_DIR, fixture.file), fixture.source);
   }
@@ -282,8 +297,11 @@ beforeAll(() => {
   // multi-line `default` otherwise). `agent` is the only one that puts file, rule and help on
   // ONE line, which is what oxlintFiredAt and the FOR-THE-INTENDED-REASON checks read.
   oxlint = run(["exec", "oxlint", "--format=agent", FIXTURE_DIR_NAME]);
-  astGrep = run(["exec", "ast-grep", "scan", FIXTURE_DIR_NAME]);
-  const json = run(["exec", "ast-grep", "scan", "--json=compact", FIXTURE_DIR_NAME], true);
+  astGrep = run(["exec", "ast-grep", "scan", "--no-ignore", "hidden", FIXTURE_DIR_NAME]);
+  const json = run(
+    ["exec", "ast-grep", "scan", "--no-ignore", "hidden", "--json=compact", FIXTURE_DIR_NAME],
+    true,
+  );
   // `--json=compact` writes the whole findings array on ONE line, and pnpm/ast-grep put their
   // own chatter on others -- including a `[warn] postinstall ...` line that starts with `[`,
   // so "slice from the first bracket" is not good enough.

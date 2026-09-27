@@ -18,15 +18,14 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from threading import RLock
+from datetime import datetime, timedelta, timezone
+from threading import Lock
+from unittest import mock
 from uuid import uuid4
 
 import pytest
 
-from nurse_scheduling.server.jobs.models import Job, JobPurpose, JobRequest, JobState
+from nurse_scheduling.server.jobs.models import Job, JobPurpose, JobRequest, JobState, WorkerLease
 from nurse_scheduling.server.queue_state import QueueStateSnapshot, check_queue_invariants
 from nurse_scheduling.server.stores.memory import MemoryJobStore
 from nurse_scheduling.server.stores.redis import RedisJobStore
@@ -82,6 +81,24 @@ def make_job(
     )
 
 
+def register_lease(store, worker_id: str, *, now: datetime | None = None, seconds: float = 90.0) -> WorkerLease:
+    """Register a live worker lease directly on a store (W6 lease API)."""
+    now = now or utc_now()
+    lease = WorkerLease(worker_id=worker_id, token=uuid4().hex, expires_at=now + timedelta(seconds=seconds))
+    assert store.register_worker(lease, now), f"worker {worker_id} could not register"
+    return lease
+
+
+def claim(store, worker_id: str = "worker-1", *, now: datetime | None = None, seconds: float = 90.0, runtime=None):
+    """Register a fresh lease for `worker_id` and claim the effective queue head with it.
+
+    Returns `(job_or_none, lease)`. Replaces the T19 `store.claim_next(worker, now, deadline)`.
+    """
+    now = now or utc_now()
+    lease = register_lease(store, worker_id, now=now, seconds=seconds)
+    return store.claim_next_job(lease, now, runtime), lease
+
+
 def assert_queue_invariants(store, *, context: str = "") -> QueueStateSnapshot:
     """Assert all six queue invariants against what the store actually persisted.
 
@@ -101,39 +118,35 @@ def _make_memory_store(*, max_events_per_job: int = 1_000) -> MemoryJobStore:
     return MemoryJobStore(max_events_per_job=max_events_per_job)
 
 
-class FakeredisLeaseCommitBoundary:
-    """Share one reentrant critical section with fakeredis command execution."""
-
-    def __init__(self, server, before_commit: Callable[[], None] | None = None):
-        self._lock = RLock()
-        server.lock = self._lock
-        self._before_commit = before_commit or (lambda: None)
-
-    @contextmanager
-    def commit(self) -> Iterator[None]:
-        self._before_commit()
-        with self._lock:
-            yield
+_FROM_URL_PATCH_LOCK = Lock()
+"""`mock.patch` of the process-global `redis.Redis.from_url` is not thread-safe: two racing
+constructions can restore each other's patch and leak it into later real-Redis tests."""
 
 
-def _make_fakeredis_store(
-    *,
-    max_events_per_job: int = 1_000,
-    before_commit: Callable[[], None] | None = None,
-) -> RedisJobStore:
-    """Build a Redis store backed by an isolated fakeredis server."""
+def fakeredis_store(*, server=None, key_prefix: str | None = None, **kwargs) -> RedisJobStore:
+    """Build the production Redis store over a fakeredis server, as the genie tests do.
+
+    The store runs the SAME WATCH/MULTI code as against real Redis; only the
+    connection factory is replaced.
+    """
     import fakeredis
+    import redis
 
-    server = fakeredis.FakeServer()
-    commit_boundary = FakeredisLeaseCommitBoundary(server, before_commit)
-    client = fakeredis.FakeStrictRedis(server=server)
-    return RedisJobStore(
-        url="redis://fake",
-        key_prefix=f"nurse_test:{uuid4().hex}:v0",
-        max_events_per_job=max_events_per_job,
-        client=client,
-        test_lease_commit_boundary=commit_boundary.commit,
-    )
+    server = server or fakeredis.FakeServer()
+    with (
+        _FROM_URL_PATCH_LOCK,
+        mock.patch.object(
+            redis.Redis,
+            "from_url",
+            lambda url, **options: fakeredis.FakeRedis.from_url(url, server=server, **options),
+        ),
+    ):
+        return RedisJobStore(url="redis://fake", key_prefix=key_prefix or f"nurse_test:{uuid4().hex}:v0", **kwargs)
+
+
+def _make_fakeredis_store(*, max_events_per_job: int = 1_000) -> RedisJobStore:
+    """Build a Redis store backed by an isolated fakeredis server."""
+    return fakeredis_store(max_events_per_job=max_events_per_job)
 
 
 def real_redis_url() -> str | None:

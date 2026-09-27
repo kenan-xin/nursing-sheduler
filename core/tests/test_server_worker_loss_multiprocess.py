@@ -47,7 +47,7 @@ def _controller(store) -> JobController:
         store,
         limits=StoreLimits(max_pending=8, max_retained=128),
         retention_seconds=3600,
-        claim_lease_seconds=LEASE_SECONDS,
+        worker_lease_seconds=LEASE_SECONDS,
     )
 
 
@@ -58,35 +58,41 @@ def _hold_claim_forever(url: str, prefix: str, job_id: str, lease: float) -> Non
         store,
         limits=StoreLimits(max_pending=8, max_retained=128),
         retention_seconds=3600,
-        claim_lease_seconds=lease,
+        worker_lease_seconds=lease,
     )
-    claimed = controller.claim_next_job("child-worker")
+    worker_lease = controller.register_worker("child-worker")
+    claimed = controller.claim_next_job(worker_lease)
     if claimed is None:
         return
     while True:
-        controller.renew_claim(claimed.id, "child-worker")
+        worker_lease = controller.renew_worker(worker_lease) or worker_lease
         time.sleep(lease / 3)
 
 
-def _replacement_expire(url: str, prefix: str, job_id: str, lease: float, deadline_seconds: float) -> None:
-    """Replacement-process maintenance: expire the abandoned claim to worker_lost.
+def _replacement_expire(
+    url: str, prefix: str, job_id: str, next_job_id: str, lease: float, deadline_seconds: float
+) -> None:
+    """Replacement-process worker: expire the abandoned job to worker_lost, then recover.
 
-    Exits 0 only after observing terminal `worker_lost`, so the parent asserts on
-    a genuine second process rather than impersonating the replacement itself.
+    Exits 0 only after observing terminal `worker_lost` AND claiming the next queued
+    job under its own fresh lease (W6: the replacement worker recovers).
     """
     store = RedisJobStore(url=url, key_prefix=prefix)
     controller = JobController(
         store,
         limits=StoreLimits(max_pending=8, max_retained=128),
         retention_seconds=3600,
-        claim_lease_seconds=lease,
+        worker_lease_seconds=lease,
     )
     end = time.monotonic() + deadline_seconds
     while time.monotonic() < end:
         controller.expire_worker_claims()
         job = controller.get_job(job_id)
         if job.state.terminal:
-            sys.exit(0 if job.failure is not None and job.failure.code == "worker_lost" else 2)
+            if job.failure is None or job.failure.code != "worker_lost":
+                sys.exit(2)
+            claimed = controller.claim_next_job(controller.register_worker("replacement-worker"))
+            sys.exit(0 if claimed is not None and claimed.id == next_job_id else 4)
         time.sleep(0.25)
     sys.exit(3)
 
@@ -131,11 +137,19 @@ def test_sigkilled_worker_becomes_worker_lost_in_replacement_process():
         worker_process.join(timeout=5)
         assert not worker_process.is_alive()
 
+        next_job = controller.create_job(
+            input_name="next.yaml",
+            client_id="c",
+            solver="ortools/cp-sat",
+            prettify=None,
+            timeout_seconds=300,
+            input_bytes=b"x",
+        )
         # A genuine replacement PROCESS (not this pytest process) detects the
         # now-unrenewed claim and records terminal worker_lost.
         replacement = context.Process(
             target=_replacement_expire,
-            args=(url, prefix, job.id, LEASE_SECONDS, LEASE_SECONDS * 3 + 5.0),
+            args=(url, prefix, job.id, next_job.id, LEASE_SECONDS, LEASE_SECONDS * 3 + 5.0),
         )
         replacement.start()
         replacement.join(timeout=LEASE_SECONDS * 3 + 20.0)
@@ -145,6 +159,9 @@ def test_sigkilled_worker_becomes_worker_lost_in_replacement_process():
         lost = controller.get_job(job.id)
         assert lost.state == JobState.FAILED
         assert lost.failure.code == "worker_lost"
+        recovered = controller.get_job(next_job.id)
+        assert recovered.state == JobState.RUNNING
+        assert recovered.worker_id == "replacement-worker"
     finally:
         if worker_process.is_alive():
             worker_process.kill()

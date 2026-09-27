@@ -41,6 +41,8 @@ files:
   - "**/*.test-support.*"
   - "lib/store/test-authority.ts"
   - "evals/**"
+  - "**/*.stories.*"
+  - "**/.storybook/**"
 ignores:
   - "components/ai/assistant-styles.test.ts"
   - "lib/ai/runtime/model-visible-tools.test.ts"

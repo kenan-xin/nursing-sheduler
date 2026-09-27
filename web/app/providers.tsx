@@ -12,19 +12,22 @@ import { ThemeProvider } from "@/components/theme/theme-provider";
 // The class-based ThemeProvider (light/dark + accent) sits inside the QueryClient
 // wrapper so every client component has both contexts. The QueryClient wrapper is
 // left intact per T06's ownership of the data-fetching spine.
+
+/** The app's QueryClient defaults; shared with the Storybook harness so stories match. */
+export function createQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        // BFF calls are explicit; avoid surprise refetches on window focus.
+        refetchOnWindowFocus: false,
+        retry: false,
+      },
+    },
+  });
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            // BFF calls are explicit; avoid surprise refetches on window focus.
-            refetchOnWindowFocus: false,
-            retry: false,
-          },
-        },
-      }),
-  );
+  const [queryClient] = useState(createQueryClient);
 
   return (
     <QueryClientProvider client={queryClient}>

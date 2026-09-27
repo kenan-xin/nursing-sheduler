@@ -124,6 +124,8 @@ def _create_store(settings: ServerSettings, instance_id: str) -> JobStore:
         key_prefix=settings.redis_key_prefix,
         event_stream_keepalive_seconds=settings.sse_keepalive_seconds,
         max_events_per_job=settings.max_events_per_job,
+        usage_metrics_key_prefix=(settings.usage_metrics_key_prefix if settings.usage_metrics_enabled else None),
+        usage_metrics_retention_days=settings.usage_metrics_retention_days,
     )
 
 
@@ -190,7 +192,7 @@ def create_app(
             ordinary_reserved_slots=settings.ordinary_reserved_slots,
         ),
         retention_seconds=settings.job_retention_seconds,
-        claim_lease_seconds=settings.claim_lease_seconds,
+        worker_lease_seconds=settings.worker_lease_seconds,
         runtime_identity=runtime_identity,
     )
     worker = JobWorker(
@@ -198,7 +200,7 @@ def create_app(
         runner,
         worker_id=instance_id,
         claim_poll_seconds=settings.claim_poll_seconds,
-        claim_lease_seconds=settings.claim_lease_seconds,
+        worker_lease_seconds=settings.worker_lease_seconds,
         timeout_grace_seconds=settings.timeout_grace_seconds,
         unexpected_error_formatter=_format_unexpected_error,
     )
@@ -413,7 +415,7 @@ def create_app(
                     "queued": activity.queued_jobs,
                     "cancelling": activity.cancelling_jobs,
                 },
-                "workers": {"online": int(worker.is_ready())},  # v2 bridge until the W6 lease registry
+                "workers": {"online": activity.online_workers},
             },
             headers={"Cache-Control": "no-store"},
         )

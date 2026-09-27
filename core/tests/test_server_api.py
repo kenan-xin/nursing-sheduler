@@ -290,3 +290,18 @@ def test_missing_job_is_404(client):
     response = client.get("/optimize/job_missing")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "job_not_found"
+
+
+def test_a_non_cp_sat_solver_stays_a_422_even_when_the_allowlist_names_it(monkeypatch):
+    monkeypatch.setattr("nurse_scheduling.server.app.validate_solver_availability", lambda _solver_ids: None)
+    settings = ServerSettings(job_backend="memory", solver_ids=("ortools/cp-sat", "pulp/glpk"))
+    with TestClient(create_app(settings=settings, start_background=False)) as client:
+        response = client.post("/optimize", data={"yaml_content": MINIMAL_SCENARIO, "solver": "pulp/glpk"})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "unsupported_solver"
+
+
+def test_runtime_identity_reports_api_version_0_2_0():
+    with TestClient(create_app(settings=ServerSettings(job_backend="memory"), start_background=False)) as client:
+        assert client.get("/info").json()["api_version"] == "0.2.0"
+        assert client.get("/health").json()["apiVersion"] == "0.2.0"

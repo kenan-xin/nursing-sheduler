@@ -1,0 +1,186 @@
+# W6 patch for core/nurse_scheduling/server/stores/memory.py against genie 1bf4b85.
+# hunk: prepare_event_replay under the store lock (P6)
+# hunk: reserve admission, ordinary-first order, transition rules, queue snapshot (P9)
+
+diff --git a/core/nurse_scheduling/server/stores/memory.py b/core/nurse_scheduling/server/stores/memory.py
+index 076668c..a44d54f 100644
+--- a/core/nurse_scheduling/server/stores/memory.py
++++ b/core/nurse_scheduling/server/stores/memory.py
+@@ -24,13 +24,42 @@ from datetime import datetime
+ from uuid import uuid4
+ 
+ from ..errors import (
++    DiagnosticCapacityError,
+     JobArtifactNotFoundError,
+     JobCapacityError,
+     JobInputNotFoundError,
+     JobNotFoundError,
++    QueueInvariantError,
+     StoreWriteConflictError,
+ )
+-from ..jobs.models import Job, JobEvent, JobState, ServerActivity, StoredArtifact, StoreLimits, WorkerLease
++from ..event_cursor import EventCursorExpired, EventCursorInvalid, decode_cursor, encode_cursor
++from ..jobs.models import (
++    EventReplayWindow,
++    Job,
++    JobEvent,
++    JobPurpose,
++    JobState,
++    ServerActivity,
++    StoredArtifact,
++    StoreLimits,
++    WorkerLease,
++)
++from ..queue_state import (
++    ADMISSION_OK,
++    ADMISSION_ORDINARY_RESERVED,
++    DIAGNOSTIC_CAPACITY_MESSAGE,
++    JobQueueFacts,
++    QueueMember,
++    QueueStateSnapshot,
++    admission_decision,
++    queue_sort_key,
++    validate_transition,
++)
++
++
++def _queue_order(job: Job) -> tuple:
++    """v2 P9: ordinary work first, then FIFO within a purpose (T09)."""
++    return queue_sort_key(job.request.purpose, job.created_at, job.id)
+ 
+ 
+ @dataclass
+@@ -103,8 +132,18 @@ class MemoryJobStore:
+         with self._changed:
+             if job.id in self._records:
+                 raise StoreWriteConflictError(f"Job already exists: {job.id}")
++            if job.state != JobState.QUEUED:
++                raise QueueInvariantError("A job may only be admitted in the queued state")
+             pending_count = sum(not record.job.state.terminal for record in self._records.values())
+-            if pending_count >= limits.max_pending:
++            decision = admission_decision(
++                job.request.purpose,
++                pending_count=pending_count,
++                max_pending=limits.max_pending,
++                ordinary_reserved_slots=limits.ordinary_reserved_slots,
++            )
++            if decision == ADMISSION_ORDINARY_RESERVED:
++                raise DiagnosticCapacityError(DIAGNOSTIC_CAPACITY_MESSAGE)
++            if decision != ADMISSION_OK:
+                 raise JobCapacityError("Too many jobs are queued or running")
+ 
+             while len(self._records) >= limits.max_retained:
+@@ -187,7 +226,7 @@ class MemoryJobStore:
+                 return None
+             queued = sorted(
+                 (record for record in self._records.values() if record.job.state == JobState.QUEUED),
+-                key=lambda record: (record.job.created_at, record.job.id),
++                key=lambda record: _queue_order(record.job),
+             )
+             if not queued:
+                 return None
+@@ -305,6 +344,7 @@ class MemoryJobStore:
+                 worker = self._get_worker_for_live_lease_locked(worker_lease, worker_lease_observed_at)
+                 if record.job.worker_id != worker_lease.worker_id or worker is None or worker.active_job_id != job.id:
+                     return self._with_queue_position(record.job)
++            validate_transition(record.job.state, record.job.request.purpose, job)
+             was_queued = record.job.state == JobState.QUEUED
+             updated_job = replace(job, revision=expected_revision + 1, queue_position=None)
+             record.job = updated_job
+@@ -366,6 +406,78 @@ class MemoryJobStore:
+             if terminal:
+                 return
+ 
++    def prepare_event_replay(self, job_id: str, requested_cursor: str | None) -> EventReplayWindow:
++        """v2 P6: snapshot the initial replay batch under the store lock.
++
++        Raises:
++            JobNotFoundError: If the job does not exist.
++            EventCursorExpired: If the cursor is valid but older than the retained floor.
++            EventCursorInvalid: If the cursor is malformed, foreign, future, or non-exact.
++        """
++        with self._lock:
++            events = self._record(job_id).events
++            if not events:
++                if requested_cursor is None:
++                    return EventReplayWindow(initial_events=[], next_cursor=None, oldest_event_id=None)
++                decode_cursor(requested_cursor, job_id)
++                raise EventCursorExpired(None)
++            floor = int(events[0].id or 0)
++            tail = int(events[-1].id or 0)
++            oldest_public = encode_cursor(job_id, events[0].id or "")
++            if requested_cursor is None:
++                return EventReplayWindow(list(events), events[-1].id, oldest_public)
++            native = decode_cursor(requested_cursor, job_id)
++            try:
++                value = int(native)
++            except ValueError as error:
++                raise EventCursorInvalid("Cursor native ID is not an integer") from error
++            if native != str(value):
++                raise EventCursorInvalid("Cursor native ID is not in canonical form")
++            if value <= 0:
++                raise EventCursorInvalid("Cursor native ID is out of range")
++            if value < floor:
++                raise EventCursorExpired(oldest_public)
++            if value > tail:
++                raise EventCursorInvalid("Cursor native ID is newer than the retained tail")
++            initial = [event for event in events if int(event.id or 0) > value]
++            return EventReplayWindow(initial, initial[-1].id if initial else native, oldest_public)
++
++    def describe_queue_state(self) -> QueueStateSnapshot:
++        """v2 P9: return one atomic snapshot, derived from the records under the lock."""
++        with self._lock:
++            active = {worker.active_job_id for worker in self._workers.values()}
++            jobs = {
++                job_id: JobQueueFacts(
++                    state=record.job.state,
++                    purpose=record.job.request.purpose,
++                    created_at=record.job.created_at,
++                    has_claim_lease=job_id in active,
++                )
++                for job_id, record in self._records.items()
++            }
++            members = {
++                purpose: tuple(
++                    QueueMember(job_id=job_id, created_at=facts.created_at)
++                    for job_id, facts in jobs.items()
++                    if facts.state == JobState.QUEUED and facts.purpose == purpose
++                )
++                for purpose in JobPurpose
++            }
++            return QueueStateSnapshot(
++                jobs=jobs,
++                pending_ids=frozenset(job_id for job_id, facts in jobs.items() if not facts.state.terminal),
++                ordinary_members=members[JobPurpose.ORDINARY],
++                diagnostic_members=members[JobPurpose.ASSISTANT_DIAGNOSTIC],
++            )
++
++    def repair_queue_residue(self, occurred_at: datetime | None = None) -> list[str]:
++        """v2 P9: memory queue state is derived from records, so no residue can exist."""
++        return []
++
++    def recent_invariant_errors(self) -> list[dict[str, str]]:
++        """v2 P9: memory never repairs residue, so it records nothing."""
++        return []
++
+     def find_finished_before(self, cutoff: datetime) -> list[Job]:
+         """Return jobs finished before the retention cutoff.
+ 
+@@ -441,7 +553,7 @@ class MemoryJobStore:
+             candidate.id
+             for candidate in sorted(
+                 (record.job for record in self._records.values() if record.job.state == JobState.QUEUED),
+-                key=lambda candidate: (candidate.created_at, candidate.id),
++                key=_queue_order,
+             )
+         ]
+         return replace(job, queue_position=queued_ids.index(job.id) + 1)
+@@ -476,7 +588,7 @@ class MemoryJobStore:
+         """Append current position events for queued jobs except the excluded job."""
+         queued = sorted(
+             (record for record in self._records.values() if record.job.state == JobState.QUEUED),
+-            key=lambda record: (record.job.created_at, record.job.id),
++            key=lambda record: _queue_order(record.job),
+         )
+         for position, record in enumerate(queued, start=1):
+             if record.job.id == exclude_job_id:
