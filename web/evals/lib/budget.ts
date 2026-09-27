@@ -1,7 +1,7 @@
 import type { EvalCase } from "./case";
 import type { Baseline } from "./report";
 // Cost accounting at the provider fetch seam, and the hard stop.
-import type { Usage } from "./trial";
+import type { TurnLatency, Usage } from "./trial";
 
 /** USD per million tokens. Check openrouter.ai/models before a release run. */
 export const PRICING_PER_MTOK: Record<string, { input: number; output: number }> = {
@@ -13,7 +13,12 @@ const FALLBACK = { input: 3, output: 15 };
 
 export const BUDGET_ERROR = "eval budget exhausted";
 
-const ZERO: Usage = { inputTokens: 0, outputTokens: 0, usd: 0, estimated: false };
+const ZERO: Usage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  usd: 0,
+  estimated: false,
+};
 export const plus = (a: Usage, b: Usage): Usage => ({
   inputTokens: a.inputTokens + b.inputTokens,
   outputTokens: a.outputTokens + b.outputTokens,
@@ -79,10 +84,36 @@ export function plannedUsd(cases: Planned[], trials: number, baseline: Baseline)
   }, 0);
 }
 
+/** One provider call on the `performance.now()` clock. */
+export interface HopTiming {
+  start: number;
+  /** The first streamed text or tool-call delta; reasoning and role chunks do not count. */
+  firstToken: number | null;
+  end: number;
+}
+
 export interface Recorder {
   fetch: typeof fetch;
   hops(): number;
   settled(): Promise<Usage>;
+  timings(): HopTiming[];
+}
+
+/** A non-empty `content` string or a `tool_calls` list: something the user sees. */
+const VISIBLE = /"(?:content":\s*"[^"]|tool_calls":\s*\[)/;
+
+/** Each turn's wait: to its first hop's visible token, and to its end. */
+export function turnLatencies(
+  windows: { start: number; end: number }[],
+  hops: HopTiming[],
+): TurnLatency[] {
+  return windows.map((w) => {
+    const first = hops.find((h) => h.start >= w.start && h.start <= w.end && h.firstToken !== null);
+    return {
+      ttftMs: first ? Math.round(first.firstToken! - w.start) : null,
+      ms: Math.round(w.end - w.start),
+    };
+  });
 }
 
 function priced(model: string, inputTokens: number, outputTokens: number): number {
@@ -90,7 +121,11 @@ function priced(model: string, inputTokens: number, outputTokens: number): numbe
   return (inputTokens * p.input + outputTokens * p.output) / 1_000_000;
 }
 
-type UsageChunk = { prompt_tokens?: number; completion_tokens?: number; cost?: number };
+type UsageChunk = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  cost?: number;
+};
 
 function usageOf(model: string, requestBytes: number, responseText: string): Usage {
   let found: UsageChunk | null = null;
@@ -140,6 +175,7 @@ export function recordingFetch(
   let hops = 0;
   let trial = ZERO;
   const pending: Promise<void>[] = [];
+  const timings: HopTiming[] = [];
   const wrapped = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (ledger.over) {
       ledger.refused += 1;
@@ -147,22 +183,41 @@ export function recordingFetch(
     }
     hops += 1;
     const requestBytes = typeof init?.body === "string" ? init.body.length : 0;
+    const timing: HopTiming = {
+      start: performance.now(),
+      firstToken: null,
+      end: 0,
+    };
+    timings.push(timing);
     const response = await base(input, init);
+    // The clone streams alongside the caller's read, so its chunk times are the caller's.
+    const read = async (): Promise<string> => {
+      if (!response.body) return "";
+      const reader = response.clone().body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+        if (timing.firstToken === null && VISIBLE.test(text)) timing.firstToken = performance.now();
+      }
+      timing.end = performance.now();
+      return text + decoder.decode();
+    };
     pending.push(
-      response
-        .clone()
-        .text()
-        .then((text) => {
-          const usage = usageOf(model, requestBytes, text);
-          trial = plus(trial, usage);
-          ledger.add(usage);
-        }),
+      read().then((text) => {
+        const usage = usageOf(model, requestBytes, text);
+        trial = plus(trial, usage);
+        ledger.add(usage);
+      }),
     );
     return response;
   }) as typeof fetch;
   return {
     fetch: wrapped,
     hops: () => hops,
+    timings: () => timings,
     settled: async () => {
       await Promise.allSettled(pending);
       return trial;

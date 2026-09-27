@@ -44,7 +44,7 @@ import { loadScenario } from "@/lib/store/lifecycle";
 import { clearTestAuthority, installTestAuthority } from "@/lib/store/test-authority";
 import { vi } from "vitest";
 import type { Ledger } from "./budget";
-import { recordingFetch } from "./budget";
+import { recordingFetch, turnLatencies } from "./budget";
 import type { EvalCase, Seed, UserPolicy } from "./case";
 import { renderTranscript } from "./judge";
 import { clearSavedRoster, seedSavedRoster } from "./saved-roster";
@@ -218,6 +218,13 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
   let runs = 0;
   /** The send `say` last started; a timed-out one is still running at teardown. */
   let pendingSend: Promise<unknown> = Promise.resolve();
+  const windows: { start: number; end: number }[] = [];
+  /** Times `turn` as one user-visible wait; a turn that throws is not recorded. */
+  const timed = async (turn: () => Promise<void>) => {
+    const start = performance.now();
+    await turn();
+    windows.push({ start, end: performance.now() });
+  };
 
   const observe = () => {
     const st = useAssistantStore.getState();
@@ -275,26 +282,27 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
     });
     await settle();
   };
-  const finishRecordedRun = async (outcome: "infeasible" | "optimal") => {
-    const before = await userCount();
-    runs += 1;
-    act(() => {
-      useRunRequestStore.setState({ pending: null, last: "started" });
-      useHotStore.getState().setRunView({
-        ...INITIAL_OPTIMIZE_RUN_VIEW,
-        lifecycle: "completed",
-        jobId: `eval_${runs}`,
-        outcome,
-        result: {
+  const finishRecordedRun = (outcome: "infeasible" | "optimal") =>
+    timed(async () => {
+      const before = await userCount();
+      runs += 1;
+      act(() => {
+        useRunRequestStore.setState({ pending: null, last: "started" });
+        useHotStore.getState().setRunView({
+          ...INITIAL_OPTIMIZE_RUN_VIEW,
+          lifecycle: "completed",
+          jobId: `eval_${runs}`,
           outcome,
-          score: outcome === "infeasible" ? null : 100,
-          solverStatus: outcome === "infeasible" ? "INFEASIBLE" : "OPTIMAL",
-          terminationReason: null,
-        },
+          result: {
+            outcome,
+            score: outcome === "infeasible" ? null : 100,
+            solverStatus: outcome === "infeasible" ? "INFEASIBLE" : "OPTIMAL",
+            terminationReason: null,
+          },
+        });
       });
+      await awaitFollowUp(before);
     });
-    await awaitFollowUp(before);
-  };
 
   try {
     globalThis.fetch = infoStub(realFetch);
@@ -331,7 +339,10 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
       withShippedClone(() =>
         createOpenRouterAgent(
           new Request(`${ORIGIN}/api/copilotkit`, {
-            headers: { [AI_KEY_HEADER]: input.apiKey, [AI_MODEL_HEADER]: input.model },
+            headers: {
+              [AI_KEY_HEADER]: input.apiKey,
+              [AI_MODEL_HEADER]: input.model,
+            },
           }),
           { fetch: recorder.fetch },
         ),
@@ -361,20 +372,21 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
     const turns = [...policy.turns];
     const answers = [...(policy.answers ?? [])];
     let userTurns = 0;
-    const say = async (text: string) => {
-      userTurns += 1;
-      useAssistantStore.setState({ lastRefusal: null });
-      // `send` resolves only when the turn's last write settles, so a run that never
-      // ends would hold it forever: race it against the trial deadline. Teardown stops
-      // it and waits for it.
-      pendingSend = handles.send!(text);
-      await beforeDeadline(pendingSend);
-      await settle();
-      // A refused send still resolves true, with the reason in the store. It is a
-      // harness fault, not the model's: record it as one.
-      const refusal = useAssistantStore.getState().lastRefusal;
-      if (refusal) throw new Error(`refused:${refusal}`);
-    };
+    const say = (text: string) =>
+      timed(async () => {
+        userTurns += 1;
+        useAssistantStore.setState({ lastRefusal: null });
+        // `send` resolves only when the turn's last write settles, so a run that never
+        // ends would hold it forever: race it against the trial deadline. Teardown stops
+        // it and waits for it.
+        pendingSend = handles.send!(text);
+        await beforeDeadline(pendingSend);
+        await settle();
+        // A refused send still resolves true, with the reason in the store. It is a
+        // harness fault, not the model's: record it as one.
+        const refusal = useAssistantStore.getState().lastRefusal;
+        if (refusal) throw new Error(`refused:${refusal}`);
+      });
 
     while (userTurns < maxUserTurns && recorder.hops() < maxHops && !ledger.over) {
       const st = useAssistantStore.getState();
@@ -397,12 +409,14 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
         proposal &&
         (proposal.status === "preview_ready" || proposal.status === "confirmation_required");
       if (open && policy.onPreview === "apply") {
-        const before = await userCount();
-        for (const a of proposal.assumptions)
-          await act(() => handles.controller!.confirm(a.assumptionId));
-        await act(() => handles.controller!.apply());
-        appliedByHarness += 1;
-        await awaitFollowUp(before);
+        await timed(async () => {
+          const before = await userCount();
+          for (const a of proposal.assumptions)
+            await act(() => handles.controller!.confirm(a.assumptionId));
+          await act(() => handles.controller!.apply());
+          appliedByHarness += 1;
+          await awaitFollowUp(before);
+        });
         continue;
       }
       if (open && policy.onPreview === "reject") {
@@ -502,6 +516,7 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
       usage,
       hops: recorder.hops(),
       ms: Math.round(performance.now() - started),
+      turns: turnLatencies(windows, recorder.timings()),
       error,
     };
   } finally {

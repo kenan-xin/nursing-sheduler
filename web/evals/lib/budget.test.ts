@@ -8,6 +8,7 @@ import {
   plannedUsd,
   recordingFetch,
   selectCases,
+  turnLatencies,
 } from "./budget";
 import type { Baseline } from "./report";
 
@@ -16,7 +17,9 @@ const sse = (...objects: unknown[]) =>
 
 const fakeBase = (body: string) =>
   (async () =>
-    new Response(body, { headers: { "content-type": "text/event-stream" } })) as typeof fetch;
+    new Response(body, {
+      headers: { "content-type": "text/event-stream" },
+    })) as typeof fetch;
 
 describe("recordingFetch", () => {
   it("reads usage and cost from the final chunk", async () => {
@@ -26,17 +29,30 @@ describe("recordingFetch", () => {
       { usage: { prompt_tokens: 1000, completion_tokens: 100, cost: 0.0042 } },
     );
     const rec = recordingFetch("anthropic/claude-sonnet-4.5", ledger, fakeBase(body));
-    const res = await rec.fetch("https://x.test/chat", { method: "POST", body: "{}" });
+    const res = await rec.fetch("https://x.test/chat", {
+      method: "POST",
+      body: "{}",
+    });
     await res.text();
     const usage = await rec.settled();
-    expect(usage).toEqual({ inputTokens: 1000, outputTokens: 100, usd: 0.0042, estimated: false });
+    expect(usage).toEqual({
+      inputTokens: 1000,
+      outputTokens: 100,
+      usd: 0.0042,
+      estimated: false,
+    });
     expect(rec.hops()).toBe(1);
     expect(ledger.total.usd).toBeCloseTo(0.0042);
   });
 
   it("counts every call it refuses once the ledger is over", async () => {
     const ledger = new Ledger(0.001);
-    ledger.add({ inputTokens: 0, outputTokens: 0, usd: 0.002, estimated: false });
+    ledger.add({
+      inputTokens: 0,
+      outputTokens: 0,
+      usd: 0.002,
+      estimated: false,
+    });
     const rec = recordingFetch("openai/gpt-5-mini", ledger, fakeBase(sse()));
     await expect(rec.fetch("https://x.test")).rejects.toThrow(BUDGET_ERROR);
     await expect(rec.fetch("https://x.test")).rejects.toThrow(BUDGET_ERROR);
@@ -45,7 +61,9 @@ describe("recordingFetch", () => {
 
   it("prices tokens from the table when the provider sends no cost", async () => {
     const ledger = new Ledger(5);
-    const body = sse({ usage: { prompt_tokens: 1_000_000, completion_tokens: 0 } });
+    const body = sse({
+      usage: { prompt_tokens: 1_000_000, completion_tokens: 0 },
+    });
     const rec = recordingFetch("anthropic/claude-sonnet-4.5", ledger, fakeBase(body));
     await (await rec.fetch("https://x.test", { method: "POST", body: "{}" })).text();
     expect((await rec.settled()).usd).toBeCloseTo(3);
@@ -53,11 +71,17 @@ describe("recordingFetch", () => {
 
   it("reads usage from a plain JSON body (a non-streamed judge or user call)", async () => {
     const ledger = new Ledger(5);
-    const body = JSON.stringify({ usage: { prompt_tokens: 2000, completion_tokens: 50 } });
+    const body = JSON.stringify({
+      usage: { prompt_tokens: 2000, completion_tokens: 50 },
+    });
     const rec = recordingFetch("openai/gpt-5-mini", ledger, fakeBase(body));
     await (await rec.fetch("https://x.test", { method: "POST", body: "{}" })).text();
     const usage = await rec.settled();
-    expect(usage).toMatchObject({ inputTokens: 2000, outputTokens: 50, estimated: false });
+    expect(usage).toMatchObject({
+      inputTokens: 2000,
+      outputTokens: 50,
+      estimated: false,
+    });
     expect(ledger.total.usd).toBeCloseTo(0.0006);
   });
 
@@ -68,7 +92,12 @@ describe("recordingFetch", () => {
       ledger,
       fakeBase(sse({ choices: [] })),
     );
-    await (await rec.fetch("https://x.test", { method: "POST", body: "x".repeat(4000) })).text();
+    await (
+      await rec.fetch("https://x.test", {
+        method: "POST",
+        body: "x".repeat(4000),
+      })
+    ).text();
     const usage = await rec.settled();
     expect(usage.estimated).toBe(true);
     expect(usage.inputTokens).toBe(1000);
@@ -76,11 +105,67 @@ describe("recordingFetch", () => {
 
   it("refuses a new hop once the ledger is over budget", async () => {
     const ledger = new Ledger(0.001);
-    ledger.add({ inputTokens: 0, outputTokens: 0, usd: 0.01, estimated: false });
+    ledger.add({
+      inputTokens: 0,
+      outputTokens: 0,
+      usd: 0.01,
+      estimated: false,
+    });
     const rec = recordingFetch("anthropic/claude-sonnet-4.5", ledger, fakeBase(sse()));
     await expect(rec.fetch("https://x.test", { method: "POST", body: "{}" })).rejects.toThrow(
       BUDGET_ERROR,
     );
+  });
+});
+
+describe("latency", () => {
+  it("times a hop's first visible token, not an earlier role or reasoning chunk", async () => {
+    const enc = new TextEncoder();
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const base = (async () =>
+      new Response(
+        new ReadableStream({
+          async start(c) {
+            c.enqueue(
+              enc.encode(
+                sse({
+                  choices: [{ delta: { role: "assistant", content: "" } }],
+                }),
+              ),
+            );
+            await wait(20);
+            c.enqueue(enc.encode(sse({ choices: [{ delta: { reasoning: "hmm" } }] })));
+            await wait(40);
+            c.enqueue(enc.encode(sse({ choices: [{ delta: { tool_calls: [{ index: 0 }] } }] })));
+            await wait(20);
+            c.close();
+          },
+        }),
+      )) as typeof fetch;
+    const rec = recordingFetch("m", new Ledger(5), base);
+    await (await rec.fetch("https://x.test", { method: "POST", body: "{}" })).text();
+    await rec.settled();
+    const [hop] = rec.timings();
+    expect(hop!.firstToken! - hop!.start).toBeGreaterThanOrEqual(55);
+    expect(hop!.end - hop!.firstToken!).toBeGreaterThanOrEqual(15);
+  });
+
+  it("measures each turn from its start to its first hop's visible token and its end", () => {
+    const windows = [
+      { start: 0, end: 500 },
+      { start: 1000, end: 3000 },
+      { start: 4000, end: 4100 },
+    ];
+    const hops = [
+      { start: 10, firstToken: 200, end: 400 },
+      { start: 1010, firstToken: null, end: 1500 },
+      { start: 1600, firstToken: 1900, end: 2900 },
+    ];
+    expect(turnLatencies(windows, hops)).toEqual([
+      { ttftMs: 200, ms: 500 },
+      { ttftMs: 900, ms: 2000 },
+      { ttftMs: null, ms: 100 },
+    ]);
   });
 });
 
@@ -127,7 +212,12 @@ describe("budget plan", () => {
 });
 
 describe("cutByBudget", () => {
-  const usd = (n: number) => ({ inputTokens: 0, outputTokens: 0, usd: n, estimated: false });
+  const usd = (n: number) => ({
+    inputTokens: 0,
+    outputTokens: 0,
+    usd: n,
+    estimated: false,
+  });
 
   it("counts a trial that ended with the ledger over as cut, not failed", () => {
     const ledger = new Ledger(1);

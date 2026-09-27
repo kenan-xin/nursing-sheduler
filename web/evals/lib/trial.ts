@@ -28,6 +28,11 @@ export interface Usage {
   usd: number;
   estimated: boolean;
 }
+/** One user-visible turn: a send, an Apply or a finished run, until the assistant settles. */
+export interface TurnLatency {
+  ttftMs: number | null;
+  ms: number;
+}
 export interface TrialRecord {
   caseId: string;
   trial: number;
@@ -41,6 +46,10 @@ export interface TrialRecord {
   usage: Usage;
   hops: number;
   ms: number;
+  /** Turns that settled; a timed-out turn is in `error`, not here. */
+  turns?: TurnLatency[];
+  /** The assistant model's own spend; `usage` adds the judge and the simulated user. */
+  assistantUsd?: number;
   error: string | null;
 }
 export interface GateResult {
