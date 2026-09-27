@@ -221,7 +221,11 @@ export function useDiagnosticTools(agentId: string, turnEpoch: number): void {
           );
         }
 
-        assistantActions.showProposal(outcome.proposal.proposalId, authorizedEpoch);
+        assistantActions.showProposal(
+          outcome.proposal.proposalId,
+          authorizedEpoch,
+          outcome.proposal.baseDocumentRevision,
+        );
         return (
           `${summary} The tested change is now shown to the user as a preview, labelled with ` +
           "the copied run that proved it. Nothing has changed yet, and you cannot apply it — " +
