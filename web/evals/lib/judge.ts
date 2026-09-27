@@ -6,6 +6,7 @@ import { z } from "zod";
 import { OPENROUTER_BASE_URL } from "@/lib/ai/runtime/containment";
 import type { ScenarioUiState } from "@/lib/scenario";
 import type { ImportNormalizationTarget } from "@/lib/scenario/types";
+import { appChoiceCards } from "./graders";
 import type { JudgeItem, TranscriptEntry, TrialRecord } from "./trial";
 
 export const RUBRIC_VERSION = "2026-09-27.7";
@@ -91,11 +92,14 @@ export function renderTranscript(
   labels = { user: "User", assistant: "Assistant" },
 ): string {
   const lines: string[] = [];
+  const appCards = appChoiceCards(r);
   for (const m of r.transcript) {
     if (m.role === "user") lines.push(`${labels.user}: ${m.text}`);
     if (m.role !== "assistant") continue;
     // The text streams before the calls, so a lead-in question reads before its card.
     if (m.text.trim()) lines.push(`${labels.assistant}: ${m.text.trim()}`);
+    const appCard = appCards.get(m);
+    if (appCard) lines.push(`Card: ${appCard.question} [${appCard.options.join(" | ")}]`);
     for (const call of m.toolCalls) {
       const args = call.args as { question?: string; options?: unknown } | null;
       if (call.name === "offer_choices" && args?.question) {

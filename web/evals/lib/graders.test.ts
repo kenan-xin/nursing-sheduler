@@ -341,12 +341,28 @@ describe("gradeDeterministic", () => {
     const wording = (r: TrialRecord) => gate(gradeDeterministic(evalCase({}), r), "wording");
 
     it("fails a yes/no offer or an either-or question asked in text with no card", () => {
-      expect(wording(turn("It's on the Shifts screen. Want me to take you there?"))?.pass).toBe(
+      expect(wording(turn("Want me to take you there? It's on the Shifts screen."))?.pass).toBe(
         false,
       );
-      expect(wording(turn("Would you like me to prepare that?"))?.pass).toBe(false);
-      expect(wording(turn("Did you mean Tan Wei or Tan Mei?"))?.pass).toBe(false);
+      expect(wording(turn("Did you mean Tan Wei, Tan Mei or someone else?"))?.pass).toBe(false);
       expect(wording(turn("That covers nights; want help adding a cap?"))?.pass).toBe(false);
+    });
+
+    it("passes a text choice the app turns into its own card (09x8, 7xw)", () => {
+      expect(wording(turn("It's on the Shifts screen. Want me to take you there?"))?.pass).toBe(
+        true,
+      );
+      expect(wording(turn("Would you like me to prepare that?"))?.pass).toBe(true);
+      expect(wording(turn("Did you mean **Tan Wei** or **Tan Mei**?"))?.pass).toBe(true);
+      // Only the turn's last reply gets the app card.
+      const earlier = record({
+        transcript: [
+          { role: "user", text: "Where do I change the night shift?", toolCalls: [] },
+          { role: "assistant", text: "Did you mean Tan Wei or Tan Mei?", toolCalls: [] },
+          { role: "assistant", text: "It's on the Shifts screen.", toolCalls: [] },
+        ],
+      });
+      expect(wording(earlier)?.pass).toBe(false);
     });
 
     it("passes the same question with a card in the turn, and an open question", () => {

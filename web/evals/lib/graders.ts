@@ -4,10 +4,11 @@ import {
   PARAMETERLESS_MODEL_VISIBLE_TOOLS,
 } from "@/components/ai/model-visible-tools";
 import { violatesSafetyFloor } from "@/lib/ai/assistant/repair-options";
+import { endingTextChoice, type TextChoice } from "@/lib/ai/assistant/text-choice-card";
 import type { AssistantCommandV1 } from "@/lib/proposal";
 import type { ScenarioUiState } from "@/lib/scenario";
 import type { EvalCase } from "./case";
-import type { GateResult, TrialRecord } from "./trial";
+import type { GateResult, TranscriptEntry, TrialRecord } from "./trial";
 
 /** The opening words of the prepare tool's refusal result (use-proposal-tools.ts). */
 export const REFUSAL_PREFIX = "The app refused that change:";
@@ -134,17 +135,44 @@ const JARGON =
  * ponytail: sentence regexes; a pick-one question worded outside these openers, or a claim
  * in other words, still reaches only the judge.
  */
-function wordingFailures(c: EvalCase, r: TrialRecord): string[] {
-  // The harness discards an open Preview before sending the next scripted message.
-  const discards = !("simulated" in c.user) && c.user.onPreview === "reject";
-  const failures: string[] = [];
-  const turns: TrialRecord["transcript"][] = [];
+function turnsOf(r: TrialRecord): TranscriptEntry[][] {
+  const turns: TranscriptEntry[][] = [];
   for (const m of r.transcript) {
     if (m.role === "user" || turns.length === 0) turns.push([]);
     turns.at(-1)!.push(m);
   }
+  return turns;
+}
+
+/**
+ * The option cards the app adds itself (text-choice-card.ts, 09x8/7xw), keyed by the reply
+ * they sit under: a turn's last reply ending on a clear text choice, in a turn that showed no
+ * card or Preview of its own.
+ */
+export function appChoiceCards(r: TrialRecord): Map<TranscriptEntry, TextChoice> {
+  const cards = new Map<TranscriptEntry, TextChoice>();
+  for (const turn of turnsOf(r)) {
+    const shown = turn.some((m) =>
+      m.toolCalls.some(
+        (c) =>
+          CARD_TOOLS.has(c.name) ||
+          (PREVIEW_TOOLS.has(c.name) && !c.result?.startsWith(REFUSAL_PREFIX)),
+      ),
+    );
+    const reply = turn.findLast((m) => m.role === "assistant" && m.text.trim() !== "");
+    const choice = !shown && reply ? endingTextChoice(reply.text) : null;
+    if (reply && choice) cards.set(reply, choice);
+  }
+  return cards;
+}
+
+function wordingFailures(c: EvalCase, r: TrialRecord): string[] {
+  // The harness discards an open Preview before sending the next scripted message.
+  const discards = !("simulated" in c.user) && c.user.onPreview === "reject";
+  const failures: string[] = [];
+  const appCards = appChoiceCards(r);
   let waiting = false;
-  for (const turn of turns) {
+  for (const turn of turnsOf(r)) {
     const card = turn.some((m) => m.toolCalls.some((c) => CARD_TOOLS.has(c.name)));
     for (const m of turn) {
       if (m.role === "user" && (discards || APPLIED_FOLLOW_UP.test(m.text))) waiting = false;
@@ -154,7 +182,10 @@ function wordingFailures(c: EvalCase, r: TrialRecord): string[] {
         .split(/(?<=[.!?\n])\s+/)
         .map((s) => s.trim().replace(/^[-*\d.)\s]+/, ""))
         .filter((s) => s.endsWith("?"));
+      // A question the app itself turns into a card passes, like one on a model card.
+      const appQuestion = appCards.get(m)?.question;
       for (const q of card ? [] : questions) {
+        if (q.replace(/[*_`]/g, "").trim() === appQuestion) continue;
         if (PICK_ONE.test(q)) failures.push(`pick-one question in text: "${q}"`);
       }
       const claim = waiting && m.text.match(APPLIED_CLAIM);

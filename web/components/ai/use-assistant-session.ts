@@ -77,7 +77,7 @@ function publishVisibleIfOwned(
   return true;
 }
 import { buildAssistantContext, pendingAtLaunch } from "@/lib/ai/assistant/scenario-context";
-import { offerYesNoCard } from "@/lib/ai/assistant/yes-no-card";
+import { offerTextChoiceCard } from "@/lib/ai/assistant/text-choice-card";
 import {
   authorizeLaunchAuthority,
   authorizeLaunchIdentity,
@@ -797,7 +797,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
        * the conversation above it has answers in it.
        */
       let producedAssistantText = false;
-      /** The last reply's text, for the app's own Yes/No card (09x8). */
+      /** The last reply's text, for the app's own option card (09x8, 7xw). */
       let lastAssistantText = "";
       const subscriber: AgentSubscriber = {
         onEvent: ({ event, input: runInput }) => {
@@ -946,7 +946,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           assistantActions.endTurn("run_failed", plan.turn.turnId);
         } else {
           // Before the await: authority was checked just above and nothing can move it here.
-          offerYesNoCard(lastAssistantText, turnEpochForSend);
+          offerTextChoiceCard(lastAssistantText, turnEpochForSend);
           await setTurnState(plan.turn.turnId, { state: "terminal", settlement: "completed" });
           assistantActions.endTurn("completed", plan.turn.turnId);
         }
