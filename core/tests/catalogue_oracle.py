@@ -27,8 +27,9 @@ To vet a *new* candidate check:
 
 Scenarios built here are intentionally tiny (1-2 people, a handful of days), so a
 full sweep solves in well under a second and belongs in the ordinary test run.
-Contrast ``core/scripts/solver_capability_probe.py``, which is a slow real-scale
-probe deliberately kept out of the test tree.
+Contrast ``tests/real/solver_capabilities.py``, which is a slow real-scale probe
+deliberately kept out of the default test run (it omits the ``test_`` filename
+prefix, and its rounds are opt-in).
 """
 
 # This file is part of Nurse Scheduling Project, see <https://github.com/j3soon/nurse-scheduling>.
