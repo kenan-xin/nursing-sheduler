@@ -206,3 +206,27 @@ describe("DateScopeField (RTL)", () => {
     expect(input.value).toBe("5,");
   });
 });
+
+// bd memory `long-user-text-no-overflow` / nursing-sheduler-w0e.9: a long authored
+// date-group label is arbitrary user input — it must truncate inside its chip and
+// expose the full value on hover.
+const LONG_TOKEN = "ward8-east-extended-weekend-night-cover-rotation-".repeat(3).slice(0, 120);
+
+describe("DateScopeField — long user text (w0e.9)", () => {
+  const noop = () => {};
+
+  it("truncates a long date-group chip label and exposes the full value on hover", () => {
+    render(
+      <DateScopeField
+        autoScopes={[]}
+        dateGroups={[{ id: "LongGroup", label: LONG_TOKEN }]}
+        dateItems={SINGLE_MONTH}
+        value={["LongGroup"]}
+        onChange={noop}
+      />,
+    );
+    const label = screen.getByTitle(LONG_TOKEN);
+    expect(label).toHaveTextContent(LONG_TOKEN);
+    expect(label).toHaveClass("truncate");
+  });
+});

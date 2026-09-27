@@ -12,6 +12,11 @@ const DATES = [
   { iso: "2026-10-15", label: "Thu 15 Oct" },
 ];
 
+// bd memory `long-user-text-no-overflow` / nursing-sheduler-w0e.21: a date-group
+// label is arbitrary user input — the native select must stay inside its row and
+// expose the full selected value on hover.
+const LONG_TOKEN = "ward8-east-extended-weekend-night-cover-rotation-".repeat(3).slice(0, 120);
+
 function Harness({ initial = [] as OverrideRow[], onRows = (_: OverrideRow[]) => {} }) {
   const [rows, setRows] = React.useState(initial);
   return (
@@ -71,5 +76,18 @@ describe("DateOverridesField", () => {
       />,
     );
     expect(screen.getByTestId("date-overrides-add")).toBeDisabled();
+  });
+
+  it("constrains a long option label so the select cannot overflow its row", () => {
+    render(
+      <DateOverridesField
+        rows={[{ date: "2026-10-14", requiredNumPeople: 2 }]}
+        dates={[{ iso: "2026-10-14", label: LONG_TOKEN }]}
+        onChange={() => {}}
+      />,
+    );
+    const select = screen.getByLabelText("Date of exception 1");
+    expect(select).toHaveClass("max-w-full");
+    expect(select).toHaveAttribute("title", LONG_TOKEN);
   });
 });
