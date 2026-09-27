@@ -5,6 +5,7 @@ import {
   ashaContext,
   ashaDocument,
   ashaGrid,
+  borrowRosterDocument,
   overtimeContext,
   overtimeDocument,
   overtimeGrid,
@@ -73,6 +74,29 @@ describe("summarizeRoster", () => {
     expect(summary.dates).toEqual(["2026-10-08", "2026-10-09"]);
     expect(summary.rows).toEqual([{ person: "SN-Priya", days: ["N", "N"] }]);
     expect(summary.rulesBrokenNow).toEqual([]);
+  });
+
+  it("roster summary counts a temporary cover", () => {
+    // Priya is off on 8 Oct, so the night is empty; Haseena covers it.
+    const document = {
+      ...borrowRosterDocument(),
+      solvedDays: [
+        [{ kind: "off" as const }, { kind: "off" as const }, { kind: "off" as const }],
+        borrowRosterDocument().solvedDays[1],
+      ],
+    };
+    const bare = summarizeRoster(document, {}, false);
+    if (typeof bare === "string") throw new Error(bare);
+    expect(bare.rulesBrokenNow).toEqual(["8 Oct: “One night nurse” has 0 of the 1 needed."]);
+    expect(bare.temporaryCover).toBeUndefined();
+
+    const live = [
+      { name: "Haseena (Ward 3)", date: "2026-10-08", shiftType: "N", groups: ["Nights"] },
+    ];
+    const covered = summarizeRoster(document, {}, false, { decrements: [], live });
+    if (typeof covered === "string") throw new Error(covered);
+    expect(covered.rulesBrokenNow).toEqual([]);
+    expect(covered.temporaryCover).toEqual(["N on 2026-10-08: +1 cover (Haseena (Ward 3))"]);
   });
 
   it("refuses an unknown name and lists who is on the roster", () => {
