@@ -77,7 +77,6 @@ describe("planChangeHighlight", () => {
     );
     expect(plan.primary).toMatchObject({
       capabilityId: "shift-types",
-      label: "Shift types",
       directCount: 3,
       keys: ['shift:"EVE"', 'shift:"LATE"', 'shift:"N2"'],
       announcement: "3 shift types added",
@@ -133,7 +132,6 @@ describe("planChangeHighlight", () => {
     );
     expect(plan.primary).toMatchObject({
       capabilityId: "rule-library",
-      label: "Rules",
       directCount: 2,
     });
     expect(plan.others).toEqual([]);
@@ -162,7 +160,6 @@ describe("planChangeHighlight", () => {
     // the tie. Its own announcement is the row.
     expect(plan.primary).toMatchObject({
       capabilityId: "staff-list",
-      label: "Staff",
       directCount: 1,
       keys: ["cover:Haseena (Ward 3)|2026-11-05|N"],
       announcement: "1 temporary cover added",
