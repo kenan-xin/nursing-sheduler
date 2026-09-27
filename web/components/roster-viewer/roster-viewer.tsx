@@ -39,6 +39,7 @@ import {
   computeCoverage,
   computeRequirementGrid,
   computeTallies,
+  coverBandRows,
   deriveRequirementModel,
   readViewPreference,
   resolveFocusedDay,
@@ -114,6 +115,13 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
         live: liveCover,
       }),
     [document.submission, document.cover.decrements, liveCover],
+  );
+  // The band below the staff rows: what the solve counted (the roster file's
+  // entries) unioned with the scenario's covers right now, so the display states
+  // the same disagreement the coverage numbers do (d582, spec §4).
+  const coverRows = useMemo(
+    () => coverBandRows(document.cover.entries, liveCover, document.context.calendar),
+    [document.cover.entries, liveCover, document.context.calendar],
   );
   const assignments = useMemo(
     () => buildAssignmentIndex(document.context, currentDays),
@@ -249,6 +257,7 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
           ramp={ramp}
           coverage={coverage}
           tallies={tallies}
+          coverRows={coverRows}
           editing={gridEditing}
         />
       ) : null}
