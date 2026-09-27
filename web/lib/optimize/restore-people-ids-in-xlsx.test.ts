@@ -23,6 +23,14 @@ import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 
 import type { PeopleReverseMap } from "@/lib/scenario";
+import type { CanonicalScenarioDocument } from "@/lib/scenario/types";
+import { parseSubmissionDocument } from "@/lib/roster/context";
+import {
+  PROVENANCE_SHEET_NAME,
+  buildCoverSheetPlan,
+  type CoverSheetPlan,
+} from "@/lib/roster/cover-sheet";
+import type { RosterCoverEntry } from "@/lib/roster/types";
 
 import {
   RESTORED_XLSX_MIME_TYPE,
@@ -474,6 +482,7 @@ describe("applyPeopleIdRestoration — download bypass seam (T16e)", () => {
       anonymized: false,
       reverseMap: [],
       peopleCount: plain.peopleCount,
+      cover: null,
     });
     // Identity: the plain byte path is never parsed or re-serialized.
     expect(result).toBe(blob);
@@ -485,6 +494,7 @@ describe("applyPeopleIdRestoration — download bypass seam (T16e)", () => {
       anonymized: true,
       reverseMap: plain.columnAIds.map((anon) => [anon, `orig-${anon}`]) as PeopleReverseMap,
       peopleCount: plain.peopleCount,
+      cover: null,
     });
     expect(result).not.toBe(blob);
     const sheet = (await readRestored(result)).worksheets[0];
@@ -502,7 +512,181 @@ describe("applyPeopleIdRestoration — download bypass seam (T16e)", () => {
         anonymized: true,
         reverseMap: [["P1", "a"]],
         peopleCount: 1,
+        cover: null,
       }),
     ).rejects.toThrow(XlsxRestorationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Temporary cover rows on the raw download (d582, F6).
+//
+// The cover nurse is never a solver person, so her rows are INSERTED under the
+// ward staff window at download time and her credit is added to the count rows by
+// hand. The plan is built from the SUBMITTED document (`buildCoverSheetPlan`),
+// exactly as the edited export builds it; these tests use the REAL C5 producer
+// goldens for the workbook side, so the insert is proven against true OOXML.
+// ---------------------------------------------------------------------------
+
+/** A submission whose dates and count rows match the C5 goldens (2023-08-18..20). */
+const COVER_SCENARIO = `apiVersion: alpha
+dates:
+  range:
+    startDate: 2023-08-18
+    endDate: 2023-08-20
+people:
+  items:
+    - id: P1
+    - id: P2
+    - id: P3
+  groups:
+    - id: Ward 3
+      members: [P1]
+shiftTypes:
+  items:
+    - id: D
+    - id: E
+    - id: N
+preferences:
+  - type: at most one shift per day
+export:
+  extraRows:
+    - type: count
+      header: Duty count
+      countShiftTypes: [ALL]
+      countPeople: [ALL]
+`;
+
+/** Haseena covers N on the last date of the range, in "Ward 3". */
+const HASSEENA: RosterCoverEntry = {
+  name: "Haseena (Ward 3)",
+  iso: "2023-08-20",
+  shiftId: "N",
+  groups: ["Ward 3"],
+};
+
+function coverScenarioDocument(): CanonicalScenarioDocument {
+  const parsed = parseSubmissionDocument(COVER_SCENARIO);
+  if (!parsed.ok) throw new Error(parsed.reason);
+  return parsed.document;
+}
+
+function coverPlan(entries: readonly RosterCoverEntry[]): CoverSheetPlan {
+  const plan = buildCoverSheetPlan(coverScenarioDocument(), entries);
+  if (plan === null) throw new Error("expected a cover sheet plan");
+  return plan;
+}
+
+/** The C5 golden plus the exporter's separator + count row below `Status`. */
+async function fixtureWithCountRow(file: string): Promise<Blob> {
+  return tamperedFixture(file, (sheet) => {
+    sheet.getCell(9, 1).value = "Duty count";
+    for (const col of [2, 3, 4]) sheet.getCell(9, col).value = 1;
+  });
+}
+
+describe("applyPeopleIdRestoration — temporary cover rows (d582, F6)", () => {
+  const plain = MANIFEST["plain-3people"];
+
+  it("writes her row under the staff window and moves Score/Status down", async () => {
+    const blob = fixtureBlob(plain.file);
+    const result = await applyPeopleIdRestoration(blob, {
+      anonymized: false,
+      reverseMap: [],
+      peopleCount: plain.peopleCount,
+      cover: coverPlan([HASSEENA]),
+    });
+    expect(result).not.toBe(blob);
+
+    const sheet = (await readRestored(result)).worksheets[0];
+    // Rows 3-5 stay the (un-anonymized) people; row 6 is hers.
+    expect(sheet.getCell(3, 1).value).toBe("P1");
+    expect(sheet.getCell(6, 1).value).toBe(HASSEENA.name);
+    // Her shift on her date (2023-08-20 is the third date column, D), blank elsewhere.
+    expect(sheet.getCell(6, 2).value).toBe("");
+    expect(sheet.getCell(6, 3).value).toBe("");
+    expect(sheet.getCell(6, 4).value).toBe("N");
+    // The summary block moved down by one row.
+    expect(sheet.getCell(7, 1).value).toBe("Score");
+    expect(sheet.getCell(8, 1).value).toBe("Status");
+  });
+
+  it("writes the provenance table with name, ISO date, shift id and groups JSON", async () => {
+    const result = await applyPeopleIdRestoration(fixtureBlob(plain.file), {
+      anonymized: false,
+      reverseMap: [],
+      peopleCount: plain.peopleCount,
+      cover: coverPlan([HASSEENA]),
+    });
+    const provenance = (await readRestored(result)).getWorksheet(PROVENANCE_SHEET_NAME);
+    expect(provenance).toBeDefined();
+    expect(provenance!.getCell(1, 1).value).toBe("Temporary cover");
+    expect([1, 2, 3, 4].map((c) => provenance!.getCell(2, c).value)).toEqual([
+      "Name",
+      "Date",
+      "Shift type",
+      "Groups",
+    ]);
+    expect([1, 2, 3, 4].map((c) => provenance!.getCell(3, c).value)).toEqual([
+      HASSEENA.name,
+      HASSEENA.iso,
+      "N",
+      JSON.stringify(["Ward 3"]),
+    ]);
+  });
+
+  it("adds her credit to a count row that matches her shift and people", async () => {
+    const result = await applyPeopleIdRestoration(await fixtureWithCountRow(plain.file), {
+      anonymized: false,
+      reverseMap: [],
+      peopleCount: plain.peopleCount,
+      cover: coverPlan([HASSEENA]),
+    });
+    const sheet = (await readRestored(result)).worksheets[0];
+    expect(sheet.getCell(8, 1).value).toBe("Status");
+    expect(sheet.getCell(10, 1).value).toBe("Duty count");
+    // The count row's own tally, plus her one on her date.
+    expect(sheet.getCell(10, 2).value).toBe(1);
+    expect(sheet.getCell(10, 3).value).toBe(1);
+    expect(sheet.getCell(10, 4).value).toBe(2);
+  });
+
+  it("restores ids BEFORE the insert (anonymized plus cover)", async () => {
+    const blob = fixtureBlob(plain.file);
+    const result = await applyPeopleIdRestoration(blob, {
+      anonymized: true,
+      reverseMap: plain.columnAIds.map((anon) => [anon, `orig-${anon}`]) as PeopleReverseMap,
+      peopleCount: plain.peopleCount,
+      cover: coverPlan([HASSEENA]),
+    });
+    const sheet = (await readRestored(result)).worksheets[0];
+    // The people window holds the restored ids on the CORE bytes, so the insert
+    // ran after restoration and shifted them down by nothing.
+    expect(sheet.getCell(3, 1).value).toBe("orig-P1");
+    expect(sheet.getCell(4, 1).value).toBe("orig-P2");
+    expect(sheet.getCell(5, 1).value).toBe("orig-P3");
+    expect(sheet.getCell(6, 1).value).toBe(HASSEENA.name);
+    expect(sheet.getCell(7, 1).value).toBe("Score");
+  });
+
+  it("never restores ids on an exported workbook (real ids, cover only)", async () => {
+    // An exported workbook already carries real ids in column A, so the P# people
+    // window must not be asserted against it — only the cover insert runs.
+    const exported = await restorePeopleIdsInXlsx(
+      fixtureBlob(plain.file),
+      plain.columnAIds.map((anon) => [anon, `real-${anon}`]) as PeopleReverseMap,
+      plain.peopleCount,
+    );
+    const result = await applyPeopleIdRestoration(exported, {
+      anonymized: false,
+      reverseMap: [],
+      peopleCount: plain.peopleCount,
+      cover: coverPlan([HASSEENA]),
+    });
+    const sheet = (await readRestored(result)).worksheets[0];
+    expect(sheet.getCell(3, 1).value).toBe("real-P1");
+    expect(sheet.getCell(4, 1).value).toBe("real-P2");
+    expect(sheet.getCell(5, 1).value).toBe("real-P3");
+    expect(sheet.getCell(6, 1).value).toBe(HASSEENA.name);
   });
 });

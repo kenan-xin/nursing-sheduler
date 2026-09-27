@@ -49,6 +49,7 @@ import {
   type ScenarioValidationIssue,
 } from "@/lib/scenario";
 import type { CanonicalScenarioDocument } from "@/lib/scenario/types";
+import { buildCoverSheetPlan, type CoverSheetPlan } from "@/lib/roster/cover-sheet";
 import type { RosterCover } from "@/lib/roster/types";
 import {
   buildProvisionalSession,
@@ -215,6 +216,15 @@ export interface RunActivation {
    * de-anonymize a result against.
    */
   capture: SessionCaptureState;
+  /**
+   * The temporary-cover rows the raw download writes into the workbook, after id
+   * restoration (d582, F6), or `null` for a run with no cover.
+   *
+   * Carried on the activation because the download needs it and nothing else
+   * downstream sees the submission: the plan is built once, before the POST, from
+   * the same document the submitted counts were computed against.
+   */
+  coverSheet: CoverSheetPlan | null;
 }
 
 /**
@@ -807,6 +817,13 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
         return { status: "revoked-before-post" };
       }
 
+      // d582 F6: the cover rows the raw download writes into the workbook, built
+      // ONCE, here, from the same document the submitted counts were computed
+      // against. Built before the POST so the durable record and the in-memory
+      // activation describe the same covers the solver was told about — a download
+      // can never add a cover the submission did not account for.
+      const coverSheet = buildCoverSheetPlan(input.document, input.cover?.entries ?? []);
+
       const record = buildProvisionalSession({
         ownerId,
         anonymized: prep.anonymized,
@@ -814,6 +831,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
         reverseMap: prep.reverseMap,
         runOptions,
         capture,
+        coverSheet,
       });
 
       let revokedBeforePost = false;
@@ -924,6 +942,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
           peopleCount: prep.peopleCount,
           reverseMap: prep.reverseMap,
           capture,
+          coverSheet,
         });
         setJobId(id);
         setAttachmentIdentity(token);
