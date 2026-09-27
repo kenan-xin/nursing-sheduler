@@ -2178,3 +2178,107 @@ describe("add a nurse to the staff list (bead 2vtv)", () => {
     expect(violatesSafetyFloor(state, op("Siti Rahman"), { leaveAsked: true })).not.toBeNull();
   });
 });
+
+describe("unexplained-path guesses (bead nursing-sheduler-spdk, l3m fixtures)", () => {
+  const DAYS = ["01", "02", "03", "04", "05", "06", "07"];
+  const rest = (uid: string, pattern: string[]) => ({
+    uid,
+    description: uid,
+    person: ["ALL"],
+    pattern,
+    weight: -Infinity,
+  });
+  const never = (person: string, date: string) => ({
+    uid: `never-${person}-${date}`,
+    person,
+    date,
+    kind: "request" as const,
+    shiftType: "N",
+    weight: -Infinity,
+  });
+  /** l3m "hard-never-night-rest": n1 never works nights all week, against the rest rules. */
+  const neverNightRest = (dates = DAYS): ScenarioUiState =>
+    ward({
+      staff: people("n1", "n2", "n3"),
+      staffGroups: [{ id: "Nurses", members: ["n1", "n2", "n3"] }],
+      reqData: dates.map((d) => never("n1", d)),
+      cardsByKind: cards({
+        requirements: [requirement("req-D", "D", 1), requirement("req-N", "N", 1)],
+        successions: [
+          rest("no-day-after-night", ["N", "D"]),
+          rest("no-double-night", ["N", "N"]),
+          rest("no-night-after-day", ["D", "N"]),
+          rest("max-5-days-in-a-row", ["ALL", "ALL", "ALL", "ALL", "ALL", "ALL"]),
+        ],
+      }),
+    });
+  const exactNights = (target: number) => ({
+    ...nightCap("exactly-nights", "Nurses", target),
+    description: `Exactly ${target} nights`,
+    expression: "x = T",
+  });
+  const unexplained = (state: ScenarioUiState) => {
+    const findings = findStaffingShortfalls(state);
+    expect(findings).toEqual([]);
+    return rankRepairOptions(state, findings, { runInfeasible: true });
+  };
+
+  it("never raises an exact count: it relaxes the first true cap instead", () => {
+    // l3m sg-*: "exactly six nights" 6 -> 7 asked for more nights than exist.
+    const base = neverNightRest([]);
+    const state = {
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        counts: [exactNights(3), nightCap("max-nights", "Nurses", 3)],
+      },
+    };
+    const relax = unexplained(state).find((o) => o.repairId === "relax_count_rule");
+    expect(relax?.operations).toEqual([
+      expect.objectContaining({ type: "edit_count_rule", ruleId: "max-nights", target: 4 }),
+    ]);
+  });
+
+  it("offers no count relaxation when the only limit is an exact count", () => {
+    const base = neverNightRest([]);
+    const state = {
+      ...base,
+      cardsByKind: { ...base.cardsByKind, counts: [exactNights(3)] },
+    };
+    const ids = unexplained(state).map((o) => o.repairId);
+    expect(ids).not.toContain("relax_count_rule");
+    expect(ids).toContain("soften_rest_rule");
+  });
+
+  it("softens the nurse's whole consecutive block of hard requests, not one day", () => {
+    const state = neverNightRest();
+    const soften = unexplained(state).find((o) => o.repairId === "soften_hard_request");
+    expect(soften?.operations).toEqual([
+      {
+        type: "set_shift_request",
+        personId: "n1",
+        shiftType: "N",
+        startDate: "2026-11-01",
+        endDate: "2026-11-07",
+        weight: -10,
+      },
+    ]);
+    expect(soften?.title).toMatch(/Nov 1, 2026.*Nov 7, 2026/);
+    expect(soften && isSafeOption(state, soften)).toBe(true);
+  });
+
+  it("stops the block at a gap or a different request", () => {
+    const state = {
+      ...neverNightRest(["02", "03", "05"]),
+    };
+    state.reqData = [
+      ...state.reqData,
+      { ...never("n1", "04"), uid: "must-n1-04", weight: Infinity },
+      never("n2", "04"),
+    ];
+    const soften = unexplained(state).find((o) => o.repairId === "soften_hard_request");
+    expect(soften?.operations).toEqual([
+      expect.objectContaining({ personId: "n1", startDate: "2026-11-02", endDate: "2026-11-03" }),
+    ]);
+  });
+});

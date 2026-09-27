@@ -338,11 +338,35 @@ const softenHardRequest: Builder = (ctx, findings, situation) => {
   );
   const cell = hit ? hit.cell : !anyHit && situation === "unexplained" ? hard[0] : undefined;
   if (!cell) return null;
-  const dateId = toDateId(cell.date, range(ctx));
-  const iso = isoOf(ctx, dateId);
-  if (!iso) return null;
+  const at = (c: HardCell) => ctx.items.findIndex((i) => i.id === toDateId(c.date, range(ctx)));
+  let first = at(cell);
+  if (first < 0) return null;
+  let last = first;
+  // A guess softens the nurse's whole run of this request (l3m: one day of a week of
+  // "never nights" never helps). A static-check hit frees her on its one short date only.
+  if (!hit) {
+    const shiftOf = (c: HardCell) => (c.kind === "request" ? String(c.shiftType) : null);
+    const run = new Set(
+      hard
+        .filter(
+          (c) =>
+            String(c.person) === String(cell.person) &&
+            c.kind === cell.kind &&
+            c.weight === cell.weight &&
+            shiftOf(c) === shiftOf(cell),
+        )
+        .map(at),
+    );
+    while (run.has(first - 1)) first--;
+    while (run.has(last + 1)) last++;
+  }
+  const iso = ctx.items[first].iso;
+  const endIso = ctx.items[last].iso;
   const who = String(cell.person);
-  const when = dateLabel(ctx, dateId);
+  const when =
+    first === last
+      ? ctx.items[first].description
+      : `${ctx.items[first].description} to ${ctx.items[last].description}`;
   const dayOff = cell.kind === "off";
   const never = !dayOff && cell.weight === -Infinity;
   const request = dayOff
@@ -361,7 +385,7 @@ const softenHardRequest: Builder = (ctx, findings, situation) => {
             type: "set_off_request",
             personId: cell.person,
             startDate: iso,
-            endDate: iso,
+            endDate: endIso,
             weight: SOFT_REQUEST_WEIGHT,
           }
         : {
@@ -369,7 +393,7 @@ const softenHardRequest: Builder = (ctx, findings, situation) => {
             personId: cell.person,
             shiftType: String(cell.shiftType),
             startDate: iso,
-            endDate: iso,
+            endDate: endIso,
             weight: never ? -SOFT_REQUEST_WEIGHT : SOFT_REQUEST_WEIGHT,
           },
     ],
@@ -411,7 +435,15 @@ const extraShiftWillingNurse: Builder = (ctx, findings) => {
 
 const relaxCountRule: Builder = (ctx, findings, situation) => {
   if (situation === "unexplained") {
-    const card = ctx.state.cardsByKind.counts.find(editableCap);
+    // Ruling (spdk, 2026-09-27): never guess at an exact count (x = T). Raising it raises
+    // its floor too, and with no cap_short its cap already covers the demand, so a raise
+    // cannot help (l3m: "exactly six nights" 6 -> 7 asked for 98 nights of 84). The side
+    // that can bind is its floor, and lowering a floor, changing the expression or
+    // softening a hard count all break the safety floor. Relax the first true cap instead.
+    // (A hard-negative "|x - T|^2" is exact too.)
+    const card = ctx.state.cardsByKind.counts.find(
+      (c) => editableCap(c) && c.expression !== "x = T" && c.expression !== "|x - T|^2",
+    );
     return editableCap(card) ? relaxOption(ctx, card, 1, null) : null;
   }
   for (const f of findings) {
