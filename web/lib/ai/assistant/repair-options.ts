@@ -57,6 +57,7 @@ import {
   MAX_BORROWED,
   MAX_CAP_RAISE,
   MAX_EXPLAINED_FINDINGS,
+  MAX_NEW_STAFF,
   MAX_OPTIONS,
   PLAYBOOK_VERSION,
   REPAIRS,
@@ -110,7 +111,7 @@ const REASON_WORDS = {
   never_request: "must not work this shift",
 } as const;
 
-const PLACEHOLDER = /^Borrowed nurse \d+$/;
+const PLACEHOLDER = /^(Borrowed|New) nurse \d+$/;
 
 function makeCtx(state: ScenarioUiState): Ctx {
   return {
@@ -647,6 +648,40 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
   });
 };
 
+/** bead 2vtv: a chronic head-count shortage is a staffing problem, so offer a real staff member. */
+const addStaffMember: Builder = (ctx, all) => {
+  const dated = gapsOnly(all).filter((f) => f.dateId !== null);
+  if (ctx.items.length === 0 || dated.length === 0) return null;
+  // A skill-mix gap needs a qualified nurse; that is the manager's word, and the borrow
+  // option already asks for it.
+  if (dated.some((f) => f.skillMix)) return null;
+  const short = shortDates(ctx, dated);
+  const count = Math.max(...short.map((id) => gapOn(dated, id)));
+  if (count < 1 || count > MAX_NEW_STAFF) return null;
+  const who = count === 1 ? "a nurse" : `${count} nurses`;
+  // A kept placeholder is a real staff id now, and the floor refuses a name already taken.
+  const names: string[] = [];
+  for (let n = 1; names.length < count; n++) {
+    const name = `New nurse ${n}`;
+    if (!ctx.staffIds.has(name) && !ctx.groupIds.has(name)) names.push(name);
+  }
+  return makeOption("add_staff_member", {
+    title: `Add ${who} to the staff list for the whole period (a new starter, a transfer or a relief nurse)`,
+    why: `${short.length} days are short by up to ${count} ${count === 1 ? "nurse" : "nurses"} even with everyone free working. A nurse on the staff list can be rostered on any of them.`,
+    operations: names.map((name): AssistantCommandV1 => ({ type: "add_person", name, groups: [] })),
+    confirmationQuestion:
+      count === 1
+        ? "Is a new nurse joining the ward's staff for this roster period?"
+        : `Are ${count} new nurses joining the ward's staff for this roster period?`,
+    needsFromUser: [
+      "Her name as the roster should show it (or keep the placeholder until you know it).",
+      "Which staff groups she is in, if a rule counts that group. Leave her in none if unsure.",
+    ],
+    capabilityId: "staff-list",
+    evidence: "static_check",
+  });
+};
+
 const askNurseOnLeave: Builder = (ctx, all) => {
   const findings = gapsOnly(all);
   for (const f of findings) {
@@ -879,6 +914,7 @@ const BUILDERS: Record<RepairId, Builder> = {
   relax_count_rule: relaxCountRule,
   soften_rest_rule: softenRestRule,
   borrow_temporary_nurse: borrowTemporaryNurse,
+  add_staff_member: addStaffMember,
   ask_nurse_on_leave: askNurseOnLeave,
   run_one_short: runOneShort,
   split_long_shift: splitLongShift,
@@ -1223,6 +1259,8 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
       case "move_leave":
         return nurseAsked && real(op.personId);
       case "add_person":
+        // bead 2vtv: a new staff member joins no group; the manager names one in chat.
+        if (option.repairId === "add_staff_member") return op.groups.length === 0;
         // A placeholder (the floor), in real groups, and a skill group only with a host question.
         return (
           loan &&

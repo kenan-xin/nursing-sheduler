@@ -61,7 +61,36 @@ describe("setup steps", () => {
   });
 });
 
+describe("after a fix is applied (bead 2vtv)", () => {
+  it("offers a run through the card and reports whether the schedule can now be built", () => {
+    const line = FEASIBILITY_INSTRUCTIONS.find((l) => l.includes("request_optimize_run"));
+    expect(line).toMatch(/After the user applies a fix/);
+    expect(line).toMatch(/never say a run has started/);
+    expect(line).toMatch(/get_optimize_result/);
+    expect(line).toMatch(/whether the schedule can now be built/);
+  });
+});
+
 describe("repair catalogue", () => {
+  it("adds a regular staff member only for a chronic shortage, as the manager's Apply", () => {
+    const add = REPAIRS.find((repair) => repair.id === "add_staff_member")!;
+    expect(add).toMatchObject({
+      confirmation: "manager",
+      enforcedBy: "apply",
+      opTypes: ["add_person"],
+    });
+    expect(REPAIR_ORDER.chronic).toEqual([
+      "align_overlapping_requirements",
+      "borrow_temporary_nurse",
+      "add_staff_member",
+      "run_one_short",
+      "split_long_shift",
+    ]);
+    for (const situation of ["capped", "acute", "unexplained"] as const) {
+      expect(REPAIR_ORDER[situation]).not.toContain("add_staff_member");
+    }
+  });
+
   it("has a version, unique ids, and every ranked id exists", () => {
     expect(PLAYBOOK_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
     const ids = REPAIRS.map((repair) => repair.id);
@@ -216,6 +245,6 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS[0]).not.toMatch(/all at once, in plain words/);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-27.1");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-27.2");
   });
 });

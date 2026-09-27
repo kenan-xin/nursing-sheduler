@@ -42,7 +42,7 @@ import {
   OPTIMIZE_TIMEOUT_MAX_SECONDS,
   OPTIMIZE_TIMEOUT_MIN_SECONDS,
   acquireSessionStorage,
-  clearOptimizeRunRequestOutcome,
+  noteOptimizeRunStarted,
   createAttemptRegistry,
   createOptimizeObservability,
   deriveOptimizeReadiness,
@@ -518,7 +518,8 @@ export function OptimizeAndExportScreen({
     // attempt exists, so the old run can never observe itself as current again.
     abandonCurrentAttempt("spa");
     const attempt = attempts.start();
-    clearOptimizeRunRequestOutcome();
+    // `buildSubmitInput` drained and reconciled, so this is the revision the run is built from.
+    noteOptimizeRunStarted(useAuthorityStore.getState().documentRevision);
 
     runStartRef.current = Date.now();
     emittedTerminalRef.current = null;

@@ -70,7 +70,7 @@ const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
   busyNightsWithRestRule: ["borrow_temporary_nurse", "run_one_short"],
   rnMixOnLeave: ["borrow_temporary_nurse", "ask_nurse_on_leave"],
   shortOnLeaveDay: ["borrow_temporary_nurse", "ask_nurse_on_leave", "run_one_short"],
-  tooFewNurses: ["borrow_temporary_nurse"],
+  tooFewNurses: ["borrow_temporary_nurse", "add_staff_member"],
 };
 
 /** The host question each option's Preview must raise before Apply (none = asked in chat or plain manager call). */
