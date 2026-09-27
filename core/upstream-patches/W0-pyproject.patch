@@ -1,0 +1,48 @@
+# W0 patch for core/pyproject.toml against genie 1bf4b85.
+# hunk: pytest testpaths = tests, so core/scripts is never collected (v2 tooling)
+# hunk: target-version py312, explicit Ruff lint select pinned to the 0.15 defaults (W2 step 10)
+# hunk: E402 ignore for the verbatim tests/real/solver_capabilities.py (r6g)
+
+diff --git a/core/pyproject.toml b/core/pyproject.toml
+index da988b9..a84c5e2 100644
+--- a/core/pyproject.toml
++++ b/core/pyproject.toml
+@@ -3,10 +3,37 @@ name = "nurse-scheduling"
+ version = "0.0.0"
+ requires-python = ">=3.12"
+ 
++[tool.pytest.ini_options]
++# Scope discovery to the test tree so runnable tools under core/scripts can
++# never be collected or executed by an ordinary pytest run. The opt-in
++# real-world checks under tests/real/ are additionally excluded by the `test_`
++# filename convention (see tests/real/README.md).
++testpaths = ["tests"]
++
+ [tool.ruff]
+-target-version = "py310"
++target-version = "py312"
+ line-length = 120
+ 
++[tool.ruff.lint]
++# Explicit lint selection — do NOT rely on Ruff's defaults. Defaults widen
++# between releases (e.g. 0.15.x → 0.16.x added I/UP/B/SIM/RUF/PIE/BLE/TRY/LOG
++# to the default set), which would silently turn a fresh `pip install -r
++# core/requirements-optional.txt` into a red gate. This is the same default selection
++# Ruff 0.15.x shipped with (`E4`, `E7`, `E9`, `F` — pycodestyle errors
++# excluding E501 line-too-long, plus pyflakes) and matches what the
++# project's existing code has been reviewed against; line length is
++# governed by `tool.ruff.line-length` above. The matching version pin lives
++# in core/requirements-optional.txt.
++select = ["E4", "E7", "E9", "F"]
++
++[tool.ruff.lint.per-file-ignores]
++# `tests/real/solver_capabilities.py` is kept byte-identical to genie `1bf4b85`
++# (recorded in `upstream-patches/manifest.toml`). It prepends `core/` to
++# `sys.path` before importing the package, so Ruff reports six E402
++# module-import-not-at-top. The file must not be reformatted: exempt it here
++# instead of touching it.
++"tests/real/solver_capabilities.py" = ["E402"]
++
+ [tool.ruff.format]
+ quote-style = "double"
+ indent-style = "space"
