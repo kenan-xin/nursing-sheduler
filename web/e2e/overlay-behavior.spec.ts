@@ -248,6 +248,19 @@ test.describe("Mobile navigation drawer — side geometry and modal behaviour", 
     const drawer = page.getByTestId("mobile-nav-drawer");
     await expect(drawer).toBeVisible();
 
+    // Wait for the trap to be ARMED before tabbing. Base UI moves the modal's
+    // initial focus asynchronously — FloatingFocusManager queues it on a
+    // microtask and then focuses on the next animation frame — while the drawer
+    // is already `toBeVisible()` at mount (it renders at translateX(-100%) and
+    // slides in). Tabbing inside that gap leaves the trap unarmed, so the first
+    // Tab walks the top bar and the second lands on the routed page
+    // (`people-continue`) behind the scrim. The readiness signal is the state
+    // the assertions depend on: the modal has taken focus. Not a sleep — a poll
+    // on the real condition.
+    await expect
+      .poll(() => drawer.evaluate((el) => el.contains(document.activeElement)))
+      .toBe(true);
+
     // Tab past the end of the drawer's tab ring several times. Focus may land on
     // Base UI's own focus guards (that is how the trap wraps), but it must never
     // reach the routed page behind the scrim.
