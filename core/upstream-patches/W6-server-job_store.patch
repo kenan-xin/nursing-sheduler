@@ -1,0 +1,50 @@
+# W6 patch for core/nurse_scheduling/server/job_store.py against genie 1bf4b85.
+# hunk: prepare_event_replay protocol method (P6)
+# hunk: describe_queue_state, repair_queue_residue, recent_invariant_errors, admission errors (P9)
+
+diff --git a/core/nurse_scheduling/server/job_store.py b/core/nurse_scheduling/server/job_store.py
+index fb656a3..6b8d96b 100644
+--- a/core/nurse_scheduling/server/job_store.py
++++ b/core/nurse_scheduling/server/job_store.py
+@@ -21,7 +21,8 @@ from collections.abc import Iterator, Mapping, Sequence
+ from datetime import datetime
+ from typing import Protocol
+ 
+-from .jobs.models import Job, JobEvent, ServerActivity, StoredArtifact, StoreLimits, WorkerLease
++from .jobs.models import EventReplayWindow, Job, JobEvent, ServerActivity, StoredArtifact, StoreLimits, WorkerLease
++from .queue_state import QueueStateSnapshot
+ 
+ 
+ class JobStore(Protocol):
+@@ -44,6 +45,8 @@ class JobStore(Protocol):
+         Raises:
+             StoreWriteConflictError: If the job ID already exists.
+             JobCapacityError: If pending or retained capacity is exhausted.
++            DiagnosticCapacityError: If only the reserved ordinary slots remain (v2 P9).
++            QueueInvariantError: If the job is not admissible as a queued job (v2 P9).
+         """
+         ...
+ 
+@@ -132,6 +135,22 @@ class JobStore(Protocol):
+         """
+         ...
+ 
++    def prepare_event_replay(self, job_id: str, requested_cursor: str | None) -> EventReplayWindow:
++        """v2 P6: validate a public cursor and snapshot the initial replay batch atomically."""
++        ...
++
++    def describe_queue_state(self) -> QueueStateSnapshot:
++        """v2 P9: return one atomic snapshot of the complete queue state (T09)."""
++        ...
++
++    def repair_queue_residue(self, occurred_at: datetime | None = None) -> list[str]:
++        """v2 P9: atomically remove index entries no job record justifies (T09)."""
++        ...
++
++    def recent_invariant_errors(self) -> list[dict[str, str]]:
++        """v2 P9: return the bounded record of defensive repairs, oldest first (T09)."""
++        ...
++
+     def stream_events(
+         self,
+         job_id: str,

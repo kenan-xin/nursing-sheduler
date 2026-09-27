@@ -37,7 +37,7 @@ def _append(store, job_id, count):
     """Append `count` progress events to a job and return their native IDs in order."""
     current = store.get(job_id)
     for index in range(count):
-        current = store.save(
+        current = store.update_job(
             current,
             current.revision,
             [JobEvent(type="job.progressed", data={"i": index}, occurred_at=utc_now())],

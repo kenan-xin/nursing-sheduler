@@ -47,7 +47,7 @@ def _controller(store: RedisJobStore, lease: float = 90.0) -> JobController:
         store,
         limits=StoreLimits(max_pending=8, max_retained=128),
         retention_seconds=3600,
-        claim_lease_seconds=lease,
+        worker_lease_seconds=lease,
     )
 
 
@@ -81,10 +81,11 @@ def check(job_id: str) -> None:
 def replay() -> None:
     controller = _controller(_store())
     job = _new_job(controller)
-    claimed = controller.claim_next_job("gate-worker")
+    lease = controller.register_worker("gate-worker")
+    claimed = controller.claim_next_job(lease)
     assert claimed is not None, "queued job was not claimable"
     for index in range(5):
-        controller.record_event(job.id, "job.progressed", {"n": index}, worker_id="gate-worker")
+        controller.record_event(job.id, "job.progressed", {"n": index}, lease=lease)
 
     full = controller.prepare_event_replay(job.id, None)
     # initial_events carry native store IDs; the public Last-Event-ID cursor is the
@@ -105,11 +106,12 @@ def replay() -> None:
 def _hold_claim_forever(job_id: str) -> None:
     """Child process: claim the job and renew its lease until SIGKILLed."""
     controller = _controller(_store(), lease=LEASE_SECONDS)
-    claimed = controller.claim_next_job("hold-worker")
+    lease = controller.register_worker("hold-worker")
+    claimed = controller.claim_next_job(lease)
     if claimed is None:
         return
     while True:
-        controller.renew_claim(claimed.id, "hold-worker")
+        lease = controller.renew_worker(lease) or lease
         time.sleep(LEASE_SECONDS / 3)
 
 

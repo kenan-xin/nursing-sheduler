@@ -55,6 +55,31 @@ patch ID:
 `JOB_MAX_PENDING=8` and the diagnostic concurrency of 1 now live in `docker/compose.yml`
 and `scripts/dev.sh`. The web owns user-facing failure wording (`web/lib/bff/errors.ts`).
 
+W6 replaces the T19 fence with the genie worker lease registry. It adds 2 `verbatim` rows
+(`server/usage_metrics.py`, import only, telemetry off under X6, and
+`tests/test_optimize_job_backends.py`) and 7 `patched` rows, each with one
+`W6-<file>.patch`: `job_store.py`, `jobs/models.py`, `jobs/controller.py`,
+`jobs/worker.py`, `stores/memory.py`, `stores/redis.py` and `tests/test_serve.py`. Patch
+IDs: P6 event replay snapshot, P8 basis and INCONCLUSIVE fields with explicit store
+serialization, P9 purpose queues on `WATCH`/`MULTI` with no Lua (the ordinary queue keeps
+the genie key), and P10 the worker shutdown write gate. P12 is gone: the W2 `config.py`
+and `app.py` patches no longer carry it. `stores/queue_script.py` is deleted. The Redis
+key namespace is `nurse_scheduling:jobs:v2` (X13), and in-flight v1 jobs are dropped at
+cutover.
+
+Accepted semantic change: the lease fence checks expiry against the worker's clock
+before commit, so a worker write can land between lease expiry and the `worker_lost`
+commit (pinned by `test_w6_accepted_gap_late_write_before_worker_lost_lands`). The
+worker runs in the API process, so clock skew is zero. Review this again if the worker
+moves to another process or host.
+
+Deleted v2 assertions (Lua-only mechanics): the 2 lines of
+`test_every_state_machine_key_shares_one_hash_tag`, and the `claim_expires_at` and
+`worker_id` equality lines in `test_server_worker_loss.py`. The memory variant of 5
+residue tests skips, because the genie memory store derives its queues from the records.
+Genie tests whose behaviour v2 changes on purpose are listed, with reasons, in
+`core/tests/conftest.py` `UPSTREAM_DEVIATIONS`.
+
 ## Ported files (upstream → rebuild)
 
 All paths below are relative to `core/nurse_scheduling/`. Files were vendored from

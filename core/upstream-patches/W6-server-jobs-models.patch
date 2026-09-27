@@ -1,0 +1,95 @@
+# W6 patch for core/nurse_scheduling/server/jobs/models.py against genie 1bf4b85.
+# hunk: EventReplayWindow (P6)
+# hunk: INCONCLUSIVE outcome, basis fields, expires_at (P8)
+# hunk: JobPurpose, request purpose, StoreLimits.ordinary_reserved_slots default 0 (P9)
+
+diff --git a/core/nurse_scheduling/server/jobs/models.py b/core/nurse_scheduling/server/jobs/models.py
+index 1b358ba..d59f7f8 100644
+--- a/core/nurse_scheduling/server/jobs/models.py
++++ b/core/nurse_scheduling/server/jobs/models.py
+@@ -22,6 +22,8 @@ from datetime import datetime
+ from enum import Enum
+ from typing import Any
+ 
++from ..optimize_basis import OptimizeBasisV2
++
+ 
+ class JobState(str, Enum):
+     """Execution lifecycle for an asynchronous job."""
+@@ -39,12 +41,20 @@ class JobState(str, Enum):
+         return self in {self.COMPLETED, self.CANCELLED, self.FAILED}
+ 
+ 
++class JobPurpose(str, Enum):
++    """Why a job exists, fixed at admission and never rewritten (v2 P9, T09)."""
++
++    ORDINARY = "ordinary"
++    ASSISTANT_DIAGNOSTIC = "assistant_diagnostic"
++
++
+ class OptimizationOutcome(str, Enum):
+     """Normalized outcome produced by a successful optimization run."""
+ 
+     OPTIMAL = "optimal"
+     FEASIBLE = "feasible"
+     INFEASIBLE = "infeasible"
++    INCONCLUSIVE = "inconclusive"  # v2 P8: normal completion without proof (T08)
+ 
+ 
+ @dataclass(frozen=True)
+@@ -61,6 +71,12 @@ class JobRequest:
+     """Optional schedule-prettification preference."""
+     timeout_seconds: int
+     """Maximum duration supplied to the scheduling engine."""
++    # v2 P8/P9: immutable purpose and verified submission basis (T08, T09).
++    purpose: JobPurpose = JobPurpose.ORDINARY
++    basis: OptimizeBasisV2 | None = None
++    basis_id: str | None = None
++    parent_basis_id: str | None = None
++    transform_digest: str | None = None
+ 
+ 
+ @dataclass(frozen=True)
+@@ -99,6 +115,8 @@ class Job:
+     """Normalized immutable execution inputs."""
+     created_at: datetime
+     """UTC time at which the job entered the store."""
++    expires_at: datetime | None = None
++    """v2 P8: advertised UTC time from which this job's evidence may no longer exist (T08)."""
+     revision: int = 0
+     """Optimistic-concurrency version incremented by each stored update."""
+     started_at: datetime | None = None
+@@ -135,6 +153,15 @@ class JobEvent:
+     """Store-assigned replay cursor, absent before persistence."""
+ 
+ 
++@dataclass(frozen=True)
++class EventReplayWindow:
++    """v2 P6: atomic snapshot returned by `JobStore.prepare_event_replay`."""
++
++    initial_events: list[JobEvent]
++    next_cursor: str | None
++    oldest_event_id: str | None
++
++
+ @dataclass(frozen=True)
+ class StoredArtifact:
+     """Named binary result persisted for a job."""
+@@ -155,6 +182,17 @@ class StoreLimits:
+     """Maximum queued, running, or cancelling jobs accepted by the store."""
+     max_retained: int
+     """Maximum total jobs retained, including terminal history."""
++    ordinary_reserved_slots: int = 0
++    """v2 P9: pending slots only ordinary work may be admitted into (T09).
++
++    Zero for direct construction, so upstream-shaped limits such as
++    `StoreLimits(max_pending=1, ...)` stay valid. `ServerSettings.from_env()` and the
++    compose file supply the shipped value of 1.
++    """
++
++    def __post_init__(self) -> None:
++        if not 0 <= self.ordinary_reserved_slots < self.max_pending:
++            raise ValueError("ordinary_reserved_slots must satisfy 0 <= reserve < max_pending")
+ 
+ 
+ @dataclass(frozen=True)

@@ -144,13 +144,14 @@ jobs:
         run: ruff check . ../docker
       - name: Ruff format
         run: ruff format --check . ../docker
-      # Real-Redis store variants skip unless NURSE_TEST_REDIS_URL is set.
+      # Real-Redis store variants skip unless NURSE_TEST_REDIS_URL (v2 suites) and JOB_REDIS_TEST_URL (genie suites) are set.
       # Serial on purpose: pytest-xdist on the 4-vCPU runner was slower (6m04s vs
       # 4.9m) and starved the wall-clock solver/process tests. core is off the
       # critical path, so it gains nothing from parallelism.
       - name: Pytest (memory, fakeredis, real Redis)
         env:
           NURSE_TEST_REDIS_URL: redis://localhost:6379/0
+          JOB_REDIS_TEST_URL: redis://localhost:6379/0
           PYTHONPATH: .
         run: python3 -m pytest -q -rs
       - name: Score ground-truth replay (patch P0)

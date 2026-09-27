@@ -31,20 +31,7 @@ from nurse_scheduling.server.runtime_identity import get_deployment_id
 from nurse_scheduling.server.stores import redis as redis_store
 from nurse_scheduling.server.stores.memory import MemoryJobStore
 from nurse_scheduling.server.stores.redis import RedisJobStore
-from tests.server_support import real_redis_url
-
-
-def _fakeredis_store(*, key_prefix: str | None = None, server=None) -> RedisJobStore:
-    """Build a fakeredis-backed store, optionally sharing one server namespace."""
-    import fakeredis
-
-    server = server or fakeredis.FakeServer()
-    client = fakeredis.FakeStrictRedis(server=server)
-    return RedisJobStore(
-        url="redis://fake",
-        key_prefix=key_prefix or f"nurse_test:identity:{uuid4().hex}:v0",
-        client=client,
-    )
+from tests.server_support import fakeredis_store as _fakeredis_store, real_redis_url
 
 
 def test_runtime_deployment_identity_is_shared_within_one_server_launch(monkeypatch):

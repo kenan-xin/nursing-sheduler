@@ -43,6 +43,7 @@ from nurse_scheduling.server.jobs.models import (
 from nurse_scheduling.server.stores.memory import MemoryJobStore
 from nurse_scheduling.server.stores.redis import RedisJobStore
 from tests.server_support import _make_fakeredis_store as make_fakeredis_store
+from tests.server_support import fakeredis_store
 from tests.server_support import real_redis_url
 
 
@@ -53,7 +54,7 @@ def _controller(store, *, max_pending=8, max_retained=32, now=None):
         store,
         limits=StoreLimits(max_pending=max_pending, max_retained=max_retained),
         retention_seconds=60,
-        claim_lease_seconds=30,
+        worker_lease_seconds=30,
         clock=clock,
         id_factory=lambda: next(sequence),
     )
@@ -79,15 +80,16 @@ def test_store_round_trips_lifecycle_input_events_and_artifact(store):
     assert created.state == JobState.QUEUED
     assert controller.get_input(created.id) == b"apiVersion: alpha\n"
 
-    claimed = controller.claim_next_job("worker")
+    lease = controller.register_worker("worker")
+    claimed = controller.claim_next_job(lease)
     assert claimed is not None and claimed.state == JobState.RUNNING
-    controller.record_event(claimed.id, "job.phase_changed", {"message": "Solving"}, worker_id="worker")
+    controller.record_event(claimed.id, "job.phase_changed", {"message": "Solving"}, lease=lease)
     artifact = StoredArtifact("input.xlsx", "application/test", b"xlsx")
     completed = controller.complete_job(
         claimed.id,
         OptimizationResult(OptimizationOutcome.OPTIMAL, 42, "OPTIMAL", "optimality_proven"),
         artifact,
-        worker_id="worker",
+        lease=lease,
     )
     assert completed.state == JobState.COMPLETED
     assert controller.get_artifact(completed.id, "input.xlsx") == artifact
@@ -105,15 +107,17 @@ def test_store_round_trips_lifecycle_input_events_and_artifact(store):
 def test_store_rejects_events_from_stale_workers_and_terminal_jobs(store):
     controller = _controller(store)
     _create(controller)
-    claimed = controller.claim_next_job("worker")
+    lease = controller.register_worker("worker")
+    claimed = controller.claim_next_job(lease)
     assert claimed is not None
+    other = controller.register_worker("other-worker")
 
-    accepted = controller.record_score_and_event(claimed.id, 42, {"source": "accepted"}, worker_id="worker")
-    stale = controller.record_event(claimed.id, "job.phase_changed", {"source": "stale"}, worker_id="other-worker")
+    accepted = controller.record_score_and_event(claimed.id, 42, {"source": "accepted"}, lease=lease)
+    stale = controller.record_event(claimed.id, "job.phase_changed", {"source": "stale"}, lease=other)
     assert stale.revision == accepted.revision
 
-    terminal = controller.fail_job(claimed.id, JobFailure("solver_failed", "failed"), worker_id="worker")
-    late = controller.record_event(claimed.id, "job.phase_changed", {"source": "late"}, worker_id="worker")
+    terminal = controller.fail_job(claimed.id, JobFailure("solver_failed", "failed"), lease=lease)
+    late = controller.record_event(claimed.id, "job.phase_changed", {"source": "late"}, lease=lease)
     assert late.revision == terminal.revision
 
 
@@ -122,10 +126,11 @@ def test_store_caps_replayable_events_per_job(store_factory):
     # so it terminates and the stream ends; the retained window is capped.
     controller = _controller(store_factory(max_events_per_job=4))
     created = _create(controller)
-    controller.claim_next_job("worker")
+    lease = controller.register_worker("worker")
+    controller.claim_next_job(lease)
     for index in range(6):
-        controller.record_event(created.id, "job.test", {"index": index}, worker_id="worker")
-    failed = controller.fail_job(created.id, JobFailure("optimization_failed", "x"), worker_id="worker")
+        controller.record_event(created.id, "job.test", {"index": index}, lease=lease)
+    failed = controller.fail_job(created.id, JobFailure("optimization_failed", "x"), lease=lease)
     assert failed.state == JobState.FAILED
 
     events = [e for e in controller.stream_events(created.id, after_id=None, keepalive_seconds=0.01) if e is not None]
@@ -141,9 +146,10 @@ def test_controller_cancellation_policy_is_shared_by_stores(store):
     assert controller.cancel_job(queued.id).state == JobState.CANCELLED
 
     running = _create(controller, "running.yaml")
-    controller.claim_next_job("worker")
+    lease = controller.register_worker("worker")
+    controller.claim_next_job(lease)
     assert controller.cancel_job(running.id).state == JobState.CANCELLING
-    failed = controller.fail_job(running.id, JobFailure("solver_failed", "ignored"), worker_id="worker")
+    failed = controller.fail_job(running.id, JobFailure("solver_failed", "ignored"), lease=lease)
     assert failed.state == JobState.CANCELLED
 
 
@@ -152,18 +158,19 @@ def test_complete_cancellation_is_lease_fenced_across_stores(store):
     # still-active claim; a foreign worker cannot manufacture the terminal write.
     controller = _controller(store)
     running = _create(controller)
-    controller.claim_next_job("worker")
+    lease = controller.register_worker("worker")
+    controller.claim_next_job(lease)
     assert controller.cancel_job(running.id).state == JobState.CANCELLING
 
-    foreign = controller.complete_cancellation(running.id, worker_id="other-worker")
+    foreign = controller.complete_cancellation(running.id, controller.register_worker("other-worker"))
     assert foreign.state == JobState.CANCELLING
 
-    cancelled = controller.complete_cancellation(running.id, worker_id="worker")
+    cancelled = controller.complete_cancellation(running.id, lease)
     assert cancelled.state == JobState.CANCELLED
-    assert cancelled.failure == JobFailure("cancelled", "Optimisation cancelled.")
+    assert cancelled.failure == JobFailure("cancelled", "Optimization cancelled.")
 
     # Re-finalizing a terminal job is a no-op.
-    assert controller.complete_cancellation(running.id, worker_id="worker").state == JobState.CANCELLED
+    assert controller.complete_cancellation(running.id, lease).state == JobState.CANCELLED
 
 
 def test_complete_cancellation_after_lease_expiry_defers_to_maintenance(store):
@@ -172,11 +179,12 @@ def test_complete_cancellation_after_lease_expiry_defers_to_maintenance(store):
     start = datetime.now(timezone.utc)
     controller = _controller(store, now=start)
     running = _create(controller)
-    controller.claim_next_job("worker")
+    lease = controller.register_worker("worker")
+    controller.claim_next_job(lease)
     assert controller.cancel_job(running.id).state == JobState.CANCELLING
 
     expired = _controller(store, now=start + timedelta(seconds=31))
-    unchanged = expired.complete_cancellation(running.id, worker_id="worker")
+    unchanged = expired.complete_cancellation(running.id, lease)
     assert unchanged.state == JobState.CANCELLING
 
     assert expired.expire_worker_claims() == [running.id]
@@ -189,13 +197,14 @@ def test_process_timeout_failure_does_not_overwrite_worker_lost(store):
     start = datetime.now(timezone.utc)
     controller = _controller(store, now=start)
     running = _create(controller)
-    controller.claim_next_job("worker")
+    lease = controller.register_worker("worker")
+    controller.claim_next_job(lease)
 
     expired = _controller(store, now=start + timedelta(seconds=31))
     assert expired.expire_worker_claims() == [running.id]
     assert expired.get_job(running.id).failure.code == "worker_lost"
 
-    refused = expired.fail_job(running.id, JobFailure("process_timeout", "timed out"), worker_id="worker")
+    refused = expired.fail_job(running.id, JobFailure("process_timeout", "timed out"), lease=lease)
     assert refused.state == JobState.FAILED
     assert refused.failure.code == "worker_lost"
 
@@ -206,7 +215,7 @@ def test_revision_prevents_late_overwrite(store):
     stale = controller.get_job(created.id)
     controller.cancel_job(created.id)
     with pytest.raises(StoreWriteConflictError):
-        store.save(stale, stale.revision, [])
+        store.update_job(stale, stale.revision, [])
 
 
 def test_retention_cleanup_removes_old_terminal_jobs(store):
@@ -219,7 +228,7 @@ def test_retention_cleanup_removes_old_terminal_jobs(store):
         store,
         limits=StoreLimits(max_pending=8, max_retained=32),
         retention_seconds=60,
-        claim_lease_seconds=30,
+        worker_lease_seconds=30,
         clock=lambda: now + timedelta(seconds=61),
     )
     assert later.expire_jobs() == [created.id]
@@ -233,7 +242,7 @@ def test_store_enforces_capacity_across_concurrent_creates(store):
         store,
         limits=StoreLimits(max_pending=4, max_retained=4),
         retention_seconds=60,
-        claim_lease_seconds=30,
+        worker_lease_seconds=30,
     )
 
     def create(index: int):
@@ -258,7 +267,11 @@ def test_store_claims_each_job_at_most_once_under_concurrency(store):
     controller = _controller(store)
     created_ids = {_create(controller, f"{index}.yaml").id for index in range(6)}
     with ThreadPoolExecutor(max_workers=6) as executor:
-        claimed = list(executor.map(lambda index: controller.claim_next_job(f"worker-{index}"), range(6)))
+        claimed = list(
+            executor.map(
+                lambda index: controller.claim_next_job(controller.register_worker(f"worker-{index}")), range(6)
+            )
+        )
     claimed_ids = {job.id for job in claimed if job is not None}
     assert claimed_ids == created_ids
     assert len(claimed_ids) == len(claimed)
@@ -273,27 +286,28 @@ def test_expired_worker_claim_fails_job_and_releases_capacity(store):
         store,
         limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
-        claim_lease_seconds=10,
+        worker_lease_seconds=10,
         clock=lambda: now,
         id_factory=lambda: "job_abandoned",
     )
     abandoned = _create(controller)
-    controller.claim_next_job("lost-worker")
+    lease = controller.register_worker("lost-worker")
+    controller.claim_next_job(lease)
 
     recovery = JobController(
         store,
         limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
-        claim_lease_seconds=10,
+        worker_lease_seconds=10,
         clock=lambda: now + timedelta(seconds=11),
         id_factory=lambda: "job_replacement",
     )
-    assert recovery.renew_claim(abandoned.id, "lost-worker") is None
-    assert recovery.is_stop_requested(abandoned.id, "lost-worker") is True
+    assert recovery.renew_worker(lease) is None
+    assert recovery.is_stop_requested(abandoned.id, lease) is True
     assert recovery.expire_worker_claims() == [abandoned.id]
     failed = recovery.get_job(abandoned.id)
     assert failed.state == JobState.FAILED
-    assert failed.failure == JobFailure("worker_lost", "The optimisation worker stopped before the job completed.")
+    assert failed.failure == JobFailure("worker_lost", "The optimization worker stopped before the job completed.")
     # Capacity is released: the replacement controller can queue a fresh job.
     assert _create(recovery).state == JobState.QUEUED
 
@@ -301,7 +315,8 @@ def test_expired_worker_claim_fails_job_and_releases_capacity(store):
 def test_completed_job_replays_after_client_reconnect(store):
     controller = _controller(store)
     created = _create(controller)
-    running = controller.claim_next_job("worker")
+    lease = controller.register_worker("worker")
+    running = controller.claim_next_job(lease)
     assert running is not None
 
     stream = controller.stream_events(running.id, after_id=None, keepalive_seconds=0.01)
@@ -315,7 +330,7 @@ def test_completed_job_replays_after_client_reconnect(store):
         running.id,
         OptimizationResult(OptimizationOutcome.OPTIMAL, 42, "OPTIMAL", "optimality_proven"),
         artifact,
-        worker_id="worker",
+        lease=lease,
     )
 
     window = controller.prepare_event_replay(created.id, None)
@@ -346,7 +361,8 @@ def _raise_watch_error_once(store) -> None:
             return getattr(self._pipeline, name)
 
         def execute(self):
-            if pending["error"]:
+            # W6: only a WATCHing transaction can see WatchError in real Redis.
+            if pending["error"] and self._pipeline.watching:
                 pending["error"] = False
                 raise redis.WatchError
             return self._pipeline.execute()
@@ -366,9 +382,10 @@ def test_redis_store_retries_watch_errors(operation):
     created = _create(controller)
     if operation == "delete":
         created = controller.cancel_job(created.id)
+    lease = controller.register_worker("worker")
     _raise_watch_error_once(store)
     if operation == "claim":
-        assert controller.claim_next_job("worker").state == JobState.RUNNING
+        assert controller.claim_next_job(lease).state == JobState.RUNNING
     elif operation == "save":
         assert controller.cancel_job(created.id).state == JobState.CANCELLED
     else:
@@ -387,16 +404,8 @@ def test_redis_store_retries_watch_errors(operation):
     ],
 )
 def test_redis_store_rejects_invalid_configuration(settings):
-    import fakeredis
-
-    configuration = {
-        "url": "redis://localhost/0",
-        "key_prefix": "test:jobs",
-        "client": fakeredis.FakeStrictRedis(server=fakeredis.FakeServer()),
-        **settings,
-    }
     with pytest.raises(ValueError):
-        RedisJobStore(**configuration)
+        fakeredis_store(**{"key_prefix": "test:jobs", **settings})
 
 
 def test_memory_store_rejects_nonpositive_event_limit():
