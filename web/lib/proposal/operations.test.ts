@@ -11,7 +11,13 @@ import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
 import type { AssistantCommandV1 } from "./commands";
 import { applyAssistantCommand, applyAssistantCommands } from "./operations";
-import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
+import {
+  octoberWard,
+  pairingWardScenario,
+  peopleScenario,
+  proposalScenario,
+  ruleWardScenario,
+} from "./test-support";
 import { REQUIREMENT_MESSAGES } from "@/components/requirements/requirements-model";
 
 describe("set_roster_range", () => {
@@ -2192,5 +2198,207 @@ describe("temporary-cover arms (d582)", () => {
     const { temporaryCover: _added, ...rest } = added.next;
     const { temporaryCover: _before, ...untouched } = state;
     expect(rest).toEqual(untouched);
+  });
+});
+
+describe("add_pairing_rule / edit_pairing_rule", () => {
+  const apart = {
+    type: "add_pairing_rule" as const,
+    description: "Keep Ana and Ben apart on nights",
+    people: ["ana"] as (string | number)[],
+    withPeople: ["ben"] as (string | number)[],
+    shiftTypes: ["Night"],
+    dates: ["ALL"],
+    weight: "-infinity",
+  };
+  const edit = (overrides: Partial<Omit<typeof apart, "type"> & { ruleId: string }> = {}) => ({
+    ...apart,
+    type: "edit_pairing_rule" as const,
+    ruleId: "aff-apart",
+    description: "Ana and Ben apart on nights",
+    weight: "-10",
+    ...overrides,
+  });
+
+  it("expresses 'never put Ana and Ben on the same night' as a hard rule", () => {
+    const result = applyAssistantCommand(pairingWardScenario(), apart);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.cardsByKind.affinities.at(-1)).toEqual({
+      uid: expect.any(String),
+      description: "Keep Ana and Ben apart on nights",
+      people1: [["ana"]],
+      people2: [["ben"]],
+      shiftTypes: [["Night"]],
+      date: ["ALL"],
+      weight: Number.NEGATIVE_INFINITY,
+    });
+  });
+
+  it("refuses ALL as people, naming the rule", () => {
+    const result = applyAssistantCommand(pairingWardScenario(), { ...apart, withPeople: ["ALL"] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain('Pairing rule "Keep Ana and Ben apart on nights"');
+    expect(result.rejection.message).toContain('cannot say "everyone" directly');
+  });
+
+  it("refuses an unknown shift and lists the choices", () => {
+    const result = applyAssistantCommand(pairingWardScenario(), { ...apart, shiftTypes: ["N"] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain("Valid choices:");
+  });
+
+  it("gives a numeric shift id the screen's own reason, not 'no such shift'", () => {
+    const state = pairingWardScenario();
+    state.shifts = [...state.shifts, { _k: "s9", id: 7 }];
+    const result = applyAssistantCommand(state, { ...apart, shiftTypes: ["7"] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain("numeric shift type ID");
+  });
+
+  it("refuses a +infinity weight and suggests a large finite one", () => {
+    const result = applyAssistantCommand(pairingWardScenario(), { ...apart, weight: "infinity" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain('Pairing rule "Keep Ana and Ben apart on nights"');
+    expect(result.rejection.message.toLowerCase()).toContain("finite");
+    // -infinity stays allowed (the first test asserts the card it builds).
+    expect(applyAssistantCommand(pairingWardScenario(), { ...apart, weight: "-infinity" }).ok).toBe(
+      true,
+    );
+  });
+
+  it("refuses a matrix day id and accepts the ISO date", () => {
+    const bad = applyAssistantCommand(pairingWardScenario(), { ...apart, dates: ["06"] });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.rejection.message).toContain("YYYY-MM-DD");
+    expect(
+      applyAssistantCommand(pairingWardScenario(), { ...apart, dates: ["2026-04-06"] }).ok,
+    ).toBe(true);
+  });
+
+  it("edit keeps the rule off, and refuses an edit that changes nothing", () => {
+    const state = pairingWardScenario();
+    state.cardsByKind.affinities = [{ ...state.cardsByKind.affinities[0], disabled: true }];
+    const result = applyAssistantCommand(state, edit({ weight: "-infinity" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.affinities[0]).toMatchObject({
+        uid: "aff-apart",
+        disabled: true,
+        weight: Number.NEGATIVE_INFINITY,
+      });
+    }
+    const same = applyAssistantCommand(pairingWardScenario(), edit());
+    expect(same.ok).toBe(false);
+    if (!same.ok) expect(same.rejection.code).toBe("no_effect");
+  });
+
+  it("edit refuses a card the form cannot open, and an unknown rule", () => {
+    const state = pairingWardScenario();
+    state.cardsByKind.affinities = [
+      { ...state.cardsByKind.affinities[0], people1: [["ana"], ["cai"]] },
+    ];
+    const multi = applyAssistantCommand(state, edit({ weight: "-5" }));
+    expect(multi.ok).toBe(false);
+    if (!multi.ok) {
+      expect(multi.rejection.code).toBe("unsupported_shape");
+      expect(multi.rejection.message).toContain("Affinities screen");
+    }
+    const missing = applyAssistantCommand(state, edit({ ruleId: "nope" }));
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.rejection.code).toBe("unknown_target");
+  });
+});
+
+describe("add_supervision_rule / edit_supervision_rule", () => {
+  const senior = {
+    type: "add_supervision_rule" as const,
+    description: "A senior on every shift Ana works",
+    supervisors: ["Senior"] as (string | number)[],
+    supervisedPeople: ["ana"] as (string | number)[],
+    shiftTypes: ["Day", "Night"],
+    dates: [] as string[],
+  };
+
+  it("writes the Coverings card, with no dates meaning every date", () => {
+    const result = applyAssistantCommand(pairingWardScenario(), senior);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.cardsByKind.coverings.at(-1)).toEqual({
+      uid: expect.any(String),
+      description: "A senior on every shift Ana works",
+      preceptors: [["Senior"]],
+      preceptees: [["ana"]],
+      shiftTypes: [["Day", "Night"]],
+      weight: 1,
+    });
+  });
+
+  it("refuses OFF and LEAVE, in the screen's words", () => {
+    const result = applyAssistantCommand(pairingWardScenario(), {
+      ...senior,
+      shiftTypes: ["OFF"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain(
+      'Supervision rule "A senior on every shift Ana works": OFF and LEAVE are not allowed',
+    );
+  });
+
+  it("refuses an unknown supervisor, listing who it could be", () => {
+    const result = applyAssistantCommand(pairingWardScenario(), {
+      ...senior,
+      supervisors: ["Seniors"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain('"Senior"');
+  });
+
+  it("edit rewrites the rule in place and refuses no change", () => {
+    const moved = applyAssistantCommand(pairingWardScenario(), {
+      ...senior,
+      type: "edit_supervision_rule",
+      ruleId: "cov-ben",
+      description: "Ben needs a senior on Day",
+      supervisedPeople: ["ben"],
+      shiftTypes: ["Day"],
+      dates: ["WEEKEND"],
+    });
+    expect(moved.ok).toBe(true);
+    if (moved.ok) {
+      expect(moved.next.cardsByKind.coverings).toEqual([
+        {
+          uid: "cov-ben",
+          description: "Ben needs a senior on Day",
+          preceptors: [["Senior"]],
+          preceptees: [["ben"]],
+          shiftTypes: [["Day"]],
+          date: ["WEEKEND"],
+          weight: 1,
+        },
+      ]);
+    }
+    const same = applyAssistantCommand(pairingWardScenario(), {
+      ...senior,
+      type: "edit_supervision_rule",
+      ruleId: "cov-ben",
+      description: "Ben needs a senior on Day",
+      supervisedPeople: ["ben"],
+      shiftTypes: ["Day"],
+    });
+    expect(same.ok).toBe(false);
+    if (!same.ok) expect(same.rejection.code).toBe("no_effect");
   });
 });

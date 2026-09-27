@@ -43,6 +43,9 @@ function Host() {
 
 const handler = () => captured.find((t) => t.name === "test_feasibility_candidates")!.handler;
 
+/** The model-facing text of a tool result; every handler answers with an object (bead 3eve). */
+const text = (answer: unknown) => (answer as { guidance: string }).guidance;
+
 beforeEach(() => {
   captured.length = 0;
   fixture.identity.mockClear();
@@ -74,9 +77,9 @@ describe("test_feasibility_candidates enforces the safety floor", () => {
       },
       {},
     );
-    expect(answer).toMatch(/Candidate 1/);
-    expect(answer).toMatch(/rest rule/);
-    expect(answer).toMatch(/Nothing was tested/);
+    expect(text(answer)).toMatch(/Candidate 1/);
+    expect(text(answer)).toMatch(/rest rule/);
+    expect(text(answer)).toMatch(/Nothing was tested/);
     expect(fixture.identity).not.toHaveBeenCalled();
   });
 
@@ -94,6 +97,6 @@ describe("test_feasibility_candidates enforces the safety floor", () => {
       {},
     );
     expect(fixture.identity).toHaveBeenCalled();
-    expect(answer).toMatch(/no retained Optimize run/);
+    expect(text(answer)).toMatch(/no retained Optimize run/);
   });
 });

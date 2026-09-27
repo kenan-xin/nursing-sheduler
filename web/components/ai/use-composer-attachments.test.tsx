@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import ExcelJS from "exceljs";
 
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { useComposerAttachments } from "./use-composer-attachments";
@@ -76,6 +77,61 @@ describe("composer attachments (2by.10)", () => {
     await userEvent.click(screen.getByText("consume"));
     await upload([new File(["x".repeat(200 * 1024 + 1)], "big.txt", { type: "text/plain" })]);
     await waitFor(() => expect(error()).toBe('"big.txt" is larger than 200 KB.'));
+  });
+
+  it("queues an .xlsx as CSV text, and refuses one that is not a workbook (6eli)", async () => {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet("Leave").addRow(["Ana", 3]);
+    const xlsx = new Uint8Array(await wb.xlsx.writeBuffer());
+    render(<Probe imageInput={false} />);
+    await upload([new File([xlsx], "leave.xlsx", { type: "" })]);
+    await waitFor(() => expect(ready()).toBe(JSON.stringify([["text", "leave.xlsx", "text/csv"]])));
+    await upload([new File(["a,b"], "fake.xlsx", { type: "" })]);
+    await waitFor(() =>
+      expect(error()).toBe('"fake.xlsx" could not be read as an Excel workbook.'),
+    );
+    expect(JSON.parse(ready()!)).toHaveLength(1);
+  });
+
+  it("shrinks a photo over 3.75 MB, and refuses one that still does not fit (j6dk)", async () => {
+    let encoded = 800_000;
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ width: 4000, height: 3000, close: () => {} })),
+    );
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        getContext() {
+          return { fillRect: () => {}, drawImage: () => {} };
+        }
+        async convertToBlob() {
+          const bytes = new Uint8Array(encoded);
+          bytes.set([0xff, 0xd8, 0xff, 0xe0]);
+          return new Blob([bytes]);
+        }
+      },
+    );
+    const photo = (name: string) => {
+      const bytes = new Uint8Array(6 * 1024 * 1024);
+      bytes.set(PNG);
+      return new File([bytes], name, { type: "image/png" });
+    };
+    render(<Probe imageInput />);
+    await upload([photo("roster-photo.png")]);
+    await waitFor(() =>
+      expect(ready()).toBe(JSON.stringify([["image", "roster-photo.png", "image/jpeg"]])),
+    );
+
+    encoded = 4 * 1024 * 1024;
+    await upload([photo("noisy.png")]);
+    await waitFor(() =>
+      expect(error()).toBe(
+        '"noisy.png" is still larger than 3.75 MB after shrinking. Crop it or save it smaller, and attach it again.',
+      ),
+    );
+    expect(JSON.parse(ready()!)).toHaveLength(1);
+    vi.unstubAllGlobals();
   });
 
   it("checks the bytes, not the name: a renamed file is refused", async () => {

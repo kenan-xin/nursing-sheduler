@@ -294,14 +294,14 @@ describe("open_app_screen during a live optimiser run", () => {
       { capabilityId: "leave-and-requests" },
       {},
     );
-    expect(result).toBe(RUN_LIVE_NAVIGATION_REFUSAL);
+    expect(result).toMatchObject({ guidance: RUN_LIVE_NAVIGATION_REFUSAL });
     expect(push).not.toHaveBeenCalled();
   });
 
   it("still allows the Optimise screen itself", async () => {
     mountAnchor("optimize.run-options");
     const result = await tool("open_app_screen").handler({ capabilityId: "generate-roster" }, {});
-    expect(result).not.toBe(RUN_LIVE_NAVIGATION_REFUSAL);
+    expect(result).not.toMatchObject({ guidance: RUN_LIVE_NAVIGATION_REFUSAL });
     expect(push).toHaveBeenCalledWith(expect.stringContaining("optimize"));
   });
 });
@@ -313,7 +313,7 @@ describe("turn authorization", () => {
     for (const { handler } of captured) {
       await expect(
         handler({ capabilityId: "roster-period", policy: "night" }, {}),
-      ).resolves.toMatch(/^superseded:/);
+      ).resolves.toMatchObject({ guidance: expect.stringMatching(/^superseded:/) });
     }
   });
 
@@ -322,7 +322,9 @@ describe("turn authorization", () => {
     // outside any authorised turn has no authority by construction, rather than by
     // failing a comparison against a sentinel epoch.
     boundTurn.release();
-    await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatch(/^superseded:/);
+    await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatchObject({
+      guidance: expect.stringMatching(/^superseded:/),
+    });
   });
 
   it("answers nothing after a lease takeover, which an epoch check could not see", async () => {
@@ -332,17 +334,23 @@ describe("turn authorization", () => {
       ...boundTurn.turn.claim,
       leaseEpoch: boundTurn.turn.claim.leaseEpoch + 1,
     };
-    await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatch(/^superseded:/);
+    await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatchObject({
+      guidance: expect.stringMatching(/^superseded:/),
+    });
   });
 
   it("answers nothing after the document revision moves under the turn", async () => {
     boundTurn.live.documentRevision += 1;
-    await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatch(/^superseded:/);
+    await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatchObject({
+      guidance: expect.stringMatching(/^superseded:/),
+    });
   });
 
   it("answers nothing once this tab stops owning the schedule", async () => {
     boundTurn.live.isOwner = false;
-    await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatch(/^superseded:/);
+    await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatchObject({
+      guidance: expect.stringMatching(/^superseded:/),
+    });
   });
 
   it("answers nothing for an aborted request", async () => {
@@ -350,7 +358,7 @@ describe("turn authorization", () => {
     controller.abort();
     await expect(
       tool("list_app_capabilities").handler({}, { signal: controller.signal }),
-    ).resolves.toMatch(/^superseded:/);
+    ).resolves.toMatchObject({ guidance: expect.stringMatching(/^superseded:/) });
   });
 
   it("does not report a navigation to a turn that was interrupted mid-flight", async () => {
@@ -361,7 +369,9 @@ describe("turn authorization", () => {
       { signal: controller.signal },
     );
     controller.abort();
-    await expect(pending).resolves.toMatch(/^superseded:/);
+    await expect(pending).resolves.toMatchObject({
+      guidance: expect.stringMatching(/^superseded:/),
+    });
   });
 });
 
@@ -383,7 +393,7 @@ describe("navigation is withheld as an EFFECT, not just as a result", () => {
 
     const result = await tool("open_app_screen").handler({ capabilityId: "roster-period" }, {});
 
-    expect(result).toMatch(/^superseded:/);
+    expect(result).toMatchObject({ guidance: expect.stringMatching(/^superseded:/) });
     expect(push).not.toHaveBeenCalled();
   });
 
@@ -405,7 +415,7 @@ describe("navigation is withheld as an EFFECT, not just as a result", () => {
 
     const result = await tool("open_app_screen").handler({ capabilityId: "roster-period" }, {});
 
-    expect(result).toMatch(/^superseded:/);
+    expect(result).toMatchObject({ guidance: expect.stringMatching(/^superseded:/) });
     // The push already happened -- it was authorised when it was made, and nothing can
     // recall it. What must NOT happen is the app then moving the user's focus for a
     // turn that has since been stopped.

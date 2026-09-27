@@ -1,0 +1,38 @@
+# W5 patch for core/AGENTS.md against genie 1bf4b85.
+# hunk: v2 notes section at the end (lane 07 D17, lane 05 L5-30)
+
+diff --git a/core/AGENTS.md b/core/AGENTS.md
+index 1a5ca4f..6db47c3 100644
+--- a/core/AGENTS.md
++++ b/core/AGENTS.md
+@@ -253,3 +253,30 @@ suite. Run optional solver and real-scenario suites explicitly when affected.
+   block, using `# This test is mostly AI generated.` for anything under `tests/`,
+   including helpers and runners, and `# This file is mostly AI generated.` in any
+   other new file. Editing a file someone else wrote does not earn a marker.
++
++## v2 notes
++This file is genie `core/AGENTS.md` with only this section added (lane 07 D17,
++lane 05 L5-30), so it syncs like any other patched file. The repository root
++`AGENTS.md` and `CLAUDE.md` come first. Where the rules above do not fit v2:
++
++- v2 does not vendor the Python AI package, `ai_serve.py`,
++  `frontend_validation.py`, `usage_report.py` or the performance benchmark
++  (spec X5, X6). Skip the Experimental AI rules, the AI service auth rules and
++  the `ai_serve` and `usage_report` import checks.
++  `../scripts/test_core_affected.sh` and `../docs/agent-license-headers.md` do
++  not exist in v2.
++- The product runs OR-Tools CP-SAT only (X4). The other solvers stay as a
++  library so that upstream syncs stay clean. Install
++  `requirements-optional.txt` to run their tests.
++- Auth stays off. The backend is private behind the web BFF (X7). Usage
++  telemetry stays off (X6).
++- Core CI runs on Linux only.
++- Every file in `core/` has one row in `upstream-patches/manifest.toml`:
++  `verbatim`, `patched`, `v2-only` or `excluded`. Add a row when you add a
++  file. Change a `verbatim` file only by syncing it from upstream. After you
++  change a `patched` file, rebuild its patch with
++  `python -m scripts.sync_upstream --repo <v1 clone> --refresh-patches`. Put new
++  v2 behavior in a `v2-only` module where you can, not in an upstream file.
++- Before you finish core work, run from `core/`: `ruff check .`,
++  `ruff format --check .`, `python -m scripts.check_upstream_sync` and
++  `pytest`. The sync recipe is in `docs/T19-upstream-backend-source-manifest.md`.
