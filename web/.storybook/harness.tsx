@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import type { StoreApi } from "zustand";
 import { createQueryClient } from "@/app/providers";
 import { useConfirmStore } from "@/components/shell/confirm-store";
+import { clearGuidedArrival } from "@/components/shell/guided-arrival";
 import { useNavGuardStore } from "@/components/shell/nav-guard-store";
 import { ThemeProvider, useTheme } from "@/components/theme/theme-provider";
 import {
@@ -16,6 +17,7 @@ import {
   type Theme,
 } from "@/components/theme/theme-store";
 import { useChangeHighlightStore } from "@/lib/change-highlight/store";
+import { useModeStore } from "@/lib/mode/mode";
 import { useRunRequestStore } from "@/lib/optimize/run-request";
 import { useRosterChangeStore } from "@/lib/roster/change-request";
 import { useCoverEditStore } from "@/lib/scenario/cover-edit-request";
@@ -67,8 +69,8 @@ function resetStore<T>(store: StoreApi<T>): void {
 
 /**
  * Global `beforeEach` (preview.tsx): every module-singleton UI store back to its initial
- * state, so no story inherits the previous story's pending request, confirm dialog or
- * change highlight. The assistant store is deliberately absent: `.storybook/` sits under
+ * state, so no story inherits the previous story's pending request, confirm dialog,
+ * change highlight, app mode or pending Guided arrival. The assistant store is deliberately absent: `.storybook/` sits under
  * the assistant import boundary (Phase 5 decides AI stories).
  */
 export function withResetTransientStores(): void {
@@ -78,6 +80,8 @@ export function withResetTransientStores(): void {
   resetStore(useRosterChangeStore);
   resetStore(useNavGuardStore);
   resetStore(useConfirmStore);
+  resetStore(useModeStore);
+  clearGuidedArrival();
   useHotStore.getState().resetEphemeral();
 }
 
