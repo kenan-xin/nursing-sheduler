@@ -9,6 +9,7 @@ import {
   OPENROUTER_BASE_URL,
   RUNTIME_INSTANCE_HEADER,
 } from "./containment";
+import { MAX_IMAGE_BYTES } from "@/lib/ai/assistant/attachment-rules";
 import { createSchedulerCopilotRuntime, type SchedulerCopilotRuntime } from "./handler";
 import {
   SENTINEL_KEY,
@@ -80,6 +81,12 @@ const METADATA_URL = "http://169.254.169.254/latest/meta-data/";
 const PNG_BASE64 = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52,
 ]).toString("base64");
+
+function pngOfSize(bytes: number): string {
+  const buffer = Buffer.alloc(bytes);
+  Buffer.from(PNG_BASE64, "base64").copy(buffer);
+  return buffer.toString("base64");
+}
 
 function imagePart(filename: string, value: string) {
   return {
@@ -274,6 +281,7 @@ describe("run", () => {
     ["an executable named .png", imagePart("ward.png", Buffer.from("MZ\x90\0").toString("base64"))],
     ["a binary .txt", documentPart("notes.txt", "text/plain", "PK\x03\x04\0")],
     ["a PDF", documentPart("rota.pdf", "application/pdf", "%PDF-1.7")],
+    ["an image one byte over 3.75 MB", imagePart("big.png", pngOfSize(3_932_161))],
     ["an oversized text file", documentPart("big.txt", "text/plain", "x".repeat(200 * 1024 + 1))],
     [
       "an image by URL",
@@ -376,8 +384,8 @@ describe("run", () => {
     expect(provider.calls).toHaveLength(0);
   });
 
-  it("carries four 5 MB images in one run request, about 28 MB of JSON (2by.10)", async () => {
-    const big = Buffer.alloc(5 * 1024 * 1024);
+  it("carries four 3.75 MB images in one run request, about 21 MB of JSON (2by.10)", async () => {
+    const big = Buffer.alloc(MAX_IMAGE_BYTES);
     Buffer.from(PNG_BASE64, "base64").copy(big);
     const value = big.toString("base64");
     const { runtime, provider } = launch();

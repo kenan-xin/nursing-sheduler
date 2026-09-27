@@ -48,7 +48,7 @@ describe("attachment rules (2by.10)", () => {
     expect(checkAttachment(file("noext", ""), true, 0)).toMatchObject({ ok: false });
     expect(checkAttachment(file("big.jpg", "image/jpeg", MAX_IMAGE_BYTES + 1), true, 0)).toEqual({
       ok: false,
-      message: '"big.jpg" is larger than 5 MB.',
+      message: '"big.jpg" is larger than 3.75 MB.',
     });
     expect(checkAttachment(file("big.txt", "text/plain", MAX_TEXT_BYTES + 1), true, 0)).toEqual({
       ok: false,
@@ -57,6 +57,14 @@ describe("attachment rules (2by.10)", () => {
     expect(checkAttachment(file("a.txt", "text/plain"), true, MAX_ATTACHMENTS)).toEqual({
       ok: false,
       message: "You can attach up to 4 files to one message.",
+    });
+  });
+
+  it("keeps an image's base64 within Anthropic's 5,242,880-byte limit", () => {
+    expect(MAX_IMAGE_BYTES).toBe(3.75 * 1024 * 1024);
+    expect(Math.ceil(MAX_IMAGE_BYTES / 3) * 4).toBeLessThanOrEqual(5_242_880);
+    expect(checkAttachment(file("ok.png", "image/png", MAX_IMAGE_BYTES), true, 0)).toMatchObject({
+      ok: true,
     });
   });
 

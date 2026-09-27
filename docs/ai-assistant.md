@@ -96,7 +96,7 @@ Ready, the following may be sent through OpenRouter to the model you chose:
 - the complete relevant schedule — dates, people, shift types, rules, requests,
   identifiers and descriptions;
 - which screen you are on, and the conversation so far for that schedule;
-- images and text files you attach to a message (PNG, JPEG, WebP or GIF up to 5 MB;
+- images and text files you attach to a message (PNG, JPEG, WebP or GIF up to 3.75 MB;
   .txt, .csv or .md up to 200 KB; at most 4 per message, always with some typed text).
   Images need a model that reads images; the panel says so when yours does not. An
   attachment is part of the conversation, so it is sent again with each later message

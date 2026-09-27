@@ -3,7 +3,11 @@
 // server route and the tests agree.
 
 export const MAX_ATTACHMENTS = 4;
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/**
+ * 3.75 MB decoded, so the base64 an image travels as stays within 5,242,880 bytes:
+ * Anthropic's per-image limit, the tightest among the catalog's image models.
+ */
+export const MAX_IMAGE_BYTES = 3.75 * 1024 * 1024;
 export const MAX_TEXT_BYTES = 200 * 1024;
 
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
@@ -50,7 +54,7 @@ export function checkAttachment(
   if (IMAGE_TYPES.includes(file.type)) {
     if (!imageInput) return { ok: false, message: NO_VISION };
     return file.size > MAX_IMAGE_BYTES
-      ? { ok: false, message: `"${file.name}" is larger than 5 MB.` }
+      ? { ok: false, message: `"${file.name}" is larger than 3.75 MB.` }
       : { ok: true, kind: "image", mimeType: file.type };
   }
   return { ok: false, message: wrongTypeMessage(file.name) };
