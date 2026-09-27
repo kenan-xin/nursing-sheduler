@@ -194,7 +194,7 @@ export function CoefficientFields({
                   {hint}
                 </span>
               )}
-              {err && <span className="text-meta font-semibold text-error">{err}</span>}
+              {err && <span className="text-meta font-semibold text-errorink">{err}</span>}
             </label>
           );
         })}
@@ -209,7 +209,7 @@ export function CoefficientFields({
       )}
       {aggregateError && (
         <p
-          className="text-meta font-semibold text-error"
+          className="text-meta font-semibold text-errorink"
           role="alert"
           data-testid={`${testId}-aggregate-error`}
         >
