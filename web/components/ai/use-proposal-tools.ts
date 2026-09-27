@@ -29,7 +29,12 @@ import {
 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import { assistantProposalCommands } from "@/lib/store";
-import { REST_PRACTICE_WARNING, relaxesRestRule } from "@/lib/ai/assistant/playbook";
+import {
+  BALANCE_RULE_NOTE,
+  REST_PRACTICE_WARNING,
+  relaxesRestRule,
+  setsBalanceRule,
+} from "@/lib/ai/assistant/playbook";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { planChangeHighlight } from "@/lib/change-highlight/plan";
 import { readCapabilityContext } from "./capability-context";
@@ -222,6 +227,9 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
             : "") +
           (relaxesRestRule(outcome.proposal.commands)
             ? `This change relaxes a rest rule, so also say, in one short line: "${REST_PRACTICE_WARNING}" `
+            : "") +
+          (setsBalanceRule(outcome.proposal.commands)
+            ? `This is a fairness rule, so also say, in one short line: "${BALANCE_RULE_NOTE}" `
             : "") +
           "Then wait."
         );

@@ -131,6 +131,8 @@ describe("the attached turn context", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Preview/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/user .*Apply/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/instead of refusing/);
+    // bead hnd: 'Make it fair' got a Prepare it / Not now card instead of a Preview.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/prepare it straight away.*asking whether to/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/open_app_screen/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Never claim .*applied/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/opens the screen that holds the change/);

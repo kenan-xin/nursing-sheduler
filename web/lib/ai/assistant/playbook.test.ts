@@ -13,12 +13,15 @@ import {
   PLAYBOOK_VERSION,
   REPAIRS,
   REPAIR_ORDER,
+  BALANCE_RULE_NOTE,
   REST_PRACTICE_WARNING,
   SAFETY_FLOOR,
   SETUP_INSTRUCTIONS,
   SETUP_STEPS,
   relaxesRestRule,
+  setsBalanceRule,
 } from "./playbook";
+import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 
 describe("setup steps", () => {
   it("follow the Home guided order, then review", () => {
@@ -190,6 +193,27 @@ describe("rest rules are guidance, not law", () => {
     ).toBe(false);
   });
 
+  it("spots a change that adds or sets a balance rule, and nothing else", () => {
+    // bead hnd: a fairness rule can slow the run or end it without proof it is the best.
+    const count = (expression: string, type = "add_count_rule") =>
+      ({
+        type,
+        ruleId: "r",
+        description: "Fair nights",
+        people: ["ALL"],
+        shiftTypes: ["N"],
+        dates: ["ALL"],
+        expression,
+        target: 1,
+        weight: "-5",
+      }) as unknown as AssistantCommandV1;
+    expect(setsBalanceRule([count("|x - T|^2")])).toBe(true);
+    expect(setsBalanceRule([count("|x - T|^2", "edit_count_rule")])).toBe(true);
+    expect(setsBalanceRule([count("x <= T")])).toBe(false);
+    expect(BALANCE_RULE_NOTE).toMatch(/take longer/);
+    expect(BALANCE_RULE_NOTE).toMatch(/not proven the best/);
+  });
+
   it("measures the 12-hour daily limit in working hours, not the clock span", () => {
     expect(MAX_DAILY_WORKING_MINUTES).toBe(12 * 60);
     // Long 08:00-20:30 is a 12.5 h span, but its 2 h break leaves 10.5 h worked.
@@ -245,6 +269,6 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS[0]).not.toMatch(/all at once, in plain words/);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-27.2");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-27.3");
   });
 });

@@ -29,7 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { REST_PRACTICE_WARNING } from "@/lib/ai/assistant/playbook";
+import { BALANCE_RULE_NOTE, REST_PRACTICE_WARNING } from "@/lib/ai/assistant/playbook";
 import { proposalScenario } from "@/lib/proposal/test-support";
 import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import { createEmptyScenarioUiState } from "@/lib/scenario";
@@ -190,6 +190,31 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     await mount();
     const { MAX_ASSISTANT_OPERATIONS } = await import("@/lib/proposal");
     expect(proposalTool().description).toContain(`${MAX_ASSISTANT_OPERATIONS} operations`);
+  });
+
+  it("tells the model to pass on the balance-rule note when it prepares a fairness rule", async () => {
+    await mount(SCENARIOS.restRuleTooTight());
+    const answer = await proposalTool().handler(
+      {
+        summary: "Share the nights fairly.",
+        operations: [
+          {
+            type: "add_count_rule",
+            description: "Fair nights",
+            people: ["ana", "ben"],
+            shiftTypes: ["N"],
+            dates: ["ALL"],
+            expression: "|x - T|^2",
+            target: 1,
+            weight: "-5",
+          },
+        ],
+      },
+      {},
+    );
+    expect(String(answer)).toContain("preview of this change is now shown");
+    expect(String(answer)).toContain(BALANCE_RULE_NOTE);
+    expect(String(answer)).not.toContain(REST_PRACTICE_WARNING);
   });
 
   it("names the screen Apply will open, so the model never guesses one", async () => {

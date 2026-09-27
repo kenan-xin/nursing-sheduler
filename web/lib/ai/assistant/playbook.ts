@@ -38,11 +38,23 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-27.2";
+export const PLAYBOOK_VERSION = "2026-09-27.3";
 
 /** Said on the Preview and in the reply whenever a change relaxes a rest rule. */
 export const REST_PRACTICE_WARNING =
   "This is a recommended rest practice, not a legal rule. Nurses may be more tired; consider a day off after nights.";
+
+/** Said in the reply whenever a change adds or sets a balance (as close to T as possible) rule. */
+export const BALANCE_RULE_NOTE =
+  "A fairness rule gives the optimiser more to weigh up: the run can take longer, and it may stop at its time limit with a usable roster that is not proven the best.";
+
+/** True when a change adds or sets a count rule of the balance kind (bead hnd). */
+export function setsBalanceRule(commands: readonly AssistantCommandV1[]): boolean {
+  return commands.some(
+    (c) =>
+      (c.type === "add_count_rule" || c.type === "edit_count_rule") && c.expression === "|x - T|^2",
+  );
+}
 
 /** Employment Act: at most 12 WORKING hours a day incl. overtime (span minus the unpaid break). */
 export const MAX_DAILY_WORKING_MINUTES = 12 * 60;
