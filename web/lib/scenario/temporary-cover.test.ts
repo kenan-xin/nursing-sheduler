@@ -287,6 +287,27 @@ const MIX: SlotRow[] = [
     ),
     slots: { [`mix#d${ISO}`]: { required: 3, preferred: undefined, skillMix: undefined } },
   },
+  {
+    title: "a two-floor card keeps only the floor the cover did not zero out",
+    state: scenario(
+      [
+        requirement("mix", "N", 3, {
+          skillMix: [
+            { people: "RN", minNumPeople: 1 },
+            { people: "HCA", minNumPeople: 1 },
+          ],
+        }),
+      ],
+      [cover("Haseena", "N", ["RN"])],
+    ),
+    slots: {
+      [`mix#d${ISO}`]: {
+        required: 2,
+        preferred: undefined,
+        skillMix: [{ people: "HCA", minNumPeople: 1 }],
+      },
+    },
+  },
 ];
 
 const F2: SlotRow[] = [
@@ -693,7 +714,13 @@ describe("identity and the ledger", () => {
     ]);
     expect(decrements).toEqual([
       { pref: 2, iso: ISO, required: 1 },
-      { pref: 4, iso: ISO, required: 1, preferred: 1, mix: [[0, 1]] },
+      {
+        pref: 4,
+        iso: ISO,
+        required: 1,
+        preferred: 1,
+        mix: [{ entryIdx: 0, people: "RN", authored: 2, by: 1 }],
+      },
       { pref: 5, iso: "2026-11-06", required: 1 },
     ]);
     const document = toCanonicalScenarioDocument(derived);
@@ -710,6 +737,33 @@ describe("identity and the ledger", () => {
       const source = authored.get(card.uid.split("#")[0]);
       expect(requiredOn(card, d.iso) + d.required).toBe(requiredOn(source!, d.iso));
     }
+  });
+
+  it("a multi-floor ledger records the AUTHORED floor the split dropped", () => {
+    const state = scenario(
+      [
+        requirement("mix", "N", 3, {
+          skillMix: [
+            { people: "RN", minNumPeople: 1 },
+            { people: "HCA", minNumPeople: 1 },
+          ],
+        }),
+      ],
+      [cover("Haseena", "N", ["RN"])],
+    );
+    const { state: derived, decrements } = applyCovers(state);
+    // The date copy keeps ONLY HCA: the RN floor she zeroed is dropped from it,
+    // so the copy's positions no longer line up with the authored card's, and the
+    // authored index alone could not name the floor that went missing.
+    expect(slotsOn(derived)[`mix#d${ISO}`].skillMix).toEqual([{ people: "HCA", minNumPeople: 1 }]);
+    expect(decrements).toEqual([
+      {
+        pref: 2,
+        iso: ISO,
+        required: 1,
+        mix: [{ entryIdx: 0, people: "RN", authored: 1, by: 1 }],
+      },
+    ]);
   });
 });
 

@@ -1702,7 +1702,7 @@ describe("date-scoped exact-shift targets", () => {
     );
     const cells = [...(dLane?.querySelectorAll("[data-staffed]") ?? [])];
     expect(cells[1].getAttribute("data-short")).toBe("true");
-    expect(cells[1].getAttribute("aria-label")).toContain("of 2 required");
+    expect(cells[1].getAttribute("aria-label")).toContain("/2 from the ward");
     expect(cells[0].getAttribute("data-short")).toBe("false");
     expect(cells[0].getAttribute("aria-label")).not.toContain("required");
   });

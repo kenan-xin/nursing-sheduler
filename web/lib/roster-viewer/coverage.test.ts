@@ -6,10 +6,14 @@
 // its member lanes, and a lane with no declared target must never read as short.
 
 import { describe, expect, it } from "vitest";
-import { computeCoverage, uniformShiftRequirement } from "./coverage";
+import { computeCoverage, exactShiftCoverageLabel, uniformShiftRequirement } from "./coverage";
 import { buildAssignmentIndex, buildEquations } from "./requirements";
 import { PREFERENCE_TYPE } from "@/lib/scenario";
-import type { CanonicalPreference, CanonicalScenarioDocument } from "@/lib/scenario";
+import type {
+  CanonicalPreference,
+  CanonicalScenarioDocument,
+  UiTemporaryCover,
+} from "@/lib/scenario";
 import type { RosterContext, RosterDayGrid, RosterDayState } from "@/lib/roster";
 
 const D: RosterDayState = { kind: "shift", shiftId: "D" };
@@ -65,6 +69,21 @@ function modelFor(preferences: CanonicalPreference[]) {
   return { equations: buildEquations(documentWith(preferences)), reason: null };
 }
 
+/** The model with a temporary-cover ledger and live set (d582). */
+function coveredModel(preferences: CanonicalPreference[], live: UiTemporaryCover[]) {
+  return {
+    equations: buildEquations(documentWith(preferences), { decrements: [], live }),
+    reason: null,
+  };
+}
+
+const HASEENA: UiTemporaryCover = {
+  name: "Haseena (Ward 3)",
+  date: "2026-07-01",
+  shiftType: "D",
+  groups: [],
+};
+
 /** Day 0: Ada+Cy on D, Bo on N. Day 1: Ada on D+, nobody else working. */
 const GRID: RosterDayGrid = [
   [D, DPLUS],
@@ -79,6 +98,7 @@ describe("computeCoverage", () => {
       people: [0, 2],
       staffed: 2,
       required: null,
+      cover: 0,
       short: false,
     });
     expect(coverage[0].shifts[2].people).toEqual([1]);
@@ -96,6 +116,7 @@ describe("computeCoverage", () => {
       people: [0, 2],
       staffed: 2,
       required: 2,
+      cover: 0,
       short: false,
     });
     // Day 1 has nobody on D against a declared 2.
@@ -133,6 +154,7 @@ describe("computeCoverage", () => {
       people: [],
       staffed: 0,
       required: null,
+      cover: 0,
       short: false,
     });
   });
@@ -154,6 +176,7 @@ describe("computeCoverage", () => {
       people: [],
       staffed: 0,
       required: null,
+      cover: 0,
       short: false,
     });
   });
@@ -224,5 +247,83 @@ describe("computeCoverage", () => {
     );
     expect(coverage[0].shifts[0].people).toEqual([2]);
     expect(coverage[0].shifts[0].short).toBe(true);
+  });
+
+  it("coverage counts a temporary cover", () => {
+    // `D` needs 3 of the ward's own every day; Haseena (Ward 3) covers D on day 0.
+    const coverage = computeCoverage(
+      CONTEXT,
+      buildAssignmentIndex(CONTEXT, GRID),
+      coveredModel([requirement("D", 3)], [HASEENA]),
+    );
+    // Her day: the ward need is 2, so 2 of the ward's own SATISFIES it — and the
+    // cell states both numbers instead of silently reading as if the ward alone
+    // staffed it. She is never a person in `people`.
+    expect(coverage[0].shifts[0]).toEqual({
+      people: [0, 2],
+      staffed: 2,
+      required: 2,
+      cover: 1,
+      short: false,
+    });
+    expect(coverage[0].anyShort).toBe(false);
+
+    // Off her date the declared 3 stands untouched, and nobody on it is Short
+    // against it.
+    expect(coverage[1].shifts[0]).toEqual({
+      people: [],
+      staffed: 0,
+      required: 3,
+      cover: 0,
+      short: true,
+    });
+    // One number cannot stand for a lane whose target is 2 on one day and 3 on
+    // the next.
+    expect(uniformShiftRequirement(coverage, 0)).toBeNull();
+  });
+
+  it("leaves the lane target alone for a cover on a shift and date it does not name", () => {
+    const elsewhere = computeCoverage(
+      CONTEXT,
+      buildAssignmentIndex(CONTEXT, GRID),
+      coveredModel(
+        [requirement("N", 2)],
+        [{ name: "Haseena (Ward 3)", date: "2026-07-02", shiftType: "D+", groups: [] }],
+      ),
+    );
+    expect(elsewhere[0].shifts[2]).toEqual({
+      people: [1],
+      staffed: 1,
+      required: 2,
+      cover: 0,
+      short: true,
+    });
+  });
+});
+
+describe("exactShiftCoverageLabel", () => {
+  it("reads the ward need and her credit side by side", () => {
+    expect(
+      exactShiftCoverageLabel({ people: [0, 2], staffed: 2, required: 2, cover: 1, short: false }),
+    ).toBe("2/2 from the ward · +1 cover");
+    expect(
+      exactShiftCoverageLabel({ people: [0], staffed: 1, required: 2, cover: 2, short: false }),
+    ).toBe("1/2 from the ward · +2 covers");
+  });
+
+  it("states the ward staff alone when she lowers nothing, and never invents a denominator", () => {
+    expect(
+      exactShiftCoverageLabel({ people: [0, 2], staffed: 2, required: 2, cover: 0, short: false }),
+    ).toBe("2/2 from the ward");
+    // No declared target: the cell still states who is on, with no `/n`.
+    expect(
+      exactShiftCoverageLabel({
+        people: [0, 2],
+        staffed: 2,
+        required: null,
+        cover: 0,
+        short: false,
+      }),
+    ).toBe("2 from the ward");
   });
 });
