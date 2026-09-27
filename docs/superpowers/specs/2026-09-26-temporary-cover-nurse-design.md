@@ -238,6 +238,7 @@ If validation fails, the editor stays open with the error and nothing is written
 - `source` becomes the ward text inside `name` ("Haseena (Ward 3)"). The description asks the model to write the name as the user said it, with the lending ward in brackets.
 - Add `lenderConfirmed: z.boolean()`: true only after the user said in chat that the lending ward agreed. False refuses.
 - The handler emits one `add_temporary_cover` per `ladder.borrow` need. Its `groups` are the user's `groups`, plus the group the short rule names (olu `qualifiedGroup`, the code field `skillGroup`). It also emits the asking nurse's leave or off request, as today.
+- No saved roster (20wo, v9lu): it shows a plain Preview. The Preview has one cover per missing nurse on the given dates. The covers come from the scenario's `borrow_temporary_nurse` repair. A sick person in the scenario gets `add_leave` for those dates in the same Preview. The covers count that leave. For more than one nurse, its return asks the model to check that the lending ward agreed to each nurse.
 - It emits no person, no pins and no roster cells.
 - Its return names `OPTIMIZE_RUN_TOOL` (`playbook.ts:65`) as the next step. 2vtv owns the run, after the user says yes.
 - `scenario-context.ts:125` says to ask in chat first whether the lending ward agreed.

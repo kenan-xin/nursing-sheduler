@@ -17,6 +17,7 @@ import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { OPTIMIZE_RUN_TOOL } from "@/lib/ai/assistant/playbook";
 import { rankRepairOptions } from "@/lib/ai/assistant/repair-options";
 import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
+import { applyAssistantCommands } from "@/lib/proposal";
 import {
   buildBorrowView,
   buildOvertimeView,
@@ -138,7 +139,8 @@ export const borrowParameters = z.object({
   lenderConfirmed: z
     .boolean()
     .describe(
-      "true ONLY after the user said in chat that the lending ward or agency agreed to lend this nurse.",
+      "true ONLY after the user said in chat that the lending ward or agency agreed to lend this " +
+        "nurse, or every nurse when more than one is missing.",
     ),
   summary: z.string().min(1).describe("Why, in one plain sentence. Shown as your reasoning."),
 });
@@ -283,29 +285,36 @@ function showCard(
 /**
  * With no saved roster (after an infeasible run) a cover is still just a staffing credit
  * (bead 20wo): the covers are the scenario's own short (date, shift) slots on these dates,
- * the same ones suggest_feasibility_options' borrow repair books, under the user's name.
- * ponytail: one cover per short slot, however many nurses it is short by.
+ * the same ones suggest_feasibility_options' borrow repair books, under the user's name:
+ * one cover per missing nurse (bead v9lu). A sick nurse named in the scenario gets her leave
+ * first (`add_leave`, as the Requests screen records it), so her own shifts are covered too.
  */
 function scenarioCovers(
+  args: Pick<z.infer<typeof borrowParameters>, "person" | "reason" | "groups" | "dates">,
   name: string,
-  groups: readonly string[],
-  dates: readonly string[],
 ): { commands: AssistantCommandV1[]; shortDates: string[] } {
-  const state = pickScenario(useScenarioStore.getState());
+  const live = pickScenario(useScenarioStore.getState());
+  const personIdx =
+    args.reason === "sick_or_emergency" ? findPersonIdx({ people: live.staff }, args.person) : -1;
+  const leave = personIdx < 0 ? [] : addLeave(live.staff[personIdx].id, args.dates);
+  // A leave the record refuses (already on leave, a date off the period) is left out.
+  const withLeave = applyAssistantCommands(live, leave);
+  const [state, recorded] = withLeave.ok ? [withLeave.next, leave] : [live, []];
   const borrow = rankRepairOptions(state, findStaffingShortfalls(state), {
     runInfeasible: true,
   }).find((option) => option.repairId === "borrow_temporary_nurse");
   const slots = (borrow?.operations ?? []).flatMap((op) =>
     op.type === "add_temporary_cover" ? [op] : [],
   );
-  const seen = new Set<string>();
-  const commands = slots.flatMap((op): AssistantCommandV1[] => {
-    const key = `${op.date}|${op.shiftType}`;
-    if (!dates.includes(op.date) || seen.has(key)) return [];
-    seen.add(key);
-    return [{ ...op, name, groups: [...new Set([...groups, ...op.groups])] }];
-  });
-  return { commands, shortDates: [...new Set(slots.map((op) => op.date))] };
+  const covers = slots.flatMap((op): AssistantCommandV1[] =>
+    args.dates.includes(op.date)
+      ? [{ ...op, name, groups: [...new Set([...args.groups, ...op.groups])] }]
+      : [],
+  );
+  return {
+    commands: covers.length ? [...covers, ...recorded] : [],
+    shortDates: [...new Set(slots.map((op) => op.date))],
+  };
 }
 
 const NO_ROSTER =
@@ -774,8 +783,8 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         "Step 3 only, when find_swap_partners says step 3 and the user said in chat that the " +
         "lending ward agreed: prepare a temporary cover nurse from the relief pool, another " +
         "ward or an agency for the uncovered shifts. With no saved roster (after a run that " +
-        "could not build one), it covers the short shifts on those dates and person and reason " +
-        "are not used. The nurse is not added as staff: each cover " +
+        "could not build one), it covers every missing nurse on those dates, and a person on " +
+        "sick_or_emergency leave gets that leave recorded in the same preview. The nurse is not added as staff: each cover " +
         "lowers that shift's staffing need by one. This does NOT change anything: the user " +
         "sees a card with an Apply button only they can press.",
       parameters: borrowParameters,
@@ -793,7 +802,7 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         if (token === null) return SUPERSEDED;
         const name = args.name.trim();
         if (read.status === "none" && !read.newerRunWaiting) {
-          const { commands, shortDates } = scenarioCovers(name, args.groups, args.dates);
+          const { commands, shortDates } = scenarioCovers(args, name);
           if (shortDates.length === 0) return noRoster();
           if (commands.length === 0) {
             return (
@@ -816,11 +825,21 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
             token.turnEpoch,
             prepared.linked.baseDocumentRevision,
           );
+          const covers = commands.filter((c) => c.type === "add_temporary_cover").length;
+          const sickPerson = commands.find((c) => c.type === "add_leave")?.personId;
           return (
-            "A preview of the temporary cover is now shown to the user. Nothing has changed " +
-            "yet; only the user can apply it. Say \"I've prepared ...; check it and press " +
-            `Apply" in one short sentence: Apply books ${name} as temporary cover on the Staff ` +
-            `screen. Remind the user to let their ${ROSTER_OWNER} know. Once they have applied ` +
+            `A preview of ${covers === 1 ? "the temporary cover" : `${covers} temporary covers, one per missing nurse,`} ` +
+            "is now shown to the user. Nothing has changed yet; only the user can apply it. " +
+            'Say "I\'ve prepared ...; check it and press Apply" in one short sentence: Apply ' +
+            `books ${name} as temporary cover on the Staff screen` +
+            (sickPerson === undefined
+              ? ". "
+              : ` and records ${sickPerson}'s leave on the Requests screen. `) +
+            (covers === 1
+              ? ""
+              : `Each of the ${covers} nurses needs the lending ward's agreement: if the user ` +
+                "confirmed only one, ask whether the ward agreed to lend them all. ") +
+            `Remind the user to let their ${ROSTER_OWNER} know. Once they have applied ` +
             `it, offer a run with ${OPTIMIZE_RUN_TOOL} so a roster can be built with the cover; ` +
             "it starts only when the user says yes. Then wait."
           );

@@ -931,6 +931,47 @@ describe("prepare_borrowed_cover with no saved roster (bead 20wo)", () => {
     expect(useAssistantStore.getState().activeProposal).toBeNull();
   });
 
+  it("proposes one cover per missing nurse on a slot short by two (bead v9lu)", async () => {
+    // Nights only, and the 5th needs 5 of the 3 staff: that one slot is two nurses short.
+    const ward = SCENARIOS.understaffedNight();
+    const requirements = ward.cardsByKind.requirements.flatMap((card) =>
+      card.uid === "day"
+        ? []
+        : [card.uid === "night-05" ? { ...card, requiredNumPeople: 5 } : card],
+    );
+    fixture.scenario = { ...ward, cardsByKind: { ...ward.cardsByKind, requirements } };
+    const answer = await tool("prepare_borrowed_cover").handler(RINA, {});
+    const cover = {
+      type: "add_temporary_cover",
+      name: "Rina Lim (float pool)",
+      date: "2026-11-05",
+      shiftType: "N",
+      groups: [],
+    };
+    expect(fixture.prepare.mock.calls[0][0].commands).toEqual([cover, cover]);
+    expect(answer).toMatch(/2 temporary covers/);
+  });
+
+  it("records the named sick nurse's leave in the same Preview, and covers her too (bead v9lu)", async () => {
+    await tool("prepare_borrowed_cover").handler({ ...RINA, person: "ana" }, {});
+    const commands = fixture.prepare.mock.calls[0][0].commands;
+    expect(commands.filter((c: { type: string }) => c.type === "add_temporary_cover")).toHaveLength(
+      2,
+    );
+    expect(commands).toContainEqual({
+      type: "add_leave",
+      personId: "ana",
+      startDate: "2026-11-05",
+      endDate: "2026-11-05",
+    });
+  });
+
+  it("records no leave when the reason is not sickness (bead v9lu)", async () => {
+    await tool("prepare_borrowed_cover").handler({ ...RINA, person: "ana", reason: "swap" }, {});
+    const commands = fixture.prepare.mock.calls[0][0].commands;
+    expect(commands.map((c: { type: string }) => c.type)).toEqual(["add_temporary_cover"]);
+  });
+
   it("still refuses before the lending ward agreed", async () => {
     const answer = await tool("prepare_borrowed_cover").handler(
       { ...RINA, lenderConfirmed: false },
