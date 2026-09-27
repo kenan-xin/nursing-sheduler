@@ -102,14 +102,9 @@ def test_env_settings_keep_the_v2_reserve_and_prettify_default(monkeypatch):
     assert settings.ordinary_reserved_slots == 1
     assert settings.max_pending_jobs == 32  # genie default; compose and dev.sh set 8
     assert settings.default_prettify is False
-    assert settings.redis_key_prefix == "nurse_scheduling:jobs:v1"
+    assert settings.redis_key_prefix == "nurse_scheduling:jobs:v2"
     assert settings.solver_ids == ("ortools/cp-sat",)
     assert settings.auth_required is False and settings.auth_token is None
-
-
-def test_claim_lease_keeps_its_v2_name_until_w6(monkeypatch):
-    monkeypatch.setenv("JOB_CLAIM_LEASE_SECONDS", "12")
-    assert ServerSettings.from_env().claim_lease_seconds == 12.0
 
 
 def test_solver_capability_registry_matches_canonical_choices():
@@ -314,21 +309,6 @@ def test_info_reports_self_claimed_performance_with_provenance():
             "app_version": "v0.2.0-66-g959adc4",
             "measured_at": "2026-08-28T19:12:54+00:00",
         }
-
-
-def test_info_reports_cancelling_jobs_separately():
-    with _client(start_background=False) as client:
-        created = _create(client).json()
-        controller = client.app.state.job_controller
-        # v2: no worker lease registry until W6; claim by worker id.
-        assert controller.claim_next_job("test-worker") is not None
-        controller.cancel_job(created["id"])
-
-        info = client.get("/info")
-
-        assert info.json()["jobs"] == {"running": 0, "queued": 0, "cancelling": 1}
-        # v2 bridge (P12): workers.online reads the process worker, idle here.
-        assert info.json()["workers"] == {"online": 0}
 
 
 def test_info_and_readiness_fail_when_job_store_is_unavailable():

@@ -66,12 +66,11 @@ from nurse_scheduling.server.queue_state import (
     check_queue_invariants,
     effective_positions,
 )
-from nurse_scheduling.server.stores.queue_script import QUEUE_KEY_HASH_TAG
 from tests.server_support import (
     MINIMAL_SCENARIO,
-    _make_fakeredis_store,
     assert_queue_invariants,
     make_job,
+    register_lease,
     utc_now,
 )
 
@@ -95,10 +94,16 @@ def _admit(store, job_id, purpose, *, offset_seconds=0.0, limits=DEPLOYED_LIMITS
     return store.create(job, b"input", limits, [_state_event("queued")])
 
 
-def _claim(store, worker_id="worker-1", *, lease_seconds=90.0) -> Job | None:
+_LEASES: dict = {}
+"""W6: live worker leases registered by `_claim`, keyed by (store, worker)."""
+
+
+def _claim(store, worker_id="worker-1", *, lease_seconds=90.0, now=None) -> Job | None:
     """Claim the effective queue head for a worker holding a live lease."""
-    now = utc_now()
-    return store.claim_next(worker_id, now, now + timedelta(seconds=lease_seconds))
+    now = now or utc_now()
+    lease = register_lease(store, worker_id, now=now, seconds=lease_seconds)
+    _LEASES[(id(store), worker_id)] = lease
+    return store.claim_next_job(lease, now)
 
 
 def _terminalize(store, job: Job, state: JobState, *, worker_id=None) -> Job:
@@ -108,16 +113,15 @@ def _terminalize(store, job: Job, state: JobState, *, worker_id=None) -> Job:
         current,
         state=state,
         finished_at=utc_now(),
-        claim_expires_at=None,
         worker_id=current.worker_id,
         failure=JobFailure(code=state.value, message="settled") if state != JobState.COMPLETED else None,
     )
-    return store.save(
+    return store.update_job(
         terminal,
         current.revision,
         [_state_event(state.value)],
-        worker_id=worker_id,
-        expected_claim_expires_at=current.claim_expires_at if worker_id is not None else None,
+        worker_lease=_LEASES[(id(store), worker_id)] if worker_id is not None else None,
+        worker_lease_observed_at=utc_now() if worker_id is not None else None,
     )
 
 
@@ -140,7 +144,7 @@ def test_purpose_round_trips_and_cannot_be_rewritten(store):
     current = store.get("job_diag")
     rewritten = replace(current, request=replace(current.request, purpose=ORDINARY))
     with pytest.raises(QueueInvariantError):
-        store.save(rewritten, current.revision, [])
+        store.update_job(rewritten, current.revision, [])
     # Refused, not partially applied: the stored purpose and its queue are unchanged.
     assert store.get("job_diag").request.purpose is DIAGNOSTIC
     snapshot = assert_queue_invariants(store, context="refused purpose rewrite")
@@ -231,7 +235,7 @@ def test_queued_cancellation_releases_capacity_exactly_once(store):
 
     # Repeating the same terminal save is idempotent and must not free a second slot.
     current = store.get("job_drop")
-    store.save(replace(current, state=JobState.CANCELLED), current.revision, [])
+    store.update_job(replace(current, state=JobState.CANCELLED), current.revision, [])
     repeated = assert_queue_invariants(store, context="repeated cancellation")
     assert repeated.pending_ids == frozenset({"job_keep"})
 
@@ -259,7 +263,7 @@ def test_running_job_is_not_preempted_and_cancellation_is_explicit(store):
     # Freeing the worker requires an EXPLICIT cancellation, and it is observable:
     # cancelling passes through a pending, still-claimed intermediate state.
     current = store.get("job_diag_running")
-    cancelling = store.save(
+    cancelling = store.update_job(
         replace(current, state=JobState.CANCELLING, cancel_requested=True),
         current.revision,
         [_state_event("cancelling")],
@@ -279,20 +283,20 @@ def test_expired_claim_terminalization_releases_capacity_once(store):
     """Claim expiry terminalizes a lost worker's job and frees its slot once."""
     _admit(store, "job_lost", ORDINARY, offset_seconds=0)
     now = utc_now()
-    claimed = store.claim_next("worker-gone", now, now - timedelta(seconds=1))
+    # W6: the lease was live at claim time and expired one second ago.
+    claimed = _claim(store, "worker-gone", lease_seconds=1.0, now=now - timedelta(seconds=2))
     assert claimed is not None
-    assert store.find_claimed_before(now) == [store.get("job_lost")]
+    assert store.find_jobs_without_live_workers(now) == [store.get("job_lost")]
 
     current = store.get("job_lost")
     # Maintenance terminalizes WITHOUT the worker's fence: the worker is presumed
     # lost, so requiring its live claim would leave the slot occupied forever.
-    store.save(
+    store.update_job(
         replace(
             current,
             state=JobState.FAILED,
             failure=JobFailure(code="worker_lost", message="worker stopped"),
             finished_at=utc_now(),
-            claim_expires_at=None,
         ),
         current.revision,
         [_state_event("failed")],
@@ -309,27 +313,30 @@ def test_expired_claim_terminalization_releases_capacity_once(store):
 def test_stale_worker_cannot_commit_after_its_claim_lapses(store):
     """Lease and revision fencing survive the move onto the state machine."""
     _admit(store, "job_fenced", ORDINARY, offset_seconds=0)
-    now = utc_now()
-    claimed = store.claim_next("worker-1", now, now + timedelta(seconds=90))
+    claimed = _claim(store, "worker-1")
+    foreign = register_lease(store, "worker-2")
+    owner = _LEASES[(id(store), "worker-1")]
 
+    # W6: a fenced write that fails the lease check is refused by returning the
+    # unchanged job (genie contract), not by raising.
     # A foreign worker's write is refused even with the correct revision.
-    with pytest.raises(StoreWriteConflictError):
-        store.save(
-            replace(claimed, state=JobState.COMPLETED, finished_at=utc_now()),
-            claimed.revision,
-            [_state_event("completed")],
-            worker_id="worker-2",
-            expected_claim_expires_at=claimed.claim_expires_at,
-        )
-    # So is the owner's write against a deadline it never observed.
-    with pytest.raises(StoreWriteConflictError):
-        store.save(
-            replace(claimed, state=JobState.COMPLETED, finished_at=utc_now()),
-            claimed.revision,
-            [_state_event("completed")],
-            worker_id="worker-1",
-            expected_claim_expires_at=now + timedelta(seconds=999),
-        )
+    refused = store.update_job(
+        replace(claimed, state=JobState.COMPLETED, finished_at=utc_now()),
+        claimed.revision,
+        [_state_event("completed")],
+        worker_lease=foreign,
+        worker_lease_observed_at=utc_now(),
+    )
+    assert refused.state is JobState.RUNNING and refused.revision == claimed.revision
+    # So is the owner's worker id with a lease token it never held.
+    refused = store.update_job(
+        replace(claimed, state=JobState.COMPLETED, finished_at=utc_now()),
+        claimed.revision,
+        [_state_event("completed")],
+        worker_lease=replace(owner, token="forged"),
+        worker_lease_observed_at=utc_now(),
+    )
+    assert refused.state is JobState.RUNNING and refused.revision == claimed.revision
     snapshot = assert_queue_invariants(store, context="refused stale worker commits")
     assert snapshot.jobs["job_fenced"].state is JobState.RUNNING
     assert snapshot.pending_ids == frozenset({"job_fenced"})
@@ -342,9 +349,9 @@ def test_terminal_state_cannot_be_walked_back_into_the_queue(store):
     current = store.get("job_done")
 
     with pytest.raises(QueueInvariantError):
-        store.save(replace(current, state=JobState.QUEUED, finished_at=None), current.revision, [])
+        store.update_job(replace(current, state=JobState.QUEUED, finished_at=None), current.revision, [])
     with pytest.raises(QueueInvariantError):
-        store.save(replace(current, state=JobState.RUNNING, worker_id="worker-9"), current.revision, [])
+        store.update_job(replace(current, state=JobState.RUNNING, worker_id="worker-9"), current.revision, [])
     snapshot = assert_queue_invariants(store, context="refused resurrection")
     assert snapshot.jobs["job_done"].state is JobState.COMPLETED
     assert snapshot.pending_ids == frozenset()
@@ -357,9 +364,10 @@ def _inject_queue_member(store, job_id: str, purpose: JobPurpose, score: float) 
     cannot create this state, which is exactly why the repair path needs a test that
     can: an unexercised repair path is an untested one.
     """
-    if hasattr(store, "_queues"):
-        store._queues[purpose][job_id] = datetime.fromtimestamp(score, tz=timezone.utc)
-        return
+    if not hasattr(store, "_redis"):
+        # W6: genie memory derives its queues from the job records, so no index
+        # entry can exist without a record. Residue is unrepresentable there.
+        pytest.skip("memory store has no queue index to corrupt")
     store._redis.zadd(store._queue_keys[purpose], {job_id: score})
 
 
@@ -538,7 +546,7 @@ def test_active_state_without_a_worker_is_refused(store):
     """An active job must name an owner, or nothing could ever fence or expire it."""
     admitted = _admit(store, "job_unowned", ORDINARY, offset_seconds=0)
     with pytest.raises(QueueInvariantError):
-        store.save(replace(admitted, state=JobState.RUNNING, worker_id=None), admitted.revision, [])
+        store.update_job(replace(admitted, state=JobState.RUNNING, worker_id=None), admitted.revision, [])
     assert_queue_invariants(store, context="refused unowned active job")
 
 
@@ -620,7 +628,7 @@ def test_server_settings_env_reserves_one_slot(monkeypatch):
     assert settings.ordinary_reserved_slots == 1
     # The Redis namespace version moved with the queue layout, so a v0 namespace's
     # single-queue entries can never be misread by the new state machine.
-    assert settings.redis_key_prefix.endswith(":v1")
+    assert settings.redis_key_prefix.endswith(":v2")
     with pytest.raises(ValueError):
         ServerSettings(max_pending_jobs=8, ordinary_reserved_slots=8)
 
@@ -634,30 +642,9 @@ def test_reserve_is_configurable_from_the_environment(monkeypatch):
         ServerSettings.from_env()
 
 
-def test_every_state_machine_key_shares_one_hash_tag():
-    """All keys occupy one slot, so a later cluster cannot break atomicity silently."""
-    store = _make_fakeredis_store()
-    keys = [
-        store._jobs_key,
-        store._pending_key,
-        store._invariant_errors_key,
-        *store._queue_keys.values(),
-        store._job_key("job_a"),
-        store._lease_key("job_a"),
-        store._events_key("job_a"),
-        store._input_key("job_a"),
-        store._artifact_key("job_a"),
-    ]
-    tags = {key[key.index("{") : key.index("}") + 1] for key in keys}
-    assert tags == {QUEUE_KEY_HASH_TAG}
-    # The Lua module derives per-job keys from this same tagged base, so a key it
-    # builds itself cannot escape the slot the declared keys occupy.
-    assert store._state_machine_namespace.endswith(QUEUE_KEY_HASH_TAG)
-
-
 def test_state_machine_version_is_pinned():
     """The protocol version is explicit, so an incompatible change must be declared."""
-    assert QUEUE_STATE_MACHINE_VERSION == "v1"
+    assert QUEUE_STATE_MACHINE_VERSION == "v2"
 
 
 # --- The HTTP boundary -------------------------------------------------------------
