@@ -418,6 +418,64 @@ describe("catalog unavailable and fallback", () => {
   });
 });
 
+// 2by.12. `imageInput` is OpenRouter's `architecture.input_modalities`, a TRI-STATE
+// in practice: true, false, or absent (a custom slug, or a row that never declared
+// modalities). Only a positive declaration earns a label; false and unknown stay
+// silent, because "we could not tell" must never read as "it cannot".
+function imageCatalogResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      source: "catalog",
+      fallbackVersion: 1,
+      models: [
+        { id: "vendor/vision", name: "Vision", contextLength: null, imageInput: true },
+        { id: "vendor/text-only", name: "Text Only", contextLength: null, imageInput: false },
+        { id: "vendor/unknown", name: "Unknown", contextLength: null },
+      ],
+      recommendedId: "vendor/vision",
+    }),
+    { status: 200 },
+  );
+}
+
+describe("image-capable models", () => {
+  beforeEach(async () => {
+    await assistantActions.setEnabled(true);
+    installFetch({ catalog: imageCatalogResponse });
+  });
+
+  it("labels the models that read images, and nothing else", async () => {
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("ai-model-select").querySelectorAll("option")).toHaveLength(3),
+    );
+    const options = Array.from(screen.getByTestId("ai-model-select").querySelectorAll("option"));
+    const optionFor = (id: string) => options.find((option) => option.value === id)!;
+
+    // The one model that declares image input carries the label...
+    expect(optionFor("vendor/vision")).toHaveTextContent("Reads images");
+    // ...a model that declares text-only input does not...
+    expect(optionFor("vendor/text-only")).not.toHaveTextContent("Reads images");
+    // ...and neither does one whose support is unknown. Never a guess.
+    expect(optionFor("vendor/unknown")).not.toHaveTextContent("Reads images");
+  });
+
+  it("shows the chip for a selected model that reads images, and drops it for one that does not", async () => {
+    const user = userEvent.setup();
+    renderCard();
+
+    // The recommended default (a vision model) is selected on load.
+    await waitFor(() => expect(screen.getByTestId("ai-model-reads-images")).toBeInTheDocument());
+
+    await user.selectOptions(screen.getByTestId("ai-model-select"), "vendor/text-only");
+    expect(screen.queryByTestId("ai-model-reads-images")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByTestId("ai-model-select"), "vendor/unknown");
+    expect(screen.queryByTestId("ai-model-reads-images")).not.toBeInTheDocument();
+  });
+});
+
 describe("custom slug escape hatch", () => {
   beforeEach(async () => {
     await assistantActions.setEnabled(true);
