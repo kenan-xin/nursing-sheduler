@@ -115,7 +115,7 @@ describe("importing a roster file into the working roster", () => {
       string,
       unknown
     >;
-    raw.schemaVersion = "roster-file/2";
+    raw.schemaVersion = "roster-file/3";
 
     const outcome = await importRosterBytesToWorking(
       new TextEncoder().encode(JSON.stringify(raw)),

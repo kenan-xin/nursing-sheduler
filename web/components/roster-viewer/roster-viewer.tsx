@@ -24,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
+import { useScenarioStore } from "@/lib/store";
 import {
   deriveCurrentDays,
   deriveEditedSinceSolve,
@@ -101,8 +102,19 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
   );
   // The ephemeral staffing-equation projection. Keyed on the IMMUTABLE
   // submission, so it survives every edit without being recomputed, and nothing
-  // about it is ever written back into the persisted document.
-  const model = useMemo(() => deriveRequirementModel(document.submission), [document.submission]);
+  // about it is ever written back into the persisted document. Covers apply on
+  // read (d582, spec §4): the solve's ledger rebuilds the authored need and the
+  // scenario's covers right now lower it, so adding or removing a cover after the
+  // solve changes coverage at once.
+  const liveCover = useScenarioStore((state) => state.temporaryCover);
+  const model = useMemo(
+    () =>
+      deriveRequirementModel(document.submission, {
+        decrements: document.cover.decrements,
+        live: liveCover,
+      }),
+    [document.submission, document.cover.decrements, liveCover],
+  );
   const assignments = useMemo(
     () => buildAssignmentIndex(document.context, currentDays),
     [document.context, currentDays],

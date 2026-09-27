@@ -42,12 +42,22 @@ export interface RosterFileMigration {
   ): { ok: true; document: Record<string, unknown> } | { ok: false; reason: string };
 }
 
-/**
- * The registered migrations. Empty at v1 — there is no older version yet — but the
- * chain machinery is live and tested against an injected registry, so the first
- * real migration only has to add a step, not build the mechanism under pressure.
- */
-export const ROSTER_FILE_MIGRATIONS: readonly RosterFileMigration[] = [];
+/** The registered migrations, one step per version. */
+export const ROSTER_FILE_MIGRATIONS: readonly RosterFileMigration[] = [
+  // roster-file/2 adds `cover` (temporary cover, d582). A v1 roster was solved
+  // with none.
+  {
+    from: 1,
+    migrate: (document) => ({
+      ok: true,
+      document: {
+        ...document,
+        schemaVersion: rosterFileVersionString(2),
+        cover: { entries: [], decrements: [] },
+      },
+    }),
+  },
+];
 
 /**
  * Bring a STORED document (IndexedDB working roster or candidate, written by an

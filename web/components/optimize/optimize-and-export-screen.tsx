@@ -28,7 +28,7 @@ import { Surface, surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 import { rangeDayCount } from "@/lib/dates";
 import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
-import { withCoverOverrides } from "@/lib/scenario/temporary-cover";
+import { applyCovers } from "@/lib/scenario/temporary-cover";
 import { countEnabledRules } from "@/lib/scenario";
 import {
   drainScenarioCommands,
@@ -461,9 +461,22 @@ export function OptimizeAndExportScreen({
       );
       return null;
     }
-    const document = toCanonicalScenarioDocument(withCoverOverrides(useScenarioStore.getState()));
+    // ONE applyCovers run builds both the solver input and the ledger the roster
+    // keeps, so the roster knows exactly what this solve subtracted (d582).
+    const scenario = useScenarioStore.getState();
+    const applied = applyCovers(scenario);
+    const document = toCanonicalScenarioDocument(applied.state);
     return {
       document,
+      cover: {
+        entries: scenario.temporaryCover.map(({ name, date, shiftType, groups }) => ({
+          name,
+          iso: date,
+          shiftId: shiftType,
+          groups,
+        })),
+        decrements: applied.decrements,
+      },
       anonymize,
       prettify,
       timeout: parsed.value,
