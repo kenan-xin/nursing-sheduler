@@ -1142,6 +1142,14 @@ describe("inspectPersistedSession — strict reload classification", () => {
     if (resumable.kind === "resumable") expect(resumable.record.jobId).toBe("job-77");
   });
 
+  it("keeps a timeout above an hour, which a deployment may advertise (2by.7)", () => {
+    const storage = new FakeStorage();
+    storage.seed(
+      JSON.stringify({ ...JSON.parse(validActiveJson()), runOptions: { timeout: 2 * 60 * 60 } }),
+    );
+    expect(inspectPersistedSession(storage).kind).toBe("resumable");
+  });
+
   it("reports corrupt JSON, a future version, and a throwing read as unreadable", () => {
     const corrupt = new FakeStorage();
     corrupt.seed("{not valid json");

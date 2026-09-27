@@ -130,9 +130,14 @@ const completedJob = baseJob({
   links: { ...baseJob().links, schedule: "/optimize/opt_1/xlsx" },
 });
 
+// The screen reads the deployment's timeout options on every visit (2by.7). That
+// probe is about no run, so it is answered here, as a legacy backend without the
+// endpoint, and never reaches a handler that counts what the old run touched.
 function routeFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>) {
   globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) =>
-    handler(String(url), init),
+    String(url).endsWith("/api/optimize/options")
+      ? new Response(null, { status: 404 })
+      : handler(String(url), init),
   ) as typeof fetch;
 }
 

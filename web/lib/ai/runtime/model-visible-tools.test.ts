@@ -520,11 +520,13 @@ describe("the command arms the provider is actually shown", () => {
       "groups",
       "lenderConfirmed",
       "name",
+      "names",
       "person",
       "reason",
       "summary",
     ]);
     expect(child(borrow, "lenderConfirmed").type).toBe("boolean");
+    expect(child(child(borrow, "names"), "items").type).toBe("string");
     const read = child(child(wire.get("get_roster"), "parameters"), "properties");
     expect(child(child(read, "people"), "items").type).toBe("string");
   });
