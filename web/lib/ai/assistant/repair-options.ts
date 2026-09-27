@@ -848,11 +848,11 @@ const runOneShort: Builder = (ctx, all) => {
 function softenedRest(
   ctx: Ctx,
   card: SuccessionCard,
-): Extract<AssistantCommandV1, { type: "edit_succession_rule" }> | null {
+): Extract<AssistantCommandV1, { type: "edit_shift_sequence_rule" }> | null {
   const pattern = asList(card.pattern);
   if (pattern.some((p) => typeof p === "object")) return null;
   return {
-    type: "edit_succession_rule",
+    type: "edit_shift_sequence_rule",
     ruleId: card.uid,
     description: card.description ?? "",
     people: asList(card.person),
@@ -1013,7 +1013,7 @@ export function violatesSafetyFloor(
             : offByKind(op.ruleKind, op.ruleId);
         case "remove_rule":
           return offByKind(op.ruleKind, op.ruleId);
-        case "edit_succession_rule": {
+        case "edit_shift_sequence_rule": {
           const card = ctx.state.cardsByKind.successions.find((c) => c.uid === op.ruleId);
           if (!card || Number.isFinite(card.weight)) return null;
           // Softening is allowed (guidance, not law); people, pattern and dates all stay:
@@ -1218,7 +1218,7 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
           [...people].every((p) => staff.has(p))
         );
       }
-      case "edit_succession_rule": {
+      case "edit_shift_sequence_rule": {
         // Soften a hard rest rule to a strong preference, nothing else about it changing.
         const card = ctx.state.cardsByKind.successions.find((c) => c.uid === op.ruleId);
         const want = isHardRest(card) ? softenedRest(ctx, card) : null;
