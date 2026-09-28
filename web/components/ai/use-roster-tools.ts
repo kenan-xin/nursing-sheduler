@@ -130,7 +130,7 @@ export const borrowParameters = z.object({
     .min(1)
     .describe(
       "The nurse's name as the user said it, with the lending ward in brackets, for example " +
-        "Haseena (Ward 3). Never invent one.",
+        "Nurse A (Ward X). Never invent one.",
     ),
   names: z
     .array(z.string().min(1))

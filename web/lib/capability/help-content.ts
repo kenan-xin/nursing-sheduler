@@ -116,7 +116,8 @@ export const CAPABILITY_ENTRIES = [
       "Define each kind of shift the ward runs — its code, name, clock times and rest break — " +
       "and group related shifts together, such as all the night shifts. Working hours are the " +
       "clock time minus the unpaid break, and that is what the Employment Act's 12-hour daily " +
-      "limit counts: 08:00 to 20:30 with a 2-hour break is 10.5 hours. The assistant can also " +
+      "limit counts: a shift spanning 12.5 hours with a 2-hour break is 10.5 working hours. " +
+      "The assistant can also " +
       "prepare new shifts and shift groups for you to review and apply.",
     concepts: ["shift", "shift type", "shift group", "night shift", "clock times", "duration"],
     modes: BOTH_MODES,

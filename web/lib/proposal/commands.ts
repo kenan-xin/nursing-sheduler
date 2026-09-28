@@ -764,7 +764,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     code: z
       .string()
       .describe(
-        "The new shift's short code as shown on the roster, e.g. am1, N. Must not match any " +
+        "The new shift's short code as shown on the roster, e.g. D or N. Must not match any " +
           "existing shift code or shift group id, and must contain a letter.",
       ),
     name: z
@@ -785,7 +785,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
           "Never ask the user whether a shift has a break. If they gave none, pick one: " +
           "copy the break of an existing shift of similar length, otherwise 0 under 6 hours, " +
           "30 from 6 to under 8 hours, 60 from 8 to under 12 hours, 120 for 12 hours or more " +
-          "(a long day or night, e.g. 08:00 to 20:30). Hours here are the clock span, start " +
+          "(a long day or night, e.g. a 12-hour day shift). Hours here are the clock span, start " +
           "to end. Say which break you chose " +
           "so the user can change it in Preview.",
       ),
@@ -917,7 +917,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     name: z
       .string()
       .describe(
-        'The person\'s name as the staff list should show it, e.g. "Float RN (Ward 5)". Must ' +
+        'The person\'s name as the staff list should show it, e.g. "Float RN (Ward X)". Must ' +
           "not match any existing person or staff group, and must not be ALL. Their trimmed " +
           "name becomes their id -- use it as personId in a later command in the same batch, " +
           "e.g. to mark a borrowed nurse off outside the days they cover.",
@@ -999,7 +999,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
       .string()
       .describe(
         "The nurse's name as the Staff list should show it, with the ward she comes from in " +
-          'brackets, e.g. "Haseena (Ward 3)". She is a TEMPORARY COVER, not a person: no staff ' +
+          'brackets, e.g. "Nurse A (Ward X)". She is a TEMPORARY COVER, not a person: no staff ' +
           "row, no requests and no rules name her, and she is never a nurse who can be put on " +
           "the roster. A cover already booked for the same name and date is refused.",
       ),
