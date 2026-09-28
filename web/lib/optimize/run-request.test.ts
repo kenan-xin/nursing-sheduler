@@ -3,6 +3,7 @@ import {
   RUN_REQUEST_TTL_MS,
   isRunLive,
   leavesLiveRun,
+  publishSolverTimeoutSeconds,
   reportOptimizeRunRequest,
   requestOptimizeRun,
   takeOptimizeRunRequest,
@@ -10,7 +11,7 @@ import {
 } from "./run-request";
 
 beforeEach(() => {
-  useRunRequestStore.setState({ pending: null, last: null });
+  useRunRequestStore.setState({ pending: null, last: null, solverTimeoutSeconds: null });
 });
 
 describe("the assistant's run request", () => {
@@ -57,5 +58,20 @@ describe("the assistant's run request", () => {
     expect(leavesLiveRun("running", undefined)).toBe(true);
     expect(leavesLiveRun("running", "optimize-and-export")).toBe(false);
     expect(leavesLiveRun("completed", "shift-types")).toBe(false);
+  });
+});
+
+// The screen owns the typed timeout as component state, so it publishes the value it
+// would submit here for the assistant's diagnostic candidate solves to read.
+describe("the published solver timeout", () => {
+  it("starts unknown, so a reader uses its own deployment default", () => {
+    expect(useRunRequestStore.getState().solverTimeoutSeconds).toBeNull();
+  });
+
+  it("carries the screen's effective timeout and can be retired to unknown", () => {
+    publishSolverTimeoutSeconds(45);
+    expect(useRunRequestStore.getState().solverTimeoutSeconds).toBe(45);
+    publishSolverTimeoutSeconds(null);
+    expect(useRunRequestStore.getState().solverTimeoutSeconds).toBeNull();
   });
 });

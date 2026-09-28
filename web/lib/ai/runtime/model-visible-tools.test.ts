@@ -400,6 +400,8 @@ describe("the command arms the provider is actually shown", () => {
         qualifiedPeople: ["ALL"],
         dates: ["ALL"],
         requiredNumPeople: 4,
+        preferredNumPeople: 5,
+        weight: "-50",
         skillMix: [{ people: "RN", minNumPeople: 2 }],
       },
       edit_staffing_requirement: {
@@ -410,6 +412,8 @@ describe("the command arms the provider is actually shown", () => {
         qualifiedPeople: ["ALL"],
         dates: ["WEEKEND"],
         requiredNumPeople: 4,
+        preferredNumPeople: 5,
+        weight: "-50",
       },
       set_skill_mix: {
         type: "set_skill_mix",
@@ -505,7 +509,10 @@ describe("the command arms the provider is actually shown", () => {
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
     // The only optional wire fields: advertised, present in the payload, not `required`.
-    const optional: Record<string, string[]> = { add_staffing_requirement: ["skillMix"] };
+    const optional: Record<string, string[]> = {
+      add_staffing_requirement: ["preferredNumPeople", "weight", "skillMix"],
+      edit_staffing_requirement: ["preferredNumPeople", "weight"],
+    };
 
     const parameters = child(wire.get("prepare_scenario_change"), "parameters");
     const operations = child(child(parameters, "properties"), "operations");

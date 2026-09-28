@@ -710,7 +710,7 @@ describe("rule sentences state what the solver enforces", () => {
         preferredNumPeople: 3,
         weight: -50,
       }),
-    ).toBe("On · 2 to 3 people on Night, every date (3 preferred, weight -50)");
+    ).toBe("On · At least 2, ideally 3 people on Night, every date (weight -50)");
   });
 
   it("an aggregate group is one combined count, and qualified people ban everyone else", () => {

@@ -155,6 +155,7 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     capabilityId: "staffing-requirements",
     ask: [
       "How many nurses each shift needs, and any skill mix: a minimum from a group among them, such as at least 2 RNs of the 4 on nights. Set it with set_skill_mix or skillMix on add_staffing_requirement; never approximate it by naming who may work the whole shift.",
+      "'Optional, ideally N' (or 'at least R, ideally N') is requiredNumPeople R, often 0, plus preferredNumPeople N on add_staffing_requirement. A required count alone is exact, and a required count of 0 alone forbids the shift.",
       "The rest rules the ward uses. Many wards use no day shift straight after a night as a must, and a day off after nights as a preference.",
       "Limits such as the most nights one nurse may work in the period, and whether to balance nights and weekends across the team.",
       "Suggest a rule giving each nurse at least 1 rest day a week, which the Employment Act sets: a shift sequence rule of ALL 7 days in a row at -infinity (no 7 working days in a row), not a total over the period. On any card that offers it, label it a must.",
@@ -199,6 +200,10 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
   },
 ];
 
+/** Held in the prepare_scenario_change description and the setup instructions (hg9v). */
+export const TRUTHFUL_SUMMARY_RULE =
+  "The summary, and anything you say about the change before or after Apply, describes only what its operations set; never claim a setting, such as a preferred count, that no operation sets.";
+
 export const SETUP_INSTRUCTIONS: readonly string[] = [
   "Work on nextStep only. Ask its pick-one questions that the schedule does not already answer on one offer_choices card, up to four with moreQuestions, the usual ward value first; ask in text only what has no set answers, such as names.",
   "Never guess a date, number, name or time. If the user is unsure, offer a common ward default and ask them to confirm it.",
@@ -206,6 +211,7 @@ export const SETUP_INSTRUCTIONS: readonly string[] = [
   "After the user applies, call get_setup_progress again and continue with the new nextStep.",
   "If the user says an optional step does not apply (for example nobody has leave), move on to the step after it.",
   "If knownGaps is above 0, call suggest_feasibility_options before offering to run Optimize.",
+  TRUTHFUL_SUMMARY_RULE,
 ];
 
 export type RepairId =

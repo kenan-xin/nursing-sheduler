@@ -211,7 +211,10 @@ export type AssistantCommandV1 =
       target: number;
       weight: string;
     }
-  /** Add one staffing requirement -- the Staffing requirements screen's Add form, no preferred count. */
+  /**
+   * Add one staffing requirement -- the Staffing requirements screen's Add form. An omitted
+   * preferred count leaves Preferred blank; an omitted weight keeps the form's default.
+   */
   | {
       type: "add_staffing_requirement";
       description: string;
@@ -219,11 +222,13 @@ export type AssistantCommandV1 =
       qualifiedPeople: PersonRef[];
       dates: string[];
       requiredNumPeople: number;
+      preferredNumPeople?: number;
+      weight?: string;
       skillMix?: { people: PersonRef; minNumPeople: number }[];
     }
   /**
-   * Replace these fields of one staffing requirement -- that screen's Edit form. Its
-   * preferred count, weight, coefficients and skill mix are kept as stored.
+   * Replace these fields of one staffing requirement -- that screen's Edit form. An
+   * omitted preferred count or weight, the coefficients and skill mix are kept as stored.
    */
   | {
       type: "edit_staffing_requirement";
@@ -233,6 +238,8 @@ export type AssistantCommandV1 =
       qualifiedPeople: PersonRef[];
       dates: string[];
       requiredNumPeople: number;
+      preferredNumPeople?: number;
+      weight?: string;
     }
   /**
    * Replace one staffing requirement's skill mix -- that screen's Edit form "Skill mix"
@@ -579,8 +586,28 @@ function requirementFields() {
       .number()
       .describe(
         "The exact number of people on that shift on each date, e.g. 2 (a hard rule), " +
-          "unless the requirement already has a preferred count, which makes it the lowest " +
-          "allowed. It cannot go below the requirement's skill mix.",
+          "unless the requirement has a preferred count, which makes it the lowest " +
+          "allowed. 0 with no preferred count forbids the shift. It cannot go below the " +
+          "requirement's skill mix.",
+      ),
+    preferredNumPeople: z
+      .number()
+      .optional()
+      .describe(
+        "The Preferred number of people: 'at least requiredNumPeople, ideally this many'. " +
+          'For "optional, ideally 1" send requiredNumPeople 0 and preferredNumPeople 1. At ' +
+          "least 1 and not below requiredNumPeople; equal to it means no preference. Omit it " +
+          "for an exact count. On an edit, omitting it keeps the stored preferred count.",
+      ),
+    weight: z
+      .string()
+      .optional()
+      .describe(
+        "How strongly the preferred count is pursued, as typed in the Weight box: 0 or " +
+          'less, e.g. "-50" (the default for a new requirement); the more negative, the ' +
+          'stronger. "-infinity" makes the preferred count a must. Only used when ' +
+          "preferredNumPeople is above requiredNumPeople. On an edit, omitting it keeps the " +
+          "stored weight.",
       ),
   };
 }

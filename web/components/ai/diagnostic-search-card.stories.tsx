@@ -40,6 +40,7 @@ function searchWith(outcomes: readonly (ProductOutcomeView | null)[]): Diagnosti
     scenarioGeneration: 0,
     compare: false,
     parentExpiresAt: null,
+    timeoutSeconds: 90,
     now: NOW,
   });
   outcomes.forEach((outcome, index) => {

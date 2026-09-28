@@ -257,6 +257,39 @@ describe("set_skill_mix", () => {
     );
   });
 
+  it.each([
+    ["add", {}],
+    ["edit", { ruleId: "req-day" }],
+  ])(
+    "%s_staffing_requirement refuses 'ideally' in the title without a preferred count (hg9v)",
+    (arm, extra) => {
+      const result = applyAssistantCommand(state(), {
+        type: `${arm}_staffing_requirement` as "add_staffing_requirement",
+        description: "Afternoon second senior (optional, ideally 1)",
+        shiftType: "Day",
+        qualifiedPeople: ["ALL"],
+        dates: ["ALL"],
+        requiredNumPeople: 0,
+        ...extra,
+      });
+      expect(!result.ok && result.rejection.code).toBe("invalid_value");
+      expect(!result.ok && result.rejection.message).toContain("preferredNumPeople");
+    },
+  );
+
+  it("add_staffing_requirement accepts 'ideally' when a preferred count is set (hg9v)", () => {
+    const result = applyAssistantCommand(state(), {
+      type: "add_staffing_requirement",
+      description: "Afternoon second senior (optional, ideally 1)",
+      shiftType: "Day",
+      qualifiedPeople: ["ALL"],
+      dates: ["ALL"],
+      requiredNumPeople: 0,
+      preferredNumPeople: 1,
+    });
+    expect(result.ok).toBe(true);
+  });
+
   it("add_staffing_requirement can carry a skill mix", () => {
     const result = applyAssistantCommand(state(), {
       type: "add_staffing_requirement",

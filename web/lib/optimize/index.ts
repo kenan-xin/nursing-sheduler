@@ -311,6 +311,7 @@ export {
   RUN_REQUEST_TTL_MS,
   isRunLive,
   noteOptimizeRunStarted,
+  publishSolverTimeoutSeconds,
   reportOptimizeRunRequest,
   requestOptimizeRun,
   takeOptimizeRunRequest,

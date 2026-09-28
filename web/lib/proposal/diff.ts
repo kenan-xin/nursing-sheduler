@@ -245,8 +245,10 @@ function describeRequirement(card: RequirementCard): string {
   if (p == null || p === n) {
     return `Exactly ${n} ${n === 1 ? "person" : "people"} on ${shifts}, ${dates}${exceptions}${ban}${mix}`;
   }
-  const lean =
-    card.weight < 0 ? `${p} preferred` : card.weight > 0 ? `${n} preferred` : "no preference";
+  if (card.weight < 0) {
+    return `At least ${n}, ideally ${p} people on ${shifts}, ${dates}${exceptions} (weight ${card.weight})${ban}${mix}`;
+  }
+  const lean = card.weight > 0 ? `${n} preferred` : "no preference";
   return `${n} to ${p} people on ${shifts}, ${dates}${exceptions} (${lean}, weight ${card.weight})${ban}${mix}`;
 }
 
