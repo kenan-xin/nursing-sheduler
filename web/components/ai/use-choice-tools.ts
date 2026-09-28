@@ -53,6 +53,17 @@ export const choiceParameters = z.object({
 export type ChoiceOffer = z.infer<typeof choiceParameters>;
 
 /**
+ * Where an option may come from (bead 1450). A model read the ward-flavoured examples in
+ * these instructions -- a shift-code list and a long-day time range -- and offered a
+ * fabricated "am/pm" shift set as if the user had named it. The examples are illustrations,
+ * never a source of answers, so the rule is stated in the tool description and pinned by a
+ * test (`choice-card.test.tsx`).
+ */
+export const CHOICE_OPTION_SOURCE_RULE =
+  "Options come only from the user's own words or the current schedule, never from " +
+  "examples in these instructions.";
+
+/**
  * Option labels that name an action rather than an answer (bead tpt2). A FIXED list,
  * matched exactly after trimming and lower-casing: no fuzzy matching, no synonyms beyond
  * these phrases. Widened only from real transcripts, never guessed.
@@ -124,6 +135,8 @@ export function useChoiceTools(agentId: string, turnEpoch: number): void {
         "A yes/no offer is a pick too: instead of ending a reply on 'Would you like me to " +
         "prepare that?', offer 'Prepare it' and 'Not now' here. " +
         CHOICE_OPTION_RULES.join(" ") +
+        " " +
+        CHOICE_OPTION_SOURCE_RULE +
         " The card also lets them type another answer. Their answer arrives as their next " +
         "message. Keep the question in this tool rather than repeating it at length in text. " +
         "You may batch up to four related questions in one card with moreQuestions, for " +

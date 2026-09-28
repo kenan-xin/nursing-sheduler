@@ -231,9 +231,11 @@ describe("the attached turn context", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/12 working hours a day, including overtime/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/44 hours a week averaged over 3 weeks/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/72 hours of overtime a month/);
-    // Working hours, never the clock span.
+    // Working hours, never the clock span. Neutral numbers: no ward's shift set (bead 1450).
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/minus its unpaid break/);
-    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/08:00 to 20:30 .*10\.5 hours/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(
+      /a shift spanning 12\.5 hours .*10\.5 working hours/,
+    );
     // Never a numeric MOH rest minimum.
     expect(ASSISTANT_AUTHORITY_STATEMENT).not.toMatch(/MOH[^.]*\d+\s*hours/);
   });
