@@ -101,9 +101,11 @@ import {
   buildContractedCard,
   defaultContractedForm,
   hasContractedErrors,
+  toContractedForm,
   validateContractedCommit,
   type ContractedFormState,
 } from "@/components/counts/contracted-model";
+import type { ContractedHoursCountCard } from "@/lib/scenario";
 import { stableStringify } from "./digest";
 
 describe("set_roster_range is the manual range cascade", () => {
@@ -1521,5 +1523,83 @@ describe("add_contracted_hours is the Contracted hours form's Save (4h5a)", () =
     const result = applyAssistantCommand(timed(), { ...command(rows[1]), people: ["zed"] });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
+  });
+
+  it("edit: starts from the loaded card (toContractedForm), keeps its uid and markers", () => {
+    const added = applyAssistantCommand(timed(), command(rows[1]));
+    if (!added.ok) throw new Error(added.rejection.message);
+    const loaded = added.next.cardsByKind.counts.at(-1)!;
+    const source = { ...loaded, disabled: true } as typeof loaded;
+    const state = { ...added.next, cardsByKind: { ...added.next.cardsByKind, counts: [source] } };
+    const edits = [
+      { minHours: 152, maxHours: 184 }, // lower the floor, keep the 8 h days
+      { minHours: 160, maxHours: 160, hoursPerShift: 8 },
+      { minHours: 190, maxHours: 184 }, // minimum above maximum
+      { minHours: 168, maxHours: 184 }, // no change
+    ];
+    for (const [i, row] of edits.entries()) {
+      const base = toContractedForm(source as ContractedHoursCountCard, state);
+      const exact = row.minHours === row.maxHours;
+      const form: ContractedFormState = {
+        ...base,
+        description: "Contract",
+        person: ["ana", "ben"],
+        countDates: ["ALL"],
+        policy: exact ? "exact" : "range",
+        targetExact: exact ? `${row.minHours}h` : "",
+        targetRangeMin: exact ? "" : `${row.minHours}h`,
+        targetRangeMax: exact ? "" : `${row.maxHours}h`,
+        countShiftTypeCoefficients:
+          row.hoursPerShift === undefined
+            ? base.countShiftTypeCoefficients
+            : base.countShiftTypeCoefficients.map(([id]) => [id, row.hoursPerShift! * 2]),
+      };
+      const ok = !hasContractedErrors(validateContractedCommit(form, state));
+      const manual = ok
+        ? { ...buildContractedCard(form, state, source.uid), disabled: true }
+        : null;
+      const changes = manual !== null && JSON.stringify(manual) !== JSON.stringify(source);
+      const assistant = applyAssistantCommand(state, {
+        type: "edit_contracted_hours",
+        ruleId: source.uid,
+        description: "Contract",
+        people: ["ana", "ben"],
+        dates: ["ALL"],
+        ...row,
+      });
+      expect(assistant.ok, `row ${i}`).toBe(ok && changes);
+      if (assistant.ok) expect(assistant.next.cardsByKind.counts).toEqual([manual]);
+    }
+  });
+
+  it("edit refuses a card that is not a contract, and edit_count_rule points to it", () => {
+    const state = timed();
+    const notContract = applyAssistantCommand(state, {
+      type: "edit_contracted_hours",
+      ruleId: "cnt-nights",
+      description: "Contract",
+      people: ["ana"],
+      dates: ["ALL"],
+      minHours: 150,
+      maxHours: 160,
+    });
+    expect(notContract.ok).toBe(false);
+    if (!notContract.ok) expect(notContract.rejection.code).toBe("unsupported_shape");
+
+    const added = applyAssistantCommand(state, command(rows[1]));
+    if (!added.ok) throw new Error(added.rejection.message);
+    const asCount = applyAssistantCommand(added.next, {
+      type: "edit_count_rule",
+      ruleId: added.next.cardsByKind.counts.at(-1)!.uid,
+      description: "Contract",
+      people: ["ana"],
+      shiftTypes: ["ALL"],
+      dates: ["ALL"],
+      expression: "x <= T",
+      target: 5,
+      weight: "infinity",
+    });
+    expect(asCount.ok).toBe(false);
+    if (!asCount.ok) expect(asCount.rejection.message).toMatch(/edit_contracted_hours/);
   });
 });

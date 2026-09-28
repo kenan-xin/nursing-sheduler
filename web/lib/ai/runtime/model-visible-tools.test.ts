@@ -391,6 +391,16 @@ describe("the command arms the provider is actually shown", () => {
         maxHours: 184,
         hoursPerShift: 8,
       },
+      edit_contracted_hours: {
+        type: "edit_contracted_hours",
+        ruleId: "c1",
+        description: "Contract",
+        people: ["ana"],
+        dates: ["ALL"],
+        minHours: 152,
+        maxHours: 184,
+        hoursPerShift: 8,
+      },
       edit_count_rule: {
         type: "edit_count_rule",
         ruleId: "c1",
@@ -522,6 +532,7 @@ describe("the command arms the provider is actually shown", () => {
       add_staffing_requirement: ["preferredNumPeople", "weight", "skillMix"],
       edit_staffing_requirement: ["preferredNumPeople", "weight"],
       add_contracted_hours: ["hoursPerShift"],
+      edit_contracted_hours: ["hoursPerShift"],
     };
 
     const parameters = child(wire.get("prepare_scenario_change"), "parameters");

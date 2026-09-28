@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
+import { cards, leave, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
 import type { RequirementCard } from "@/lib/scenario";
 import { computeStaffingBalance } from "./staffing-balance";
 
@@ -40,11 +40,55 @@ describe("computeStaffingBalance (4h5a)", () => {
       capacity: 286,
       spareShifts: 38,
       fewestOffDaysEach: 11.9,
+      estimated: true,
     });
-    expect(balance.sentence).toContain("13 nurses × 22 shifts = 286");
+    // No contracts yet: the capacity is an assumption, said as "about".
+    expect(balance.sentence).toContain("about 286 shifts of working time");
+    expect(balance.sentence).toContain("13 nurses assumed full time (22 shifts each");
     expect(balance.sentence).toContain("at least 248 shifts (8 a day)");
-    expect(balance.sentence).toContain("38 shifts spare");
+    expect(balance.sentence).toContain("about 38 shifts spare");
     expect(balance.sentence).toContain("31 − 248 ÷ 13 = 11.9 days off");
+  });
+
+  it("takes each nurse's leave and hard days off out of her working time", () => {
+    const state = transcriptWard("2026-10-31");
+    state.reqData = [
+      ...["01", "02", "03", "04", "05"].map((d) => leave("S1", `2026-10-${d}`)),
+      { uid: "r1-off-1", person: "R1", date: "2026-10-10", kind: "off", weight: Infinity },
+      { uid: "r1-off-2", person: "R1", date: "2026-10-11", kind: "off", weight: Infinity },
+      { uid: "r2-soft", person: "R2", date: "2026-10-12", kind: "off", weight: 5 },
+    ];
+    // S1: 26 days x 5/7 = 19; R1: 29 x 5/7 = 21; a soft day off is not away.
+    expect(computeStaffingBalance(state)).toMatchObject({ capacity: 11 * 22 + 19 + 21 });
+  });
+
+  it("uses each nurse's contract instead of the full-time guess", () => {
+    const state = transcriptWard("2026-10-31");
+    const ids = state.staff.map((p) => String(p.id));
+    state.cardsByKind.counts = [
+      {
+        uid: "contract",
+        description: "Contract",
+        person: ids,
+        countDates: ["ALL"],
+        countShiftTypes: [...state.shifts.map((s) => String(s.id)), "LEAVE"],
+        countShiftTypeCoefficients: [...state.shifts.map((s) => String(s.id)), "LEAVE"].map(
+          (id) => [id, 16] as [string, number],
+        ),
+        expression: ["x >= T", "x <= T"],
+        target: [21 * 16, 23 * 16],
+        weight: Infinity,
+        tag: "contracted_hours",
+        policy: "range",
+        unit: "half-hour",
+      },
+    ];
+    state.reqData = ["01", "02", "03", "04", "05"].map((d) => leave("S1", `2026-10-${d}`));
+    const balance = computeStaffingBalance(state)!;
+    // 22 days each; S1's 5 leave days count toward her contract, so she works 17.
+    expect(balance).toMatchObject({ capacity: 12 * 22 + 17, estimated: false });
+    expect(balance.sentence).not.toMatch(/about|assumed/);
+    expect(balance.sentence).toContain("281 shifts of working time");
   });
 
   it("lets 'ideally' counts raise the most shifts the numbers allow", () => {

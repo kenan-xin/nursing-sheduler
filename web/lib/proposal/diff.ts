@@ -1082,6 +1082,7 @@ function directKeys(
         keys.add(`rule:successions:${command.ruleId}`);
         break;
       case "edit_count_rule":
+      case "edit_contracted_hours":
         keys.add(`rule:counts:${command.ruleId}`);
         break;
       case "edit_staffing_requirement":

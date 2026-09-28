@@ -162,7 +162,7 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
       "'Optional, ideally N' (or 'at least R, ideally N') is requiredNumPeople R, often 0, plus preferredNumPeople N on add_staffing_requirement. A required count alone is exact, and a required count of 0 alone forbids the shift.",
       "Ask about every worked shift the step's detail lists with no staffing requirement, on a choice card with the usual numbers, such as '1 senior every night' and 'Optional: 0 required, ideally 1 senior'; never guess it.",
       // Bead 4h5a: spike numbers in the bead notes (13 nurses, 31 days: exact counts left 12 days off each and A_sup empty; these weights filled A_sup every day, then 7 third mornings).
-      "After the staffing numbers, read staffingBalance from get_setup_progress and say its sentence in plain words. When spareShifts is above 0 the staff can work more than the minimums need: on one offer_choices card ask where the spare shifts go, by default first an optional senior lead slot (ideally 1 senior), then a 3rd nurse on mornings, then a 3rd on afternoons, and ask each nurse's contracted working days (default shiftsEach, 5 in every 7 days). Then set preferredNumPeople on those requirements with weights -300, -200 and -100 in that order, and add_contracted_hours for the staff, one day either side of the contract (hoursPerShift 8 for a contract in days). The contract's fewest days times the staff must not exceed mostShifts once the 'ideally' counts are set, or no roster is possible.",
+      "After the staffing numbers, read staffingBalance from get_setup_progress and say its sentence in plain words; when staffingBalance.estimated is true, say 'about' and the assumption, and ask each nurse's contract before treating the numbers as fact. When spareShifts is above 0 the staff can work more than the minimums need: on one offer_choices card ask where the spare shifts go, by default first an optional senior lead slot (ideally 1 senior), then a 3rd nurse on mornings, then a 3rd on afternoons, and ask each nurse's contracted working days (default shiftsEach, 5 in every 7 days). Then set preferredNumPeople on those requirements with weights -300, -200 and -100 in that order, and add_contracted_hours for the staff, one day either side of the contract (hoursPerShift 8 for a contract in days). The contract's fewest days times the staff must not exceed mostShifts once the 'ideally' counts are set, or no roster is possible.",
       "Prefer a contracted working target over a cap on days off: a cap cannot make anyone work a shift the staffing numbers do not allow. Never propose a days-off cap below staffingBalance.fewestOffDaysEach; show the arithmetic from its sentence instead.",
       "Never say a rule over any 7 days in a row is impossible: add_rest_days_rule is one.",
       "The rest rules the ward uses. Many wards use no day shift straight after a night as a must, and a day off after nights as a preference.",
@@ -225,6 +225,7 @@ export const SETUP_INSTRUCTIONS: readonly string[] = [
 ];
 
 export type RepairId =
+  | "relax_contracted_hours"
   | "align_overlapping_requirements"
   | "soften_hard_request"
   | "extra_shift_willing_nurse"
@@ -254,6 +255,20 @@ export interface RepairEntry {
 }
 
 export const REPAIRS: readonly RepairEntry[] = [
+  {
+    // Bead 4h5a: a contracted minimum is a hard floor on each nurse's working time. More
+    // floor than the staffing numbers or her free days allow has no roster.
+    id: "relax_contracted_hours",
+    title: "Lower a contracted minimum for this period",
+    whenToUse:
+      "A run failed and contracted hours are set: their minimums may ask for more working days than the staffing numbers allow, or than a nurse on leave has.",
+    disruption: "medium",
+    confirmation: "manager",
+    enforcedBy: "apply",
+    opTypes: ["edit_contracted_hours"],
+    guardrail:
+      "Lower the minimum only, keep the maximum, the people, the dates and each shift's hours, and ask how the missing hours are made up.",
+  },
   {
     // A static requirement_conflict: no staffing change helps until the rules agree.
     id: "align_overlapping_requirements",
@@ -407,7 +422,14 @@ export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
   // Spec: 1, 3, as hypotheses. A blind borrow is not a guess worth testing.
   // Softening a rest rule comes last. Only here: the static check does not model rest
   // rules, so it never blames them for a proven gap.
-  unexplained: ["soften_hard_request", "relax_count_rule", "soften_rest_rule"],
+  // A contracted minimum first (4h5a): the only hard floor on working time, and one the
+  // staffing findings never name. Its builder proves it when it can.
+  unexplained: [
+    "relax_contracted_hours",
+    "soften_hard_request",
+    "relax_count_rule",
+    "soften_rest_rule",
+  ],
 };
 
 /** More short dates than this is a staffing problem, not a bad day. */
@@ -441,4 +463,5 @@ export const FEASIBILITY_INSTRUCTIONS: readonly string[] = [
   "Prepare only the option the user picks. The app then asks for the agreement it needs, and the user applies it and runs Optimize again.",
   `After the user applies a fix, offer a run with ${OPTIMIZE_RUN_TOOL} and never say a run has started; once it finishes, read ${OPTIMIZE_RESULT_TOOL} and say in one sentence whether the schedule can now be built.`,
   "Never suggest anything in safetyFloor, even if the user asks.",
+  "When contracted hours are set and a run fails, suggest lowering the contracted minimum (edit_contracted_hours) and say how many days the contracts ask for against what the period allows.",
 ];

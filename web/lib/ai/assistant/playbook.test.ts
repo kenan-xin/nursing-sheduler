@@ -108,7 +108,10 @@ describe("repair catalogue", () => {
   it("guesses only the spec's repairs when the cause is unknown", () => {
     // Spec "Ranking": Unexplained is 1, 3 as hypotheses. A blind borrow is not a guess to test.
     // Softening a rest rule (guidance, not law; 2026-09-24 user decision) comes last.
+    // A hard contracted minimum comes first when one exists (4h5a): it is a floor the
+    // static check cannot see in the staffing findings.
     expect(REPAIR_ORDER.unexplained).toEqual([
+      "relax_contracted_hours",
       "soften_hard_request",
       "relax_count_rule",
       "soften_rest_rule",
@@ -344,6 +347,18 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(text).toMatch(/show the arithmetic/);
     // A hard contract floor above what the numbers allow has no roster.
     expect(text).toMatch(/mostShifts/);
+  });
+  it("says 'about' when the capacity rests on an assumption (4h5a)", () => {
+    const text = ask("rules");
+    expect(text).toMatch(/staffingBalance.estimated/);
+    expect(text).toMatch(/say 'about'/);
+  });
+  it("suggests lowering a contracted minimum after an infeasible run (4h5a)", () => {
+    const text = FEASIBILITY_INSTRUCTIONS.join(" ");
+    expect(text).toMatch(/contracted minimum/);
+    expect(REPAIRS.find((r) => r.id === "relax_contracted_hours")?.opTypes).toEqual([
+      "edit_contracted_hours",
+    ]);
   });
   it("never calls a rule over any 7 days in a row impossible (4h5a)", () => {
     const text = ask("rules");

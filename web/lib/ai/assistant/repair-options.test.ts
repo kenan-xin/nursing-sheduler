@@ -2325,3 +2325,134 @@ describe("unexplained-path guesses (bead nursing-sheduler-spdk, l3m fixtures)", 
     ]);
   });
 });
+
+describe("a contracted minimum the period cannot give (4h5a)", () => {
+  const SHIFTS = ["M", "M_sup", "A", "A_sup", "N", "N_sup"];
+  const contract = (person: string[], target: number | [number, number], leaveCredit = true) => {
+    const ids = leaveCredit ? [...SHIFTS, "LEAVE"] : SHIFTS;
+    return {
+      uid: "contract",
+      description: "Contract",
+      person,
+      countDates: ["ALL"],
+      countShiftTypes: ids,
+      countShiftTypeCoefficients: ids.map((id) => [id, 16] as [string, number]),
+      expression: Array.isArray(target) ? ["x >= T", "x <= T"] : "x = T",
+      target,
+      weight: Infinity,
+      tag: "contracted_hours" as const,
+      policy: Array.isArray(target) ? ("range" as const) : ("exact" as const),
+      unit: "half-hour" as const,
+    };
+  };
+  /** The 2026-09-28 ward: 13 nurses, exact counts of 8 a day, so at most 248 shifts. */
+  const october = (target: number | [number, number]): ScenarioUiState => {
+    const staff = people(
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "R1",
+      "R2",
+      "R3",
+      "R4",
+      "R5",
+      "R6",
+      "E1",
+      "E2",
+    );
+    return ward({
+      rangeStart: "2026-10-01",
+      rangeEnd: "2026-10-31",
+      staff,
+      shifts: SHIFTS.map((id) => ({ id })),
+      cardsByKind: cards({
+        requirements: (
+          [
+            ["M", 2],
+            ["M_sup", 1],
+            ["A", 2],
+            ["A_sup", 0],
+            ["N", 2],
+            ["N_sup", 1],
+          ] as const
+        ).map(([shift, n]) => requirement(shift, shift, n)),
+        counts: [
+          contract(
+            staff.map((p) => String(p.id)),
+            target,
+          ),
+        ],
+      }),
+    });
+  };
+  const unexplained = (state: ScenarioUiState) => {
+    const findings = findStaffingShortfalls(state);
+    expect(findings).toEqual([]);
+    return rankRepairOptions(state, findings, { runInfeasible: true });
+  };
+
+  it("proves 13 x 21 days is more than the numbers allow, and lowers the minimum first", () => {
+    const state = october([21 * 16, 23 * 16]);
+    const [first] = unexplained(state);
+    expect(first).toMatchObject({ repairId: "relax_contracted_hours", evidence: "static_check" });
+    // 273 contracted days against 248 shifts: 25 too many, 2 days fewer each.
+    expect(first.why).toMatch(/273/);
+    expect(first.why).toMatch(/248/);
+    expect(first.title).toMatch(/from 168h to 152h/);
+    expect(first.operations).toEqual([
+      expect.objectContaining({
+        type: "edit_contracted_hours",
+        ruleId: "contract",
+        minHours: 152,
+        maxHours: 184,
+      }),
+    ]);
+    expect(isSafeOption(state, first)).toBe(true);
+    const [applied] = [applyAssistantCommands(state, first.operations)];
+    expect(applied.ok).toBe(true);
+  });
+
+  it("proves one nurse's leave leaves too few days, when leave does not count", () => {
+    const base = october(21 * 16);
+    const state = {
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        requirements: base.cardsByKind.requirements.map((r) =>
+          r.uid === "A_sup" ? { ...r, preferredNumPeople: 1 } : r,
+        ),
+        counts: [contract(["S1"], 21 * 16, false)],
+      },
+      // 12 days of leave: S1 has 19 days to work, and leave does not count.
+      reqData: Array.from({ length: 12 }, (_, i) =>
+        leave("S1", `2026-10-${String(i + 1).padStart(2, "0")}`),
+      ),
+    };
+    const [first] = unexplained(state);
+    expect(first).toMatchObject({ repairId: "relax_contracted_hours", evidence: "static_check" });
+    expect(first.why).toMatch(/S1/);
+    expect(first.operations).toEqual([expect.objectContaining({ minHours: 152, maxHours: 168 })]);
+  });
+
+  it("still suggests one day less, as a guess, when the floors fit", () => {
+    const base = october([18 * 16, 20 * 16]);
+    const [first] = unexplained(base);
+    expect(first).toMatchObject({ repairId: "relax_contracted_hours", evidence: "hypothesis" });
+    expect(first.operations).toEqual([expect.objectContaining({ minHours: 136, maxHours: 160 })]);
+  });
+
+  it("is safe only when it lowers the minimum and keeps who, when and the maximum", () => {
+    const state = october([21 * 16, 23 * 16]);
+    const [first] = unexplained(state);
+    const op = first.operations[0] as Extract<Op, { type: "edit_contracted_hours" }>;
+    const variant = (patch: Partial<typeof op>) =>
+      isSafeOption(state, { ...first, operations: [{ ...op, ...patch }] });
+    expect(variant({ minHours: 176 })).toBe(false); // a raise
+    expect(variant({ maxHours: 200 })).toBe(false);
+    expect(variant({ people: ["S1"] })).toBe(false);
+    expect(variant({ dates: ["WEEKDAY"] })).toBe(false);
+    expect(variant({ hoursPerShift: 7 })).toBe(false);
+  });
+});

@@ -73,6 +73,16 @@ export const RULE_KINDS = [
   "coverings",
 ] as const satisfies readonly GuidedRuleConstraintKind[];
 
+/** Contracted working time, as the Contracted hours form holds it (bead 4h5a). */
+export interface ContractedHoursFields {
+  description: string;
+  people: PersonRef[];
+  dates: string[];
+  minHours: number;
+  maxHours: number;
+  hoursPerShift?: number;
+}
+
 export type AssistantCommandV1 =
   /**
    * Move the roster period. The most consequential supported operation: dates that
@@ -203,15 +213,9 @@ export type AssistantCommandV1 =
    * Contracted working time for each of these people -- the Contracted hours form's Save
    * (bead 4h5a). A must: minHours = maxHours is exact, else a range.
    */
-  | {
-      type: "add_contracted_hours";
-      description: string;
-      people: PersonRef[];
-      dates: string[];
-      minHours: number;
-      maxHours: number;
-      hoursPerShift?: number;
-    }
+  | ({ type: "add_contracted_hours" } & ContractedHoursFields)
+  /** Replace these fields of one Contracted hours card -- that screen's Edit form (4h5a). */
+  | ({ type: "edit_contracted_hours"; ruleId: string } & ContractedHoursFields)
   /** Replace every field of one ordinary shift count rule -- that screen's Edit form. */
   | {
       type: "edit_count_rule";
@@ -394,6 +398,7 @@ export const ASSISTANT_COMMAND_TYPES = [
   "add_count_rule",
   "add_rest_days_rule",
   "add_contracted_hours",
+  "edit_contracted_hours",
   "edit_count_rule",
   "add_staffing_requirement",
   "edit_staffing_requirement",
@@ -573,6 +578,28 @@ function countFields() {
       ),
     target: z.number().describe("The target T, a whole number of zero or more, e.g. 5."),
     weight: countWeightSchema(),
+  };
+}
+
+function contractedFields() {
+  return {
+    description: ruleDescriptionSchema(),
+    people: rulePeopleSchema(),
+    dates: ruleDatesSchema(),
+    minHours: z
+      .number()
+      .describe("The fewest hours each person works over the dates, on the half-hour grid."),
+    maxHours: z
+      .number()
+      .describe("The most hours each person works; equal to minHours for an exact contract."),
+    hoursPerShift: z
+      .number()
+      .optional()
+      .describe(
+        "Count every worked shift and a leave day as this many hours, for a contract in " +
+          "days: 8 turns 21 to 23 days into minHours 168, maxHours 184. Omit it to count " +
+          "each shift's own working time from the Shifts screen (a leave day counts 8h).",
+      ),
   };
 }
 
@@ -885,32 +912,24 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
         "nurse's history. One rule; never build it from count or shift sequence rules.",
     ),
   z
-    .strictObject({
-      type: z.enum(["add_contracted_hours"]),
-      description: ruleDescriptionSchema(),
-      people: rulePeopleSchema(),
-      dates: ruleDatesSchema(),
-      minHours: z
-        .number()
-        .describe("The fewest hours each person works over the dates, on the half-hour grid."),
-      maxHours: z
-        .number()
-        .describe("The most hours each person works; equal to minHours for an exact contract."),
-      hoursPerShift: z
-        .number()
-        .optional()
-        .describe(
-          "Count every worked shift and a leave day as this many hours, for a contract in " +
-            "days: 8 turns 21 to 23 days into minHours 168, maxHours 184. Omit it to count " +
-            "each shift's own working time from the Shifts screen (a leave day counts 8h).",
-        ),
-    })
+    .strictObject({ type: z.enum(["add_contracted_hours"]), ...contractedFields() })
     .describe(
       "Contracted working time for each named person over the period: the Contracted hours " +
         "card on the Shift counts screen, always a must. Prefer it to a cap on days off: it " +
         "makes each nurse work her contract, so the spare shifts go where 'ideally' counts " +
         "allow them. Its minimum times the staff must fit what the staffing numbers allow " +
         "(staffingBalance.mostShifts), or no roster is possible.",
+    ),
+  z
+    .strictObject({
+      type: z.enum(["edit_contracted_hours"]),
+      ruleId: ruleIdSchema(),
+      ...contractedFields(),
+    })
+    .describe(
+      "Replace these fields of one Contracted hours card -- that screen's Edit form. An " +
+        "omitted hoursPerShift keeps each shift's stored hours. Use it to lower a contracted " +
+        "minimum or widen the range when a roster is not possible.",
     ),
   z.strictObject({
     type: z.enum(["edit_count_rule"]),
