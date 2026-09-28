@@ -110,6 +110,7 @@ const PROPOSAL_OPERATIONS = [
   "edit_shift_sequence_rule",
   "add_count_rule",
   "add_rest_days_rule",
+  "add_contracted_hours",
   "edit_count_rule",
   "add_staffing_requirement",
   "edit_staffing_requirement",

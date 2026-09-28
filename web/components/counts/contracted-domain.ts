@@ -18,7 +18,7 @@ import type {
   CoefficientDerivation,
   CoefficientDomain,
   CoefficientPair,
-} from "@/components/card-editor/coefficient-fields";
+} from "@/components/card-editor/coefficient-model";
 import { LEAVE_CREDIT_HALF_HOURS } from "./half-hour-codec";
 
 /** Minutes represented by one half-hour grid step — the derivation divisor. */

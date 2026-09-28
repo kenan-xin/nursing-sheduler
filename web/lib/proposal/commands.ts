@@ -199,6 +199,19 @@ export type AssistantCommandV1 =
     }
   /** Add the one rolling "2 rest days in any 7 days in a row" rule for everyone (bead 1v5k). */
   | { type: "add_rest_days_rule" }
+  /**
+   * Contracted working time for each of these people -- the Contracted hours form's Save
+   * (bead 4h5a). A must: minHours = maxHours is exact, else a range.
+   */
+  | {
+      type: "add_contracted_hours";
+      description: string;
+      people: PersonRef[];
+      dates: string[];
+      minHours: number;
+      maxHours: number;
+      hoursPerShift?: number;
+    }
   /** Replace every field of one ordinary shift count rule -- that screen's Edit form. */
   | {
       type: "edit_count_rule";
@@ -380,6 +393,7 @@ export const ASSISTANT_COMMAND_TYPES = [
   "edit_shift_sequence_rule",
   "add_count_rule",
   "add_rest_days_rule",
+  "add_contracted_hours",
   "edit_count_rule",
   "add_staffing_requirement",
   "edit_staffing_requirement",
@@ -869,6 +883,34 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
         "any 7 days in a row (any 7 days, not Monday to Sunday), a strong preference; " +
         "leave and days off are not worked, and the days before the roster count from each " +
         "nurse's history. One rule; never build it from count or shift sequence rules.",
+    ),
+  z
+    .strictObject({
+      type: z.enum(["add_contracted_hours"]),
+      description: ruleDescriptionSchema(),
+      people: rulePeopleSchema(),
+      dates: ruleDatesSchema(),
+      minHours: z
+        .number()
+        .describe("The fewest hours each person works over the dates, on the half-hour grid."),
+      maxHours: z
+        .number()
+        .describe("The most hours each person works; equal to minHours for an exact contract."),
+      hoursPerShift: z
+        .number()
+        .optional()
+        .describe(
+          "Count every worked shift and a leave day as this many hours, for a contract in " +
+            "days: 8 turns 21 to 23 days into minHours 168, maxHours 184. Omit it to count " +
+            "each shift's own working time from the Shifts screen (a leave day counts 8h).",
+        ),
+    })
+    .describe(
+      "Contracted working time for each named person over the period: the Contracted hours " +
+        "card on the Shift counts screen, always a must. Prefer it to a cap on days off: it " +
+        "makes each nurse work her contract, so the spare shifts go where 'ideally' counts " +
+        "allow them. Its minimum times the staff must fit what the staffing numbers allow " +
+        "(staffingBalance.mostShifts), or no roster is possible.",
     ),
   z.strictObject({
     type: z.enum(["edit_count_rule"]),

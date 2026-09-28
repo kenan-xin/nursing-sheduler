@@ -97,6 +97,13 @@ import {
   validateRequirementForm,
 } from "@/components/requirements/requirements-model";
 import { applyRequirementPatch } from "@/components/requirements/requirement-patch";
+import {
+  buildContractedCard,
+  defaultContractedForm,
+  hasContractedErrors,
+  validateContractedCommit,
+  type ContractedFormState,
+} from "@/components/counts/contracted-model";
 import { stableStringify } from "./digest";
 
 describe("set_roster_range is the manual range cascade", () => {
@@ -1422,5 +1429,97 @@ describe("supervision arms are the Shift type coverings form's Save", () => {
       expect(assistant.ok, `row ${i}`).toBe(valid(validateCoveringForm(draft, state)) && changes);
       if (assistant.ok) expect(assistant.next.cardsByKind.coverings).toEqual([manual]);
     }
+  });
+});
+
+describe("add_contracted_hours is the Contracted hours form's Save (4h5a)", () => {
+  // Day 7.5 h, Night 10.5 h of working time, as the Shifts screen derives them.
+  const timed = (): ScenarioUiState => {
+    const state = ruleWardScenario();
+    return {
+      ...state,
+      shifts: state.shifts.map((s) => ({ ...s, durationMinutes: s.id === "Night" ? 630 : 450 })),
+    };
+  };
+  const rows: { minHours: number; maxHours: number; hoursPerShift?: number }[] = [
+    { minHours: 160, maxHours: 160 }, // exact, each shift its own working time
+    { minHours: 168, maxHours: 184, hoursPerShift: 8 }, // 21-23 days of 8 h
+    { minHours: 150.5, maxHours: 170 },
+    { minHours: 170, maxHours: 160 }, // minimum above maximum
+    { minHours: 7.25, maxHours: 8 }, // off the half-hour grid
+    { minHours: 160, maxHours: 176, hoursPerShift: 7.25 }, // shift credit off the grid
+    { minHours: -8, maxHours: 8 }, // negative
+  ];
+  /** What the user types into the form opened by "Add Contracted Hours". */
+  const typed = (state: ScenarioUiState, row: (typeof rows)[number]): ContractedFormState => {
+    const base = defaultContractedForm(state);
+    const exact = row.minHours === row.maxHours;
+    return {
+      ...base,
+      description: "Contract",
+      person: ["ana", "ben"],
+      countDates: ["ALL"],
+      policy: exact ? "exact" : "range",
+      targetExact: exact ? `${row.minHours}h` : "",
+      targetRangeMin: exact ? "" : `${row.minHours}h`,
+      targetRangeMax: exact ? "" : `${row.maxHours}h`,
+      countShiftTypeCoefficients:
+        row.hoursPerShift === undefined
+          ? base.countShiftTypeCoefficients
+          : base.countShiftTypeCoefficients.map(([id]) => [id, row.hoursPerShift! * 2]),
+    };
+  };
+  const command = (row: (typeof rows)[number]) => ({
+    type: "add_contracted_hours" as const,
+    description: "Contract",
+    people: ["ana", "ben"],
+    dates: ["ALL"],
+    ...row,
+  });
+
+  it("accepts and refuses what the form does, and appends the same card", () => {
+    for (const state of [timed(), ruleWardScenario()]) {
+      for (const [i, row] of rows.entries()) {
+        const form = typed(state, row);
+        const assistant = applyAssistantCommand(state, command(row));
+        expect(assistant.ok, `row ${i}`).toBe(
+          !hasContractedErrors(validateContractedCommit(form, state)),
+        );
+        if (!assistant.ok) continue;
+        const uid = assistant.next.cardsByKind.counts.at(-1)!.uid;
+        expect(assistant.next.cardsByKind.counts).toEqual([
+          ...state.cardsByKind.counts,
+          buildContractedCard(form, state, uid),
+        ]);
+      }
+    }
+  });
+
+  it("counts every day as the same hours when the contract is in days", () => {
+    const result = applyAssistantCommand(timed(), command(rows[1]));
+    if (!result.ok) throw new Error(result.rejection.message);
+    expect(result.next.cardsByKind.counts.at(-1)).toMatchObject({
+      tag: "contracted_hours",
+      policy: "range",
+      target: [336, 368],
+      weight: Number.POSITIVE_INFINITY,
+      countShiftTypeCoefficients: [
+        ["Day", 16],
+        ["Night", 16],
+        ["LEAVE", 16],
+      ],
+    });
+  });
+
+  it("refuses a shift with no working time unless hoursPerShift is given", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), command(rows[0]));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.message).toMatch(/hoursPerShift/);
+  });
+
+  it("refuses a person the People picker does not offer", () => {
+    const result = applyAssistantCommand(timed(), { ...command(rows[1]), people: ["zed"] });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
   });
 });

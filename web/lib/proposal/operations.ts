@@ -99,6 +99,12 @@ import {
   type CountFormState,
 } from "@/components/counts/counts-model";
 import {
+  buildContractedCard,
+  defaultContractedForm,
+  validateContractedCommit,
+  type ContractedFormState,
+} from "@/components/counts/contracted-model";
+import {
   REST_DAYS_RULE_DESCRIPTION,
   buildRestDaysRuleCard,
   isRestDaysRuleCard,
@@ -645,6 +651,64 @@ function applyAddRestDaysRule(
     );
   }
   const card = buildRestDaysRuleCard(newRuleUid(state, "counts", command));
+  return {
+    ok: true,
+    next: withCards(state, "counts", [...state.cardsByKind.counts, card]),
+  };
+}
+
+type ContractedCommand = Extract<AssistantCommandV1, { type: "add_contracted_hours" }>;
+
+/**
+ * The Contracted hours form as the user fills it: opened by "Add Contracted Hours"
+ * (every worked shift and LEAVE, coefficients from each shift's working time), then
+ * the hours typed, and, for a contract in days, every row set to `hoursPerShift`.
+ */
+function contractedDraft(state: ScenarioUiState, command: ContractedCommand): ContractedFormState {
+  const base = defaultContractedForm(state);
+  const exact = command.minHours === command.maxHours;
+  const perShift = command.hoursPerShift;
+  return {
+    ...base,
+    description: command.description,
+    person: [...command.people],
+    countDates: [...command.dates],
+    policy: exact ? "exact" : "range",
+    targetExact: exact ? `${command.minHours}h` : "",
+    targetRangeMin: exact ? "" : `${command.minHours}h`,
+    targetRangeMax: exact ? "" : `${command.maxHours}h`,
+    countShiftTypeCoefficients:
+      perShift === undefined
+        ? base.countShiftTypeCoefficients
+        : base.countShiftTypeCoefficients.map(([id]) => [id, perShift * 2]),
+  };
+}
+
+function applyAddContractedHours(
+  state: ScenarioUiState,
+  command: ContractedCommand,
+  index: number,
+): OperationResult {
+  const name = ruleName("counts", command.description);
+  const people = countPeopleOptions(state);
+  const offeredPeople = [...people.items, ...people.groups];
+  const person = firstUnofferedPerson(command.people, offeredPeople, undefined);
+  if (person !== undefined) return rulePersonRefusal(state, name, person, offeredPeople, index);
+  const dates = dateScopeRejection(state, command.dates, COUNT_DATES);
+  if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
+  const draft = contractedDraft(state, command);
+  const errors = validateContractedCommit(draft, state);
+  const coefficient =
+    errors.coefficientAggregate ?? Object.values(errors.coefficientErrorsById ?? {})[0];
+  const error = firstFormError(errors) ?? coefficient;
+  if (error) {
+    const hint =
+      coefficient && command.hoursPerShift === undefined
+        ? " A shift has no working time on the Shifts screen: send hoursPerShift, or set the shift's times first."
+        : "";
+    return reject(index, "invalid_value", `${name}: ${error}.${hint}`);
+  }
+  const card = buildContractedCard(draft, state, newRuleUid(state, "counts", command));
   return {
     ok: true,
     next: withCards(state, "counts", [...state.cardsByKind.counts, card]),
@@ -2093,6 +2157,8 @@ export function applyAssistantCommand(
       return applyAddCountRule(state, command, index);
     case "add_rest_days_rule":
       return applyAddRestDaysRule(state, command, index);
+    case "add_contracted_hours":
+      return applyAddContractedHours(state, command, index);
     case "edit_count_rule":
       return applyEditCountRule(state, command, index);
     case "add_staffing_requirement":

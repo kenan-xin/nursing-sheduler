@@ -321,6 +321,34 @@ describe("setup hints carry ward defaults, never invented law", () => {
     const help = CAPABILITY_ENTRIES.find((e) => e.id === "ai-assistant-conversation");
     expect(help?.nurseFacingSummary).not.toMatch(/cannot yet create pairing/);
   });
+  it("asks on a card about any shift with no staffing requirement (4h5a)", () => {
+    const text = ask("rules");
+    expect(text).toMatch(/no staffing requirement, on a choice card/);
+    expect(text).toMatch(/never guess/);
+  });
+  it("checks capacity against demand and spends spare shifts in the ward's order (4h5a)", () => {
+    const rules = SETUP_STEPS.find((s) => s.id === "rules")!;
+    const text = rules.ask.join(" ");
+    expect(text).toMatch(/staffingBalance/);
+    expect(text).toMatch(/spareShifts/);
+    // Senior lead slot first, then a 3rd morning, then a 3rd afternoon, by weight.
+    expect(text).toMatch(/optional senior lead slot.*3rd nurse on mornings.*3rd on afternoons/);
+    expect(text).toMatch(/-300, -200 and -100/);
+    expect(text).toMatch(/add_contracted_hours/);
+    expect(rules.proposeWith).toContain("add_contracted_hours");
+  });
+  it("prefers a contracted target over a days-off cap, and never an impossible cap (4h5a)", () => {
+    const text = ask("rules");
+    expect(text).toMatch(/Prefer a contracted working target over a cap on days off/);
+    expect(text).toMatch(/fewestOffDaysEach/);
+    expect(text).toMatch(/show the arithmetic/);
+    // A hard contract floor above what the numbers allow has no roster.
+    expect(text).toMatch(/mostShifts/);
+  });
+  it("never calls a rule over any 7 days in a row impossible (4h5a)", () => {
+    const text = ask("rules");
+    expect(text).toMatch(/Never say a rule over any 7 days in a row is impossible/);
+  });
   it("maps 'optional, ideally N' to a preferred count, never to required 0 alone (hg9v)", () => {
     const ask = SETUP_STEPS.find((s) => s.id === "rules")!.ask.join(" ");
     expect(ask).toMatch(/ideally N/);
@@ -332,7 +360,7 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS).toContain(TRUTHFUL_SUMMARY_RULE);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-28.2");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-28.3");
   });
 });
 

@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { computeScenarioSummary } from "@/components/home/scenario-summary";
 import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import { deriveSetupProgress } from "./setup-progress";
+import { computeStaffingBalance } from "./staffing-balance";
 
 const input = (scenario = SCENARIOS.empty()) => ({
   summary: computeScenarioSummary(scenario),
   runComplete: false,
   uncoveredShifts: [] as string[],
   knownGaps: 0,
+  staffingBalance: null,
 });
 
 describe("deriveSetupProgress", () => {
@@ -62,6 +64,14 @@ describe("deriveSetupProgress", () => {
     });
     expect(progress.steps.find((s) => s.id === "run")?.done).toBe(true);
     expect(progress.nextStep?.id).toBe("review");
+  });
+
+  it("carries the staffing balance so the assistant never does the sums itself (4h5a)", () => {
+    const staffingBalance = computeStaffingBalance(SCENARIOS.ruleTooStrict());
+    expect(staffingBalance).not.toBeNull();
+    expect(
+      deriveSetupProgress({ ...input(SCENARIOS.ruleTooStrict()), staffingBalance }).staffingBalance,
+    ).toBe(staffingBalance);
   });
 
   it("carries the playbook version and instructions", () => {

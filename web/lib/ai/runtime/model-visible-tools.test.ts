@@ -382,6 +382,15 @@ describe("the command arms the provider is actually shown", () => {
         weight: "infinity",
       },
       add_rest_days_rule: { type: "add_rest_days_rule" },
+      add_contracted_hours: {
+        type: "add_contracted_hours",
+        description: "Contract",
+        people: ["ana"],
+        dates: ["ALL"],
+        minHours: 168,
+        maxHours: 184,
+        hoursPerShift: 8,
+      },
       edit_count_rule: {
         type: "edit_count_rule",
         ruleId: "c1",
@@ -512,6 +521,7 @@ describe("the command arms the provider is actually shown", () => {
     const optional: Record<string, string[]> = {
       add_staffing_requirement: ["preferredNumPeople", "weight", "skillMix"],
       edit_staffing_requirement: ["preferredNumPeople", "weight"],
+      add_contracted_hours: ["hoursPerShift"],
     };
 
     const parameters = child(wire.get("prepare_scenario_change"), "parameters");
