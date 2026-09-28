@@ -41,6 +41,7 @@ import { create } from "zustand";
 import {
   createScenarioRepository,
   GLOBAL_GENERATION_SCOPE,
+  isLeaseLive,
   isRepositoryError,
   migrateLegacyScenarioRecord,
   NurseSchedulerDb,
@@ -478,6 +479,16 @@ export interface OwnershipHint {
   epoch: number;
 }
 
+/**
+ * Whether this page is on screen. Automatic acquisition of a free lease is
+ * reserved for the tab the user is looking at: otherwise a background tab, woken
+ * by the release hint of a tab that is merely RELOADING, would grab the lease and
+ * leave the reloaded tab read-only. No `document` (node tests) counts as visible.
+ */
+function pageVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
 export class ScenarioAuthority {
   readonly repository: ScenarioRepository;
   /**
@@ -495,6 +506,8 @@ export class ScenarioAuthority {
   private readonly hot: HotStore;
   private readonly authority: AuthorityStore;
   private readonly broadcast: (message: OwnershipHint) => void;
+  /** The repository's clock, so the lease-liveness pre-check agrees with it. */
+  private readonly now: () => Date;
   /**
    * Settle this tab's writer identity. Injectable so a test can pin it; the app uses
    * the live-peer probe in {@link resolveTabIdentity}.
@@ -519,6 +532,7 @@ export class ScenarioAuthority {
     this.authority = config.authority;
     this.tabId = config.tabId;
     this.broadcast = config.broadcast ?? (() => {});
+    this.now = config.now ?? (() => new Date());
     // A test that supplies an explicit `tabId` is simulating a specific tab, so it
     // keeps that identity; the app resolves its own through the collision probe.
     this.resolveIdentity = config.resolveTabIdentity ?? (async () => this.tabId);
@@ -777,9 +791,8 @@ export class ScenarioAuthority {
     const context = await this.repository.readTabContext(this.tabId);
     if (!this.isCurrentEra(era)) return;
     if (!context.selection || !context.envelope) {
-      // The selection was reaped (or never existed). Read-only until the tab
-      // explicitly reselects — silently re-acquiring would make a stale tab a
-      // writer again without anyone asking for it.
+      // The selection was reaped (or never existed): there is no scenario to
+      // acquire, so read-only until the tab explicitly reselects.
       this.loseOwnership("read-only");
       return;
     }
@@ -793,14 +806,41 @@ export class ScenarioAuthority {
         // Any state derived from the old epoch is void.
         this.hot.getState().cancelPaint();
       }
-    } else if (this.owner !== null) {
-      const takenOver = context.lease !== null && context.lease.ownerTabId !== this.tabId;
-      this.loseOwnership(takenOver ? "taken-over" : "expired", context.lease?.ownerTabId);
     } else {
-      this.authority.setState({
-        ownership: "read-only",
-        heldByTabId: context.lease?.ownerTabId ?? null,
-      });
+      const takenOver = context.lease !== null && context.lease.ownerTabId !== this.tabId;
+      const wasOwner = this.owner !== null;
+      if (wasOwner) {
+        this.loseOwnership(takenOver ? "taken-over" : "expired", context.lease?.ownerTabId);
+      } else {
+        const current = this.authority.getState().ownership;
+        this.authority.setState({
+          // Keep the words for HOW this tab lost the lease until it has it back.
+          ownership: current === "taken-over" || current === "expired" ? current : "read-only",
+          heldByTabId: context.lease?.ownerTabId ?? null,
+        });
+      }
+
+      // A FREE lease (missing, or expired with nobody renewing it) is taken with a
+      // normal acquire, never a takeover: a live holder still wins, so two live tabs
+      // still leave the second read-only. This is what un-sticks a lone tab facing
+      // its previous document's lease, or a crashed owner's.
+      //
+      // Why re-acquiring without asking is safe: nobody holds the lease, so nobody
+      // loses anything, and the acquire mints a strictly higher epoch. Every piece of
+      // in-memory work captured under the old epoch -- a staged paint, an Optimize
+      // attachment (both revoked by `loseOwnership` above), an assistant turn whose
+      // send gate compares lease epochs -- is fenced by that epoch and the revision
+      // compare-and-swap, exactly as after a takeover. The one exception is kept: an
+      // owner that finds ANOTHER tab took the lease meanwhile stays `taken-over` for
+      // this pass, so that change is announced instead of silently reversed.
+      const reclaim =
+        pageVisible() &&
+        !isLeaseLive(context.lease ?? undefined, this.now()) &&
+        !(wasOwner && takenOver);
+      if (reclaim) {
+        const acquired = await this.acquireNow(context.selection.scenarioId, "acquire");
+        if (acquired.ok) return;
+      }
     }
 
     const history = context.history;
@@ -854,46 +894,68 @@ export class ScenarioAuthority {
     return this.enqueueLifecycle(async (): Promise<CommandOutcome> => {
       const scenarioId = this.authority.getState().scenarioId;
       if (!scenarioId) return { ok: false, reason: "not-ready", code: "unknown" };
-      try {
-        const result = await this.repository.acquireOrTakeover({
-          scenarioId,
-          tabId: this.tabId,
-          mode: "takeover",
-          // A new owner starts a new Undo session: the previous owner's reversal
-          // payloads describe a history this tab never performed. Rolled INSIDE the
-          // fenced takeover, so the session it invalidates is provably the one this
-          // takeover superseded.
-          rollHistorySession: true,
-        });
-        const era = this.beginEra();
-        this.owner = result.owner;
-        this.authority.setState({ ownership: "owner", heldByTabId: null, lastErrorCode: null });
-        const history = await this.repository.describeHistory(scenarioId);
-        if (!this.isCurrentEra(era)) {
-          return { ok: false, reason: "not-owner", code: "not_owner" };
-        }
-        this.publish(result.envelope, {
-          undo: history.undoAvailable,
-          redo: history.redoAvailable,
-        });
-        this.broadcast({
-          kind: "acquired",
-          scenarioId,
-          tabId: this.tabId,
-          epoch: result.owner.epoch,
-        });
-        return {
-          ok: true,
-          committed: true,
-          documentRevision: result.envelope.documentRevision,
-          commitId: null,
-        };
-      } catch (error) {
-        const classified = classify(error);
-        this.authority.setState({ lastErrorCode: classified.code });
-        return { ok: false, ...classified };
-      }
+      const outcome = await this.acquireNow(scenarioId, "takeover");
+      if (!outcome.ok) this.authority.setState({ lastErrorCode: outcome.code });
+      return outcome;
     });
+  }
+
+  /**
+   * The periodic upkeep tick (every heartbeat interval): renew the lease when this
+   * tab owns it, and otherwise re-check durable truth, which acquires the lease when
+   * it is free (see {@link ScenarioAuthority.reconcile}). A heartbeat that fails
+   * because the lease lapsed is followed by that same re-check, so a visible tab
+   * whose timer was throttled recovers instead of sitting on "Editing paused".
+   */
+  async keepAlive(): Promise<void> {
+    if (!(await this.heartbeat())) await this.reconcile();
+  }
+
+  /**
+   * Acquire (`acquire`: only when free) or seize (`takeover`) the lease and publish
+   * the new ownership. Runs INSIDE the lifecycle queue; callers enqueue it.
+   */
+  private async acquireNow(
+    scenarioId: string,
+    mode: "acquire" | "takeover",
+  ): Promise<CommandOutcome> {
+    try {
+      const result = await this.repository.acquireOrTakeover({
+        scenarioId,
+        tabId: this.tabId,
+        mode,
+        // A new owner starts a new Undo session: the previous owner's reversal
+        // payloads describe a history this tab never performed. Rolled INSIDE the
+        // fenced acquisition, so the session it invalidates is provably the one this
+        // acquisition superseded.
+        rollHistorySession: true,
+      });
+      const era = this.beginEra();
+      this.owner = result.owner;
+      this.authority.setState({ ownership: "owner", heldByTabId: null, lastErrorCode: null });
+      const history = await this.repository.describeHistory(scenarioId);
+      if (!this.isCurrentEra(era)) {
+        return { ok: false, reason: "not-owner", code: "not_owner" };
+      }
+      this.publish(result.envelope, {
+        undo: history.undoAvailable,
+        redo: history.redoAvailable,
+      });
+      this.broadcast({
+        kind: "acquired",
+        scenarioId,
+        tabId: this.tabId,
+        epoch: result.owner.epoch,
+      });
+      return {
+        ok: true,
+        committed: true,
+        documentRevision: result.envelope.documentRevision,
+        commitId: null,
+      };
+    } catch (error) {
+      return { ok: false, ...classify(error) };
+    }
   }
 
   /** Clean release (an explicit close). Best-effort: expiry is the real backstop.

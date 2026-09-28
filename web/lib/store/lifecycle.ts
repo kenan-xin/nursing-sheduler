@@ -140,24 +140,21 @@ export function resetToNewScenario(apiVersion?: string): Promise<CommandOutcome>
  *
  * Two distinct jobs, and conflating them was the pre-T03 bug this replaces:
  *
- *   • `pagehide` with `persisted === false` is a real teardown — release the lease
- *     so a peer tab need not wait out the 20-second expiry. With
- *     `persisted === true` the page is going into BFCache and may come back, so
- *     releasing would strand a tab that is about to resume; expiry is the correct
- *     backstop there.
- *   • `pageshow`, `visibilitychange`, and `online` are RESUMPTION points where
- *     process memory may describe a world that no longer exists — each one
+ *   • `pagehide` releases the lease — on a real teardown AND on entry to BFCache
+ *     (`persisted === true`). Holding it while cached stranded the NEXT document
+ *     (a reload, the same tab navigating back to a fresh page) read-only for the
+ *     20-second expiry. A cached page that comes back simply re-acquires.
+ *   • `pageshow`, `visibilitychange`, `focus`, and `online` are RESUMPTION points
+ *     where process memory may describe a world that no longer exists — each one
  *     triggers an authoritative reread rather than trusting what this tab
- *     remembers about its own ownership.
+ *     remembers about its own ownership, and the reread acquires the lease when it
+ *     is free (a normal acquire; a live holder still wins).
  */
 export function registerScenarioLifecycle(): () => void {
   if (typeof window === "undefined") return () => {};
   const authority = getScenarioAuthority();
 
-  const onPageHide = (event: PageTransitionEvent) => {
-    if (event.persisted) return; // BFCache: the tab may resume and still own it
-    void authority.release();
-  };
+  const onPageHide = () => void authority.release();
   const onPageShow = (event: PageTransitionEvent) => {
     if (!event.persisted) return; // a fresh load already initialized
     void authority.reconcile();
@@ -165,17 +162,19 @@ export function registerScenarioLifecycle(): () => void {
   const onVisibility = () => {
     if (document.visibilityState === "visible") void authority.reconcile();
   };
-  const onOnline = () => void authority.reconcile();
+  const onReread = () => void authority.reconcile();
 
   window.addEventListener("pagehide", onPageHide);
   window.addEventListener("pageshow", onPageShow);
   document.addEventListener("visibilitychange", onVisibility);
-  window.addEventListener("online", onOnline);
+  window.addEventListener("focus", onReread);
+  window.addEventListener("online", onReread);
 
   return () => {
     window.removeEventListener("pagehide", onPageHide);
     window.removeEventListener("pageshow", onPageShow);
     document.removeEventListener("visibilitychange", onVisibility);
-    window.removeEventListener("online", onOnline);
+    window.removeEventListener("focus", onReread);
+    window.removeEventListener("online", onReread);
   };
 }
