@@ -14,12 +14,13 @@ import {
   AssistantHistoricalConversation,
   AssistantLiveConversation,
 } from "./assistant-conversation";
-import { choiceParameters, useChoiceTools } from "./use-choice-tools";
+import { CHOICE_OPTION_SOURCE_RULE, choiceParameters, useChoiceTools } from "./use-choice-tools";
 import { describeAnswers } from "./choice-card";
 import { bindTurnForTest, type TestTurnHandle } from "./turn-authority.test-support";
 
 interface CapturedTool {
   name: string;
+  description?: string;
   handler: (args: unknown, context: { signal?: AbortSignal }) => Promise<unknown>;
 }
 const captured = vi.hoisted(() => [] as CapturedTool[]);
@@ -548,6 +549,19 @@ describe("offer_choices", () => {
     expect(screen.getByRole("group", { name: NEXT.question })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Day" })).not.toBeChecked();
     expect(screen.getByLabelText("Something else")).toHaveValue("");
+  });
+
+  it("tells the model options come from the user or the schedule, never from examples (1450)", () => {
+    render(
+      <>
+        <Host />
+        <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />
+      </>,
+    );
+    const tool = captured.find((candidate) => candidate.name === "offer_choices")!;
+    expect(tool.description).toContain(CHOICE_OPTION_SOURCE_RULE);
+    expect(tool.description).toMatch(/only from the user's own words or the current schedule/);
+    expect(tool.description).toMatch(/never from examples in these instructions/);
   });
 
   it("accepts 2 to 5 options and requires multiple", () => {

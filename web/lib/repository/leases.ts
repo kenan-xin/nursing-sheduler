@@ -31,7 +31,7 @@ export function isLeaseLive(lease: WriterLeaseV2 | undefined, now: Date): lease 
  *
  * The rejections are deliberately distinct, because they need different
  * recoveries: no lease or another tab's lease means "reacquire or go read-only";
- * an expired own lease means "recover explicitly"; a stale epoch means "you were
+ * an expired own lease means "re-acquire under a new epoch"; a stale epoch means "you were
  * taken over, drop every derived draft"; a scenario mismatch means the caller is
  * writing to something it did not read.
  *

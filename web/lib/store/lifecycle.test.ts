@@ -8,12 +8,36 @@
 
 import "fake-indexeddb/auto";
 import { Dexie } from "dexie";
-import { afterEach, expect, it } from "vitest";
-import { initializeScenarioAuthority } from "./lifecycle";
+import { afterEach, expect, it, vi } from "vitest";
+import { initializeScenarioAuthority, registerScenarioLifecycle } from "./lifecycle";
 import { clearTestAuthority, freshAuthorityDbName, installTestAuthority } from "./test-authority";
 import { setScenarioAuthority, useHotStore } from "./spine";
 
-afterEach(() => clearTestAuthority());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  clearTestAuthority();
+});
+
+// Bead d854: a page entering BFCache must not strand its lease for the next document.
+it("a BFCache pagehide releases the lease, and the persisted pageshow re-acquires it", async () => {
+  const tab = await installTestAuthority();
+  const scenarioId = tab.authorityStore.getState().scenarioId!;
+  vi.stubGlobal("window", new EventTarget());
+  vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
+  const unregister = registerScenarioLifecycle();
+  const transition = (type: string) =>
+    window.dispatchEvent(Object.assign(new Event(type), { persisted: true }));
+
+  transition("pagehide");
+  await tab.authority.drain();
+  expect(await tab.db.writerLeases.get(scenarioId)).toBeUndefined();
+
+  transition("pageshow");
+  await tab.authority.drain();
+  expect(tab.authorityStore.getState().ownership).toBe("owner");
+  expect((await tab.db.writerLeases.get(scenarioId))?.ownerTabId).toBe(tab.tabId);
+  unregister();
+});
 
 /** Another connection holding a readwrite lock on the scenario stores until released. */
 async function holdScenarioLock(databaseName: string) {

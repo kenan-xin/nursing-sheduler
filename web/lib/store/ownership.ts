@@ -46,7 +46,8 @@ function isOwnershipHint(value: unknown): value is OwnershipHint {
  * ownership changes: `heartbeat()` is a no-op without a lease, and a timer that
  * only exists while we believe we are the owner cannot notice that we no longer
  * are. Deriving the loss from the renewal's own failure is what makes an expiry
- * observable in a tab that was suspended.
+ * observable in a tab that was suspended. A tab without a lease uses the same tick
+ * to re-check durable truth, which acquires the lease once it is free.
  */
 export function useOwnershipController(): void {
   useEffect(() => {
@@ -62,7 +63,7 @@ export function useOwnershipController(): void {
     }
 
     const timer = setInterval(() => {
-      void authority.heartbeat();
+      void authority.keepAlive();
     }, LEASE_HEARTBEAT_MS);
 
     return () => {
