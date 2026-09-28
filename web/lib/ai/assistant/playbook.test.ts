@@ -234,6 +234,28 @@ describe("rest rules are guidance, not law", () => {
 describe("setup hints carry ward defaults, never invented law", () => {
   const ask = (id: string) => SETUP_STEPS.find((s) => s.id === id)?.ask.join(" ") ?? "";
 
+  it("recommends a 28-day roster period first and the calendar month second (cei5)", () => {
+    const text = ask("dates");
+    expect(text).toMatch(/28 days \(4 weeks\)/);
+    expect(text).toMatch(/4 weeks: 1-28 Oct/);
+    // With history, continue the cycle from the day after the last period.
+    expect(text).toMatch(/day after the last period \+ 27 days/);
+    expect(text).toMatch(/calendar month as the second option/);
+    // 28 days is the first option, never the only one.
+    expect(text).toMatch(/Never present 28 days as "only"/);
+  });
+  it("asks the leave question on a choice card with the two common answers (cei5)", () => {
+    const text = ask("requests");
+    expect(text).toMatch(/offer_choices/);
+    expect(text).toMatch(/Nobody has leave or days off/);
+    expect(text).toMatch(/Yes, I will list them/);
+    // The free-text box stays for the days themselves.
+    expect(text).toMatch(/free-text box/);
+  });
+  it("sends every setup question with a short, common answer set to a choice card (cei5)", () => {
+    expect(SETUP_INSTRUCTIONS[0]).toMatch(/short, common answer set/);
+    expect(SETUP_INSTRUCTIONS[0]).toMatch(/always goes on a choice card/);
+  });
   it("suggests common shift patterns to confirm", () => {
     expect(ask("shiftTypes")).toMatch(/three 8-hour shifts/);
     expect(ask("shiftTypes")).toMatch(/12-hour/);
@@ -310,7 +332,7 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS).toContain(TRUTHFUL_SUMMARY_RULE);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-28.1");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-28.2");
   });
 });
 
