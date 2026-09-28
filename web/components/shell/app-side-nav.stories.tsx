@@ -48,7 +48,7 @@ export const Collapsed: Story = {
   play: async ({ canvas }) => {
     await expect(canvas.getByTestId("sidebar-brand-mark")).toHaveAttribute(
       "title",
-      "Rota · Nurse Scheduling",
+      "Genie Rota · Nurse Scheduling",
     );
     await expect(canvas.getByTestId("mode-toggle")).toHaveAttribute("data-compact", "true");
     await expect(canvas.queryByTestId("sidebar-identity")).toBeNull();
