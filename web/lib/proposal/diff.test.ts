@@ -750,6 +750,41 @@ describe("rule sentences state what the solver enforces", () => {
       }),
     ).toBe("On · Close to 5 Night shifts for everyone, across every date: must be exactly 5");
   });
+
+  it("a contracted-hours card says its hours, what each day counts and that it is a must (4h5a)", () => {
+    const contract = {
+      uid: "x",
+      description: "Contract",
+      person: ["ana", "ben"],
+      countDates: ["ALL"],
+      countShiftTypes: ["Day", "Night", "LEAVE"],
+      countShiftTypeCoefficients: [
+        ["Day", 16],
+        ["Night", 16],
+        ["LEAVE", 16],
+      ],
+      tag: "contracted_hours",
+      unit: "half-hour",
+      weight: Number.POSITIVE_INFINITY,
+    };
+    expect(
+      sentence("counts", {
+        ...contract,
+        policy: "range",
+        expression: ["x >= T", "x <= T"],
+        target: [336, 368],
+      }),
+    ).toBe(
+      "On · “Contract” · Each of ana, ben works 168h to 184h across every date " +
+        "(Day 8h, Night 8h, a leave day 8h): must hold",
+    );
+    expect(
+      sentence("counts", { ...contract, policy: "exact", expression: "x = T", target: 320 }),
+    ).toBe(
+      "On · “Contract” · Each of ana, ben works exactly 160h across every date " +
+        "(Day 8h, Night 8h, a leave day 8h): must hold",
+    );
+  });
 });
 
 describe("skill mix in the Preview", () => {

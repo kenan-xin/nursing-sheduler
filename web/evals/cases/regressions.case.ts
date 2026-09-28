@@ -1,4 +1,5 @@
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
+import type { ScenarioUiState } from "@/lib/scenario";
 import type { EvalCase } from "../lib/case";
 
 const small = () =>
@@ -7,7 +8,71 @@ const small = () =>
     cardsByKind: cards({ requirements: [requirement("day", "D", 1)] }),
   });
 
+// The user's own test prompt of 2026-09-28 (bead 4h5a), names replaced with neutral ids.
+// It gives no number for N_sup, on purpose.
+const OCTOBER_SETUP_PROMPT = `help me setup october roster
+
+here are the nurses:
+SN-01, SSN-02, SSN-03, SSN-04, SSN-05 : Senior Staff Nurses — can act as the shift's Nurse-in-Charge (NIC), the senior leading that shift
+
+SN-06, SN-07, SN-08, SN-09, SN-10, SN-11: Staff Nurses
+
+EN-12, EN-13: Enrolled Nurses
+
+i have these shift types
+1. M — Morning 07:00–15:30
+2. M_sup — Morning shift lead (SSN/NIC)
+3. A — Afternoon 13:00–22:00
+4. A_sup — Afternoon lead (SSN/NIC)
+5. N — Night 20:00–08:30
+6. N_sup — Night NIC
+
+these are my requirements:
+1. Morning (M): At least 2 nurses daily; ideally 3. Any grade. Covers meds and breakfast round.
+2. Morning senior lead (M_sup): Exactly 1 senior daily.
+3. Afternoon (A): Exactly 2 nurses daily, any grade
+4. Afternoon second senior (A_sup): Optional: 0 required, ideally 1 senior.
+5. Night (N): Exactly 2 nurses daily.
+6. All nurses cannot have a morning shift immediately after a night shift, nurse need to rest, prefer to arrange off after a night shift`;
+
+/** The staffing requirement on one shift in the final schedule, if any. */
+const requirementOn = (s: ScenarioUiState, shift: string) =>
+  s.cardsByKind.requirements.find((card) => [card.shiftType].flat().includes(shift));
+
 export const REGRESSION_CASES: EvalCase[] = [
+  {
+    id: "reg-october-setup-at-least-ideally",
+    tags: ["regression", "flow"],
+    description:
+      "4h5a: the user's setup prompt. 28 days first, 'at least'/'ideally' saved as required + preferred, A_sup 0 + 1, and a question about N_sup.",
+    today: "2026-09-28",
+    route: "/",
+    seed: { fixture: "empty" },
+    user: {
+      turns: [OCTOBER_SETUP_PROMPT],
+      onChoices: { pick: 1 },
+      onPreview: "apply",
+    },
+    limits: { maxUserTurns: 14, maxHops: 40, timeoutMs: 600_000 },
+    expect: {
+      // The dates card offers 4 weeks before the calendar month.
+      choicesInclude: ["4 weeks", "31"],
+      finalState: (s) => {
+        const m = requirementOn(s, "M");
+        if (m?.requiredNumPeople !== 2 || m.preferredNumPeople !== 3)
+          return `M is ${m?.requiredNumPeople}/${m?.preferredNumPeople}, expected at least 2, ideally 3`;
+        const aSup = requirementOn(s, "A_sup");
+        if (aSup?.requiredNumPeople !== 0 || aSup.preferredNumPeople !== 1)
+          return `A_sup is ${aSup?.requiredNumPeople}/${aSup?.preferredNumPeople}, expected 0 required, ideally 1`;
+        if (!requirementOn(s, "N_sup")) return "N_sup has no staffing requirement";
+        return null;
+      },
+      judge: [
+        "Asks how many nurses the Night NIC shift (N_sup) needs, on a choice card, instead of guessing a number.",
+      ],
+    },
+    trials: 1,
+  },
   {
     id: "grounding-unknown-nurse",
     tags: ["grounding", "smoke"],

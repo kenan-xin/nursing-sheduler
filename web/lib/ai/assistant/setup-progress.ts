@@ -14,6 +14,7 @@ import {
   type SetupStepGuide,
   type SetupStepId,
 } from "./playbook";
+import type { StaffingBalance } from "./staffing-balance";
 
 export interface SetupProgressInput {
   summary: Pick<
@@ -33,6 +34,8 @@ export interface SetupProgressInput {
   uncoveredShifts: readonly string[];
   /** How many static-check findings the scenario has now. */
   knownGaps: number;
+  /** Capacity vs demand (computeStaffingBalance), null before dates, staff and numbers. */
+  staffingBalance: StaffingBalance | null;
 }
 
 export interface SetupStepStatus {
@@ -49,6 +52,7 @@ export interface SetupProgress {
   nextStep: (SetupStepStatus & Pick<SetupStepGuide, "ask" | "proposeWith" | "capabilityId">) | null;
   readyToRun: boolean;
   knownGaps: number;
+  staffingBalance: StaffingBalance | null;
   instructions: readonly string[];
 }
 
@@ -111,6 +115,7 @@ export function deriveSetupProgress(input: SetupProgressInput): SetupProgress {
         : null,
     readyToRun,
     knownGaps: input.knownGaps,
+    staffingBalance: input.staffingBalance,
     instructions: SETUP_INSTRUCTIONS,
   };
 }

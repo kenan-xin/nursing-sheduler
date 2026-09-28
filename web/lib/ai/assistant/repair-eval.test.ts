@@ -87,6 +87,7 @@ describe("guided setup from an empty scenario", () => {
       runComplete: false,
       uncoveredShifts: [],
       knownGaps: findStaffingShortfalls(state).length,
+      staffingBalance: null,
     });
     expect(progress.nextStep?.id).toBe("dates");
     expect(progress.nextStep?.ask).toContain("The first and last day of the roster.");
@@ -101,6 +102,7 @@ describe("guided setup from an empty scenario", () => {
       runComplete: false,
       uncoveredShifts: [],
       knownGaps: findStaffingShortfalls(state).length,
+      staffingBalance: null,
     });
     expect(progress.readyToRun).toBe(true);
     expect(findStaffingShortfalls(state)).toHaveLength(1);

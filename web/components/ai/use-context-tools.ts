@@ -34,6 +34,7 @@ import { computeScenarioSummary } from "@/components/home/scenario-summary";
 import { computeCoverageWarnings } from "@/components/requirements/requirements-model";
 import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
 import { deriveSetupProgress, type SetupProgress } from "@/lib/ai/assistant/setup-progress";
+import { computeStaffingBalance } from "@/lib/ai/assistant/staffing-balance";
 import { isRosterGenerated } from "@/lib/optimize/roster-generated";
 
 const DOMAINS = ["dates", "staff", "shifts", "rules", "requests"] as const;
@@ -151,6 +152,7 @@ export function readSetupProgress(): SetupProgress {
     runComplete: isRosterGenerated(useHotStore.getState().runView),
     uncoveredShifts: coverage.undefinedSection?.items ?? [],
     knownGaps: findStaffingShortfalls(scenario).length,
+    staffingBalance: computeStaffingBalance(scenario),
   });
 }
 

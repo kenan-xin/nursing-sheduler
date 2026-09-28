@@ -26,7 +26,7 @@ import {
   coefficientValueFor,
   type CoefficientDraftValue,
   type CoefficientPair,
-} from "@/components/card-editor/coefficient-fields";
+} from "@/components/card-editor/coefficient-model";
 import {
   buildContractedCoefficientDomain,
   contractedCoefficientIds,
