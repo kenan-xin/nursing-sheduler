@@ -41,7 +41,7 @@ import { ThemeScript } from "@/components/theme/theme-script";
 import { SideCollapseScript } from "@/components/shell/side-collapse-script";
 
 export const metadata: Metadata = {
-  title: "Nurse Scheduler",
+  title: "Genie Rota",
   description: "Nurse scheduling application",
 };
 
