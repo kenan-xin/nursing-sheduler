@@ -39,7 +39,7 @@ import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { FaDiagramProject } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
-const BRAND_TITLE = "Rota · Nurse Scheduling";
+const BRAND_TITLE = "Genie Rota · Nurse Scheduling";
 
 export function AppSideNav({
   onAfterNavigate,
@@ -91,7 +91,7 @@ export function AppSideNav({
         {collapsed ? null : (
           <div className="min-w-0 flex-1">
             <div className="font-heading text-title font-bold leading-none tracking-[-0.015em]">
-              Rota
+              Genie Rota
             </div>
             <div className="mt-[3px] text-label font-semibold uppercase leading-[normal] tracking-[0.03em] text-ink3">
               Nurse Scheduling

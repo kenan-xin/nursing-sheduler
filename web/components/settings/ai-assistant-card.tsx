@@ -111,14 +111,24 @@ export function AiAssistantCard() {
   });
 
   const models = catalog.data?.models ?? [];
+  const recommendedId = catalog.data?.recommendedId ?? null;
   const matches = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return models;
-    return models.filter(
-      (model) =>
-        model.id.toLowerCase().includes(needle) || model.name.toLowerCase().includes(needle),
-    );
-  }, [models, search]);
+    const found = needle
+      ? models.filter(
+          (model) =>
+            model.id.toLowerCase().includes(needle) || model.name.toLowerCase().includes(needle),
+        )
+      : models;
+    // The saved and recommended models lead the list, so the cap below never drops the
+    // one the select should preselect (the live catalog has hundreds of models).
+    const pinned = [settings.modelId, recommendedId];
+    const rank = (id: string) => {
+      const at = pinned.indexOf(id);
+      return at === -1 ? pinned.length : at;
+    };
+    return [...found].sort((a, b) => rank(a.id) - rank(b.id));
+  }, [models, search, settings.modelId, recommendedId]);
 
   // OpenRouter currently lists a few hundred tool-capable models. Rendering all of
   // them into a native select is a wall of options, not a choice, so the list is
@@ -283,7 +293,10 @@ export function AiAssistantCard() {
   return (
     <Card data-testid="ai-assistant-card">
       <CardHeader>
-        <CardTitle>AI assistant</CardTitle>
+        <CardTitle>
+          {/* h2 under the page h1, so "Local AI data" (h3) keeps the outline in order. */}
+          <h2>AI assistant</h2>
+        </CardTitle>
         <CardDescription>
           Optional. Off by default. When it is on, what you type and the whole of this schedule —
           including real names, leave and dates — are sent to the OpenRouter model you choose.

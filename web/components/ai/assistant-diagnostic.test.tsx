@@ -83,6 +83,7 @@ function searchWith(outcomes: readonly (ProductOutcomeView | null)[]): Diagnosti
     scenarioGeneration: 0,
     compare: false,
     parentExpiresAt: null,
+    timeoutSeconds: 90,
     now: NOW,
   });
   outcomes.forEach((outcome, index) => {
@@ -204,6 +205,14 @@ describe("DiagnosticSearchCard", () => {
     expect(note).toMatch(/pressure points worth testing.*not reported causes/i);
     // The single sentence the whole evidence contract turns on.
     expect(note).toMatch(/only proves that exact copy can be solved/i);
+  });
+
+  it("makes the scrolling body a named, keyboard-focusable region", () => {
+    publish(searchWith([FEASIBLE]));
+    render(<DiagnosticSearchCard />);
+    const body = screen.getByRole("region", { name: "Test details" });
+    expect(body).toContainElement(screen.getByTestId("diagnostic-cause-note"));
+    expect(body).toHaveAttribute("tabindex", "0");
   });
 
   it("separates a verified copied run from the untested idea that suggested it", () => {

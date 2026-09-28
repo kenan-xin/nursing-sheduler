@@ -375,15 +375,17 @@ function AvailableRow<V>({
   const icon = option.icon ?? (option.isGroup ? <FaLayerGroup className="size-2.5" /> : null);
   if (option.disabled) {
     return (
-      <div
-        className="flex w-full cursor-not-allowed items-center justify-between gap-2 rounded-none px-2 py-[7px] text-meta text-ink opacity-50 pointer-coarse:min-h-touch"
+      <button
+        type="button"
+        disabled
+        className="flex w-full cursor-not-allowed items-center justify-between gap-2 rounded-none px-2 py-[7px] text-left text-meta text-ink opacity-50 pointer-coarse:min-h-touch"
         title={option.disabledReason}
       >
         <span className="flex min-w-0 items-center gap-2">
           {icon && <span className="flex-none text-ink3">{icon}</span>}
           <span className="truncate">{option.label}</span>
         </span>
-      </div>
+      </button>
     );
   }
   return (

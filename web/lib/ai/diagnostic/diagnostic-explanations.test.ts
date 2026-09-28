@@ -34,6 +34,7 @@ function open() {
     scenarioGeneration: 0,
     compare: false,
     parentExpiresAt: null,
+    timeoutSeconds: 90,
     now: NOW,
   });
 }

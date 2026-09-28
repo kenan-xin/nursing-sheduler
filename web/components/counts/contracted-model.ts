@@ -32,7 +32,7 @@ import {
   syncCoefficientPairs,
   validateCoefficientPairs,
   type CoefficientPair,
-} from "@/components/card-editor/coefficient-fields";
+} from "@/components/card-editor/coefficient-model";
 import { buildCountShiftTypeDomain, COUNT_MESSAGES, type CountScenarioInput } from "./counts-model";
 import { formatHalfHours, LEAVE_CREDIT_HALF_HOURS, parseHalfHours } from "./half-hour-codec";
 import { applyContractedRefresh, deriveContractedRefresh } from "./refresh-model";

@@ -32,6 +32,7 @@ import { assistantProposalCommands } from "@/lib/store";
 import {
   BALANCE_RULE_NOTE,
   REST_PRACTICE_WARNING,
+  TRUTHFUL_SUMMARY_RULE,
   relaxesRestRule,
   setsBalanceRule,
 } from "@/lib/ai/assistant/playbook";
@@ -79,7 +80,8 @@ export const prepareParameters = z.object({
     .min(1)
     .describe(
       "Why you are proposing this, in one or two plain sentences a ward manager " +
-        "would understand. This is shown as your reasoning, not as an instruction.",
+        "would understand. This is shown as your reasoning, not as an instruction. " +
+        TRUTHFUL_SUMMARY_RULE,
     ),
   operations: assistantCommandListSchema.describe(
     "The supported operations that make up ONE coherent change the user asked for. " +
@@ -112,7 +114,8 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
         "If anything is ambiguous, ask first — never guess a date, " +
         "a number of people, or which rule they mean. " +
         `At most ${MAX_ASSISTANT_OPERATIONS} operations per change — split a larger setup ` +
-        "into several changes.",
+        "into several changes. " +
+        TRUTHFUL_SUMMARY_RULE,
       parameters: prepareParameters,
       handler: async (args, context) => {
         // The token captured at entry, demanded again after the durable preparation below.

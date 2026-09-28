@@ -151,6 +151,11 @@ describe("disabled (the default)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("titles the card as an h2 so Settings headings run h1 > h2 > h3", () => {
+    renderCard();
+    expect(screen.getByRole("heading", { level: 2, name: "AI assistant" })).toBeInTheDocument();
+  });
+
   it("never claims the browser store is encrypted or secure", async () => {
     await assistantActions.setEnabled(true);
     renderCard();
@@ -384,6 +389,31 @@ describe("catalog unavailable and fallback", () => {
     // what the user can see.
     expect(Array.from(options).map((o) => o.getAttribute("value"))).toContain(
       (screen.getByTestId("ai-model-select") as HTMLSelectElement).value,
+    );
+  });
+
+  it("preselects the recommended model even when it sits past the list cap", async () => {
+    const many = Array.from({ length: 120 }, (_, index) => ({
+      id: `vendor/model-${String(index).padStart(3, "0")}`,
+      name: `Model ${String(index).padStart(3, "0")}`,
+      contextLength: null,
+    }));
+    installFetch({
+      catalog: () =>
+        new Response(
+          JSON.stringify({
+            source: "catalog",
+            fallbackVersion: 1,
+            models: many,
+            recommendedId: many[90].id,
+          }),
+          { status: 200 },
+        ),
+    });
+    renderCard();
+
+    await waitFor(() =>
+      expect((screen.getByTestId("ai-model-select") as HTMLSelectElement).value).toBe(many[90].id),
     );
   });
 

@@ -381,6 +381,26 @@ describe("the command arms the provider is actually shown", () => {
         target: 5,
         weight: "infinity",
       },
+      add_rest_days_rule: { type: "add_rest_days_rule" },
+      add_contracted_hours: {
+        type: "add_contracted_hours",
+        description: "Contract",
+        people: ["ana"],
+        dates: ["ALL"],
+        minHours: 168,
+        maxHours: 184,
+        hoursPerShift: 8,
+      },
+      edit_contracted_hours: {
+        type: "edit_contracted_hours",
+        ruleId: "c1",
+        description: "Contract",
+        people: ["ana"],
+        dates: ["ALL"],
+        minHours: 152,
+        maxHours: 184,
+        hoursPerShift: 8,
+      },
       edit_count_rule: {
         type: "edit_count_rule",
         ruleId: "c1",
@@ -399,6 +419,8 @@ describe("the command arms the provider is actually shown", () => {
         qualifiedPeople: ["ALL"],
         dates: ["ALL"],
         requiredNumPeople: 4,
+        preferredNumPeople: 5,
+        weight: "-50",
         skillMix: [{ people: "RN", minNumPeople: 2 }],
       },
       edit_staffing_requirement: {
@@ -409,6 +431,8 @@ describe("the command arms the provider is actually shown", () => {
         qualifiedPeople: ["ALL"],
         dates: ["WEEKEND"],
         requiredNumPeople: 4,
+        preferredNumPeople: 5,
+        weight: "-50",
       },
       set_skill_mix: {
         type: "set_skill_mix",
@@ -504,7 +528,12 @@ describe("the command arms the provider is actually shown", () => {
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
     // The only optional wire fields: advertised, present in the payload, not `required`.
-    const optional: Record<string, string[]> = { add_staffing_requirement: ["skillMix"] };
+    const optional: Record<string, string[]> = {
+      add_staffing_requirement: ["preferredNumPeople", "weight", "skillMix"],
+      edit_staffing_requirement: ["preferredNumPeople", "weight"],
+      add_contracted_hours: ["hoursPerShift"],
+      edit_contracted_hours: ["hoursPerShift"],
+    };
 
     const parameters = child(wire.get("prepare_scenario_change"), "parameters");
     const operations = child(child(parameters, "properties"), "operations");

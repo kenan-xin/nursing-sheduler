@@ -16,7 +16,14 @@
 // that date alone; a skill-mix requirement is never lowered, and no repair creates one (a
 // skill-mix gap is closed by covering into its group).
 
-import { isEditableCountCard } from "@/components/counts/counts-model";
+import { isContractedHoursCard, isEditableCountCard } from "@/components/counts/counts-model";
+import { formatHalfHours } from "@/components/counts/half-hour-codec";
+import {
+  awayDays,
+  computeStaffingBalance,
+  contractOf,
+  type NurseContract,
+} from "./staffing-balance";
 import { skillMixFloor } from "@/components/requirements/requirements-model";
 import { paidMinutesFor } from "@/components/entity-editor/core";
 import type { CapabilityId } from "@/lib/capability/help-content";
@@ -40,6 +47,7 @@ import {
 // Direct path: the barrel re-exports this module and `@/lib/scenario` would cycle.
 import { cardNeedOn, coverStatuses } from "@/lib/scenario/temporary-cover";
 import type {
+  ContractedHoursCountCard,
   CountCard,
   DateRef,
   OrdinaryCountCard,
@@ -468,6 +476,114 @@ const relaxCountRule: Builder = (ctx, findings, situation) => {
   }
   return null;
 };
+
+// --- Contracted hours (4h5a) -------------------------------------------------
+
+const contractCards = (ctx: Ctx) =>
+  ctx.state.cardsByKind.counts.filter(
+    (c): c is ContractedHoursCountCard => !c.disabled && isContractedHoursCard(c),
+  );
+
+/**
+ * Lower a contracted minimum. Proven first per nurse (her free days cannot give her
+ * floor), then for the team (the floors need more working days than the staffing
+ * numbers allow); otherwise one day less on the first contract, as a guess to test.
+ */
+const relaxContractedHours: Builder = (ctx) => {
+  const cards = contractCards(ctx);
+  if (cards.length === 0) return null;
+  const days = ctx.items.length;
+  const step = (c: NurseContract) => Math.max(...c.workCoefs);
+
+  for (const card of cards) {
+    for (const person of staffIn(ctx, card.person)) {
+      const c = contractOf(ctx.state, person);
+      if (c?.card.uid !== card.uid) continue;
+      const away = awayDays(ctx.state, person);
+      const most = (days - away.leave - away.off) * step(c) + away.leave * c.leaveCoef;
+      if (c.floor <= most) continue;
+      return contractOption(
+        ctx,
+        card,
+        most,
+        `${person} is on leave or off on ${away.leave + away.off} of the ${days} days, so they can work at most ${formatHalfHours(most)}, less than the contracted minimum of ${formatHalfHours(c.floor)}.`,
+      );
+    }
+  }
+
+  const mostShifts = computeStaffingBalance(ctx.state)?.mostShifts ?? null;
+  if (mostShifts !== null) {
+    let need = 0;
+    for (const person of ctx.staffIds) {
+      const c = contractOf(ctx.state, person);
+      if (!c) continue;
+      const leave = awayDays(ctx.state, person).leave * c.leaveCoef;
+      need += Math.max(0, Math.ceil((c.floor - leave) / step(c)));
+    }
+    if (need > mostShifts) {
+      const [card] = [...cards].sort(
+        (a, b) => staffIn(ctx, b.person).length - staffIn(ctx, a.person).length,
+      );
+      const c = contractOf(ctx.state, staffIn(ctx, card.person)[0])!;
+      const fewer = Math.ceil((need - mostShifts) / staffIn(ctx, card.person).length);
+      return contractOption(
+        ctx,
+        card,
+        c.floor - fewer * step(c),
+        `The contracted minimums ask for at least ${need} working days, but the staffing numbers allow at most ${mostShifts} shifts in the period, so no roster can meet them.`,
+      );
+    }
+  }
+
+  const [card] = cards;
+  const c = contractOf(ctx.state, staffIn(ctx, card.person)[0] ?? "");
+  if (!c || c.card.uid !== card.uid) return null;
+  return contractOption(ctx, card, c.floor - step(c), null);
+};
+
+const contractHours = (card: ContractedHoursCountCard): [number, number] =>
+  Array.isArray(card.target) ? [card.target[0], card.target[1]] : [card.target, card.target];
+
+function contractEdit(
+  ctx: Ctx,
+  card: ContractedHoursCountCard,
+  floor: number,
+): Extract<AssistantCommandV1, { type: "edit_contracted_hours" }> {
+  return {
+    type: "edit_contracted_hours",
+    ruleId: card.uid,
+    description: card.description ?? "",
+    people: asList(card.person),
+    dates: asList(card.countDates).map((d) => formDate(ctx, d)),
+    minHours: floor / 2,
+    maxHours: contractHours(card)[1] / 2,
+  };
+}
+
+function contractOption(
+  ctx: Ctx,
+  card: ContractedHoursCountCard,
+  newFloor: number,
+  proof: string | null,
+): RepairOption | null {
+  const [floor] = contractHours(card);
+  const lowered = Math.max(0, newFloor);
+  if (lowered >= floor) return null;
+  const people = staffIn(ctx, card.person);
+  const who = people.length <= 3 ? people.join(", ") : `the ${people.length} nurses on it`;
+  const name = ruleName(card, card.uid);
+  return makeOption("relax_contracted_hours", {
+    title: `Lower ${who}'s contracted minimum from ${formatHalfHours(floor)} to ${formatHalfHours(lowered)} ("${name}")`,
+    why: proof ?? `"${name}" is a hard contracted minimum that can make the schedule impossible.`,
+    operations: [contractEdit(ctx, card, lowered)],
+    confirmationQuestion: `Can ${who} work fewer contracted hours this period, with the difference made up later or paid?`,
+    needsFromUser: [
+      "How the ward makes up the missing contracted hours. The app cannot check that.",
+    ],
+    capabilityId: "shift-counts",
+    evidence: proof ? "static_check" : "hypothesis",
+  });
+}
 
 /**
  * The dates a person is not on leave or a hard day off.
@@ -942,6 +1058,7 @@ const splitLongShift: Builder = (ctx, all) => {
 };
 
 const BUILDERS: Record<RepairId, Builder> = {
+  relax_contracted_hours: relaxContractedHours,
   align_overlapping_requirements: alignOverlappingRequirements,
   soften_hard_request: softenHardRequest,
   extra_shift_willing_nurse: extraShiftWillingNurse,
@@ -1250,6 +1367,20 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
           op.people.length === staff.size &&
           people.size === staff.size &&
           [...people].every((p) => staff.has(p))
+        );
+      }
+      case "edit_contracted_hours": {
+        // Lower the minimum only: who, when, the maximum and each shift's hours stay.
+        const card = countCard(ctx, op.ruleId);
+        if (!card || card.disabled || !isContractedHoursCard(card)) return false;
+        const [floor, ceiling] = contractHours(card);
+        const keep = (o: typeof op) =>
+          JSON.stringify([o.description, o.people, o.dates, o.maxHours, o.hoursPerShift]);
+        return (
+          keep(op) === keep(contractEdit(ctx, card, floor)) &&
+          op.maxHours * 2 === ceiling &&
+          op.minHours >= 0 &&
+          op.minHours * 2 < floor
         );
       }
       case "edit_shift_sequence_rule": {

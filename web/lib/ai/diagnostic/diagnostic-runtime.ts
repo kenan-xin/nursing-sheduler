@@ -286,7 +286,9 @@ export async function runDiagnosticSearchForTurn(input: {
   parentExpiresAt: string | null;
   scenarioId: string | null;
   proposed: Parameters<typeof runDiagnosticSearch>[0]["proposed"];
-  /** The deployment's accepted timeout bounds; the fixed candidate timeout is clamped into them. */
+  /** The effective candidate solver timeout; clamped into `timeoutBounds` at open. */
+  timeoutSeconds: Parameters<typeof runDiagnosticSearch>[0]["timeoutSeconds"];
+  /** The deployment's accepted timeout bounds; the effective candidate timeout is clamped into them. */
   timeoutBounds?: Parameters<typeof runDiagnosticSearch>[0]["timeoutBounds"];
   isTurnActive: (turnEpoch: number) => boolean;
   authorize: () => boolean;
@@ -312,6 +314,7 @@ export async function runDiagnosticSearchForTurn(input: {
       parent: input.parent,
       parentExpiresAt: input.parentExpiresAt,
       proposed: input.proposed,
+      timeoutSeconds: input.timeoutSeconds,
       timeoutBounds: input.timeoutBounds,
     },
     runtime,

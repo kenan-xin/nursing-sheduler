@@ -157,13 +157,15 @@ function Blocks({ readiness }: { readiness: ProposalReadiness }) {
   const blocks = readiness.blocks.filter((block) => block.code !== "confirmation_required");
   if (blocks.length === 0) return null;
   return (
-    <ul className="flex flex-col gap-1 px-1" data-testid="proposal-blocks" role="status">
-      {blocks.map((block) => (
-        <li key={block.code} className="text-meta text-warnink" data-block-code={block.code}>
-          {block.message}
-        </li>
-      ))}
-    </ul>
+    <div role="status">
+      <ul className="flex flex-col gap-1 px-1" data-testid="proposal-blocks">
+        {blocks.map((block) => (
+          <li key={block.code} className="text-meta text-warnink" data-block-code={block.code}>
+            {block.message}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

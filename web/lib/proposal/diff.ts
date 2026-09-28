@@ -21,6 +21,7 @@
 import type {
   AffinityCard,
   CardsByKind,
+  ContractedHoursCountCard,
   CountCard,
   CoveringCard,
   RequirementCard,
@@ -33,6 +34,8 @@ import type {
 import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
 import { isEditableAffinityCard } from "@/components/affinities/affinities-model";
 import { isEditableCoveringCard } from "@/components/coverings/coverings-model";
+import { isContractedHoursCard } from "@/components/counts/counts-model";
+import { formatHalfHours } from "@/components/counts/half-hour-codec";
 import { calendarSpan } from "./assumptions";
 import { generateDateItems } from "@/lib/dates";
 import { formatShortDate } from "@/lib/dates/date-id";
@@ -245,8 +248,10 @@ function describeRequirement(card: RequirementCard): string {
   if (p == null || p === n) {
     return `Exactly ${n} ${n === 1 ? "person" : "people"} on ${shifts}, ${dates}${exceptions}${ban}${mix}`;
   }
-  const lean =
-    card.weight < 0 ? `${p} preferred` : card.weight > 0 ? `${n} preferred` : "no preference";
+  if (card.weight < 0) {
+    return `At least ${n}, ideally ${p} people on ${shifts}, ${dates}${exceptions} (weight ${card.weight})${ban}${mix}`;
+  }
+  const lean = card.weight > 0 ? `${n} preferred` : "no preference";
   return `${n} to ${p} people on ${shifts}, ${dates}${exceptions} (${lean}, weight ${card.weight})${ban}${mix}`;
 }
 
@@ -318,8 +323,22 @@ function renderCountStrength(squared: boolean, weight: number, target: number): 
   return `worked against, the solver is rewarded for breaking it (weight ${weight})`;
 }
 
-/** `null` for a list-shaped or contracted-hours count: no single sentence says it honestly. */
+/** A contracted-hours card (4h5a): the hours, what each shift and leave day counts, a must. */
+function describeContract(card: ContractedHoursCountCard): string | null {
+  const { target } = card;
+  const hours = Array.isArray(target)
+    ? `${formatHalfHours(target[0])} to ${formatHalfHours(target[1])}`
+    : `exactly ${formatHalfHours(target)}`;
+  const credits = (card.countShiftTypeCoefficients ?? [])
+    .map(([id, value]) => `${id === "LEAVE" ? "a leave day" : id} ${formatHalfHours(value)}`)
+    .join(", ");
+  const people = renderPeople(card.person, "");
+  return `${people ? `Each of ${people}` : "Everyone"} works ${hours} across ${renderDates(card.countDates)}${credits ? ` (${credits})` : ""}: must hold`;
+}
+
+/** `null` for a list-shaped count: no single sentence says it honestly. */
 function describeCount(card: CountCard): string | null {
+  if (isContractedHoursCard(card)) return describeContract(card);
   if (typeof card.expression !== "string" || typeof card.target !== "number") return null;
   const op = EXPRESSION_OPS.find((candidate) => candidate.value === card.expression);
   if (!op) return null;
@@ -1052,6 +1071,8 @@ function directKeys(
         created("successions");
         break;
       case "add_count_rule":
+      case "add_rest_days_rule":
+      case "add_contracted_hours":
         created("counts");
         break;
       case "add_staffing_requirement":
@@ -1061,6 +1082,7 @@ function directKeys(
         keys.add(`rule:successions:${command.ruleId}`);
         break;
       case "edit_count_rule":
+      case "edit_contracted_hours":
         keys.add(`rule:counts:${command.ruleId}`);
         break;
       case "edit_staffing_requirement":

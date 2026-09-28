@@ -43,6 +43,7 @@ import type { OptimizeTimeoutOptions } from "@/app/api/optimize/options/validate
 import {
   acquireSessionStorage,
   noteOptimizeRunStarted,
+  publishSolverTimeoutSeconds,
   createAttemptRegistry,
   createOptimizeObservability,
   deriveOptimizeReadiness,
@@ -357,6 +358,24 @@ export function OptimizeAndExportScreen({
   // boolean, not a message from the protocol: the copy is settled and must never
   // vary with the internal reason.
   const [startFailed, setStartFailed] = useState(false);
+
+  // ASSISTANT SEAM — publish the solver timeout this screen would submit, so every solve
+  // the assistant starts uses the user's own timeout: the value typed here, else the
+  // deployment default. Null before the options have answered and on unmount, so a reader
+  // never mistakes this screen's legacy fallback for the deployment's own default (bd
+  // memory assistant-respects-solver-timeout). A derived publish, not a copy: the value
+  // is recomputed from the same state `buildSubmitInput` reads.
+  useEffect(() => {
+    if (typedTimeout !== null) {
+      const parsed = parseTimeoutInput(typedTimeout, timeoutBounds);
+      publishSolverTimeoutSeconds(parsed.ok ? parsed.value : null);
+      return;
+    }
+    publishSolverTimeoutSeconds(timeoutOptions.data === undefined ? null : timeoutBounds.default);
+  }, [typedTimeout, timeoutBounds, timeoutOptions.data]);
+
+  // The published value belongs to the mounted visit: leaving the screen retires it.
+  useEffect(() => () => publishSolverTimeoutSeconds(null), []);
 
   const view = controller.view;
   const active = isActiveLifecycle(view.lifecycle);

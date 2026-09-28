@@ -168,7 +168,7 @@ export function RosterDay({
               <span
                 className={cn(
                   "mt-0.5 font-ui text-label font-medium leading-none",
-                  selected ? "opacity-80" : "text-ink3",
+                  !selected && "text-ink3",
                 )}
               >
                 {calDay.weekday}
@@ -177,7 +177,7 @@ export function RosterDay({
                 <span
                   className={cn(
                     "mt-0.5 font-ui text-label font-semibold uppercase leading-none tracking-[0.04em]",
-                    selected ? "opacity-80" : "text-brandink",
+                    !selected && "text-brandink",
                   )}
                 >
                   {monthLabel(calendar, dateIdx)}

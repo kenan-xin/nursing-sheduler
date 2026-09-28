@@ -116,7 +116,8 @@ export const CAPABILITY_ENTRIES = [
       "Define each kind of shift the ward runs — its code, name, clock times and rest break — " +
       "and group related shifts together, such as all the night shifts. Working hours are the " +
       "clock time minus the unpaid break, and that is what the Employment Act's 12-hour daily " +
-      "limit counts: 08:00 to 20:30 with a 2-hour break is 10.5 hours. The assistant can also " +
+      "limit counts: a shift spanning 12.5 hours with a 2-hour break is 10.5 working hours. " +
+      "The assistant can also " +
       "prepare new shifts and shift groups for you to review and apply.",
     concepts: ["shift", "shift type", "shift group", "night shift", "clock times", "duration"],
     modes: BOTH_MODES,
@@ -165,7 +166,8 @@ export const CAPABILITY_ENTRIES = [
       "between shifts, so rest between shifts is written as shift orders it must not use, " +
       "such as no day shift straight after a night. Days in a row across any shifts are also a " +
       "shift-order rule: 'any shift' 6 days in a row set to must never happen allows at most " +
-      "5. Limits count over fixed dates, never a rolling seven days. Counts start fresh each " +
+      "5. Limits count over fixed dates; the one rolling rule is '2 rest days in any 7 days in a row', " +
+      "which checks every 7 days in a row. Counts start fresh each " +
       "roster period: last month's nights or weekends, and a day off owed for a public " +
       "holiday, are not carried over. Shift-order rules do check each nurse's last shifts " +
       "entered on the Requests page. A skill mix, such as at least 1 RN on a shift with others " +

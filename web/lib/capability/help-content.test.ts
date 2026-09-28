@@ -21,6 +21,10 @@ describe("what the scheduler cannot do (scheduler-limits)", () => {
   it("says limits use fixed dates, not a rolling window", () => {
     expect(text).toMatch(/rolling/);
   });
+  it("names the one rolling rule, 2 rest days in any 7 days in a row (4h5a)", () => {
+    expect(text).toMatch(/2 rest days in any 7 days in a row/);
+    expect(text).not.toMatch(/never a rolling seven days/);
+  });
   it("says counts start fresh each period, but shift-order rules read each nurse's history", () => {
     expect(text).toMatch(/Counts start fresh each roster period/);
     expect(text).toMatch(/public holiday/);

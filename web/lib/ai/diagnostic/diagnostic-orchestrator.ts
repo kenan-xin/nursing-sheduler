@@ -14,9 +14,10 @@
 //     validation.
 //   • Exact identity binding: every accepted candidate is bound through the T08
 //     `bindAcceptedJob` integrity check; a mismatch quarantines the candidate.
-//   • Sequential bounded execution: at most five candidates, one at a time, with a
-//     90-second per-candidate budget, stopping at the first tested-feasible result
-//     unless the user asked to compare (search-policy).
+//   • Sequential bounded execution: at most five candidates, one at a time, each under
+//     the user's own solver timeout (typed on the Optimize screen, else the deployment
+//     default), stopping at the first tested-feasible result unless the user asked to
+//     compare (search-policy).
 //   • T05 interruption across every stage: the turn epoch is re-checked before each
 //     candidate and during polling, and the DiagnosticCanceller requests backend
 //     cancellation of the owned running job.
@@ -180,7 +181,13 @@ export async function runDiagnosticSearch(
     parent: { basisId: string; jobId: string; scenarioId: string; documentRevision: number };
     parentExpiresAt: string | null;
     proposed: readonly ProposedCandidate[];
-    /** The deployment's accepted timeout bounds; the fixed candidate timeout is clamped into them. */
+    /**
+     * The effective solver timeout for each candidate: the value typed on the Optimize
+     * screen, else the deployment default from `GET /optimize/options`. Clamped into
+     * `timeoutBounds` at open.
+     */
+    timeoutSeconds: number;
+    /** The deployment's accepted timeout bounds; the effective candidate timeout is clamped into them. */
     timeoutBounds?: OptimizeTimeoutOptions;
   },
   runtime: DiagnosticRuntime,
@@ -214,6 +221,7 @@ export async function runDiagnosticSearch(
       scenarioGeneration: 0,
       compare: input.compare,
       parentExpiresAt: input.parentExpiresAt,
+      timeoutSeconds: input.timeoutSeconds,
       timeoutBounds: input.timeoutBounds,
       now,
     });
@@ -240,6 +248,7 @@ export async function runDiagnosticSearch(
     scenarioGeneration: guard.find((g) => g.scopeKey === `scenario:${scenarioId}`)?.generation ?? 0,
     compare: input.compare,
     parentExpiresAt: input.parentExpiresAt,
+    timeoutSeconds: input.timeoutSeconds,
     timeoutBounds: input.timeoutBounds,
     now,
   });

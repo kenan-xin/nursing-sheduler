@@ -10,7 +10,7 @@
 // deliberately not claimed as proof of real cross-context concurrency —
 // `e2e/scenario-ownership.spec.ts` covers that with two real browser contexts.
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isRepositoryError, LEASE_TTL_MS } from "@/lib/repository";
 import { createEmptyScenarioUiState } from "@/lib/scenario";
 import { useAuthorityStore } from "./authority";
@@ -425,6 +425,112 @@ describe("authoritative reread on resumption", () => {
     });
     expect(useAuthorityStore.getState().documentRevision).toBe(before);
     expect(useAuthorityStore.getState().ownership).toBe("owner");
+  });
+});
+
+describe("a FREE lease is re-acquired without a click (bead d854)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function setVisibility(visibilityState: "visible" | "hidden") {
+    vi.stubGlobal("document", { visibilityState });
+  }
+
+  it("a single tab facing a stale lease from its previous document regains editing at expiry", async () => {
+    let millis = Date.parse("2026-09-28T00:00:00.000Z");
+    const now = () => new Date(millis);
+    const previous = await installTestAuthority({ now });
+    await scenarioCommands.mutate({ rangeStart: "2026-04-01" });
+
+    // The previous document went away without releasing (BFCache, an unload that
+    // never finished its release). The reloaded document is the only tab left.
+    const reloaded = await installTestAuthority({ databaseName: previous.databaseName, now });
+    harness = reloaded;
+    expect(useAuthorityStore.getState().ownership).toBe("read-only");
+
+    // Still live: the periodic re-check must not steal it.
+    millis += LEASE_TTL_MS - 1_000;
+    await reloaded.authority.keepAlive();
+    expect(useAuthorityStore.getState().ownership).toBe("read-only");
+
+    millis += 2_000;
+    await reloaded.authority.keepAlive();
+    expect(useAuthorityStore.getState().ownership).toBe("owner");
+    expect(scenario.getState().rangeStart).toBe("2026-04-01");
+    expect((await scenarioCommands.mutate({ rangeStart: "2026-04-02" })).ok).toBe(true);
+  });
+
+  it("a live second tab stays read-only across periodic re-checks", async () => {
+    const peer = await installTestAuthority({
+      databaseName: harness.databaseName,
+      install: false,
+    });
+    await peer.authority.initialize();
+    await peer.authority.keepAlive();
+    await harness.authority.keepAlive();
+    await peer.authority.keepAlive();
+
+    expect(peer.authorityStore.getState().ownership).toBe("read-only");
+    expect(useAuthorityStore.getState().ownership).toBe("owner");
+  });
+
+  it("an owner that crashes without releasing is recovered by the other tab after expiry", async () => {
+    let millis = Date.parse("2026-09-28T00:00:00.000Z");
+    const now = () => new Date(millis);
+    const shared = freshAuthorityDbName();
+    const crashing = await installTestAuthority({ databaseName: shared, now, install: false });
+    await crashing.authority.initialize();
+    const survivor = await installTestAuthority({ databaseName: shared, now, install: false });
+    await survivor.authority.initialize();
+    expect(survivor.authorityStore.getState().ownership).toBe("read-only");
+
+    millis += LEASE_TTL_MS + 1_000;
+    await survivor.authority.keepAlive();
+    expect(survivor.authorityStore.getState().ownership).toBe("owner");
+
+    // The crashed tab's in-memory epoch is fenced.
+    expect((await crashing.authority.mutate({ rangeStart: "2099-01-01" })).ok).toBe(false);
+    expect((await survivor.authority.mutate({ rangeStart: "2026-05-05" })).ok).toBe(true);
+  });
+
+  it("a hidden owner whose lease lapsed re-acquires silently once visible, under a NEW epoch", async () => {
+    let millis = Date.parse("2026-09-28T00:00:00.000Z");
+    const expiring = await installTestAuthority({ now: () => new Date(millis) });
+    harness = expiring;
+    const scenarioId = useAuthorityStore.getState().scenarioId!;
+    const before = (await expiring.db.writerLeases.get(scenarioId))!.epoch;
+
+    setVisibility("hidden");
+    millis += LEASE_TTL_MS + 1_000;
+    await expiring.authority.keepAlive();
+    // A hidden tab never auto-acquires: the tab the user is looking at wins.
+    expect(useAuthorityStore.getState().ownership).toBe("expired");
+
+    setVisibility("visible");
+    await expiring.authority.reconcile();
+    expect(useAuthorityStore.getState().ownership).toBe("owner");
+    expect((await expiring.db.writerLeases.get(scenarioId))!.epoch).toBeGreaterThan(before);
+    expect((await scenarioCommands.mutate({ rangeStart: "2026-04-03" })).ok).toBe(true);
+  });
+
+  it("a lapsed owner that another tab took over meanwhile stays taken-over", async () => {
+    let millis = Date.parse("2026-09-28T00:00:00.000Z");
+    const now = () => new Date(millis);
+    const expiring = await installTestAuthority({ now });
+    harness = expiring;
+    const peer = await installTestAuthority({
+      databaseName: expiring.databaseName,
+      now,
+      install: false,
+    });
+    await peer.authority.initialize();
+
+    millis += LEASE_TTL_MS + 1_000;
+    await peer.authority.takeover();
+    await expiring.authority.reconcile();
+    expect(useAuthorityStore.getState().ownership).toBe("taken-over");
+    await expiring.authority.keepAlive();
+    expect(useAuthorityStore.getState().ownership).toBe("taken-over");
+    expect(peer.authorityStore.getState().ownership).toBe("owner");
   });
 });
 

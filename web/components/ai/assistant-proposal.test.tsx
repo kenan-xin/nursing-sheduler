@@ -255,7 +255,11 @@ describe("Apply", () => {
     );
     expect(await screen.findByTestId("proposal-stale")).toBeInTheDocument();
     expect(await screen.findByTestId("proposal-apply")).toBeDisabled();
-    expect(await screen.findByTestId("proposal-blocks")).toHaveTextContent("out of date");
+    const blocks = await screen.findByTestId("proposal-blocks");
+    expect(blocks).toHaveTextContent("out of date");
+    // The live region wraps the list; the list itself keeps its list semantics.
+    expect(blocks).toHaveRole("list");
+    expect(blocks.parentElement).toHaveRole("status");
   });
 
   it("goes Out of date when the turn is interrupted", async () => {

@@ -44,6 +44,7 @@ import {
 } from "./counts-model";
 import { convertContractedToGeneric } from "./convert-model";
 import { formatHalfHours, formatHalfHourRange } from "./half-hour-codec";
+import { REST_DAYS_EXPRESSION_TEXT, isRestDaysRuleCard } from "@/lib/rules/rest-days";
 
 /** The YAML-first explanation shown on a disabled Convert for an advanced-array
  *  count — its shape can only be edited through Save & Load first. */
@@ -183,15 +184,20 @@ export function CountCardList({
       {counts.map((card, index) => {
         const contractedHours = isContractedHoursCard(card);
         const advanced = isAdvancedCountCard(card);
+        // The rolling rest-days rule is expanded per 7-day window at submit: its
+        // stored fields are not editable here, only on/off and delete.
+        const restDays = isRestDaysRuleCard(card);
         // An ordinary card edits in the scalar form; a contracted card routes to the
         // guided contracted editor (M2a-2). Only the unmarked advanced-array card
         // (FR-PR-55a) stays read-only here — YAML is its only edit path.
         const showEdit = !advanced;
         const coefficients = card.countShiftTypeCoefficients ?? [];
         const unsupported = hasUnsupportedExpression(card.expression);
-        const expressionText = contractedHours
-          ? describeContractedTarget(card.target)
-          : describeCountExpressionTarget(card.expression, card.target);
+        const expressionText = restDays
+          ? REST_DAYS_EXPRESSION_TEXT
+          : contractedHours
+            ? describeContractedTarget(card.target)
+            : describeCountExpressionTarget(card.expression, card.target);
 
         return (
           <CardListItem
@@ -283,7 +289,7 @@ export function CountCardList({
                 >
                   {card.disabled ? "Enable" : "Disable"}
                 </CardActionButton>
-                {showEdit ? (
+                {restDays ? null : showEdit ? (
                   <CardActionButton
                     icon={<FaPen className="size-3" />}
                     onClick={() => onEdit(card.uid)}
@@ -301,7 +307,7 @@ export function CountCardList({
                     Read-only here — edit via Save &amp; Load (YAML)
                   </span>
                 )}
-                {contractedHours ? (
+                {restDays ? null : contractedHours ? (
                   <CardActionButton
                     icon={<FaArrowRightArrowLeft className="size-3" />}
                     onClick={() => onConvertToGeneric(card.uid)}
@@ -322,14 +328,16 @@ export function CountCardList({
                     Convert to contracted
                   </CardActionButton>
                 )}
-                <CardActionButton
-                  icon={<FaCopy className="size-3" />}
-                  onClick={() => onDuplicate(card.uid)}
-                  testId={`count-dup-${index}`}
-                  ariaLabel="Duplicate shift count"
-                >
-                  Duplicate
-                </CardActionButton>
+                {!restDays && (
+                  <CardActionButton
+                    icon={<FaCopy className="size-3" />}
+                    onClick={() => onDuplicate(card.uid)}
+                    testId={`count-dup-${index}`}
+                    ariaLabel="Duplicate shift count"
+                  >
+                    Duplicate
+                  </CardActionButton>
+                )}
                 <CardActionButton
                   icon={<FaTrash className="size-3" />}
                   danger

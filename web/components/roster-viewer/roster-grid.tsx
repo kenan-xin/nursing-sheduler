@@ -161,9 +161,14 @@ export function RosterGrid({
       <GridToolbar context={context} isEditing={isEditing} />
       <div
         data-testid="roster-grid"
+        // Focusable so a read-only grid (no tabbable cells) still scrolls from the keyboard.
+        role="region"
+        aria-label="Roster grid"
+        tabIndex={0}
         className={cn(
           // The card IS the scroller (DESIGN.md §5).
           "overflow-auto rounded-card border border-line bg-surface shadow-1",
+          "focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand",
         )}
         style={{ maxHeight: "66vh" }}
       >

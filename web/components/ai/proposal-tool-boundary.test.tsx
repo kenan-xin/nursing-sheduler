@@ -29,7 +29,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { BALANCE_RULE_NOTE, REST_PRACTICE_WARNING } from "@/lib/ai/assistant/playbook";
+import {
+  BALANCE_RULE_NOTE,
+  REST_PRACTICE_WARNING,
+  TRUTHFUL_SUMMARY_RULE,
+} from "@/lib/ai/assistant/playbook";
 import { proposalScenario } from "@/lib/proposal/test-support";
 import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import { createEmptyScenarioUiState } from "@/lib/scenario";
@@ -356,6 +360,11 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     // Nothing was altered.
     expect(useScenarioStore.getState().rangeStart).toBe("2026-04-01");
     expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-30");
+  });
+
+  it("tells the model its summary may only describe what the operations do (hg9v)", async () => {
+    await mount();
+    expect(proposalTool().description).toContain(TRUTHFUL_SUMMARY_RULE);
   });
 
   it("tells the model to take ids from the schedule before naming them", async () => {

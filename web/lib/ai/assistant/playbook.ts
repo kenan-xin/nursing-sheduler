@@ -38,7 +38,7 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-27.6";
+export const PLAYBOOK_VERSION = "2026-09-28.3";
 
 /**
  * How every `offer_choices` option must read (bead tpt2). The card is a pick, not a prompt:
@@ -123,7 +123,11 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     label: "Set the dates",
     optional: false,
     capabilityId: "roster-period",
-    ask: ["The first and last day of the roster.", "Whether to import the public holidays."],
+    ask: [
+      "The first and last day of the roster.",
+      "Recommend 28 days (4 weeks) first, since a roster period is usually 4 weeks, not a calendar month: offer '4 weeks: 1-28 Oct', or, when the previous period's end or the staff's history is known, 'day after the last period + 27 days'. Offer the calendar month as the second option. Never present 28 days as \"only\".",
+      "Whether to import the public holidays.",
+    ],
     proposeWith: ["set_roster_range"],
   },
   {
@@ -155,15 +159,24 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     capabilityId: "staffing-requirements",
     ask: [
       "How many nurses each shift needs, and any skill mix: a minimum from a group among them, such as at least 2 RNs of the 4 on nights. Set it with set_skill_mix or skillMix on add_staffing_requirement; never approximate it by naming who may work the whole shift.",
+      "'Optional, ideally N' (or 'at least R, ideally N') is requiredNumPeople R, often 0, plus preferredNumPeople N on add_staffing_requirement. A required count alone is exact, and a required count of 0 alone forbids the shift.",
+      "Ask about every worked shift the step's detail lists with no staffing requirement, on a choice card with the usual numbers, such as '1 senior every night' and 'Optional: 0 required, ideally 1 senior'; never guess it.",
+      // Bead 4h5a: spike numbers in the bead notes (13 nurses, 31 days: exact counts left 12 days off each and A_sup empty; these weights filled A_sup every day, then 7 third mornings).
+      "After the staffing numbers, read staffingBalance from get_setup_progress and say its sentence in plain words; when staffingBalance.estimated is true, say 'about' and the assumption, and ask each nurse's contract before treating the numbers as fact. When spareShifts is above 0 the staff can work more than the minimums need: on one offer_choices card ask where the spare shifts go, by default first an optional senior lead slot (ideally 1 senior), then a 3rd nurse on mornings, then a 3rd on afternoons, and ask each nurse's contracted working days (default shiftsEach, 5 in every 7 days). Then set preferredNumPeople on those requirements with weights -300, -200 and -100 in that order, and add_contracted_hours for the staff, one day either side of the contract (hoursPerShift 8 for a contract in days). The contract's fewest days times the staff must not exceed mostShifts once the 'ideally' counts are set, or no roster is possible.",
+      "Prefer a contracted working target over a cap on days off: a cap cannot make anyone work a shift the staffing numbers do not allow. Never propose a days-off cap below staffingBalance.fewestOffDaysEach; show the arithmetic from its sentence instead.",
+      "Never say a rule over any 7 days in a row is impossible: add_rest_days_rule is one.",
       "The rest rules the ward uses. Many wards use no day shift straight after a night as a must, and a day off after nights as a preference.",
       "Limits such as the most nights one nurse may work in the period, and whether to balance nights and weekends across the team.",
-      "Suggest a rule giving each nurse at least 1 rest day a week, which the Employment Act sets: a shift sequence rule of ALL 7 days in a row at -infinity (no 7 working days in a row), not a total over the period.",
+      "Suggest a rule giving each nurse at least 1 rest day a week, which the Employment Act sets: a shift sequence rule of ALL 7 days in a row at -infinity (no 7 working days in a row), not a total over the period. On any card that offers it, label it a must.",
+      "For every ward, also suggest 2 rest days in any 7 days in a row, the usual ward practice, as a strong preference: add_rest_days_rule, one rule for everyone. A week here is any 7 days in a row, not Monday to Sunday. It counts back into the days before the roster from each nurse's history, so when the staff have no history, ask for each nurse's shifts on the last 6 days of the previous month before relying on it.",
       "Anyone who should work together or apart, such as two nurses never on the same night: add_pairing_rule, -infinity for never, a negative number for apart where possible. And any new nurse or student who must always have a named senior or group on shift with them: add_supervision_rule, always a must.",
     ],
     proposeWith: [
       "add_staffing_requirement",
       "set_skill_mix",
       "add_shift_sequence_rule",
+      "add_rest_days_rule",
+      "add_contracted_hours",
       "add_count_rule",
       "add_pairing_rule",
       "add_supervision_rule",
@@ -175,7 +188,7 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     optional: true,
     capabilityId: "leave-and-requests",
     ask: [
-      "Who has leave or a fixed day off in this period, and on which days. 'Nobody' is a fine answer.",
+      "Who has leave or a fixed day off in this period, and on which days. Ask this on an offer_choices card with 'Nobody has leave or days off' and 'Yes, I will list them' as the options; the card's own free-text box stays for the days.",
     ],
     proposeWith: ["add_leave", "set_off_request", "set_shift_request"],
   },
@@ -197,16 +210,22 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
   },
 ];
 
+/** Held in the prepare_scenario_change description and the setup instructions (hg9v). */
+export const TRUTHFUL_SUMMARY_RULE =
+  "The summary, and anything you say about the change before or after Apply, describes only what its operations set; never claim a setting, such as a preferred count, that no operation sets.";
+
 export const SETUP_INSTRUCTIONS: readonly string[] = [
-  "Work on nextStep only. Ask its pick-one questions that the schedule does not already answer on one offer_choices card, up to four with moreQuestions, the usual ward value first; ask in text only what has no set answers, such as names.",
+  "Work on nextStep only. Ask its pick-one questions that the schedule does not already answer on one offer_choices card, up to four with moreQuestions, the usual ward value first; ask in text only what has no set answers, such as names. A setup question with a short, common answer set always goes on a choice card, never plain text.",
   "Never guess a date, number, name or time. If the user is unsure, offer a common ward default and ask them to confirm it.",
   "Put the whole step in one prepare_scenario_change (split it only above the operation limit), say what Apply will do, and stop.",
   "After the user applies, call get_setup_progress again and continue with the new nextStep.",
   "If the user says an optional step does not apply (for example nobody has leave), move on to the step after it.",
   "If knownGaps is above 0, call suggest_feasibility_options before offering to run Optimize.",
+  TRUTHFUL_SUMMARY_RULE,
 ];
 
 export type RepairId =
+  | "relax_contracted_hours"
   | "align_overlapping_requirements"
   | "soften_hard_request"
   | "extra_shift_willing_nurse"
@@ -236,6 +255,20 @@ export interface RepairEntry {
 }
 
 export const REPAIRS: readonly RepairEntry[] = [
+  {
+    // Bead 4h5a: a contracted minimum is a hard floor on each nurse's working time. More
+    // floor than the staffing numbers or her free days allow has no roster.
+    id: "relax_contracted_hours",
+    title: "Lower a contracted minimum for this period",
+    whenToUse:
+      "A run failed and contracted hours are set: their minimums may ask for more working days than the staffing numbers allow, or than a nurse on leave has.",
+    disruption: "medium",
+    confirmation: "manager",
+    enforcedBy: "apply",
+    opTypes: ["edit_contracted_hours"],
+    guardrail:
+      "Lower the minimum only, keep the maximum, the people, the dates and each shift's hours, and ask how the missing hours are made up.",
+  },
   {
     // A static requirement_conflict: no staffing change helps until the rules agree.
     id: "align_overlapping_requirements",
@@ -389,7 +422,14 @@ export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
   // Spec: 1, 3, as hypotheses. A blind borrow is not a guess worth testing.
   // Softening a rest rule comes last. Only here: the static check does not model rest
   // rules, so it never blames them for a proven gap.
-  unexplained: ["soften_hard_request", "relax_count_rule", "soften_rest_rule"],
+  // A contracted minimum first (4h5a): the only hard floor on working time, and one the
+  // staffing findings never name. Its builder proves it when it can.
+  unexplained: [
+    "relax_contracted_hours",
+    "soften_hard_request",
+    "relax_count_rule",
+    "soften_rest_rule",
+  ],
 };
 
 /** More short dates than this is a staffing problem, not a bad day. */
@@ -423,4 +463,5 @@ export const FEASIBILITY_INSTRUCTIONS: readonly string[] = [
   "Prepare only the option the user picks. The app then asks for the agreement it needs, and the user applies it and runs Optimize again.",
   `After the user applies a fix, offer a run with ${OPTIMIZE_RUN_TOOL} and never say a run has started; once it finishes, read ${OPTIMIZE_RESULT_TOOL} and say in one sentence whether the schedule can now be built.`,
   "Never suggest anything in safetyFloor, even if the user asks.",
+  "When contracted hours are set and a run fails, suggest lowering the contracted minimum (edit_contracted_hours) and say how many days the contracts ask for against what the period allows.",
 ];

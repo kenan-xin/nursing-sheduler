@@ -94,10 +94,23 @@ import {
   buildPeopleTransferOptions as countPeopleOptions,
   countToForm,
   emptyCountForm,
+  isContractedHoursCard,
   isEditableCountCard,
   validateCountForm,
   type CountFormState,
 } from "@/components/counts/counts-model";
+import {
+  buildContractedCard,
+  defaultContractedForm,
+  toContractedForm,
+  validateContractedCommit,
+  type ContractedFormState,
+} from "@/components/counts/contracted-model";
+import {
+  REST_DAYS_RULE_DESCRIPTION,
+  buildRestDaysRuleCard,
+  isRestDaysRuleCard,
+} from "@/lib/rules/rest-days";
 import {
   buildDateScopeAutoScopes as requirementAutoScopes,
   buildDateScopeDateGroups as requirementDateGroups,
@@ -106,6 +119,7 @@ import {
   buildRequirementShiftTypeDomain,
   buildRequirementShiftTypeOptions,
   emptyRequirementForm,
+  preferredDiffersFromRequired,
   REQUIREMENT_MESSAGES,
   requirementCoveredIsos,
   requirementToForm,
@@ -145,7 +159,7 @@ import { RenameCollisionError } from "@/lib/cascade";
 import { foldPaintIntents, type MintCellUid } from "@/lib/store/paint-fold";
 import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
 import { validateCover } from "@/lib/scenario/temporary-cover";
-import type { AssistantCommandV1, RequestWeight } from "./commands";
+import type { AssistantCommandV1, ContractedHoursFields, RequestWeight } from "./commands";
 import {
   choiceList,
   everyoneGroups,
@@ -625,6 +639,138 @@ function applyAddCountRule(
   };
 }
 
+function applyAddRestDaysRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_rest_days_rule" }>,
+  index: number,
+): OperationResult {
+  const existing = state.cardsByKind.counts.find(isRestDaysRuleCard);
+  if (existing) {
+    return reject(
+      index,
+      "no_effect",
+      `${ruleName("counts", existing.description?.trim() || REST_DAYS_RULE_DESCRIPTION)} is already in this schedule.`,
+    );
+  }
+  const card = buildRestDaysRuleCard(newRuleUid(state, "counts", command));
+  return {
+    ok: true,
+    next: withCards(state, "counts", [...state.cardsByKind.counts, card]),
+  };
+}
+
+/**
+ * The Contracted hours form as the user fills it: `base` is the form "Add Contracted
+ * Hours" opens (every worked shift and LEAVE, coefficients from each shift's working
+ * time) or the loaded card on Edit; then the hours typed, and, for a contract in days,
+ * every row set to `hoursPerShift`.
+ */
+function contractedDraft(
+  base: ContractedFormState,
+  command: ContractedHoursFields,
+): ContractedFormState {
+  const exact = command.minHours === command.maxHours;
+  const perShift = command.hoursPerShift;
+  return {
+    ...base,
+    description: command.description,
+    person: [...command.people],
+    countDates: [...command.dates],
+    policy: exact ? "exact" : "range",
+    targetExact: exact ? `${command.minHours}h` : "",
+    targetRangeMin: exact ? "" : `${command.minHours}h`,
+    targetRangeMax: exact ? "" : `${command.maxHours}h`,
+    countShiftTypeCoefficients:
+      perShift === undefined
+        ? base.countShiftTypeCoefficients
+        : base.countShiftTypeCoefficients.map(([id]) => [id, perShift * 2]),
+  };
+}
+
+/** The Contracted form's Save refusal for this draft, or undefined. */
+function contractedRejection(
+  state: ScenarioUiState,
+  command: ContractedHoursFields,
+  draft: ContractedFormState,
+  name: string,
+  index: number,
+  held?: unknown,
+): OperationResult | undefined {
+  const people = countPeopleOptions(state);
+  const offeredPeople = [...people.items, ...people.groups];
+  const person = firstUnofferedPerson(command.people, offeredPeople, held);
+  if (person !== undefined) return rulePersonRefusal(state, name, person, offeredPeople, index);
+  const dates = dateScopeRejection(state, command.dates, COUNT_DATES);
+  if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
+  const errors = validateContractedCommit(draft, state);
+  const coefficient =
+    errors.coefficientAggregate ?? Object.values(errors.coefficientErrorsById ?? {})[0];
+  const error = firstFormError(errors) ?? coefficient;
+  if (error) {
+    const hint =
+      coefficient && command.hoursPerShift === undefined
+        ? " A shift has no working time on the Shifts screen: send hoursPerShift, or set the shift's times first."
+        : "";
+    return reject(index, "invalid_value", `${name}: ${error}.${hint}`);
+  }
+  return undefined;
+}
+
+function applyAddContractedHours(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_contracted_hours" }>,
+  index: number,
+): OperationResult {
+  const draft = contractedDraft(defaultContractedForm(state), command);
+  const name = ruleName("counts", command.description);
+  const refused = contractedRejection(state, command, draft, name, index);
+  if (refused) return refused;
+  const card = buildContractedCard(draft, state, newRuleUid(state, "counts", command));
+  return {
+    ok: true,
+    next: withCards(state, "counts", [...state.cardsByKind.counts, card]),
+  };
+}
+
+/** `use-counts.ts` `updateContracted`: the loaded card, rebuilt in place, markers kept. */
+function applyEditContractedHours(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "edit_contracted_hours" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.counts.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      `That contracted hours card is not in this schedule any more. ${ruleChoices(state, "counts")}`,
+    );
+  }
+  const name = ruleName("counts", source.description?.trim() || source.uid);
+  if (!isContractedHoursCard(source)) {
+    return reject(
+      index,
+      "unsupported_shape",
+      `${name}: it is not a contracted hours card; edit it with edit_count_rule.`,
+    );
+  }
+  const draft = contractedDraft(toContractedForm(source, state), command);
+  const refused = contractedRejection(state, command, draft, name, index, source.person);
+  if (refused) return refused;
+  const next = keepMarkers(source, buildContractedCard(draft, state, source.uid));
+  if (stableStringify(next) === stableStringify(source)) {
+    return reject(index, "no_effect", `${name} already says exactly that.`);
+  }
+  return {
+    ok: true,
+    next: withCards(
+      state,
+      "counts",
+      state.cardsByKind.counts.map((card) => (card.uid === source.uid ? next : card)),
+    ),
+  };
+}
+
 function applyEditCountRule(
   state: ScenarioUiState,
   command: Extract<AssistantCommandV1, { type: "edit_count_rule" }>,
@@ -643,7 +789,11 @@ function applyEditCountRule(
     return reject(
       index,
       "unsupported_shape",
-      `${name}: it is a contracted-hours or list-shaped count, so it has to be edited on the Shift counts screen.`,
+      isRestDaysRuleCard(source)
+        ? `${name}: it counts any 7 days in a row, so it can only be turned off or removed.`
+        : isContractedHoursCard(source)
+          ? `${name}: it is a contracted hours card; edit it with edit_contracted_hours.`
+          : `${name}: it is a list-shaped count, so it has to be edited on the Shift counts screen.`,
     );
   }
   const domain = buildCountShiftTypeDomain(state);
@@ -689,6 +839,9 @@ function requirementDraft(
     requiredNumPeople: fields.requiredNumPeople,
     qualifiedPeople: [...fields.qualifiedPeople],
     date: [...fields.dates],
+    // Omitted, the form's own value stays: blank/-50 on add, the stored one on edit.
+    preferredNumPeople: fields.preferredNumPeople ?? base.preferredNumPeople,
+    weight: fields.weight === undefined ? base.weight : parseWeightInput(fields.weight),
     // The edit arm carries no skill mix, so `base` (loaded from the card) keeps it.
     skillMix: fields.skillMix ? fields.skillMix.map((entry) => ({ ...entry })) : base.skillMix,
   };
@@ -768,6 +921,19 @@ function requirementRejection(
         "set_staffing_requirement_on_date, sending the requirement's own number to remove it"
       : "";
   if (error) return reject(index, "invalid_value", `${name}: ${error}${hint}.`);
+  // A title promising a preferred count the card does not carry saves an exact count (hg9v).
+  if (/\b(ideally|preferred|preferably)\b/i.test(fields.description)) {
+    if (!preferredDiffersFromRequired(draft)) {
+      return reject(
+        index,
+        "invalid_value",
+        `${name}: the title says "ideally" or "preferred", but no preferredNumPeople above ` +
+          "requiredNumPeople is set, so the card would be an exact count. Send " +
+          "preferredNumPeople (for 'optional, ideally 1': requiredNumPeople 0, " +
+          "preferredNumPeople 1), or drop that word from the title.",
+      );
+    }
+  }
   return undefined;
 }
 
@@ -2047,6 +2213,12 @@ export function applyAssistantCommand(
       return applyEditSuccessionRule(state, command, index);
     case "add_count_rule":
       return applyAddCountRule(state, command, index);
+    case "add_rest_days_rule":
+      return applyAddRestDaysRule(state, command, index);
+    case "add_contracted_hours":
+      return applyAddContractedHours(state, command, index);
+    case "edit_contracted_hours":
+      return applyEditContractedHours(state, command, index);
     case "edit_count_rule":
       return applyEditCountRule(state, command, index);
     case "add_staffing_requirement":

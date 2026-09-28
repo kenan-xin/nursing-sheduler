@@ -73,6 +73,16 @@ export const RULE_KINDS = [
   "coverings",
 ] as const satisfies readonly GuidedRuleConstraintKind[];
 
+/** Contracted working time, as the Contracted hours form holds it (bead 4h5a). */
+export interface ContractedHoursFields {
+  description: string;
+  people: PersonRef[];
+  dates: string[];
+  minHours: number;
+  maxHours: number;
+  hoursPerShift?: number;
+}
+
 export type AssistantCommandV1 =
   /**
    * Move the roster period. The most consequential supported operation: dates that
@@ -197,6 +207,15 @@ export type AssistantCommandV1 =
       target: number;
       weight: string;
     }
+  /** Add the one rolling "2 rest days in any 7 days in a row" rule for everyone (bead 1v5k). */
+  | { type: "add_rest_days_rule" }
+  /**
+   * Contracted working time for each of these people -- the Contracted hours form's Save
+   * (bead 4h5a). A must: minHours = maxHours is exact, else a range.
+   */
+  | ({ type: "add_contracted_hours" } & ContractedHoursFields)
+  /** Replace these fields of one Contracted hours card -- that screen's Edit form (4h5a). */
+  | ({ type: "edit_contracted_hours"; ruleId: string } & ContractedHoursFields)
   /** Replace every field of one ordinary shift count rule -- that screen's Edit form. */
   | {
       type: "edit_count_rule";
@@ -209,7 +228,10 @@ export type AssistantCommandV1 =
       target: number;
       weight: string;
     }
-  /** Add one staffing requirement -- the Staffing requirements screen's Add form, no preferred count. */
+  /**
+   * Add one staffing requirement -- the Staffing requirements screen's Add form. An omitted
+   * preferred count leaves Preferred blank; an omitted weight keeps the form's default.
+   */
   | {
       type: "add_staffing_requirement";
       description: string;
@@ -217,11 +239,13 @@ export type AssistantCommandV1 =
       qualifiedPeople: PersonRef[];
       dates: string[];
       requiredNumPeople: number;
+      preferredNumPeople?: number;
+      weight?: string;
       skillMix?: { people: PersonRef; minNumPeople: number }[];
     }
   /**
-   * Replace these fields of one staffing requirement -- that screen's Edit form. Its
-   * preferred count, weight, coefficients and skill mix are kept as stored.
+   * Replace these fields of one staffing requirement -- that screen's Edit form. An
+   * omitted preferred count or weight, the coefficients and skill mix are kept as stored.
    */
   | {
       type: "edit_staffing_requirement";
@@ -231,6 +255,8 @@ export type AssistantCommandV1 =
       qualifiedPeople: PersonRef[];
       dates: string[];
       requiredNumPeople: number;
+      preferredNumPeople?: number;
+      weight?: string;
     }
   /**
    * Replace one staffing requirement's skill mix -- that screen's Edit form "Skill mix"
@@ -370,6 +396,9 @@ export const ASSISTANT_COMMAND_TYPES = [
   "add_shift_sequence_rule",
   "edit_shift_sequence_rule",
   "add_count_rule",
+  "add_rest_days_rule",
+  "add_contracted_hours",
+  "edit_contracted_hours",
   "edit_count_rule",
   "add_staffing_requirement",
   "edit_staffing_requirement",
@@ -552,6 +581,28 @@ function countFields() {
   };
 }
 
+function contractedFields() {
+  return {
+    description: ruleDescriptionSchema(),
+    people: rulePeopleSchema(),
+    dates: ruleDatesSchema(),
+    minHours: z
+      .number()
+      .describe("The fewest hours each person works over the dates, on the half-hour grid."),
+    maxHours: z
+      .number()
+      .describe("The most hours each person works; equal to minHours for an exact contract."),
+    hoursPerShift: z
+      .number()
+      .optional()
+      .describe(
+        "Count every worked shift and a leave day as this many hours, for a contract in " +
+          "days: 8 turns 21 to 23 days into minHours 168, maxHours 184. Omit it to count " +
+          "each shift's own working time from the Shifts screen (a leave day counts 8h).",
+      ),
+  };
+}
+
 function requirementFields() {
   return {
     description: ruleDescriptionSchema(),
@@ -576,8 +627,28 @@ function requirementFields() {
       .number()
       .describe(
         "The exact number of people on that shift on each date, e.g. 2 (a hard rule), " +
-          "unless the requirement already has a preferred count, which makes it the lowest " +
-          "allowed. It cannot go below the requirement's skill mix.",
+          "unless the requirement has a preferred count, which makes it the lowest " +
+          "allowed. 0 with no preferred count forbids the shift. It cannot go below the " +
+          "requirement's skill mix.",
+      ),
+    preferredNumPeople: z
+      .number()
+      .optional()
+      .describe(
+        "The Preferred number of people: 'at least requiredNumPeople, ideally this many'. " +
+          'For "optional, ideally 1" send requiredNumPeople 0 and preferredNumPeople 1. At ' +
+          "least 1 and not below requiredNumPeople; equal to it means no preference. Omit it " +
+          "for an exact count. On an edit, omitting it keeps the stored preferred count.",
+      ),
+    weight: z
+      .string()
+      .optional()
+      .describe(
+        "How strongly the preferred count is pursued, as typed in the Weight box: 0 or " +
+          'less, e.g. "-50" (the default for a new requirement); the more negative, the ' +
+          'stronger. "-infinity" makes the preferred count a must. Only used when ' +
+          "preferredNumPeople is above requiredNumPeople. On an edit, omitting it keeps the " +
+          "stored weight.",
       ),
   };
 }
@@ -734,7 +805,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     code: z
       .string()
       .describe(
-        "The new shift's short code as shown on the roster, e.g. am1, N. Must not match any " +
+        "The new shift's short code as shown on the roster, e.g. D or N. Must not match any " +
           "existing shift code or shift group id, and must contain a letter.",
       ),
     name: z
@@ -755,7 +826,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
           "Never ask the user whether a shift has a break. If they gave none, pick one: " +
           "copy the break of an existing shift of similar length, otherwise 0 under 6 hours, " +
           "30 from 6 to under 8 hours, 60 from 8 to under 12 hours, 120 for 12 hours or more " +
-          "(a long day or night, e.g. 08:00 to 20:30). Hours here are the clock span, start " +
+          "(a long day or night, e.g. a 12-hour day shift). Hours here are the clock span, start " +
           "to end. Say which break you chose " +
           "so the user can change it in Preview.",
       ),
@@ -832,6 +903,34 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     ...successionFields(),
   }),
   z.strictObject({ type: z.enum(["add_count_rule"]), ...countFields() }),
+  z
+    .strictObject({ type: z.enum(["add_rest_days_rule"]) })
+    .describe(
+      'Add "2 rest days in any 7 days in a row" for every nurse: at most 5 worked days in ' +
+        "any 7 days in a row (any 7 days, not Monday to Sunday), a strong preference; " +
+        "leave and days off are not worked, and the days before the roster count from each " +
+        "nurse's history. One rule; never build it from count or shift sequence rules.",
+    ),
+  z
+    .strictObject({ type: z.enum(["add_contracted_hours"]), ...contractedFields() })
+    .describe(
+      "Contracted working time for each named person over the period: the Contracted hours " +
+        "card on the Shift counts screen, always a must. Prefer it to a cap on days off: it " +
+        "makes each nurse work her contract, so the spare shifts go where 'ideally' counts " +
+        "allow them. Its minimum times the staff must fit what the staffing numbers allow " +
+        "(staffingBalance.mostShifts), or no roster is possible.",
+    ),
+  z
+    .strictObject({
+      type: z.enum(["edit_contracted_hours"]),
+      ruleId: ruleIdSchema(),
+      ...contractedFields(),
+    })
+    .describe(
+      "Replace these fields of one Contracted hours card -- that screen's Edit form. An " +
+        "omitted hoursPerShift keeps each shift's stored hours. Use it to lower a contracted " +
+        "minimum or widen the range when a roster is not possible.",
+    ),
   z.strictObject({
     type: z.enum(["edit_count_rule"]),
     ruleId: ruleIdSchema(),
@@ -879,7 +978,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     name: z
       .string()
       .describe(
-        'The person\'s name as the staff list should show it, e.g. "Float RN (Ward 5)". Must ' +
+        'The person\'s name as the staff list should show it, e.g. "Float RN (Ward X)". Must ' +
           "not match any existing person or staff group, and must not be ALL. Their trimmed " +
           "name becomes their id -- use it as personId in a later command in the same batch, " +
           "e.g. to mark a borrowed nurse off outside the days they cover.",
@@ -961,7 +1060,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
       .string()
       .describe(
         "The nurse's name as the Staff list should show it, with the ward she comes from in " +
-          'brackets, e.g. "Haseena (Ward 3)". She is a TEMPORARY COVER, not a person: no staff ' +
+          'brackets, e.g. "Nurse A (Ward X)". She is a TEMPORARY COVER, not a person: no staff ' +
           "row, no requests and no rules name her, and she is never a nurse who can be put on " +
           "the roster. A cover already booked for the same name and date is refused.",
       ),
