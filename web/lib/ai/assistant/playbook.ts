@@ -38,7 +38,7 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-28.1";
+export const PLAYBOOK_VERSION = "2026-09-28.2";
 
 /**
  * How every `offer_choices` option must read (bead tpt2). The card is a pick, not a prompt:
@@ -123,7 +123,11 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     label: "Set the dates",
     optional: false,
     capabilityId: "roster-period",
-    ask: ["The first and last day of the roster.", "Whether to import the public holidays."],
+    ask: [
+      "The first and last day of the roster.",
+      "Recommend 28 days (4 weeks) first, since a roster period is usually 4 weeks, not a calendar month: offer '4 weeks: 1-28 Oct', or, when the previous period's end or the staff's history is known, 'day after the last period + 27 days'. Offer the calendar month as the second option. Never present 28 days as \"only\".",
+      "Whether to import the public holidays.",
+    ],
     proposeWith: ["set_roster_range"],
   },
   {
@@ -178,7 +182,7 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     optional: true,
     capabilityId: "leave-and-requests",
     ask: [
-      "Who has leave or a fixed day off in this period, and on which days. 'Nobody' is a fine answer.",
+      "Who has leave or a fixed day off in this period, and on which days. Ask this on an offer_choices card with 'Nobody has leave or days off' and 'Yes, I will list them' as the options; the card's own free-text box stays for the days.",
     ],
     proposeWith: ["add_leave", "set_off_request", "set_shift_request"],
   },
@@ -205,7 +209,7 @@ export const TRUTHFUL_SUMMARY_RULE =
   "The summary, and anything you say about the change before or after Apply, describes only what its operations set; never claim a setting, such as a preferred count, that no operation sets.";
 
 export const SETUP_INSTRUCTIONS: readonly string[] = [
-  "Work on nextStep only. Ask its pick-one questions that the schedule does not already answer on one offer_choices card, up to four with moreQuestions, the usual ward value first; ask in text only what has no set answers, such as names.",
+  "Work on nextStep only. Ask its pick-one questions that the schedule does not already answer on one offer_choices card, up to four with moreQuestions, the usual ward value first; ask in text only what has no set answers, such as names. A setup question with a short, common answer set always goes on a choice card, never plain text.",
   "Never guess a date, number, name or time. If the user is unsure, offer a common ward default and ask them to confirm it.",
   "Put the whole step in one prepare_scenario_change (split it only above the operation limit), say what Apply will do, and stop.",
   "After the user applies, call get_setup_progress again and continue with the new nextStep.",
