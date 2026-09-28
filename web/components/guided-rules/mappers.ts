@@ -41,6 +41,7 @@ import {
   isAdvancedCoveringCard,
   summarizeRefs as summarizeCoveringRefs,
 } from "@/components/coverings/coverings-model";
+import { isRestDaysRuleCard } from "@/lib/rules/rest-days";
 import type { GuidedQuickField, GuidedRuleMapper } from "./types";
 
 /** Flatten a (possibly nested) shift-type ref tree — a single flat entry means
@@ -173,6 +174,9 @@ export const countsMapper: GuidedRuleMapper<CountCard> = {
   },
   summary(card) {
     const who = summarizeCountRefs(card.person);
+    if (isRestDaysRuleCard(card)) {
+      return `${who === RESERVED_SHIFT_TYPE.all ? "Everyone" : who}: at most 5 worked days in any 7 days in a row, counting the days before the roster from each nurse's history.`;
+    }
     const expr = describeCountExpressionTarget(card.expression, card.target);
     return `${who}: ${expr} across ${summarizeCountRefs(card.countDates)}.`;
   },
@@ -193,7 +197,8 @@ export const countsMapper: GuidedRuleMapper<CountCard> = {
     ];
   },
   unsupportedReason(card) {
-    return isEditableCountCard(card) && typeof card.target === "number"
+    return isRestDaysRuleCard(card) ||
+      (isEditableCountCard(card) && typeof card.target === "number")
       ? undefined
       : "This count uses a contracted-hours or list-shaped target — adjust it in Advanced.";
   },

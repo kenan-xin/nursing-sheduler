@@ -50,6 +50,7 @@ import {
   type UiShiftType,
   type UiShiftTypeGroup,
 } from "./types";
+import { expandRestDaysRule, isRestDaysRuleCard } from "@/lib/rules/rest-days";
 
 // A projectable card is a keyless backend body plus the *optional* guided
 // `disabled` marker the projection consults. Both a full `…Card` (marker + body,
@@ -345,7 +346,20 @@ export function projectScenarioDocument(source: ProjectableScenario): CanonicalS
  * type-narrowed call into the generalized `projectScenarioDocument`.
  */
 export function toCanonicalScenarioDocument(state: ScenarioUiState): CanonicalScenarioDocument {
-  return projectScenarioDocument(state);
+  // The one "2 rest days in any 7 days in a row" card becomes a shift count per
+  // 7-day window here, the path every solver-bound document takes. The workspace
+  // (`buildWorkspaceDocument`) projects without this step, so it keeps one record.
+  const counts = state.cardsByKind.counts;
+  const rest = counts.filter(isRestDaysRuleCard);
+  if (rest.length === 0) return projectScenarioDocument(state);
+  const document = projectScenarioDocument({
+    ...state,
+    cardsByKind: { ...state.cardsByKind, counts: counts.filter((c) => !isRestDaysRuleCard(c)) },
+  });
+  for (const card of rest) {
+    if (!card.disabled) document.preferences.push(...expandRestDaysRule(card, state));
+  }
+  return document;
 }
 
 /**

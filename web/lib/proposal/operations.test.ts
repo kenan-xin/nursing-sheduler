@@ -19,6 +19,7 @@ import {
   ruleWardScenario,
 } from "./test-support";
 import { REQUIREMENT_MESSAGES } from "@/components/requirements/requirements-model";
+import { isRestDaysRuleCard } from "@/lib/rules/rest-days";
 
 describe("set_roster_range", () => {
   it("purges references to dates that leave the range", () => {
@@ -2400,5 +2401,42 @@ describe("add_supervision_rule / edit_supervision_rule", () => {
     });
     expect(same.ok).toBe(false);
     if (!same.ok) expect(same.rejection.code).toBe("no_effect");
+  });
+});
+
+describe("add_rest_days_rule", () => {
+  it("adds 2 rest days in any 7 days in a row as one rule for everyone, once", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), { type: "add_rest_days_rule" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const card = result.next.cardsByKind.counts.at(-1)!;
+    expect(isRestDaysRuleCard(card)).toBe(true);
+    expect(card).toMatchObject({
+      description: "2 rest days in any 7 days in a row",
+      person: ["ALL"],
+      weight: -1000,
+    });
+
+    const again = applyAssistantCommand(result.next, { type: "add_rest_days_rule" });
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.rejection.code).toBe("no_effect");
+  });
+
+  it("never edits it as an ordinary count", () => {
+    const added = applyAssistantCommand(ruleWardScenario(), { type: "add_rest_days_rule" });
+    if (!added.ok) throw new Error("add failed");
+    const result = applyAssistantCommand(added.next, {
+      type: "edit_count_rule",
+      ruleId: added.next.cardsByKind.counts.at(-1)!.uid,
+      description: "Rest",
+      people: ["ALL"],
+      shiftTypes: ["ALL"],
+      dates: ["ALL"],
+      expression: "x > T",
+      target: 6,
+      weight: "-1000",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("unsupported_shape");
   });
 });

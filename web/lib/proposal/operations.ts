@@ -99,6 +99,11 @@ import {
   type CountFormState,
 } from "@/components/counts/counts-model";
 import {
+  REST_DAYS_RULE_DESCRIPTION,
+  buildRestDaysRuleCard,
+  isRestDaysRuleCard,
+} from "@/lib/rules/rest-days";
+import {
   buildDateScopeAutoScopes as requirementAutoScopes,
   buildDateScopeDateGroups as requirementDateGroups,
   buildDateScopeDateItems as requirementDateItems,
@@ -625,6 +630,26 @@ function applyAddCountRule(
   };
 }
 
+function applyAddRestDaysRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_rest_days_rule" }>,
+  index: number,
+): OperationResult {
+  const existing = state.cardsByKind.counts.find(isRestDaysRuleCard);
+  if (existing) {
+    return reject(
+      index,
+      "no_effect",
+      `${ruleName("counts", existing.description?.trim() || REST_DAYS_RULE_DESCRIPTION)} is already in this schedule.`,
+    );
+  }
+  const card = buildRestDaysRuleCard(newRuleUid(state, "counts", command));
+  return {
+    ok: true,
+    next: withCards(state, "counts", [...state.cardsByKind.counts, card]),
+  };
+}
+
 function applyEditCountRule(
   state: ScenarioUiState,
   command: Extract<AssistantCommandV1, { type: "edit_count_rule" }>,
@@ -643,7 +668,9 @@ function applyEditCountRule(
     return reject(
       index,
       "unsupported_shape",
-      `${name}: it is a contracted-hours or list-shaped count, so it has to be edited on the Shift counts screen.`,
+      isRestDaysRuleCard(source)
+        ? `${name}: it counts any 7 days in a row, so it can only be turned off or removed.`
+        : `${name}: it is a contracted-hours or list-shaped count, so it has to be edited on the Shift counts screen.`,
     );
   }
   const domain = buildCountShiftTypeDomain(state);
@@ -2047,6 +2074,8 @@ export function applyAssistantCommand(
       return applyEditSuccessionRule(state, command, index);
     case "add_count_rule":
       return applyAddCountRule(state, command, index);
+    case "add_rest_days_rule":
+      return applyAddRestDaysRule(state, command, index);
     case "edit_count_rule":
       return applyEditCountRule(state, command, index);
     case "add_staffing_requirement":

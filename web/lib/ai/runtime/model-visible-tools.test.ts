@@ -381,6 +381,7 @@ describe("the command arms the provider is actually shown", () => {
         target: 5,
         weight: "infinity",
       },
+      add_rest_days_rule: { type: "add_rest_days_rule" },
       edit_count_rule: {
         type: "edit_count_rule",
         ruleId: "c1",

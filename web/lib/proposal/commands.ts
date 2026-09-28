@@ -197,6 +197,8 @@ export type AssistantCommandV1 =
       target: number;
       weight: string;
     }
+  /** Add the one rolling "2 rest days in any 7 days in a row" rule for everyone (bead 1v5k). */
+  | { type: "add_rest_days_rule" }
   /** Replace every field of one ordinary shift count rule -- that screen's Edit form. */
   | {
       type: "edit_count_rule";
@@ -370,6 +372,7 @@ export const ASSISTANT_COMMAND_TYPES = [
   "add_shift_sequence_rule",
   "edit_shift_sequence_rule",
   "add_count_rule",
+  "add_rest_days_rule",
   "edit_count_rule",
   "add_staffing_requirement",
   "edit_staffing_requirement",
@@ -832,6 +835,14 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     ...successionFields(),
   }),
   z.strictObject({ type: z.enum(["add_count_rule"]), ...countFields() }),
+  z
+    .strictObject({ type: z.enum(["add_rest_days_rule"]) })
+    .describe(
+      'Add "2 rest days in any 7 days in a row" for every nurse: at most 5 worked days in ' +
+        "any 7 days in a row (any 7 days, not Monday to Sunday), a strong preference; " +
+        "leave and days off are not worked, and the days before the roster count from each " +
+        "nurse's history. One rule; never build it from count or shift sequence rules.",
+    ),
   z.strictObject({
     type: z.enum(["edit_count_rule"]),
     ruleId: ruleIdSchema(),

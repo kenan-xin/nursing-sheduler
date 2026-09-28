@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { CountCardList } from "./count-card-list";
 import type { CountCard } from "@/lib/scenario";
+import { buildRestDaysRuleCard } from "@/lib/rules/rest-days";
 
 // ds1 (P2): a saved contracted-hours card once rendered the RAW half-hour encoding
 // in its summary — a 160h contract showed as `x = 320` and its coefficients as
@@ -221,5 +222,20 @@ describe("CountCardList — unsupported expression (wa46)", () => {
     render(<CountCardList {...NOOP_PROPS} counts={[ordinaryCard]} />);
     expect(screen.queryByTestId("count-unsupported-badge-0")).toBeNull();
     expect(screen.queryByTestId("count-unsupported-note-0")).toBeNull();
+  });
+});
+
+describe("CountCardList — 2 rest days in any 7 days in a row (1v5k)", () => {
+  it("shows the rolling rule as one read-only card in plain words", () => {
+    render(<CountCardList {...NOOP_PROPS} counts={[buildRestDaysRuleCard("t")]} />);
+    const card = screen.getByTestId("count-card-0");
+    expect(within(card).getByText("2 rest days in any 7 days in a row")).toBeTruthy();
+    expect(within(card).getByTestId("count-expression-0").textContent).toBe(
+      "At most 5 worked days in any 7 days in a row",
+    );
+    expect(within(card).queryByTestId("count-edit-0")).toBeNull();
+    expect(within(card).queryByTestId("count-dup-0")).toBeNull();
+    expect(within(card).queryByTestId("count-convert-contracted-0")).toBeNull();
+    expect(within(card).getByTestId("count-delete-0")).toBeTruthy();
   });
 });

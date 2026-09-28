@@ -1052,6 +1052,7 @@ function directKeys(
         created("successions");
         break;
       case "add_count_rule":
+      case "add_rest_days_rule":
         created("counts");
         break;
       case "add_staffing_requirement":
