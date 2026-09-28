@@ -1067,6 +1067,108 @@ describe("requirement arms are the Staffing requirements screen's commit", () =>
   });
 });
 
+describe("a requirement's preferred count and weight are the form's (hg9v)", () => {
+  const rows: { requiredNumPeople: number; preferredNumPeople?: number; weight?: string }[] = [
+    { requiredNumPeople: 0, preferredNumPeople: 1, weight: "-50" }, // optional, ideally 1
+    { requiredNumPeople: 2, preferredNumPeople: 3, weight: "-infinity" },
+    { requiredNumPeople: 1, preferredNumPeople: 2 }, // the form's own weight
+    { requiredNumPeople: 2, preferredNumPeople: 2, weight: "10" }, // equal: weight inert
+    { requiredNumPeople: 2, preferredNumPeople: 1, weight: "-5" }, // below required
+    { requiredNumPeople: 0, preferredNumPeople: 0, weight: "-5" }, // below 1
+    { requiredNumPeople: 1, preferredNumPeople: 2, weight: "10" }, // positive
+    { requiredNumPeople: 1, preferredNumPeople: 2, weight: "lots" }, // not a number
+  ];
+  const fields = {
+    shiftType: "Day",
+    qualifiedPeople: ["ALL"],
+    dates: ["ALL"],
+  };
+  const withRow = <T extends { preferredNumPeople: unknown; weight: unknown }>(
+    base: T,
+    row: (typeof rows)[number],
+  ) => ({
+    ...base,
+    requiredNumPeople: row.requiredNumPeople,
+    ...(row.preferredNumPeople === undefined ? {} : { preferredNumPeople: row.preferredNumPeople }),
+    ...(row.weight === undefined ? {} : { weight: parseWeightInput(row.weight) }),
+  });
+
+  it("add: accepts and refuses what the form does, and commits the same document", () => {
+    const state = ruleWardScenario();
+    const domain = buildRequirementShiftTypeDomain(state);
+    for (const [i, row] of rows.entries()) {
+      const form = withRow(
+        {
+          ...emptyRequirementForm(),
+          description: `row ${i}`,
+          shiftType: [fields.shiftType],
+          qualifiedPeople: fields.qualifiedPeople,
+          date: fields.dates,
+        },
+        row,
+      );
+      const assistant = applyAssistantCommand(state, {
+        type: "add_staffing_requirement",
+        description: `row ${i}`,
+        ...fields,
+        ...row,
+      });
+      expect(assistant.ok, `row ${i}`).toBe(valid(validateRequirementForm(form, domain)));
+      if (!assistant.ok) continue;
+      const uid = assistant.next.cardsByKind.requirements.at(-1)!.uid;
+      expect(assistant.next).toEqual(applyRequirementPatch(state, { type: "add", form, uid }));
+    }
+  });
+
+  it("edit: starts from the loaded card and commits the same document", () => {
+    const state = ruleWardScenario();
+    const source = state.cardsByKind.requirements[0];
+    const domain = buildRequirementShiftTypeDomain(state);
+    for (const [i, row] of rows.entries()) {
+      const form = withRow(
+        {
+          ...requirementToForm(source, domain),
+          description: "Day cover",
+          shiftType: [fields.shiftType],
+          qualifiedPeople: fields.qualifiedPeople,
+          date: fields.dates,
+        },
+        row,
+      );
+      const assistant = applyAssistantCommand(state, {
+        type: "edit_staffing_requirement",
+        ruleId: "req-day",
+        description: "Day cover",
+        ...fields,
+        ...row,
+      });
+      expect(assistant.ok, `row ${i}`).toBe(valid(validateRequirementForm(form, domain)));
+      if (assistant.ok) {
+        expect(assistant.next).toEqual(
+          applyRequirementPatch(state, { type: "update", uid: "req-day", form }),
+        );
+      }
+    }
+  });
+
+  it("optional, ideally 1 saves required 0 plus preferred 1, not an exact 0", () => {
+    const assistant = applyAssistantCommand(ruleWardScenario(), {
+      type: "add_staffing_requirement",
+      description: "Second senior (optional, ideally 1)",
+      ...fields,
+      requiredNumPeople: 0,
+      preferredNumPeople: 1,
+      weight: "-50",
+    });
+    if (!assistant.ok) throw new Error(assistant.rejection.message);
+    expect(assistant.next.cardsByKind.requirements.at(-1)).toMatchObject({
+      requiredNumPeople: 0,
+      preferredNumPeople: 1,
+      weight: -50,
+    });
+  });
+});
+
 describe("set_staffing_requirement_on_date is the Edit form with one exception row", () => {
   const rows: [string, number][] = [
     ["2026-04-14", 1],

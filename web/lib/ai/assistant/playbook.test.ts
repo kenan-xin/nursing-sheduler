@@ -18,6 +18,7 @@ import {
   REST_PRACTICE_WARNING,
   SAFETY_FLOOR,
   SETUP_INSTRUCTIONS,
+  TRUTHFUL_SUMMARY_RULE,
   SETUP_STEPS,
   relaxesRestRule,
   setsBalanceRule,
@@ -287,8 +288,18 @@ describe("setup hints carry ward defaults, never invented law", () => {
     const help = CAPABILITY_ENTRIES.find((e) => e.id === "ai-assistant-conversation");
     expect(help?.nurseFacingSummary).not.toMatch(/cannot yet create pairing/);
   });
+  it("maps 'optional, ideally N' to a preferred count, never to required 0 alone (hg9v)", () => {
+    const ask = SETUP_STEPS.find((s) => s.id === "rules")!.ask.join(" ");
+    expect(ask).toMatch(/ideally N/);
+    expect(ask).toMatch(/preferredNumPeople/);
+    expect(ask).toMatch(/required count alone is exact/);
+    expect(ask).toMatch(/0 alone forbids the shift/);
+  });
+  it("holds every summary to what its operations do (hg9v)", () => {
+    expect(SETUP_INSTRUCTIONS).toContain(TRUTHFUL_SUMMARY_RULE);
+  });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-27.6");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-28.1");
   });
 });
 

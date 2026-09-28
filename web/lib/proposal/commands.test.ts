@@ -64,6 +64,29 @@ describe("the rule arms' text states what the solver enforces", () => {
     expect(mix).toContain("[] removes it");
   });
 
+  it("offers the form's preferred count and weight on add and edit (hg9v)", () => {
+    for (const type of ["add_staffing_requirement", "edit_staffing_requirement"]) {
+      expect(arm(type).preferredNumPeople.description).toMatch(/ideally/);
+      expect(arm(type).weight.description).toMatch(/-infinity/);
+    }
+    const fields = {
+      description: "Second senior",
+      shiftType: "A_sup",
+      qualifiedPeople: ["ALL"],
+      dates: ["ALL"],
+      requiredNumPeople: 0,
+    };
+    expect(
+      parseAssistantCommands([
+        { type: "add_staffing_requirement", ...fields, preferredNumPeople: 1, weight: "-50" },
+        { type: "edit_staffing_requirement", ruleId: "r", ...fields, preferredNumPeople: 1 },
+      ]).ok,
+    ).toBe(true);
+    expect(
+      parseAssistantCommands([{ type: "add_staffing_requirement", ...fields, weight: -50 }]).ok,
+    ).toBe(false);
+  });
+
   it("says a head count cannot go below the skill mix", () => {
     for (const type of ["add_staffing_requirement", "edit_staffing_requirement"]) {
       expect(arm(type).requiredNumPeople.description).toContain(

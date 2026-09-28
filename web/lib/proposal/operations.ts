@@ -106,6 +106,7 @@ import {
   buildRequirementShiftTypeDomain,
   buildRequirementShiftTypeOptions,
   emptyRequirementForm,
+  preferredDiffersFromRequired,
   REQUIREMENT_MESSAGES,
   requirementCoveredIsos,
   requirementToForm,
@@ -689,6 +690,9 @@ function requirementDraft(
     requiredNumPeople: fields.requiredNumPeople,
     qualifiedPeople: [...fields.qualifiedPeople],
     date: [...fields.dates],
+    // Omitted, the form's own value stays: blank/-50 on add, the stored one on edit.
+    preferredNumPeople: fields.preferredNumPeople ?? base.preferredNumPeople,
+    weight: fields.weight === undefined ? base.weight : parseWeightInput(fields.weight),
     // The edit arm carries no skill mix, so `base` (loaded from the card) keeps it.
     skillMix: fields.skillMix ? fields.skillMix.map((entry) => ({ ...entry })) : base.skillMix,
   };
@@ -768,6 +772,19 @@ function requirementRejection(
         "set_staffing_requirement_on_date, sending the requirement's own number to remove it"
       : "";
   if (error) return reject(index, "invalid_value", `${name}: ${error}${hint}.`);
+  // A title promising a preferred count the card does not carry saves an exact count (hg9v).
+  if (/\b(ideally|preferred|preferably)\b/i.test(fields.description)) {
+    if (!preferredDiffersFromRequired(draft)) {
+      return reject(
+        index,
+        "invalid_value",
+        `${name}: the title says "ideally" or "preferred", but no preferredNumPeople above ` +
+          "requiredNumPeople is set, so the card would be an exact count. Send " +
+          "preferredNumPeople (for 'optional, ideally 1': requiredNumPeople 0, " +
+          "preferredNumPeople 1), or drop that word from the title.",
+      );
+    }
+  }
   return undefined;
 }
 
