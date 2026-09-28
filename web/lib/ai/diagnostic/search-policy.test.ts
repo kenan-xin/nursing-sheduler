@@ -10,7 +10,6 @@ import type { JobBasis } from "@/lib/bff/types";
 import type { RecoveryClassification } from "@/lib/optimize/basis/recovery";
 import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 import {
-  DIAGNOSTIC_CANDIDATE_TIMEOUT_SECONDS,
   appendSubmittedCandidate,
   closeSearch,
   openDiagnosticSearch,
@@ -56,22 +55,26 @@ function openSearch(over: Partial<DiagnosticSearchRecordV1> = {}): DiagnosticSea
       scenarioGeneration: 1,
       compare: false,
       parentExpiresAt: "2026-08-08T00:00:00Z",
+      timeoutSeconds: 90,
       now: NOW,
     }),
     ...over,
   };
 }
 
-// The assistant's feasibility-test run sends a FIXED per-candidate timeout, but a
-// deployment's `GET /optimize/options` bounds may exclude it (min > 90 or max < 90),
+// The assistant's feasibility-test run uses the user's own solver timeout, but a
+// deployment's `GET /optimize/options` bounds may exclude it (min > it or max < it),
 // and such a run is rejected before it starts. The record must carry a timeout the
 // deployment actually accepts.
-describe("openDiagnosticSearch — the fixed candidate timeout is clamped to the loaded bounds", () => {
-  function candidateTimeout(bounds?: {
-    default: number;
-    minimum: number;
-    maximum: number;
-  }): number {
+describe("openDiagnosticSearch — the effective candidate timeout is clamped to the loaded bounds", () => {
+  function candidateTimeout(
+    timeoutSeconds: number,
+    bounds?: {
+      default: number;
+      minimum: number;
+      maximum: number;
+    },
+  ): number {
     return openDiagnosticSearch({
       searchId: "search-1",
       scenarioId: "scenario-1",
@@ -89,15 +92,22 @@ describe("openDiagnosticSearch — the fixed candidate timeout is clamped to the
       scenarioGeneration: 1,
       compare: false,
       parentExpiresAt: null,
+      timeoutSeconds,
       now: NOW,
       timeoutBounds: bounds,
     }).candidateTimeoutSeconds;
   }
 
-  it("clamps to the deployment's bounds, and keeps the fixed timeout without them", () => {
-    expect(candidateTimeout({ default: 120, minimum: 120, maximum: 600 })).toBe(120);
-    expect(candidateTimeout({ default: 60, minimum: 1, maximum: 60 })).toBe(60);
-    expect(candidateTimeout()).toBe(DIAGNOSTIC_CANDIDATE_TIMEOUT_SECONDS);
+  it("clamps the effective timeout to the deployment's bounds, and keeps it without them", () => {
+    expect(candidateTimeout(90, { default: 120, minimum: 120, maximum: 600 })).toBe(120);
+    expect(candidateTimeout(90, { default: 60, minimum: 1, maximum: 60 })).toBe(60);
+    expect(candidateTimeout(90)).toBe(90);
+  });
+
+  it("carries the user's typed timeout, not a fixed budget, when the deployment accepts it", () => {
+    // The 15 s deployment default and a user's typed 45 s both travel verbatim.
+    expect(candidateTimeout(45, { default: 15, minimum: 1, maximum: 600 })).toBe(45);
+    expect(candidateTimeout(15, { default: 15, minimum: 1, maximum: 600 })).toBe(15);
   });
 });
 

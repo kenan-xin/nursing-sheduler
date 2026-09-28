@@ -820,7 +820,12 @@ describe("OptimizeAndExportScreen — G4 dedicated /roster route", () => {
 });
 describe("OptimizeAndExportScreen — assistant run request", () => {
   beforeEach(() => {
-    useRunRequestStore.setState({ pending: null, last: null, runRevision: null });
+    useRunRequestStore.setState({
+      pending: null,
+      last: null,
+      runRevision: null,
+      solverTimeoutSeconds: null,
+    });
   });
 
   /** Routes the run's traffic and counts POSTs, the one fact these cases assert. */
@@ -863,11 +868,14 @@ describe("OptimizeAndExportScreen — assistant run request", () => {
 
     await waitFor(() => expect(posts()).toBe(1));
     // The run remembers which schedule revision it was built from (2vtv), so a later
-    // change marks its result as stale for the assistant.
+    // change marks its result as stale for the assistant. It also publishes the solver
+    // timeout it would submit — here the legacy 300, since this route serves no
+    // /api/optimize/options — for the assistant's diagnostic solves to honour.
     expect(useRunRequestStore.getState()).toEqual({
       pending: null,
       last: "started",
       runRevision: useAuthorityStore.getState().documentRevision,
+      solverTimeoutSeconds: 300,
     });
   });
 
@@ -966,7 +974,12 @@ describe("OptimizeAndExportScreen — backend timeout options (2by.7)", () => {
   }
 
   beforeEach(() => {
-    useRunRequestStore.setState({ pending: null, last: null, runRevision: null });
+    useRunRequestStore.setState({
+      pending: null,
+      last: null,
+      runRevision: null,
+      solverTimeoutSeconds: null,
+    });
   });
 
   it("fills the timeout with the backend default and shows its bounds", async () => {
@@ -1037,6 +1050,38 @@ describe("OptimizeAndExportScreen — backend timeout options (2by.7)", () => {
 
     await waitFor(() => expect(posted).toEqual(["120"]));
     expect(useRunRequestStore.getState().last).toBe("started");
+  });
+
+  it("publishes the effective timeout for the assistant's diagnostic solves", async () => {
+    await readyStore();
+    routeWithOptions(() => json(200, BACKEND_TIMEOUT));
+    renderScreen();
+
+    // The backend default, once the options load...
+    await waitFor(() => expect(useRunRequestStore.getState().solverTimeoutSeconds).toBe(120));
+    // ...then the user's typed value, which is the timeout their own runs use.
+    const input = screen.getByLabelText("Solver Timeout");
+    await userEvent.clear(input);
+    await userEvent.type(input, "45");
+    await waitFor(() => expect(useRunRequestStore.getState().solverTimeoutSeconds).toBe(45));
+  });
+
+  it("publishes nothing until the options load, so the legacy fallback is never read", async () => {
+    await readyStore();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    routeWithOptions(async () => {
+      await gate;
+      return json(200, BACKEND_TIMEOUT);
+    });
+    renderScreen();
+
+    await waitFor(() => expect(screen.getByText("Online")).toBeInTheDocument());
+    expect(useRunRequestStore.getState().solverTimeoutSeconds).toBeNull();
+    release();
+    await waitFor(() => expect(useRunRequestStore.getState().solverTimeoutSeconds).toBe(120));
   });
 });
 

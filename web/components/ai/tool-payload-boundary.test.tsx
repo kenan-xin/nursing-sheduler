@@ -164,6 +164,7 @@ const SETTLED_SEARCH = closeSearch(
     scenarioGeneration: 0,
     compare: false,
     parentExpiresAt: null,
+    timeoutSeconds: 90,
     now: new Date("2026-08-11T00:00:00Z"),
   }),
   "exhausted",
