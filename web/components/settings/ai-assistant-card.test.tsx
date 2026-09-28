@@ -392,6 +392,31 @@ describe("catalog unavailable and fallback", () => {
     );
   });
 
+  it("preselects the recommended model even when it sits past the list cap", async () => {
+    const many = Array.from({ length: 120 }, (_, index) => ({
+      id: `vendor/model-${String(index).padStart(3, "0")}`,
+      name: `Model ${String(index).padStart(3, "0")}`,
+      contextLength: null,
+    }));
+    installFetch({
+      catalog: () =>
+        new Response(
+          JSON.stringify({
+            source: "catalog",
+            fallbackVersion: 1,
+            models: many,
+            recommendedId: many[90].id,
+          }),
+          { status: 200 },
+        ),
+    });
+    renderCard();
+
+    await waitFor(() =>
+      expect((screen.getByTestId("ai-model-select") as HTMLSelectElement).value).toBe(many[90].id),
+    );
+  });
+
   it("follows the visible options when a search excludes the current preference", async () => {
     const user = userEvent.setup();
     renderCard();
