@@ -107,6 +107,7 @@ export const Diagnostic: Story = {
         scenarioGeneration: 0,
         compare: false,
         parentExpiresAt: null,
+        timeoutSeconds: 90,
         now: new Date("2026-08-07T12:00:00Z"),
       }),
       epoch(),

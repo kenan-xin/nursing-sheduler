@@ -34,12 +34,6 @@ export const DIAGNOSTIC_SEARCH_SCHEMA_VERSION = 1 as const;
 export const MAX_DIAGNOSTIC_CANDIDATES = 5;
 
 /**
- * The per-candidate solver timeout (tech-plan "Diagnostic budget"). A fixed value the
- * record clamps into the deployment's bounds at open — see `OpenDiagnosticSearchInput.timeoutBounds`.
- */
-export const DIAGNOSTIC_CANDIDATE_TIMEOUT_SECONDS = 90;
-
-/**
  * Why a search stopped. Each value is a distinct product-visible state, never a
  * free-form string — the explanation module maps these to nurse-facing wording.
  */
@@ -154,6 +148,12 @@ export interface DiagnosticSearchRecordV1 {
 
   /** Whether to continue past the first tested-feasible candidate. */
   compare: boolean;
+  /**
+   * The per-candidate solver timeout. Captured at open from the effective timeout the
+   * caller supplied — the user's typed Optimize timeout, else the deployment default —
+   * clamped into the deployment's bounds. Never a fixed budget: every solve the
+   * assistant starts uses the user's solver timeout.
+   */
   candidateTimeoutSeconds: number;
   maxCandidates: number;
 
@@ -184,9 +184,15 @@ export interface OpenDiagnosticSearchInput {
   /** When the parent's server evidence expires, so the search knows it is stale after. */
   parentExpiresAt: string | null;
   /**
-   * The deployment's accepted solver-timeout bounds (`GET /optimize/options`). The fixed
-   * per-candidate timeout is clamped into them, because a deployment whose bounds exclude
-   * it rejects the run outright. Absent => the legacy bounds apply.
+   * The effective solver timeout for each candidate — the value the user typed on the
+   * Optimize screen, else the deployment default from `GET /optimize/options`. Clamped
+   * into `timeoutBounds` at open, because a deployment whose bounds exclude it rejects
+   * the run outright.
+   */
+  timeoutSeconds: number;
+  /**
+   * The deployment's accepted solver-timeout bounds (`GET /optimize/options`). The
+   * effective per-candidate timeout is clamped into them. Absent => the legacy bounds apply.
    */
   timeoutBounds?: OptimizeTimeoutOptions;
   now: Date;
@@ -207,10 +213,7 @@ export function openDiagnosticSearch(input: OpenDiagnosticSearchInput): Diagnost
     globalGeneration: input.globalGeneration,
     scenarioGeneration: input.scenarioGeneration,
     compare: input.compare,
-    candidateTimeoutSeconds: clampTimeoutSeconds(
-      DIAGNOSTIC_CANDIDATE_TIMEOUT_SECONDS,
-      input.timeoutBounds,
-    ),
+    candidateTimeoutSeconds: clampTimeoutSeconds(input.timeoutSeconds, input.timeoutBounds),
     maxCandidates: MAX_DIAGNOSTIC_CANDIDATES,
     status: "open",
     candidates: [],

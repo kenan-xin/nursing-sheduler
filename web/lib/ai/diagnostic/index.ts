@@ -12,7 +12,6 @@ export type {
   DiagnosticStopReason,
 } from "./search-record";
 export {
-  DIAGNOSTIC_CANDIDATE_TIMEOUT_SECONDS,
   DIAGNOSTIC_SEARCH_SCHEMA_VERSION,
   MAX_DIAGNOSTIC_CANDIDATES,
   appendRejectedCandidate,
