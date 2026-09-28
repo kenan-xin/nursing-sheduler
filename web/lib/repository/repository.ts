@@ -574,7 +574,7 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
           // Ownership is asserted from PERSISTED state at this instant, never from
           // "this tab was the owner before the reload". A missing envelope or a
           // lease that expired or moved leaves the tab read-only until it
-          // explicitly reselects or takes over.
+          // re-acquires (under a new epoch) or takes over.
           const isOwner =
             envelope !== null &&
             lease !== null &&

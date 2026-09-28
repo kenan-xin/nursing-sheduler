@@ -153,6 +153,9 @@ test.describe("T03 — single-writer scenario ownership across two real tabs", (
       );
       // Undo is not offered to a tab that cannot write.
       expect(readerState.canUndo).toBe(false);
+      // The periodic re-check (every heartbeat) never steals a LIVE lease.
+      await reader.waitForTimeout(6_000);
+      expect(await ownership(reader)).toBe("read-only");
 
       // A refused write is refused DURABLY, and reports why.
       expect(await mutate(reader, { rangeStart: "2099-01-01" })).toMatchObject({
@@ -260,6 +263,62 @@ test.describe("T03 — single-writer scenario ownership across two real tabs", (
       expect((await authority(recovered)).scenarioId).toBe(scenarioId);
       expect(await rangeStart(recovered)).toBe("2026-06-01");
       expect(await mutate(recovered, { rangeStart: "2026-06-15" })).toMatchObject({ ok: true });
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("a single tab reloaded over its previous document's live lease regains editing unaided", async ({
+    browser,
+  }) => {
+    // Bead d854: the previous document's lease outlived it (BFCache, an unfinished
+    // unload release), so the reloaded document came up read-only and stayed there.
+    const context = await browser.newContext();
+    try {
+      const page = await openTab(context);
+      await mutate(page, { rangeStart: "2026-06-01" });
+      const scenarioId = (await authority(page)).scenarioId!;
+
+      // Plant a live lease no document will ever renew or release, expiring soon.
+      await page.evaluate(async (id) => {
+        const open = indexedDB.open("nurse-scheduler");
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          open.onsuccess = () => resolve(open.result);
+          open.onerror = () => reject(open.error);
+        });
+        const store = db.transaction("writerLeases", "readwrite").objectStore("writerLeases");
+        await new Promise<void>((resolve, reject) => {
+          const read = store.get(id);
+          read.onsuccess = () => {
+            const now = Date.now();
+            const put = store.put({
+              ...read.result,
+              ownerTabId: "previous-document",
+              epoch: read.result.epoch + 1,
+              heartbeatAt: new Date(now).toISOString(),
+              expiresAt: new Date(now + 8_000).toISOString(),
+            });
+            put.onsuccess = () => resolve();
+            put.onerror = () => reject(put.error);
+          };
+          read.onerror = () => reject(read.error);
+        });
+        db.close();
+      }, scenarioId);
+
+      await page.reload();
+      await page.waitForFunction(() => {
+        const store = (window as unknown as { __nsStore?: NsWindow["__nsStore"] }).__nsStore;
+        return Boolean(store) && store!.authority().scenarioId !== null;
+      });
+      expect(await ownership(page)).toBe("read-only");
+
+      // No click: once the stale lease expires, the periodic re-check acquires it.
+      await expect.poll(() => ownership(page), { timeout: 20_000 }).toBe("owner");
+      await expect(page.getByTestId("ownership-banner")).toHaveCount(0);
+      expect(await rangeStart(page)).toBe("2026-06-01");
+      expect(await mutate(page, { rangeStart: "2026-06-15" })).toMatchObject({ ok: true });
+      expect(await readDurableRangeStart(page, scenarioId)).toBe("2026-06-15");
     } finally {
       await context.close();
     }
@@ -459,23 +518,21 @@ test.describe("T03 — single-writer scenario ownership across two real tabs", (
         window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
       });
 
-      // Two claims, and the second is the load-bearing one:
-      //   • the reread agrees with durable truth — the tab shows the content it
-      //     never performed;
-      //   • it does NOT silently re-acquire the free lease. A tab that resumed after
-      //     being superseded must not become the writer again without anyone asking,
-      //     so it stays read-only and offers the explicit action instead.
+      // The reread agrees with durable truth — the tab shows the content it never
+      // performed — and, the lease being FREE, it re-acquires it with a normal
+      // acquire under a new epoch (bead d854): no click, because nobody holds it.
       await expect.poll(() => rangeStart(first)).toBe("2026-08-01");
-      expect(["read-only", "taken-over"]).toContain(await ownership(first));
-      expect(await mutate(first, { rangeStart: "2099-01-01" })).toMatchObject({ ok: false });
-      expect(await readDurableRangeStart(first, scenarioId)).toBe("2026-08-01");
-
-      // A visibility restore is the same authoritative reread, and taking the lease
-      // back through the banner works from there.
-      await first.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-      await takeOverThroughUi(first);
       await expect.poll(() => ownership(first)).toBe("owner");
+      await expect(first.getByTestId("ownership-banner")).toHaveCount(0);
       expect(await mutate(first, { rangeStart: "2026-09-01" })).toMatchObject({ ok: true });
+      expect(await readDurableRangeStart(first, scenarioId)).toBe("2026-09-01");
+      // The releasing tab does not get it back: the lease is live again.
+      expect(await ownership(second)).not.toBe("owner");
+      expect(await mutate(second, { rangeStart: "2099-01-01" })).toMatchObject({ ok: false });
+
+      // A visibility restore is the same authoritative reread, and changes nothing.
+      await first.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      expect(await ownership(first)).toBe("owner");
     } finally {
       await context.close();
     }
