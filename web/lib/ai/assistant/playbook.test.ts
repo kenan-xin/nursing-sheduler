@@ -255,6 +255,17 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(text).toMatch(/ALL 7 days in a row at -infinity/);
     expect(text).toMatch(/not a total over the period/);
   });
+  it("suggests 2 rest days in any 7 days in a row as a strong preference, rolling, with history", () => {
+    const text = ask("rules");
+    expect(text).toMatch(/2 rest days in any 7 days in a row/);
+    expect(text).toMatch(/add_rest_days_rule/);
+    expect(text).toMatch(/strong preference/);
+    expect(text).toMatch(/any 7 days in a row, not Monday to Sunday/);
+    // The legal floor stays a must, labelled so on the card.
+    expect(text).toMatch(/label.*a must/);
+    // Without history the first days of the roster cannot look back.
+    expect(text).toMatch(/last 6 days of the previous month/);
+  });
   it("sets up a skill mix, and never approximates it with a whole-shift group", () => {
     const text = ask("rules");
     expect(text).toMatch(/skill mix/);
