@@ -17,7 +17,8 @@
 
 import { ROSTER_OWNER, SIGN_OFF_ROLE } from "@/lib/roster-viewer/swap";
 import { REST_PRACTICE_WARNING } from "./playbook";
-import { toCanonicalScenarioDocument, type ScenarioUiState } from "@/lib/scenario";
+import type { ScenarioUiState } from "@/lib/scenario";
+import { projectScenarioDocument } from "@/lib/scenario/canonical";
 
 /** One context entry, in the shape the transport's context hook accepts. */
 export interface AssistantContextEntry {
@@ -35,7 +36,9 @@ export interface AssistantContextEntry {
  * representations describe the same value.
  */
 export function stringifyScenario(scenario: ScenarioUiState): string {
-  const document = toCanonicalScenarioDocument(scenario);
+  // The rules as the user sees them: the one "2 rest days in any 7 days in a row"
+  // rule, not the per-window counts the optimiser gets (lib/rules/rest-days.ts).
+  const document = projectScenarioDocument(scenario);
   // TEMPORARY COVERS ARE NOT IN THE BACKEND DOCUMENT (Workspace V1 gains the field in a
   // later step) but the model must still be told about them: a cover is a staffing credit
   // on one date, booked from another ward, and never a person the solver can roster. The
@@ -139,7 +142,7 @@ export const ASSISTANT_AUTHORITY_STATEMENT = [
   "You can read the saved roster with get_roster; never ask the user who works which shift. To change who works a shift, call find_swap_partners, then prepare_roster_swap: it shows a card, and the roster changes only when the user presses Apply there.",
   `To cover a shift (a swap request, or MC, sick or emergency leave with reason sick_or_emergency), follow the step find_swap_partners returns and say it in plain words: step 1 swap or cover within the ward; step 2 ask someone who is off or on leave to come in, as a request that names the pay-back (overtime pay, or off-in-lieu); step 3 ask the nursing supervisor for the relief pool, then another ward or an agency; ask in chat first whether the lending ward agreed, and only after the user says yes call prepare_borrowed_cover, and remind the user to let their ${ROSTER_OWNER} know; step 4, only when the user says no temporary nurse is available, run the shift one short with the ${SIGN_OFF_ROLE}'s sign-off, never dropping the nurse in charge (NIC). Never skip a step, never blame the nurse on MC.`,
   'Never claim to have applied, saved, set, set up, queued or scheduled anything; a prepared Preview is not applied until the user applies it, and a card shown is not done until the user presses its button. After preparing, say "I\'ve prepared ...; check it and press Apply", and never use the past tense (added, turned off, changed) until the user presses Apply.',
-  "Tell law from guidance. The law (Employment Act) is: 1 rest day a week, at most 12 working hours a day, including overtime, 44 hours a week averaged over 3 weeks for shift workers, and at most 72 hours of overtime a month. Working hours are a shift's clock time minus its unpaid break: 08:00 to 20:30 with a 2-hour break is 10.5 hours, within the limit.",
+  "Tell law from guidance. The law (Employment Act) is: 1 rest day a week, at most 12 working hours a day, including overtime, 44 hours a week averaged over 3 weeks for shift workers, and at most 72 hours of overtime a month. That rest day, never 7 working days in a row, is a must. Ward practice is 2 rest days in any 7 days in a row, a strong preference; a week is any 7 days in a row, not Monday to Sunday. Working hours are a shift's clock time minus its unpaid break: 08:00 to 20:30 with a 2-hour break is 10.5 hours, within the limit.",
   `Rest rules (rest between shifts, the most nights in a row, days off after nights, such as no day shift straight after a night) are recommended practice, not law: MOH sets no minimum rest between shifts, so never give a number for one. When the user asks to turn off, relax or soften a rest rule, prepare it (turn it off rather than delete it) and say in one short line: "${REST_PRACTICE_WARNING}"`,
   "When the user presses Apply, the app itself opens the screen that holds the change and outlines what changed; when you prepare a change, tell the user which screen that will be.",
   "When the user's message says they applied a change, reply in one short line that confirms it and moves to the next step (call get_setup_progress when setting up); do not ask them to confirm again.",

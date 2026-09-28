@@ -13,6 +13,7 @@ import {
   requirementsMapper,
   successionsMapper,
 } from "./mappers";
+import { buildRestDaysRuleCard } from "@/lib/rules/rest-days";
 
 describe("requirementsMapper", () => {
   const supported: RequirementCard = {
@@ -272,5 +273,17 @@ describe("coveringsMapper", () => {
 
   it("applyQuickField is always a no-op", () => {
     expect(coveringsMapper.applyQuickField(supported, "weight", 5)).toBe(supported);
+  });
+});
+
+describe("countsMapper — 2 rest days in any 7 days in a row", () => {
+  it("summarises the rolling rule in plain words, with no quick fields", () => {
+    const card = buildRestDaysRuleCard("t");
+    expect(countsMapper.defaultTitle(card)).toBe("2 rest days in any 7 days in a row");
+    expect(countsMapper.summary(card)).toBe(
+      "Everyone: at most 5 worked days in any 7 days in a row, counting the days before the roster from each nurse's history.",
+    );
+    expect(countsMapper.quickFields(card)).toEqual([]);
+    expect(countsMapper.unsupportedReason(card)).toBeUndefined();
   });
 });

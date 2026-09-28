@@ -51,6 +51,7 @@ import {
   type WeightFieldValue,
 } from "@/components/card-editor/weight-value";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
+import { isRestDaysRuleCard } from "@/lib/rules/rest-days";
 
 /**
  * The scenario fields the Counts screen reads: the people and shift-type domains
@@ -388,7 +389,9 @@ export function isAdvancedCountCard(card: CountCard): boolean {
  *  contracted-hours card (M2, not built here) nor an unmarked advanced/list count
  *  (FR-PR-55a). */
 export function isEditableCountCard(card: CountCard): card is OrdinaryCountCard {
-  return !isContractedHoursCard(card) && !isAdvancedCountCard(card);
+  // The rolling "2 rest days in any 7 days in a row" card is a count only in
+  // storage; its fields are not what the optimiser gets (lib/rules/rest-days.ts).
+  return !isContractedHoursCard(card) && !isAdvancedCountCard(card) && !isRestDaysRuleCard(card);
 }
 
 /**

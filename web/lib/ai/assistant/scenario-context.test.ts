@@ -222,6 +222,12 @@ describe("the attached turn context", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/turn it off rather than delete it/);
     // The Employment Act, stated exactly.
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/1 rest day a week/);
+    // The legal floor is a must; 2 in any 7 days in a row is ward practice.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/never 7 working days in a row, is a must/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(
+      /2 rest days in any 7 days in a row.*strong preference/,
+    );
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/any 7 days in a row, not Monday to Sunday/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/12 working hours a day, including overtime/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/44 hours a week averaged over 3 weeks/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/72 hours of overtime a month/);
