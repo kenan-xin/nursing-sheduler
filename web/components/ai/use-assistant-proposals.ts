@@ -15,15 +15,16 @@
 // why "Out of date" appears without anyone having to notice and set it.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   assistantProposalCommands,
-  readConflictingEditorDraft,
   useAuthorityStore,
   type AssistantProposalV1,
   type AssistantScenarioBasis,
   type ReceiptStanding,
 } from "@/lib/store";
 import {
+  conflictingDraftMessage,
   describeProposalReadiness,
   type LiveProposalBasis,
   type ProposalDiff,
@@ -33,6 +34,11 @@ import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import { CAPABILITY_UNAVAILABLE } from "@/lib/capability/resolve";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { awaitCoverEditOutcome, requestCoverEdit } from "@/lib/scenario/cover-edit-request";
+import {
+  readConflictingEditorDraft,
+  selectConflictingEditorDraft,
+  useNavGuardStore,
+} from "@/components/shell/nav-guard-store";
 import { applyThroughStaffForm, coverEditsOf } from "./staff-form-apply";
 import { useCapabilityNavigation } from "./use-capability-navigation";
 
@@ -111,6 +117,7 @@ export function useAssistantProposals(): AssistantProposalController {
   const recordRevision = useAuthorityStore((state) => state.recordRevision);
   const ownership = useAuthorityStore((state) => state.ownership);
   const reloadRequired = useAuthorityStore((state) => state.reloadRequired);
+  const conflictingDraft = useNavGuardStore(selectConflictingEditorDraft);
 
   const [stored, setProposal] = useState<AssistantProposalV1 | null>(null);
   const [basis, setBasis] = useState<AssistantScenarioBasis | null>(null);
@@ -190,7 +197,8 @@ export function useAssistantProposals(): AssistantProposalController {
       topCommitId: basis?.topCommitId ?? null,
       leaseEpoch: basis?.leaseEpoch ?? null,
       isOwner: (basis?.isOwner ?? false) && ownership === "owner" && !reloadRequired,
-      conflictingDraft: readConflictingEditorDraft(),
+      // A cover Apply opens the Staff form itself; that form is the Apply, not a conflict.
+      conflictingDraft: applying ? null : conflictingDraft,
       // An interruption that moved the turn epoch past the one this Preview was
       // prepared under has already invalidated it, whether or not it has settled.
       invalidated: interrupting || (active !== null && active.turnEpoch !== liveTurnEpoch),
@@ -204,6 +212,8 @@ export function useAssistantProposals(): AssistantProposalController {
     documentRevision,
     ownership,
     reloadRequired,
+    conflictingDraft,
+    applying,
     interrupting,
     active,
     liveTurnEpoch,
@@ -319,6 +329,11 @@ export function useAssistantProposals(): AssistantProposalController {
 
   const undo = useCallback(
     async (receiptId: string) => {
+      const draft = readConflictingEditorDraft();
+      if (draft) {
+        toast.error(conflictingDraftMessage(draft));
+        return;
+      }
       await assistantProposalCommands.undoReceipt(receiptId);
       // The reverted receipt is the one the Apply notice is narrating: that claim is
       // no longer true, so drop it rather than leave the notice pointing at a change

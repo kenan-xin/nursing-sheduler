@@ -55,7 +55,6 @@ export {
   drainScenarioCommands,
   readAuthoritativeScenarioIdentity,
   readAuthoritativeScenarioOwnership,
-  readConflictingEditorDraft,
   readScenarioHistoryDepth,
   scenarioCommands,
 } from "./commands";
@@ -122,6 +121,7 @@ export {
 export { commitPaintGesture } from "./paint";
 
 export {
+  applyScenarioEdit,
   BRING_UP_STALL_MS,
   initializeScenarioAuthority,
   loadScenario,

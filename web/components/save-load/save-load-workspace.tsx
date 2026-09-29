@@ -40,8 +40,16 @@ export function SaveLoadWorkspace() {
   const [draft, setDraft] = useState("");
   // FR-PR-06: register the open Edit-YAML draft as a losable draft (T08a).
   useLosableDraft("save-load:edit-yaml", editing, "Edit YAML");
-  const { issues, clearIssues, clearImportState, confirm, warnings, dismissWarnings, handleFile } =
-    useScenarioImport({ onCommitted: () => setEditing(false) });
+  const {
+    issues,
+    clearIssues,
+    clearImportState,
+    confirm,
+    warnings,
+    dismissWarnings,
+    handleFile,
+    handleEdit,
+  } = useScenarioImport({ onCommitted: () => setEditing(false) });
 
   const openUpload = () => {
     clearIssues();
@@ -80,7 +88,8 @@ export function SaveLoadWorkspace() {
     clearImportState();
   };
 
-  const applyEdit = () => handleFile(draft);
+  // One undoable edit on the same identity, not a Load (C-06).
+  const applyEdit = () => handleEdit(draft);
 
   return (
     <>
@@ -138,6 +147,7 @@ export function SaveLoadWorkspace() {
           title={confirm.title}
           description={confirm.description}
           detail={confirm.detail}
+          destructive={confirm.destructive}
           onContinue={confirm.onContinue}
         />
       ) : null}

@@ -62,10 +62,6 @@ function pastStatesLength(page: Page): Promise<number> {
   return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
 
-function backupStatus(page: Page): Promise<string> {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus());
-}
-
 // Mirrors e2e/save-load.spec.ts's VALID_SCENARIO_PATCH / lib/scenario/test-fixtures.ts's
 // makeValidUiState (kept in sync manually — that fixture isn't exported for
 // browser-context use).
@@ -220,28 +216,26 @@ test.describe("T17b-3 — Edit-YAML mode", () => {
     await expect(preview.getByTestId("scenario-yaml-textarea")).toBeVisible();
   });
 
-  test("Apply on valid edited YAML runs the same block/gate/replace pipeline as Upload: fresh scenario identity", async ({
+  test("Apply on valid edited YAML is one undoable edit on the same scenario (C-06)", async ({
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
     await mutate(page, VALID_SCENARIO_PATCH);
+    const historyBefore = await pastStatesLength(page);
 
     const preview = page.getByTestId("scenario-yaml-preview");
     await page.getByTestId("scenario-edit-yaml-button").click();
     await preview.getByTestId("scenario-yaml-textarea").fill(EDITED_VALID_YAML);
     await preview.getByTestId("yaml-apply-button").click();
 
-    // Apply into the non-empty workspace stages the same combined replacement /
-    // version confirmation as Upload.
+    // The draft carries no app version, so the FR-SL-19 version gate still asks
+    // (no replacement warning: the edit is undoable).
     await expect(page.getByTestId("confirm-dialog-confirm")).toBeVisible();
     await page.getByTestId("confirm-dialog-confirm").click();
 
     await expect.poll(() => rangeStart(page)).toBe("2026-06-01");
-    // T03: an applied edit goes through the same atomic scenario SWITCH as Upload,
-    // so the new identity starts on its own empty Undo history; an imported file is
-    // still not a fresh local backup (T17r P0).
-    expect(await pastStatesLength(page)).toBe(0);
-    expect(await backupStatus(page)).toBe("none");
+    // One more step on the SAME history, not a fresh identity's empty one.
+    expect(await pastStatesLength(page)).toBe(historyBefore + 1);
 
     // Editing mode closes back to the read-only preview once the replace commits.
     await expect(preview.getByTestId("scenario-yaml-textarea")).toBeHidden();

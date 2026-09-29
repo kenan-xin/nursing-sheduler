@@ -34,6 +34,8 @@ import {
 } from "@/components/counts/counts-model";
 import {
   AFFINITY_MESSAGES,
+  AFFINITY_GROUPED_MEANING,
+  AFFINITY_SAME_SHIFT,
   isAdvancedAffinityCard,
   summarizeRefs as summarizeAffinityRefs,
 } from "@/components/affinities/affinities-model";
@@ -221,7 +223,10 @@ export const affinitiesMapper: GuidedRuleMapper<AffinityCard> = {
   summary(card) {
     const shiftLabel = summarizeAffinityRefs(card.shiftTypes);
     const dateLabel = summarizeAffinityRefs(card.date);
-    return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} on ${shiftLabel}, ${dateLabel}.`;
+    if (isAdvancedAffinityCard(card)) {
+      return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} on ${shiftLabel}, ${dateLabel}. ${AFFINITY_GROUPED_MEANING}`;
+    }
+    return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} ${AFFINITY_SAME_SHIFT} (${shiftLabel}), ${dateLabel}.`;
   },
   quickFields(card): GuidedQuickField[] {
     if (isAdvancedAffinityCard(card)) return [];
@@ -238,7 +243,7 @@ export const affinitiesMapper: GuidedRuleMapper<AffinityCard> = {
   },
   unsupportedReason(card) {
     return isAdvancedAffinityCard(card)
-      ? "This affinity has more than one OR-group — adjust it in Advanced."
+      ? "This affinity uses the older grouped form (any of each group, any of these shifts) — adjust it in Advanced."
       : undefined;
   },
   applyQuickField(card, key, value) {

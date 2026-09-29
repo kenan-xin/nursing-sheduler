@@ -14,11 +14,10 @@
 //     and is validity-only (no sign restriction, unlike Counts' squared rule);
 //   • OFF/LEAVE/ALL are INCLUDED (not excluded) in the shift-type picker, same
 //     as Counts and unlike Requirements/Coverings (EDGE-PR-07);
-//   • `people1`/`people2`/`shiftTypes` persist as the same one-element nested
-//     shape as Coverings' `preceptors`/`preceptees`/`shiftTypes`
-//     (`NestedPersonRefList`/`NestedShiftTypeRefList` — canonical.ts:161-173),
-//     while `date` is a flat, REQUIRED list (mirrors Counts' `countDates`, not
-//     Coverings' optional `date`).
+//   • `people1`/`people2`/`shiftTypes` persist as FLAT lists, v1's shape: core
+//     scores each element on its own, so "together" = the same shift on the
+//     same day (bead rqfx). `date` is a flat, REQUIRED list (mirrors Counts'
+//     `countDates`, not Coverings' optional `date`).
 
 import {
   RESERVED_SHIFT_TYPE,
@@ -239,10 +238,7 @@ export function validateAffinityForm(form: AffinityFormState): AffinityErrors {
 
 /**
  * Assemble the saved affinity card from a validated draft (spec 05 FR-PR-60/61).
- * `people1`/`people2`/`shiftTypes` are each wrapped in a one-element outer array
- * (the same nested shape Coverings' `preceptors`/`preceptees`/`shiftTypes` use —
- * canonical.ts:161-173); `date` stays a FLAT list (never nested — Affinities'
- * `date` is required, unlike Coverings' optional one). `description` is stored
+ * `people1`/`people2`/`shiftTypes`/`date` are all FLAT lists. `description` is stored
  * exactly as authored, never trimmed nor omitted when empty (FR-PR-04 — shared
  * with Requirements/Successions/Counts). `uid` is injectable for deterministic
  * tests.
@@ -255,49 +251,57 @@ export function buildAffinityCard(
     uid,
     description: form.description,
     date: [...form.date] as DateRef[],
-    people1: [form.people1] as NestedPersonRefList,
-    people2: [form.people2] as NestedPersonRefList,
-    shiftTypes: [form.shiftTypes] as NestedShiftTypeRefList,
+    // Flat lists, as v1 saves them: core makes one group per element, so each
+    // person and each shift is scored on its own and "together" means the
+    // same shift on the same day (bead rqfx).
+    people1: [...form.people1] as NestedPersonRefList,
+    people2: [...form.people2] as NestedPersonRefList,
+    shiftTypes: [...form.shiftTypes] as NestedShiftTypeRefList,
     weight: form.weight as number,
   };
 }
 
 /**
- * Whether one selector is the single-term shape the flat form authors and can
- * losslessly round-trip: exactly ONE top-level element (a scalar ref or a flat
- * OR-group). `buildAffinityCard` always emits `[flat]` (outer length 1), and
- * `affinityToForm` flattens that single term back to a flat list — so any outer
- * array of length 1 round-trips. An outer length !== 1 (or a non-array) carries
- * MULTIPLE distinct affinity terms the single-term form cannot represent.
+ * Whether one selector means "each element on its own" (v1's shape), which the
+ * flat form round-trips: every top-level element is a scalar ref or a
+ * one-member group (`["A"]` scores exactly like `"A"` in core). A group of two
+ * or more (`["A", "B"]`) is ONE OR-term — "any of A/B" — which flattening would
+ * split into separate terms, changing what the solver scores.
  */
-function isSingleTermSelector(selector: unknown): boolean {
-  return Array.isArray(selector) && selector.length === 1;
-}
-
-/**
- * Whether `card` is an "advanced" affinity the flat form cannot author without
- * loss (the affinity analogue of Counts' FR-PR-55a generic-array fallback). A
- * C3 affinity selector (`people1`/`people2`/`shiftTypes`) is
- * `Array<ref | ref[]>`: each top-level element is a SEPARATE constraint term.
- * The form only ever authors ONE term (`[flat]`); a card with two or more terms
- * — e.g. `people1: [["A"], ["B"]]` — would collapse to a single OR-aggregate
- * (`[["A", "B"]]`) if flattened+rebuilt, silently relaxing the constraint. Such
- * a card is therefore recognized as advanced so the editor renders it read-only
- * and preserves it byte-for-byte (never routed through `flattenRefs`/
- * `buildAffinityCard`). `date` is excluded from this check — it is a flat list
- * the form fully represents.
- */
-export function isAdvancedAffinityCard(card: AffinityCard): boolean {
-  return !(
-    isSingleTermSelector(card.people1) &&
-    isSingleTermSelector(card.people2) &&
-    isSingleTermSelector(card.shiftTypes)
+function isPerElementSelector(selector: unknown): boolean {
+  return (
+    Array.isArray(selector) && selector.every((term) => !Array.isArray(term) || term.length === 1)
   );
 }
 
-/** Whether `card` can be opened in the single-term flat form — i.e. not an
- *  advanced multi-term affinity (FR-PR-55a-style fallback). Callers must guard
- *  {@link affinityToForm} with this so a multi-term card never reaches Edit. */
+/**
+ * Whether `card` is an "advanced" (grouped) affinity the flat form cannot author
+ * without changing its meaning. Core makes one term per top-level selector
+ * element (`_compile_nested_groups`). A card holding a multi-member group —
+ * e.g. the pre-rqfx v2 form's `people1: [["A", "B"]]` ("any of A/B, on any of
+ * these shifts, scored once a day") — would become per-person/per-shift terms
+ * if flattened+rebuilt. It is NOT migrated: it renders read-only with an honest
+ * description and is preserved byte-for-byte. `date` is excluded — it is a flat
+ * list the form fully represents.
+ */
+export function isAdvancedAffinityCard(card: AffinityCard): boolean {
+  return !(
+    isPerElementSelector(card.people1) &&
+    isPerElementSelector(card.people2) &&
+    isPerElementSelector(card.shiftTypes)
+  );
+}
+
+/** The v1 meaning the flat form authors (each person, each shift on its own). */
+export const AFFINITY_SAME_SHIFT = "on the same shift on the same day";
+
+/** What a grouped (pre-rqfx v2) card actually scores, stated honestly. */
+export const AFFINITY_GROUPED_MEANING =
+  "Grouped rule: anyone from each group on any of these shifts on the same day counts, even on different shifts, scored once a day. Edit via Save & Load (YAML).";
+
+/** Whether `card` can be opened in the flat form — i.e. not a grouped (advanced)
+ *  affinity. Callers must guard {@link affinityToForm} with this so a grouped
+ *  card never reaches Edit. */
 export function isEditableAffinityCard(card: AffinityCard): boolean {
   return !isAdvancedAffinityCard(card);
 }

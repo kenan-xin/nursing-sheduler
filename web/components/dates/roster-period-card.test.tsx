@@ -32,7 +32,6 @@ describe("RosterPeriodCard — invalid/incomplete range feedback (VR-DC-03)", ()
     const start = screen.getByTestId("range-start") as HTMLInputElement;
     const end = screen.getByTestId("range-end") as HTMLInputElement;
 
-    // Setting start to a valid on/before date is itself a complete range -> commits.
     fireEvent.change(start, { target: { value: "2026-08-10" } });
     expect(screen.queryByTestId("range-invalid")).toBeNull();
 
@@ -43,11 +42,12 @@ describe("RosterPeriodCard — invalid/incomplete range feedback (VR-DC-03)", ()
       "End date must be on or after the start date.",
     );
     expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByTestId("range-apply")).toBeDisabled();
     // The misleading `0 days` duration is suppressed while invalid.
     expect(screen.getByTestId("range-duration").textContent).not.toContain("day");
   });
 
-  it("clears the error and commits once when the range is corrected", () => {
+  it("clears the error and commits once on Apply when the range is corrected", () => {
     const onCommit = vi.fn();
     render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={onCommit} />);
 
@@ -58,10 +58,10 @@ describe("RosterPeriodCard — invalid/incomplete range feedback (VR-DC-03)", ()
     fireEvent.change(end, { target: { value: "2026-08-01" } });
     expect(screen.getByTestId("range-invalid")).toBeTruthy();
 
-    // Correct the end to a valid on/after date: exactly one commit for this fix.
-    onCommit.mockClear();
     fireEvent.change(end, { target: { value: "2026-08-20" } });
     expect(screen.queryByTestId("range-invalid")).toBeNull();
+    expect(onCommit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("range-apply"));
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith(
       { start: "2026-08-10", end: "2026-08-20" },
@@ -78,6 +78,82 @@ describe("RosterPeriodCard — invalid/incomplete range feedback (VR-DC-03)", ()
 
     expect(screen.queryByTestId("range-invalid")).toBeNull();
     expect(onCommit).not.toHaveBeenCalled();
+  });
+});
+
+describe("RosterPeriodCard — draft with Apply and Cancel (v1 parity)", () => {
+  it("never commits per keystroke, even when an intermediate value is a valid shorter range", () => {
+    const onCommit = vi.fn();
+    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={onCommit} />);
+    const end = screen.getByTestId("range-end");
+    // Segment typing can emit a shorter valid range on the way to the real one.
+    fireEvent.change(end, { target: { value: "2026-08-03" } });
+    fireEvent.change(end, { target: { value: "2026-08-30" } });
+    expect(onCommit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("range-apply"));
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith({ start: "2026-08-01", end: "2026-08-30" }, true);
+  });
+
+  it("Cancel restores the committed range and switch without committing", () => {
+    const onCommit = vi.fn();
+    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={onCommit} />);
+    expect(screen.getByTestId("range-apply")).toBeDisabled();
+    expect(screen.getByTestId("range-cancel")).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("range-end"), { target: { value: "2026-08-10" } });
+    fireEvent.click(screen.getByTestId("import-toggle"));
+    expect(screen.getByTestId("import-toggle").getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(screen.getByTestId("range-cancel"));
+    expect((screen.getByTestId("range-end") as HTMLInputElement).value).toBe(VALID_RANGE.end);
+    expect(screen.getByTestId("import-toggle").getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByTestId("range-apply")).toBeDisabled();
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("the import switch is part of the draft: toggling alone commits only on Apply", () => {
+    const onCommit = vi.fn();
+    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={onCommit} />);
+    fireEvent.click(screen.getByTestId("import-toggle"));
+    expect(onCommit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("range-apply"));
+    expect(onCommit).toHaveBeenCalledWith(VALID_RANGE, false);
+    // Applied: the draft is clean again.
+    expect(screen.getByTestId("range-apply")).toBeDisabled();
+  });
+
+  it("warns how many requests and leave days the new range removes, before Apply", () => {
+    const countRemovals = vi.fn(() => ({ requests: 3, leaveDays: 1 }));
+    render(
+      <RosterPeriodCard
+        range={VALID_RANGE}
+        importedHolidaysPresent
+        onCommit={vi.fn()}
+        countRemovals={countRemovals}
+      />,
+    );
+    expect(screen.queryByTestId("range-removal-warning")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("range-end"), { target: { value: "2026-08-20" } });
+    expect(countRemovals).toHaveBeenLastCalledWith({ start: "2026-08-01", end: "2026-08-20" });
+    expect(screen.getByTestId("range-removal-warning").textContent).toBe(
+      "3 requests and 1 leave day fall outside the new range and will be removed.",
+    );
+  });
+
+  it("shows no warning when the new range removes nothing", () => {
+    render(
+      <RosterPeriodCard
+        range={VALID_RANGE}
+        importedHolidaysPresent
+        onCommit={vi.fn()}
+        countRemovals={() => ({ requests: 0, leaveDays: 0 })}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("range-end"), { target: { value: "2026-08-20" } });
+    expect(screen.queryByTestId("range-removal-warning")).toBeNull();
   });
 });
 
@@ -105,6 +181,7 @@ describe("RosterPeriodCard — import switch honest initial state (FR-DC-40)", (
     // control, so the primitive's own state contract is what is pinned here.
     expect(toggle.getAttribute("data-slot")).toBe("switch");
     expect(toggle.hasAttribute("data-checked")).toBe(true);
+    fireEvent.click(screen.getByTestId("range-apply"));
     expect(onCommit).toHaveBeenLastCalledWith(VALID_RANGE, true);
   });
 

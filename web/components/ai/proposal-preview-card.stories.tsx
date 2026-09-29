@@ -6,7 +6,8 @@ import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import { useModeStore } from "@/lib/mode/mode";
 import type { AssistantCommandV1 } from "@/lib/proposal";
 import { proposalScenario } from "@/lib/proposal/test-support";
-import { assistantProposalCommands, useHotStore, useScenarioStore } from "@/lib/store";
+import { assistantProposalCommands, useScenarioStore } from "@/lib/store";
+import { useNavGuardStore } from "@/components/shell/nav-guard-store";
 import { loadScenario } from "@/lib/store/lifecycle";
 import {
   LONG_PROSE,
@@ -132,13 +133,11 @@ export const Assumption: Story = {
 export const Blocked: Story = {
   beforeEach: [
     prepared(SHRINK),
-    () => {
-      useHotStore.getState().setDraft("shift-type-editor", { id: "late+" });
-    },
+    () => useNavGuardStore.getState().registerDraft({ id: "shift-types", label: "Shifts editor" }),
   ],
   play: async ({ canvas }) => {
     await expect(await canvas.findByTestId("proposal-apply")).toBeDisabled();
-    await expect(canvas.getByTestId("proposal-blocks")).toHaveTextContent("shift-type-editor");
+    await expect(canvas.getByTestId("proposal-blocks")).toHaveTextContent("Shifts editor");
   },
 };
 
