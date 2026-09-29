@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import type { ScenarioUiState } from "@/lib/scenario";
-import { performCopy, performDownload, SCENARIO_DOWNLOAD_FILENAME } from "./scenario-file-export";
+import { performCopy, performDownload, scenarioDownloadFilename } from "./scenario-file-export";
 
 /** An imperfect draft (equal start/end shift) — producer-invalid, but a Workspace
  *  backup preserves it (DL12 §2: readiness gates Optimize, not backup). */
@@ -22,6 +22,14 @@ function makeDuplicateIdUiState(): ScenarioUiState {
   return state;
 }
 
+describe("scenarioDownloadFilename", () => {
+  it("dates the file with the local day, as v1 did (C-32)", () => {
+    expect(scenarioDownloadFilename(new Date(2026, 8, 5, 23, 30))).toBe(
+      "nurse-scheduling-2026-09-05.yaml",
+    );
+  });
+});
+
 describe("performDownload", () => {
   it("writes the validated YAML to the injected file writer, then records the backup", () => {
     const writeFile = vi.fn();
@@ -31,7 +39,7 @@ describe("performDownload", () => {
 
     expect(result.ok).toBe(true);
     expect(writeFile).toHaveBeenCalledTimes(1);
-    expect(writeFile).toHaveBeenCalledWith(expect.any(String), SCENARIO_DOWNLOAD_FILENAME);
+    expect(writeFile).toHaveBeenCalledWith(expect.any(String), scenarioDownloadFilename());
     const [yaml] = writeFile.mock.calls[0] as [string, string];
     expect(yaml).toContain("apiVersion: alpha");
     expect(recordBackup).toHaveBeenCalledTimes(1);
