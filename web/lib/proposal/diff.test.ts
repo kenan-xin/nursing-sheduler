@@ -20,6 +20,7 @@ import { planChangeHighlight } from "@/lib/change-highlight/plan";
 import { resolveScreenName } from "@/lib/capability/resolve";
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
+import { buildRestDaysRuleCard } from "@/lib/rules/rest-days";
 import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
 import type { AssistantCommandV1 } from "./commands";
 
@@ -686,7 +687,9 @@ describe("rule sentences state what the solver enforces", () => {
       },
     };
     const diff = deriveProposalDiff(before, after, []);
-    return [...diff.direct, ...diff.cascade].find((entry) => entry.key === `rule:${kind}:x`)?.after;
+    return [...diff.direct, ...diff.cascade].find(
+      (entry) => entry.key === `rule:${kind}:${String(card.uid)}`,
+    )?.after;
   };
   const requirement = {
     uid: "x",
@@ -726,14 +729,23 @@ describe("rule sentences state what the solver enforces", () => {
     );
   });
 
-  it("a count's weight rewards the expression holding, so a negative one works against it", () => {
-    expect(sentence("counts", { ...count, weight: -50 })).toBe(
-      "On · At most 5 Night shifts for everyone, across every date: " +
-        "worked against, the solver is rewarded for breaking it (weight -50)",
+  it("a count's weight rewards the expression holding, so a negative one avoids it", () => {
+    expect(sentence("counts", { ...count, expression: "x > T", weight: -50 })).toBe(
+      "On · More than 5 Night shifts for everyone, across every date: " +
+        "avoided where possible (weight -50)",
     );
     expect(sentence("counts", { ...count, weight: Number.NEGATIVE_INFINITY })).toBe(
       "On · At most 5 Night shifts for everyone, across every date: " +
         "must never hold, the solver forces the opposite",
+    );
+  });
+
+  it("the rest-days card reads as the rule it is, not the stored x > 5 count", () => {
+    expect(
+      sentence("counts", buildRestDaysRuleCard("r1") as unknown as Record<string, unknown>),
+    ).toBe(
+      "On · “2 rest days in any 7 days in a row” · Every nurse gets 2 rest days in any 7 days " +
+        "in a row (at most 5 shifts); strong preference",
     );
   });
 
