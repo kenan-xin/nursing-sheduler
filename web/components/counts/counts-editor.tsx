@@ -42,6 +42,7 @@ import {
 } from "./counts-model";
 import {
   defaultContractedForm,
+  staleContractShifts,
   toContractedForm,
   type ContractedFormState,
 } from "./contracted-model";
@@ -140,6 +141,17 @@ export function CountsEditor() {
     });
     return new Set(findings.keys());
   }, [state, counts]);
+
+  // T2: contracts whose saved hours lag a Shift Type length change.
+  const staleHoursUids = useMemo(
+    () =>
+      new Set(
+        counts
+          .filter((card) => isContractedHoursCard(card) && staleContractShifts(card, state).length)
+          .map((card) => card.uid),
+      ),
+    [state, counts],
+  );
 
   // Bind the editor advisory + Add-LEAVE action to the source card's enablement
   // (qq0.23-UI critique P2): an "Add" draft is a new (enabled) contract; an edit/
@@ -382,6 +394,7 @@ export function CountsEditor() {
           onConfirmConvertToGeneric={confirmConvertToGeneric}
           onCancelConvertToGeneric={() => setConvertToGenericUid(null)}
           leaveGuardUids={leaveGuardUids}
+          staleHoursUids={staleHoursUids}
         />
       ) : null}
     </CardEditorScreen>

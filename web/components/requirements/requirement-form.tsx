@@ -60,7 +60,7 @@ interface RequirementFormProps {
 const WEIGHT_NOTE =
   "Weight is not needed when the preferred number of people equals the required number.";
 const WEIGHT_HELP =
-  "Penalty applied when the preferred number of people isn't met (the more negative, the higher the penalty). -Infinity makes it a hard requirement.";
+  "Penalty applied when the preferred number of people isn't met (the more negative, the higher the penalty). For a hard count, leave Preferred empty.";
 const SKILL_MIX_HELP =
   "At least this many of the shift's nurses must come from the group. Anyone can fill the other places.";
 const PREFERRED_NOTE =
@@ -475,6 +475,8 @@ export function RequirementForm({
           value={form.weight}
           error={errors.weight}
           help={WEIGHT_HELP}
+          placeholder="e.g. −50"
+          allowInfinity={false}
           onChange={(next) => {
             setForm((prev) => ({ ...prev, weight: next }));
             setErrors((prev) => (prev.weight ? { ...prev, weight: undefined } : prev));

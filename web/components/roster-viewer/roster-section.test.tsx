@@ -134,8 +134,8 @@ async function seedCandidate(jobId = JOB_A, ordinal = 1): Promise<CurrentCandida
  * The edit operation is for later revisions of this same roster and would carry
  * any existing row's candidate source forward, which a seed must not do.
  */
-async function seedWorking(): Promise<void> {
-  const document = await fixtureRosterDocument();
+async function seedWorking(edits: RosterDocument["edits"] = []): Promise<void> {
+  const document = { ...(await fixtureRosterDocument()), edits };
   const epoch = await rosterStorage.getClearEpoch();
   const outcome = await rosterStorage.promoteDocumentToWorking({
     document,
@@ -664,6 +664,43 @@ describe("RosterSection — replacing a working roster", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /replace roster/i }));
     await waitFor(() => expect(promotion.calls).toBe(1));
+  });
+
+  // Audit C-07: replacing drops hand edits, so the dialog must say so.
+  it("plain replace confirm when the roster has no edits", async () => {
+    await seedWorking();
+    await seedCandidate();
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-candidate-load")).toBeDefined());
+    fireEvent.click(screen.getByTestId("roster-candidate-load"));
+    await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
+    expect(screen.getByTestId("confirm-dialog")).not.toHaveTextContent(/will be lost/);
+    expect(document.querySelector("[data-slot='alert-dialog-media']")).toHaveAttribute(
+      "data-tone",
+      "brand",
+    );
+    expect(screen.queryByTestId("confirm-dialog-secondary")).toBeNull();
+  });
+
+  it("counts the edits that will be lost and offers to save the roster file first", async () => {
+    await seedWorking([
+      { personIdx: 0, dateIdx: 0, day: { kind: "off" } },
+      { personIdx: 1, dateIdx: 1, day: { kind: "leave" } },
+    ]);
+    await seedCandidate();
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-candidate-load")).toBeDefined());
+    fireEvent.click(screen.getByTestId("roster-candidate-load"));
+    await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
+
+    expect(screen.getByTestId("confirm-dialog")).toHaveTextContent("2 manual edits will be lost.");
+    expect(document.querySelector("[data-slot='alert-dialog-media']")).toHaveAttribute(
+      "data-tone",
+      "error",
+    );
+    expect(screen.getByTestId("confirm-dialog-secondary")).toHaveTextContent(
+      "Save roster file first",
+    );
   });
 
   it("loads WITHOUT a confirmation when there is no roster to replace", async () => {

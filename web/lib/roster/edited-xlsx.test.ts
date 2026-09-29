@@ -457,10 +457,19 @@ describe("patchFrozenXlsxWithEdits — real C5 prettify workbook (history column
       const stripped = await stripProvenanceSheet(patchedBytes);
       const diffs = semanticDiff(fixtureBytes(plain.file), stripped, "plain-edited");
 
-      // The single expected diff: B3's value changed D→N. Nothing else — not the
-      // Score/Status rows, not any other cell, not the sheet dimensions.
-      expect(diffs).toHaveLength(1);
-      expect(diffs[0]).toMatchObject({ kind: "value", sheet: "Sheet1", coord: "B3" });
+      // Exactly two diffs: B3's value changed D→N, and the "as solved, before
+      // edits" note beside the Score value (C6; audit C-10). Nothing else — the
+      // Score/Status values and labels, every other cell, and the sheet dimensions
+      // are unchanged.
+      expect(diffs).toHaveLength(2);
+      expect(diffs[0]).toMatchObject({ kind: "value", sheet: "Sheet1", coord: "B3", b: "N" });
+      expect(diffs[1]).toMatchObject({
+        kind: "value",
+        sheet: "Sheet1",
+        coord: "C6",
+        a: null,
+        b: "as solved, before edits",
+      });
     },
   );
 });
