@@ -19,6 +19,7 @@ import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { FaCircleExclamation } from "@/components/icons";
+import { FieldWarning } from "./field-shell";
 import { formatWeight, parseWeightInput, type WeightFieldValue } from "./weight-value";
 
 export {
@@ -39,6 +40,8 @@ export interface WeightFieldProps {
   /** Default: generic soft/hard explainer. */
   help?: string;
   error?: string;
+  /** Shown under the help while the value is exactly `+∞` — the editor's own +∞ caution. */
+  plusInfWarning?: string;
   /**
    * When set, renders this italic note INSTEAD of the dial — the seam Requirements
    * needs for "Weight is not needed when the preferred number of people equals the
@@ -61,6 +64,7 @@ export function WeightField({
   placeholder = "e.g. −50, +∞",
   help = DEFAULT_HELP,
   error,
+  plusInfWarning,
   note,
   testId = "weight-field",
   allowInfinity = true,
@@ -113,6 +117,7 @@ export function WeightField({
         )}
       </div>
       <p className="text-meta text-ink3">{help}</p>
+      {plusInfWarning && value === Infinity && <FieldWarning>{plusInfWarning}</FieldWarning>}
       {error && (
         <p className="flex items-center gap-1.5 text-meta font-semibold text-error" role="alert">
           <FaCircleExclamation className="size-3 flex-none" /> {error}
