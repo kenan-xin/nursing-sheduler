@@ -222,7 +222,7 @@ export function RunOptionsForm({
         >
           {submitting ? (
             <>
-              <FaSpinner className="animate-spin-slow" aria-hidden /> Optimising…
+              <FaSpinner className="animate-spin-slow" aria-hidden /> Optimizing…
             </>
           ) : (
             <>
