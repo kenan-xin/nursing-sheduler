@@ -26,6 +26,7 @@ import {
   AlertDialogMedia,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { FaSpinner, FaTriangleExclamation, FaTrash } from "@/components/icons";
 
 export interface ConfirmDialogProps {
@@ -52,6 +53,8 @@ export interface ConfirmDialogProps {
    * was still writing to IndexedDB silently dropped it).
    */
   busyLabel?: string;
+  /** An extra footer action that does NOT close the dialog (e.g. "Save roster file first"). */
+  secondaryAction?: { label: string; onClick: () => void };
   onConfirm: () => void | Promise<unknown>;
 }
 
@@ -68,6 +71,7 @@ export function ConfirmDialog({
   variant = "default",
   consequences,
   busyLabel,
+  secondaryAction,
   onConfirm,
 }: ConfirmDialogProps) {
   const [busy, setBusy] = React.useState(false);
@@ -137,6 +141,17 @@ export function ConfirmDialog({
             and the single close signal is the explicit one below. Escape and an
             alert dialog's non-dismissable backdrop can therefore never confirm. */}
         <AlertDialogFooter>
+          {secondaryAction ? (
+            <Button
+              variant="secondary"
+              className="sm:mr-auto"
+              onClick={secondaryAction.onClick}
+              disabled={busy}
+              data-testid="confirm-dialog-secondary"
+            >
+              {secondaryAction.label}
+            </Button>
+          ) : null}
           <AlertDialogCancel data-testid="confirm-dialog-cancel" disabled={busy}>
             {cancelLabel}
           </AlertDialogCancel>

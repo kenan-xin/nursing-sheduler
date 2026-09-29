@@ -3,9 +3,10 @@
 //
 // The frozen workbook is the de-anonymized styled output captured at solve time
 // (F2 reuses the restored parity-download blob). Edits are a bounded overlay, so
-// the export loads those bytes with ExcelJS and patches ONLY the edited cells —
-// every unedited cell, the Score/Status rows, summaries, and the worksheet
-// geometry are reproduced exactly as solved.
+// the export loads those bytes with ExcelJS and patches ONLY the edited cells and
+// the count cells they move (audit C-10, `./count-cells`) — every other cell, the
+// Score/Status values, and the worksheet geometry are reproduced exactly as
+// solved. The Score row gets an "as solved, before edits" note beside its value.
 //
 // The patch matrix (Core Flows Flow 5 + Tech Plan "Edited-XLSX export"), applied
 // per edited coordinate (`row = peopleRows[personIdx]`, `col = dateColumns[dateIdx]`):
@@ -40,6 +41,7 @@
 
 import type ExcelJS from "exceljs";
 
+import type { CountCellDelta } from "./count-cells";
 import { applyCoverSheet, PROVENANCE_SHEET_NAME, type CoverSheetPlan } from "./cover-sheet";
 import { dayStateDisplay } from "./day-state";
 import type { RosterCoordinateMap, RosterDayState, RosterEdit, RosterProvenance } from "./types";
@@ -76,6 +78,8 @@ export interface EditedXlsxPatchInput {
    * no edits returns the frozen bytes untouched.
    */
   readonly cover?: CoverSheetPlan | null;
+  /** The count-cell deltas the edits cause (`buildCountCellDeltas`); absent = none. */
+  readonly counts?: readonly CountCellDelta[];
 }
 
 /** The provenance view written into the dedicated sheet. */
@@ -179,6 +183,18 @@ export async function patchFrozenXlsxWithEdits(input: EditedXlsxPatchInput): Pro
     clearCellFillAndFont(cell);
     // `cell.border` is intentionally untouched — preserved wholesale.
   }
+
+  // 1b. Move each count cell by what the edits changed, after checking its header
+  //     so a layout mismatch fails closed instead of writing into the wrong cell.
+  //     Before the cover insert, which shifts the rows below the staff window.
+  for (const count of input.counts ?? []) {
+    if (sheet.getCell(count.headerRow, count.headerCol).value !== count.header) {
+      throw new EditedXlsxError("the workbook's count layout does not match the submission");
+    }
+    const cell = sheet.getCell(count.row, count.col);
+    cell.value = (typeof cell.value === "number" ? cell.value : 0) + count.delta;
+  }
+  if (input.edits.length > 0) labelScoreAsSolved(sheet, input.coordinateMap);
 
   // 2. Rebuild the Notes sheet: drop every row for an edited coordinate, then
   //    rewrite the surviving rows contiguously and fix every affected hyperlink.
@@ -517,6 +533,16 @@ function findScheduleCellByAddress(sheet: ExcelJS.Worksheet, address: string): E
   } catch {
     return null;
   }
+}
+
+/**
+ * Note beside the Score value that it is the solver's score for the solved roster,
+ * not for the edited one. Column A keeps its literal `Score` label.
+ */
+function labelScoreAsSolved(sheet: ExcelJS.Worksheet, coordinateMap: RosterCoordinateMap): void {
+  const scoreRow = coordinateMap.peopleRows[coordinateMap.peopleRows.length - 1] + 1;
+  if (sheet.getCell(scoreRow, 1).value !== "Score") return;
+  sheet.getCell(scoreRow, coordinateMap.dateColumns[0] + 1).value = "as solved, before edits";
 }
 
 // ---------------------------------------------------------------------------

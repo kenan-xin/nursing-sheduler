@@ -16,8 +16,9 @@
 // spec-conformance check must NOT "fix" these labels back to FR-ST-28. (Export
 // Layout — prototype
 // ScreenExport — is deferred to the backlog (T15 / nursing-sheduler-qq0.15)
-// and has no shipped screen or nav entry; the exportLayout data model and its
-// default XLSX layout are unaffected.)
+// and has no shipped screen or nav entry. A saved exportLayout is sent as is;
+// with none saved, each run sends v1's default layout
+// (`lib/scenario/default-export-layout.ts`).)
 //
 // Mode-visible navigation (DL12 tech-plan §2, superseding the earlier DL10
 // "identical in both modes" reading): Guided foregrounds Dates, People, Shift

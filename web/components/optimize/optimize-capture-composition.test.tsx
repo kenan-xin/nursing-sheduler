@@ -29,6 +29,7 @@ import {
   type UiTemporaryCover,
 } from "@/lib/scenario";
 import { applyCovers } from "@/lib/scenario/temporary-cover";
+import { withDefaultExportLayout } from "@/lib/scenario/default-export-layout";
 import type { RosterCover } from "@/lib/roster/types";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
 import { cards, requirement } from "@/lib/rules/ward-fixtures.test-support";
@@ -1454,7 +1455,9 @@ describe("OptimizeAndExportScreen — temporary cover (d582)", () => {
     await userEvent.click(screen.getByTestId("optimize-submit"));
     await waitFor(() => expect(staged).toHaveLength(1));
     const applied = applyCovers(useScenarioStore.getState());
-    expect(prepared[0]).toEqual(toCanonicalScenarioDocument(applied.state));
+    expect(prepared[0]).toEqual(
+      withDefaultExportLayout(toCanonicalScenarioDocument(applied.state)),
+    );
     expect(applied.decrements).not.toHaveLength(0);
     expect(staged[0]).toEqual({
       entries: [{ name: "Haseena (Ward 3)", iso: "2026-07-03", shiftId: "day", groups: [] }],
@@ -1468,6 +1471,10 @@ describe("OptimizeAndExportScreen — temporary cover (d582)", () => {
     await userEvent.click(screen.getByTestId("optimize-submit"));
     await waitFor(() => expect(staged).toHaveLength(1));
     expect(staged[0]).toEqual({ entries: [], decrements: [] });
-    expect(prepared[0]).toEqual(toCanonicalScenarioDocument(useScenarioStore.getState()));
+    // No saved layout, so the run carries v1's default one (audit C-01).
+    expect(prepared[0].export?.extraRows?.length).toBeGreaterThan(0);
+    expect(prepared[0]).toEqual(
+      withDefaultExportLayout(toCanonicalScenarioDocument(useScenarioStore.getState())),
+    );
   });
 });
