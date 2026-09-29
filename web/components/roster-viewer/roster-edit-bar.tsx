@@ -199,6 +199,11 @@ export function RosterEditBar({
       >
         <FaXmark className="size-3.5" aria-hidden /> Cancel
       </Button>
+      {/* Audit C-08: a hand edit lives only in this roster. It is not leave or a
+          request, so the solver never sees it. */}
+      <p data-testid="roster-edit-scope" className="basis-full text-meta text-ink3">
+        Roster only. The next run will not keep this.
+      </p>
     </div>
   );
 }

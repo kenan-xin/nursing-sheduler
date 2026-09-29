@@ -73,6 +73,19 @@ afterEach(() => {
   cleanup();
 });
 
+describe("CountCardList — stale hours badge (T2)", () => {
+  it("marks a contract whose hours lag a shift length change", () => {
+    render(
+      <CountCardList
+        counts={[exactContractedCard]}
+        {...NOOP_PROPS}
+        staleHoursUids={new Set(["c-exact"])}
+      />,
+    );
+    expect(screen.getByTestId("count-stale-hours-badge-0")).toHaveTextContent("Hours out of date");
+  });
+});
+
 describe("CountCardList — uncredited-leave saved badge (qq0.23d)", () => {
   // A second marked card, identical body but distinct uid, models a duplicate.
   const exactContractedDup: CountCard = { ...exactContractedCard, uid: "c-exact-dup" };

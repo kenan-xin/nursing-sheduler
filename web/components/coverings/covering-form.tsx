@@ -18,12 +18,15 @@ import { FieldShell } from "@/components/card-editor/field-shell";
 import { TransferList } from "@/components/entity-editor/transfer-list";
 import { entityKey, sameEntityId } from "@/components/entity-editor/core";
 import { DateScopeField } from "@/components/card-editor/date-scope-field";
+import { FaTriangleExclamation } from "@/components/icons";
 import {
   buildDateScopeAutoScopes,
   buildDateScopeDateGroups,
   buildDateScopeDateItems,
   buildPeopleTransferOptions,
   buildShiftTypeTransferOptions,
+  COVERING_MESSAGES,
+  supervisorOverlap,
   type CoveringErrors,
   type CoveringFormState,
   type CoveringRef,
@@ -63,6 +66,7 @@ export function CoveringForm({ state, mode, initialForm, onSave, onCancel }: Cov
   const dateItems = buildDateScopeDateItems(state);
   const noPeople = people.items.length === 0 && people.groups.length === 0;
   const noShifts = shiftTypes.items.length === 0 && shiftTypes.groups.length === 0;
+  const overlap = supervisorOverlap(form, state);
 
   function toggle(field: CoveringSelectField, ref: CoveringRef) {
     setForm((prev) => ({ ...prev, [field]: toggleRef(prev[field], ref) }));
@@ -150,6 +154,15 @@ export function CoveringForm({ state, mode, initialForm, onSave, onCancel }: Cov
           addAria={(l) => `Add ${l} as a preceptee`}
           removeAria={(l) => `Remove ${l} from preceptees`}
         />
+        {!errors.preceptees && overlap.length > 0 && (
+          <p
+            className="flex items-center gap-1.5 text-meta font-semibold text-warnink"
+            data-testid="covering-overlap-warning"
+          >
+            <FaTriangleExclamation className="size-3 flex-none" />
+            {COVERING_MESSAGES.partialOverlap(overlap)}
+          </p>
+        )}
       </FieldShell>
 
       <FieldShell

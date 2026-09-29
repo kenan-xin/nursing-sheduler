@@ -18,6 +18,7 @@ import {
   summarizeRefs,
   toggleRef,
   validateCoveringForm,
+  supervisorOverlap,
   type CoveringFormState,
 } from "./coverings-model";
 
@@ -130,6 +131,29 @@ describe("validation (FR-CV-13..15)", () => {
       state,
     );
     expect(errors.shiftTypes).toBe(COVERING_MESSAGES.offLeave);
+  });
+
+  it("blocks preceptees who are all preceptors too (group expanded)", () => {
+    const errors = validateCoveringForm(
+      form({ preceptors: ["Seniors"], preceptees: ["Anna"], shiftTypes: ["D"] }),
+      PEOPLE,
+    );
+    expect(errors.preceptees).toBe(COVERING_MESSAGES.selfSupervised);
+    expect(
+      validateCoveringForm(
+        form({ preceptors: ["ALL"], preceptees: ["ALL"], shiftTypes: ["D"] }),
+        PEOPLE,
+      ).preceptees,
+    ).toBe(COVERING_MESSAGES.selfSupervised);
+  });
+
+  it("allows a partial overlap and names the overlapping people", () => {
+    const draft = form({ preceptors: ["Seniors"], preceptees: ["ALL"], shiftTypes: ["D"] });
+    expect(validateCoveringForm(draft, PEOPLE)).toEqual({});
+    expect(supervisorOverlap(draft, PEOPLE)).toEqual(["Anna"]);
+    expect(COVERING_MESSAGES.partialOverlap(["Anna"])).toBe(
+      "Both preceptor and preceptee: Anna. They count as supervising themselves.",
+    );
   });
 
   it("passes a fully-populated worked-shift draft", () => {

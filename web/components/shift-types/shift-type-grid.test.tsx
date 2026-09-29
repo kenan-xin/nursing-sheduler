@@ -6,6 +6,7 @@ import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { changeKeys } from "@/lib/change-highlight/keys";
 import { clearChangeHighlight, showChangeHighlight } from "@/lib/change-highlight/store";
+import { toast } from "sonner";
 import { ShiftTypeGrid } from "./shift-type-grid";
 import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/store/test-authority";
 
@@ -16,7 +17,9 @@ import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/st
 // bare-duration preservation, clear-working-time, rename cascade, drag/keyboard
 // reorder, and the shared GroupsSection driven with the Shift config.
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({
+  toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }),
+}));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/shift-types",
@@ -665,5 +668,100 @@ describe("ShiftTypeGrid — change highlight", () => {
       "data-change-highlight",
     );
     expect(screen.getByTestId("group-row-Late")).toHaveAttribute("data-change-highlight", "true");
+  });
+});
+
+/** The last `toast(message, { action })` offer, invoked as a user click would. */
+function clickToastAction(): void {
+  const calls = vi.mocked(toast).mock.calls;
+  const options = calls[calls.length - 1]?.[1] as unknown as {
+    action: { onClick: () => void };
+  };
+  options.action.onClick();
+}
+
+describe("ShiftTypeGrid — delete confirm + Undo (T1)", () => {
+  it("confirms a shift delete with the cascade counts, then offers Undo", async () => {
+    await seed({
+      shifts: [{ id: "Day" }, { id: "Night" }],
+      shiftGroups: [],
+      staff: [{ id: "Anna", history: ["Night", "Day"] }],
+    });
+    await seedRequirements([requirement()]);
+    render(<ShiftTypeGrid />);
+
+    fireEvent.click(screen.getByTestId("shift-delete-string:Day"));
+    expect(screen.getByTestId("confirm-dialog-consequences")).toHaveTextContent("1 rule");
+    expect(screen.getByTestId("confirm-dialog-consequences")).toHaveTextContent(
+      "2 history entries",
+    );
+    expect((await shifts()).map((s) => s.id)).toEqual(["Day", "Night"]);
+
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    await settleSave();
+    expect((await shifts()).map((s) => s.id)).toEqual(["Night"]);
+    expect(await requirements()).toEqual([]);
+    expect(vi.mocked(toast).mock.calls.at(-1)?.[0]).toBe("Deleted shift “Day”.");
+
+    clickToastAction();
+    await settleSave();
+    expect((await shifts()).map((s) => s.id)).toEqual(["Day", "Night"]);
+    expect(await requirements()).toHaveLength(1);
+  });
+
+  it("keeps a shift group when the confirm is cancelled", async () => {
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [{ id: "Working", members: ["Day"] }] });
+    render(<ShiftTypeGrid />);
+
+    fireEvent.click(screen.getByTestId("group-delete-Working"));
+    expect(screen.getByTestId("confirm-dialog")).toHaveTextContent("Nothing else uses it.");
+    fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+    await settleSave();
+    expect((await shiftGroups()).map((g) => g.id)).toEqual(["Working"]);
+  });
+});
+
+describe("ShiftTypeGrid — stale contracted hours (T2)", () => {
+  it("after Save offers to refresh contracts that use the changed shift", async () => {
+    await seed({
+      shifts: [{ id: "N", durationMinutes: 720 }],
+      shiftGroups: [],
+      cardsByKind: {
+        ...useScenarioStore.getState().cardsByKind,
+        counts: [
+          {
+            uid: "contract-1",
+            description: "",
+            person: ["ALL"],
+            countDates: ["ALL"],
+            countShiftTypes: ["N"],
+            countShiftTypeCoefficients: [["N", 20]],
+            expression: "x = T",
+            target: 320,
+            weight: Infinity,
+            tag: "contracted_hours",
+            policy: "exact",
+            unit: "half-hour",
+          },
+        ],
+      },
+    });
+    render(<ShiftTypeGrid />);
+
+    fireEvent.click(screen.getByTestId("shift-edit-string:N"));
+    fireEvent.change(screen.getByTestId("shift-edit-string:N-name"), {
+      target: { value: "Night" },
+    });
+    fireEvent.click(screen.getByTestId("shift-edit-string:N-save"));
+    await settleSave();
+    expect(vi.mocked(toast).mock.calls.at(-1)?.[0]).toBe(
+      "N is used by 1 contracted-hours rule. Refresh it now?",
+    );
+
+    clickToastAction();
+    await settleSave();
+    expect(useScenarioStore.getState().cardsByKind.counts[0].countShiftTypeCoefficients).toEqual([
+      ["N", 24],
+    ]);
   });
 });

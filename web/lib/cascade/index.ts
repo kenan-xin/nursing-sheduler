@@ -4,7 +4,13 @@
 // mutation (T04 `mutateScenario`); these functions never touch the store.
 
 export { renameEntity, applyRename, remapDateReferences } from "./rename";
-export { deleteEntity, applyDelete } from "./delete";
+export {
+  deleteEntity,
+  applyDelete,
+  deleteImpact,
+  describeDeleteImpact,
+  type DeleteImpact,
+} from "./delete";
 export {
   RenameCollisionError,
   type EntityDomain,
