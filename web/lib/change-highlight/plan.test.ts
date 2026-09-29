@@ -41,6 +41,9 @@ describe("targetKeyFor", () => {
   it("points a folded days-off run and an availability line at the person's row", () => {
     expect(targetKeyFor(entry('offrun:"cy"|01|14', "leave-and-requests"))).toBe('person:"cy"');
     expect(targetKeyFor(entry('available:"cy"', "leave-and-requests"))).toBe('person:"cy"');
+    expect(
+      targetKeyFor(entry('groupleave:"Seniors"|2026-10-05|2026-10-07', "leave-and-requests")),
+    ).toBe('person:"Seniors"');
   });
   it("points a binds/narrowed consequence at its count rule", () => {
     expect(targetKeyFor(entry('binds:u1|"cy"', "shift-counts"))).toBe("rule:counts:u1");

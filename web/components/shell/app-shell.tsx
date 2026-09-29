@@ -142,7 +142,7 @@ function DirtyNavDialog() {
 
 // Global delete-confirm modal (ticket item 1). Bound to the imperative confirm
 // store so any screen can `await confirmDialog(...)` and share this single dialog.
-function GlobalConfirmDialog() {
+export function GlobalConfirmDialog() {
   const request = useConfirmStore((s) => s.request);
   const settle = useConfirmStore((s) => s.settle);
 
