@@ -244,7 +244,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `nurse_scheduling/server/usage_report.py` | excluded |  | X6: no usage telemetry |
 | `nurse_scheduling/server/workspace.py` | v2-only |  | P5 Workspace V1 input and located errors (X14) |
 | `nurse_scheduling/solver_interface.py` | verbatim | `63db2a420257` |  |
-| `nurse_scheduling/solver_ortools_cp_sat.py` | verbatim | `346f334d6713` |  |
+| `nurse_scheduling/solver_ortools_cp_sat.py` | patched | `346f334d6713` | `3c91-solver-max-lp-sym.patch` |
 | `nurse_scheduling/solver_ortools_linear.py` | verbatim | `36c4d411e7ae` |  |
 | `nurse_scheduling/solver_ortools_mathopt.py` | verbatim | `b2a2cf0db547` |  |
 | `nurse_scheduling/solver_pulp.py` | verbatim | `a796fcb7e684` |  |
@@ -367,7 +367,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `tests/test_shift_type_working_time.py` | verbatim | `8c8caf53830a` |  |
 | `tests/test_skill_mix.py` | v2-only |  | P2 skillMix |
 | `tests/test_solver_interface.py` | verbatim | `523fc735d17e` |  |
-| `tests/test_solver_ortools_cp_sat.py` | verbatim | `794aad1fceb4` |  |
+| `tests/test_solver_ortools_cp_sat.py` | patched | `794aad1fceb4` | `3c91-solver-max-lp-sym.patch` |
 | `tests/test_solver_ortools_linear.py` | verbatim | `ad85c5496d0f` |  |
 | `tests/test_solver_ortools_mathopt.py` | verbatim | `5dd68e6d1afe` |  |
 | `tests/test_solver_pulp_glpk.py` | verbatim | `be94ac4ce248` |  |
@@ -716,6 +716,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `tests/testcases/real/large-ward-with-87-people-2025-11.yaml` | verbatim | `8ec166c666d5` |  |
 | `tests/testcases/real/sg-28day-160h-compliance-14-nurses.yaml` | v2-only |  | SG compliance ward case |
 | `tests/testcases/real/ward-8-shift-patterns-senior-on-every-shift.yaml` | v2-only |  | 8-shift-pattern ward case |
+| `upstream-patches/3c91-solver-max-lp-sym.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/P0-fixture-restamp.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/P2-P3-skillmix-overrides.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/P4-on-roster.patch` | v2-only |  | sync patch or manifest |

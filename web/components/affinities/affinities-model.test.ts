@@ -118,15 +118,15 @@ describe("validateAffinityForm (spec 05 Shift Affinities validation table)", () 
 });
 
 describe("buildAffinityCard (spec 05 FR-PR-60/61)", () => {
-  it("builds a card with the nested people1/people2/shiftTypes shape and a flat date list", () => {
+  it("saves v1's flat people1/people2/shiftTypes lists so core scores each person and shift on its own (rqfx)", () => {
     const card = buildAffinityCard(
       form({ people1: ["Chloe"], people2: ["Aisha"], shiftTypes: ["D"], date: ["2026-01-01"] }),
       "uid-1",
     );
     expect(card.uid).toBe("uid-1");
-    expect(card.people1).toEqual([["Chloe"]]);
-    expect(card.people2).toEqual([["Aisha"]]);
-    expect(card.shiftTypes).toEqual([["D"]]);
+    expect(card.people1).toEqual(["Chloe"]);
+    expect(card.people2).toEqual(["Aisha"]);
+    expect(card.shiftTypes).toEqual(["D"]);
     expect(card.date).toEqual(["2026-01-01"]);
     expect(card.weight).toBe(1);
   });
@@ -150,12 +150,12 @@ describe("buildAffinityCard (spec 05 FR-PR-60/61)", () => {
     expect(empty.description).toBe("");
   });
 
-  it("keeps numeric and string people/date refs distinct through the nested wrap", () => {
+  it("keeps numeric and string people/date refs distinct, one element each", () => {
     const card = buildAffinityCard(
       form({ people1: [1, "1"], people2: ["Aisha"], shiftTypes: ["D"], date: [1, "2026-01-01"] }),
       "u3",
     );
-    expect(card.people1).toEqual([[1, "1"]]);
+    expect(card.people1).toEqual([1, "1"]);
     expect(card.date).toEqual([1, "2026-01-01"]);
   });
 });
@@ -244,48 +244,39 @@ describe("withCardDisabled", () => {
   });
 });
 
-describe("advanced (multi-term) affinity detection (FR-PR-55a-style fallback)", () => {
-  const single: AffinityCard = {
-    uid: "single",
+describe("v1-shaped vs grouped affinity detection (rqfx)", () => {
+  const v1: AffinityCard = {
+    uid: "v1",
     date: ["ALL"],
-    people1: [["A"]],
-    people2: [["B"]],
-    shiftTypes: [["D"]],
+    people1: ["A", "B"],
+    people2: ["C"],
+    shiftTypes: ["D", "N"],
     weight: 1,
   };
 
-  it("a form-authored single-term card is editable, not advanced", () => {
-    expect(isAdvancedAffinityCard(single)).toBe(false);
-    expect(isEditableAffinityCard(single)).toBe(true);
+  it("a v1-shaped (flat, per-element) card loads as an editable card and round-trips", () => {
+    expect(isAdvancedAffinityCard(v1)).toBe(false);
+    expect(isEditableAffinityCard(v1)).toBe(true);
+    const rebuilt = buildAffinityCard(affinityToForm(v1), v1.uid);
+    expect(rebuilt).toEqual({ ...v1, description: "" });
   });
 
-  it("a single OR-group term (many refs, one term) is still editable and round-trips", () => {
-    const orGroup: AffinityCard = { ...single, people1: [["A", "B", "C"]] };
-    expect(isAdvancedAffinityCard(orGroup)).toBe(false);
-    // Round-trip: flatten the one term, rebuild — same single-term shape.
-    const rebuilt = buildAffinityCard(affinityToForm(orGroup), orGroup.uid);
-    expect(rebuilt.people1).toEqual([["A", "B", "C"]]);
+  it("one-member groups mean the same as scalars, so they stay editable and save flat", () => {
+    const singletons: AffinityCard = { ...v1, people1: [["A"], ["B"]], shiftTypes: [["D"]] };
+    expect(isEditableAffinityCard(singletons)).toBe(true);
+    const rebuilt = buildAffinityCard(affinityToForm(singletons), singletons.uid);
+    expect(rebuilt.people1).toEqual(["A", "B"]);
+    expect(rebuilt.shiftTypes).toEqual(["D"]);
   });
 
-  it("a MULTI-term people1 selector is advanced (would collapse if flattened+rebuilt)", () => {
-    const multi: AffinityCard = { ...single, people1: [["A"], ["B"]] };
-    expect(isAdvancedAffinityCard(multi)).toBe(true);
-    expect(isEditableAffinityCard(multi)).toBe(false);
-    // Proof of the collapse the read-only guard prevents: flattening then
-    // rebuilding TWO terms yields ONE aggregate term.
-    const collapsed = buildAffinityCard(affinityToForm(multi), multi.uid);
-    expect(collapsed.people1).toEqual([["A", "B"]]);
-    expect(collapsed.people1).not.toEqual(multi.people1);
-  });
-
-  it("multi-term people2 or shiftTypes each mark the card advanced too", () => {
-    expect(isAdvancedAffinityCard({ ...single, people2: [["A"], ["B"]] })).toBe(true);
-    expect(isAdvancedAffinityCard({ ...single, shiftTypes: [["D"], ["N"]] })).toBe(true);
-  });
-
-  it("a flat multi-scalar top-level selector (two scalar terms) is advanced", () => {
-    // `["A", "B"]` at the top level is TWO scalar terms, not one OR-group.
-    const flatMulti = { ...single, people1: ["A", "B"] } as unknown as AffinityCard;
-    expect(isAdvancedAffinityCard(flatMulti)).toBe(true);
+  it("a grouped card (pre-rqfx v2 form shape) stays advanced: flattening would change its meaning", () => {
+    for (const grouped of [
+      { ...v1, people1: [["A", "B"]] },
+      { ...v1, people2: [["C", "E"]] },
+      { ...v1, shiftTypes: [["D", "N"]] },
+    ] as AffinityCard[]) {
+      expect(isAdvancedAffinityCard(grouped)).toBe(true);
+      expect(isEditableAffinityCard(grouped)).toBe(false);
+    }
   });
 });

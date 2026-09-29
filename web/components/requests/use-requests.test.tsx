@@ -9,7 +9,7 @@ import type { ShiftRequestDelta } from "./requests-csv";
 import { useRequests } from "./use-requests";
 import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/store/test-authority";
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
 
 const BASE_SEED: Partial<ScenarioUiState> = {
   rangeStart: "2026-01-01",
@@ -76,14 +76,19 @@ describe("useRequests — quick-paint history gesture", () => {
     expect(await staffHistory("Aisha")).toEqual(["LEAVE", "OFF"]);
   });
 
-  it("skips a shift-type GROUP silently (a history slot cannot hold a group)", async () => {
-    const { result } = renderHook(() =>
-      useRequests({ quickPaintSelectedIds: ["AnyDay"], quickPaintWeightText: "0" }),
-    );
-    act(() => result.current.onHistoryPointerDown("Aisha", 0));
-    fireEvent.mouseUp(window);
-    expect(await staffHistory("Aisha")).toEqual([]);
-    expect(toast.error).not.toHaveBeenCalled();
+  it("refuses a shift-type GROUP or ALL with one toast (a history slot cannot hold a group)", async () => {
+    for (const id of ["AnyDay", "ALL"]) {
+      vi.mocked(toast.error).mockClear();
+      const { result } = renderHook(() =>
+        useRequests({ quickPaintSelectedIds: [id], quickPaintWeightText: "0" }),
+      );
+      act(() => result.current.onHistoryPointerDown("Aisha", 0));
+      fireEvent.mouseUp(window);
+      expect(await staffHistory("Aisha")).toEqual([]);
+      expect(toast.error).toHaveBeenCalledWith("History needs one shift type, not a group.", {
+        id: "History needs one shift type, not a group.",
+      });
+    }
   });
 
   it("surfaces the verbatim multi-select error as a toast (and mutates nothing)", async () => {
@@ -91,7 +96,9 @@ describe("useRequests — quick-paint history gesture", () => {
       useRequests({ quickPaintSelectedIds: ["AM", "PM"], quickPaintWeightText: "0" }),
     );
     act(() => result.current.onHistoryPointerDown("Aisha", 0));
-    expect(toast.error).toHaveBeenCalledWith("Cannot set history to multiple shift types.");
+    expect(toast.error).toHaveBeenCalledWith("Cannot set history to multiple shift types.", {
+      id: "Cannot set history to multiple shift types.",
+    });
     fireEvent.mouseUp(window);
     expect(await staffHistory("Aisha")).toEqual([]);
   });
@@ -106,6 +113,59 @@ describe("useRequests — quick-paint history gesture", () => {
     fireEvent.mouseUp(window);
     expect(await staffHistory("Aisha")).toEqual(["AM"]);
     expect((await undoDepth()) - before).toBe(1);
+  });
+});
+
+describe("useRequests — quick paint over leave/OFF cells (F4)", () => {
+  it("warns how many cells a request drag skipped because they hold leave or OFF", async () => {
+    await seed({
+      reqData: [
+        { kind: "leave", person: "Aisha", date: "01" },
+        { kind: "off", person: "Aisha", date: "02", weight: 5 },
+      ],
+    });
+    const { result } = renderHook(() =>
+      useRequests({ quickPaintSelectedIds: ["AM"], quickPaintWeightText: "5" }),
+    );
+    act(() => result.current.onCellPointerDown("Aisha", "01"));
+    act(() => result.current.onCellPointerEnter("Aisha", "02"));
+    act(() => result.current.onCellPointerEnter("Aisha", "03"));
+    fireEvent.mouseUp(window);
+    expect(toast.warning).toHaveBeenCalledWith(
+      "2 cells skipped: they hold leave or OFF. Clear them first.",
+    );
+  });
+
+  it("stays quiet when nothing was skipped", async () => {
+    const { result } = renderHook(() =>
+      useRequests({ quickPaintSelectedIds: ["AM"], quickPaintWeightText: "5" }),
+    );
+    act(() => result.current.onCellPointerDown("Aisha", "01"));
+    fireEvent.mouseUp(window);
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+});
+
+describe("useRequests — clear counts name every kind of cell (F5)", () => {
+  it("counts requests, OFF days and leave pins, overall and per shape", async () => {
+    await seed({
+      reqData: [
+        { kind: "request", person: "Aisha", date: "01", shiftType: "AM", weight: 5 },
+        { kind: "request", person: "Aisha", date: "02", shiftType: "PM", weight: 5 },
+        { kind: "off", person: "Aisha", date: "03", weight: 5 },
+        { kind: "leave", person: "Aisha", date: "WEEKEND" },
+      ],
+    });
+    const { result } = renderHook(() =>
+      useRequests({ quickPaintSelectedIds: [], quickPaintWeightText: "0" }),
+    );
+    expect(result.current.countClearable()).toEqual({ requests: 2, off: 1, leave: 1 });
+    expect(
+      result.current.countClearable({ personScope: "individual", dateScope: "individual" }),
+    ).toEqual({ requests: 2, off: 1, leave: 0 });
+    expect(
+      result.current.countClearable({ personScope: "individual", dateScope: "group" }),
+    ).toEqual({ requests: 0, off: 0, leave: 1 });
   });
 });
 

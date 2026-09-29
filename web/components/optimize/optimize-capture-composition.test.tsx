@@ -690,6 +690,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
       );
 
       await userEvent.click(screen.getByTestId("optimize-capture-dismiss"));
+      await userEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
 
       await waitFor(async () => expect(await store.readCurrentCandidate()).toBeNull(), {
         timeout: CAPTURE_TIMEOUT,

@@ -25,6 +25,16 @@ describe("RosterPeriodCard — change highlight", () => {
 });
 
 describe("RosterPeriodCard — invalid/incomplete range feedback (VR-DC-03)", () => {
+  it("says what the holiday import really does (F7)", () => {
+    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={vi.fn()} />);
+    expect(
+      screen.getByText(
+        "Adds WORKDAY, NON-WORKDAY and PH date groups. They change nothing until a staffing rule uses them.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/like weekends/)).not.toBeInTheDocument();
+  });
+
   it("shows an error and does not commit when start > end", () => {
     const onCommit = vi.fn();
     render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={onCommit} />);

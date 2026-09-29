@@ -25,6 +25,13 @@ describe("parseQuickPaintWeight", () => {
   it("returns null for unparseable text", () => {
     expect(parseQuickPaintWeight("abc")).toBeNull();
   });
+
+  it("reads k/m suffixes like the cell editor (F6)", () => {
+    expect(parseQuickPaintWeight("10k")).toBe(10000);
+    expect(parseQuickPaintWeight(" 2m ")).toBe(2_000_000);
+    expect(parseQuickPaintWeight("1.5k")).toBe(1500);
+    expect(parseQuickPaintWeight("1.2345k")).toBeNull();
+  });
 });
 
 describe("quickPaintStatus (FR-SR-29)", () => {
@@ -72,9 +79,14 @@ describe("quickPaintStatus (FR-SR-29)", () => {
   });
 
   it("apply: +∞ weight", () => {
-    expect(quickPaintStatus(["LEAVE"], "∞").text).toBe(
-      "Drag over cells to apply LEAVE with weight +∞.",
-    );
+    expect(quickPaintStatus(["AM"], "∞").text).toBe("Drag over cells to apply AM with weight +∞.");
+  });
+
+  it("LEAVE has its own line and ignores the weight, even an invalid or 0 one (F3)", () => {
+    const leave = { tone: "apply", text: "Drag to pin paid leave. Weight is not used." };
+    expect(quickPaintStatus(["LEAVE"], "5")).toEqual(leave);
+    expect(quickPaintStatus(["LEAVE"], "0")).toEqual(leave);
+    expect(quickPaintStatus(["LEAVE"], "abc")).toEqual(leave);
   });
 
   // The status line must announce what the drag ACTUALLY paints (the gesture's
@@ -99,14 +111,14 @@ describe("quickPaintStatus (FR-SR-29)", () => {
       // LEAVE wins over AM and OFF — only LEAVE is announced.
       expect(quickPaintStatus(["OFF", "AM", "LEAVE"], "5")).toEqual({
         tone: "apply",
-        text: "Drag over cells to apply LEAVE with weight +5.",
+        text: "Drag to pin paid leave. Weight is not used.",
       });
     });
 
     it("apply: a sole OFF selection is still announced (it is a day-state)", () => {
       expect(quickPaintStatus(["OFF"], "5")).toEqual({
         tone: "apply",
-        text: "Drag over cells to apply OFF with weight +5.",
+        text: "Drag over cells to apply OFF with weight +5. This replaces shift requests in each cell.",
       });
     });
 
