@@ -190,11 +190,16 @@ def shift_request(
                 for s in compiled_preference.shift_types:
                     # Add the objective
                     if s == constants.OFF_sid:
-                        utils.add_objective(ctx, weight, ctx.offs[(d, p)])
+                        off_expr = ctx.offs[(d, p)]
+                        if weight == math.inf:
+                            # A leave day is also a day off: a hard OFF (e.g. on a group row) plus a
+                            # member's leave pin is not a conflict (bug hunt B5, bead 99db).
+                            off_expr = off_expr + ctx.leaves[(d, p)]
+                        utils.add_objective(ctx, weight, off_expr)
                         ctx.reports.append(
                             Report(
                                 f"shift_request_pref_{preference_idx}_d_{d}_p_{p}_offs",
-                                ctx.offs[(d, p)],
+                                off_expr,
                                 lambda x: x == 1,
                             )
                         )
@@ -277,6 +282,10 @@ def shift_type_successions(
                 )
                 if target_n_matched == 0:
                     # History already completes this pattern before the first schedulable day.
+                    if preference.weight == -math.inf:
+                        # Nothing this month can undo history, so a forbidden pattern it completed
+                        # binds nothing here (bug hunt B1, bead 99db). Soft and +inf keep v1 scores.
+                        continue
                     is_match_var_name = f"{unique_var_prefix}_is_match"
                     ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
                     ctx.solver.add_constraint(is_match == 1)

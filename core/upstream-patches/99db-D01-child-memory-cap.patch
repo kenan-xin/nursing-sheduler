@@ -1,0 +1,205 @@
+# 99db patch for server/jobs/process_executor.py, server/jobs/worker.py, server/config.py, server/app.py and tests/test_process_executor.py against genie 1bf4b85.
+# hunk: RLIMIT_DATA cap on the solver child (OPTIMIZE_CHILD_MEMORY_LIMIT_MB, default 1536); an out-of-memory child fails as scenario_too_large (bug hunt D-01, bead 99db)
+
+diff --git a/core/nurse_scheduling/server/app.py b/core/nurse_scheduling/server/app.py
+index a56ef06..c6cacf1 100644
+--- a/core/nurse_scheduling/server/app.py
++++ b/core/nurse_scheduling/server/app.py
+@@ -202,6 +202,7 @@ def create_app(
+         claim_poll_seconds=settings.claim_poll_seconds,
+         worker_lease_seconds=settings.worker_lease_seconds,
+         timeout_grace_seconds=settings.timeout_grace_seconds,
++        child_memory_limit_bytes=settings.child_memory_limit_mb * 1024 * 1024,
+         unexpected_error_formatter=_format_unexpected_error,
+     )
+     maintenance = JobMaintenance(controller, interval_seconds=settings.maintenance_interval_seconds)
+diff --git a/core/nurse_scheduling/server/config.py b/core/nurse_scheduling/server/config.py
+index 0be9af7..8dee82b 100644
+--- a/core/nurse_scheduling/server/config.py
++++ b/core/nurse_scheduling/server/config.py
+@@ -243,6 +243,13 @@ class ServerSettings:
+     """Namespace and schema version prepended to telemetry keys."""
+     usage_metrics_retention_days: int = DEFAULT_USAGE_METRICS_RETENTION_DAYS
+     """Retention period for every telemetry row."""
++    child_memory_limit_mb: int = 0
++    """Data-segment cap (RLIMIT_DATA) in MiB on each solver child, 0 for none (bead 99db).
++
++    Zero for direct construction; `from_env` supplies the shipped 1536 from
++    OPTIMIZE_CHILD_MEMORY_LIMIT_MB. The 87-person ward peaks at 1.19 GiB over 300 s on
++    2 CP-SAT workers, and 2 x 1.5 GiB still fits a 3.6 GB host running prod and dev.
++    """
+     cookie_secure: bool = False
+     """Whether the client correlation cookie is always marked secure.
+ 
+@@ -364,6 +371,7 @@ class ServerSettings:
+             auth_token=os.getenv(AUTH_TOKEN_ENV_NAME),
+             auth_tokens=parse_auth_credentials(os.getenv(AUTH_TOKENS_ENV_NAME)),
+             auth_required=_boolean(AUTH_REQUIRED_ENV_NAME, False),
++            child_memory_limit_mb=_non_negative_int("OPTIMIZE_CHILD_MEMORY_LIMIT_MB", 1536),
+             cookie_secure=_boolean("API_COOKIE_SECURE", False),
+             usage_metrics_enabled=_boolean("USAGE_METRICS_ENABLED", False),
+             usage_metrics_key_prefix=os.getenv(
+diff --git a/core/nurse_scheduling/server/jobs/process_executor.py b/core/nurse_scheduling/server/jobs/process_executor.py
+index 1837123..5b03d10 100644
+--- a/core/nurse_scheduling/server/jobs/process_executor.py
++++ b/core/nurse_scheduling/server/jobs/process_executor.py
+@@ -35,6 +35,7 @@
+ 
+ import logging
+ import multiprocessing
++import signal
+ import time
+ import traceback
+ from collections.abc import Callable
+@@ -47,9 +48,24 @@ from . import process_tree
+ from .models import Job, JobFailure
+ from .runner import EventCallback, OptimizationRunner, RunOutput
+ 
++try:
++    import resource
++except ImportError:  # Windows has no rlimits; the child runs uncapped there.
++    resource = None
++
+ server_logger = logging.getLogger("nurse_scheduling.server")
+ PROCESS_POLL_SECONDS = 1.0
+ """Maximum delay for progress, controls, aborts, and watchdog checks."""
++SCENARIO_TOO_LARGE = JobFailure(
++    code="scenario_too_large",
++    message=(
++        "This scenario is too large for this server: the solver ran out of memory. "
++        "Use fewer people, days, shift types or pairing combinations."
++    ),
++)
++"""Failure for a child that ran out of memory (bead 99db)."""
++# A C++ allocation failure aborts; the kernel OOM killer sends SIGKILL.
++OUT_OF_MEMORY_EXIT_CODES = frozenset(-getattr(signal, name) for name in ("SIGKILL", "SIGABRT") if hasattr(signal, name))
+ 
+ 
+ class ProcessControl(str, Enum):
+@@ -99,12 +115,17 @@ def _run_child(
+     finish_now_event: Any,
+     finish_now_enabled: bool,
+     expected_parent_pid: int,
++    memory_limit_bytes: int = 0,
+ ) -> None:
+     """Execute the runner and send events or its terminal message to the parent."""
+     # Isolate the child first, then wait until the supervisor has installed its
+     # guard. This prevents a PuLP solver descendant from starting during the
+     # interval where abrupt supervisor death could leave it unprotected.
+     process_tree.prepare_optimization_child(expected_parent_pid)
++    if memory_limit_bytes and resource is not None:
++        # RLIMIT_DATA, not RLIMIT_AS: CP-SAT reserves address space per worker thread, so an AS cap
++        # sized for a 2-core host aborts even a tiny scenario on a 32-core one (bead 99db).
++        resource.setrlimit(resource.RLIMIT_DATA, (memory_limit_bytes, memory_limit_bytes))
+     try:
+         start_connection.recv()
+     except (EOFError, OSError):
+@@ -145,6 +166,7 @@ def run_optimization_process(
+     control: ControlCallback,
+     hard_timeout_seconds: float,
+     finish_now_enabled: bool,
++    memory_limit_bytes: int = 0,
+ ) -> ProcessResult:
+     """Run one directly supervised child until it returns or must be stopped.
+ 
+@@ -175,6 +197,7 @@ def run_optimization_process(
+             finish_now_event,
+             finish_now_enabled,
+             multiprocessing.current_process().pid,
++            memory_limit_bytes,
+         ),
+         name=f"optimization-job-{job.id}",
+     )
+@@ -215,6 +238,9 @@ def run_optimization_process(
+         try:
+             message = receive_connection.recv()
+         except EOFError:
++            process.join(PROCESS_POLL_SECONDS)
++            if process.exitcode in OUT_OF_MEMORY_EXIT_CODES:
++                return ProcessResult(status=ProcessStatus.FAILED, failure=SCENARIO_TOO_LARGE)
+             raise ChildOptimizationError(
+                 "ChildProcessCommunicationError",
+                 (
+@@ -243,6 +269,8 @@ def run_optimization_process(
+                 exception_type,
+                 child_traceback,
+             )
++            if exception_type == "MemoryError":
++                return ProcessResult(status=ProcessStatus.FAILED, failure=SCENARIO_TOO_LARGE)
+             raise ChildOptimizationError(exception_type, error_message, child_traceback)
+         raise RuntimeError(f"Unknown optimization child message: {message_type}")
+ 
+@@ -324,6 +352,8 @@ def run_optimization_process(
+             if process.sentinel in ready:
+                 if receive_connection.poll():
+                     continue
++                if process.exitcode in OUT_OF_MEMORY_EXIT_CODES:
++                    return ProcessResult(status=ProcessStatus.FAILED, failure=SCENARIO_TOO_LARGE)
+                 raise ChildOptimizationError(
+                     "ChildProcessExit",
+                     f"Optimization process exited with code {process.exitcode}",
+diff --git a/core/nurse_scheduling/server/jobs/worker.py b/core/nurse_scheduling/server/jobs/worker.py
+index b6552ba..b35912f 100644
+--- a/core/nurse_scheduling/server/jobs/worker.py
++++ b/core/nurse_scheduling/server/jobs/worker.py
+@@ -52,9 +52,12 @@ class JobWorker:
+         claim_poll_seconds: float,
+         worker_lease_seconds: float,
+         timeout_grace_seconds: float = DEFAULT_TIMEOUT_GRACE_SECONDS,
++        child_memory_limit_bytes: int = 0,
+         unexpected_error_formatter: Callable[[Exception], str] = str,
+     ):
+         """Configure a process-local worker without starting its thread."""
++        self._child_memory_limit_bytes = child_memory_limit_bytes
++        """RLIMIT_DATA for each optimization child, 0 for none."""
+         self._controller = controller
+         """Controller used for claims, events, control requests, and outcomes."""
+         self._runner = runner
+@@ -446,6 +449,7 @@ class JobWorker:
+                 control=process_control,
+                 hard_timeout_seconds=job.request.timeout_seconds + self._timeout_grace_seconds,
+                 finish_now_enabled=finish_now_supported,
++                memory_limit_bytes=self._child_memory_limit_bytes,
+             )
+             if process_result.status is ProcessStatus.COMPLETED:
+                 if process_result.output is None:
+diff --git a/core/tests/test_process_executor.py b/core/tests/test_process_executor.py
+index 5005f5d..86722b6 100644
+--- a/core/tests/test_process_executor.py
++++ b/core/tests/test_process_executor.py
+@@ -877,6 +877,35 @@ def test_returned_invalid_model_failure_becomes_a_structured_failed_result():
+     )
+ 
+ 
++class MemoryHungryRunner:
++    def run(self, job, input_bytes, *, event_callback, should_stop):
++        return bytearray(2 * 1024 * 1024 * 1024)
++
++
++class SigkilledRunner:
++    def run(self, job, input_bytes, *, event_callback, should_stop):
++        os.kill(os.getpid(), signal.SIGKILL)
++
++
++@pytest.mark.skipif(sys.platform != "linux", reason="RLIMIT_DATA and the OOM-kill signal are Linux behaviour")
++@pytest.mark.parametrize("runner", [MemoryHungryRunner(), SigkilledRunner()], ids=["memory_error", "sigkill"])
++def test_child_out_of_memory_fails_as_scenario_too_large(runner):
++    # D-01: the capped child's MemoryError, or a kernel OOM kill, is a plain result, not a crash.
++    result = run_optimization_process(
++        runner,
++        _control_job("job_out_of_memory"),
++        b"apiVersion: alpha\n",
++        event_callback=lambda *_args: None,
++        control=lambda: None,
++        hard_timeout_seconds=61,
++        finish_now_enabled=False,
++        memory_limit_bytes=512 * 1024 * 1024,
++    )
++    assert result.status is ProcessStatus.FAILED
++    assert result.failure.code == "scenario_too_large"
++    assert "too large for this server" in result.failure.message
++
++
+ def test_unexpected_child_exception_raises_child_optimization_error():
+     with pytest.raises(ChildOptimizationError, match="solver exploded"):
+         run_optimization_process(
