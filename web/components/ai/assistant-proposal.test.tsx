@@ -30,6 +30,8 @@ import {
 } from "@/lib/store/test-authority";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { useModeStore } from "@/lib/mode/mode";
+import { toast } from "sonner";
+import { useNavGuardStore } from "@/components/shell/nav-guard-store";
 import { AssistantReceipts } from "./assistant-receipts";
 import { ProposalPreviewCard } from "./proposal-preview-card";
 import { useAssistantProposals } from "./use-assistant-proposals";
@@ -119,6 +121,7 @@ beforeEach(async () => {
   // A live Preview is rendered after mount, when the stored mode has been adopted;
   // the affected-screen names resolve only then, so pin that here.
   useModeStore.setState({ mode: "guided", adoption: "ready" });
+  useNavGuardStore.setState({ drafts: new Map(), pendingIntent: null, open: false });
   assistantActions.resetForTest();
   harness = await installTestAuthority();
   await loadScenario(proposalScenario());
@@ -303,13 +306,38 @@ describe("Apply", () => {
     expect(await screen.findByTestId("proposal-blocks")).toHaveTextContent("stopped");
   });
 
-  it("blocks on an unsaved editor draft and names it", async () => {
+  // 44xe: open forms register in the nav-guard registry; Apply must read that one.
+  it("blocks on an open editor form, names it, and reopens once the form closes", async () => {
     await showProposal(SHRINK);
-    harness.hot.getState().setDraft("shift-type-editor", { id: "Day" });
     render(<HostSurface />);
+    expect(await screen.findByTestId("proposal-apply")).toBeEnabled();
 
-    expect(await screen.findByTestId("proposal-apply")).toBeDisabled();
-    expect(await screen.findByTestId("proposal-blocks")).toHaveTextContent("shift-type-editor");
+    let close = () => {};
+    act(() => {
+      close = useNavGuardStore.getState().registerDraft({ id: "shifts", label: "Shifts editor" });
+    });
+    await waitFor(async () => expect(await screen.findByTestId("proposal-apply")).toBeDisabled());
+    expect(await screen.findByTestId("proposal-blocks")).toHaveTextContent("Shifts editor");
+
+    act(() => close());
+    await waitFor(async () => expect(await screen.findByTestId("proposal-apply")).toBeEnabled());
+  });
+
+  it("refuses a receipt Undo while an editor form is open", async () => {
+    const user = userEvent.setup();
+    const toastError = vi.spyOn(toast, "error");
+    await showProposal(SHRINK);
+    render(<HostSurface />);
+    await user.click(await screen.findByTestId("proposal-apply"));
+    await waitFor(() => expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-15"));
+
+    act(() => {
+      useNavGuardStore.getState().registerDraft({ id: "shifts", label: "Shifts editor" });
+    });
+    await user.click(await screen.findByTestId("receipt-undo"));
+
+    expect(toastError).toHaveBeenCalledWith(expect.stringContaining("Shifts editor"));
+    expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-15");
   });
 
   // nursing-sheduler-3t8. Apply's trailing refresh used to reread the proposal by the

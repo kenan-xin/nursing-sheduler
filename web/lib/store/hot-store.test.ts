@@ -35,21 +35,16 @@ describe("hot store never triggers a durable write", () => {
     expect(await commitCount(harness)).toBe(baseline);
   });
 
-  it("run/ui/draft churn stays in the hot store", () => {
+  it("run/ui churn stays in the hot store", () => {
     const hot = createHotStore();
     hot.getState().setUi({ selectedPerson: "p1" });
-    hot.getState().setDraft("staff-form", { id: "p2" });
     hot.getState().setRun({ phase: "queued", jobId: "job-1" });
 
     expect(hot.getState().ui).toEqual({ selectedPerson: "p1" });
-    expect(hot.getState().drafts).toEqual({ "staff-form": { id: "p2" } });
     expect(hot.getState().run.jobId).toBe("job-1");
-
-    hot.getState().clearDraft("staff-form");
-    expect(hot.getState().drafts).toEqual({});
   });
 
-  it("resetEphemeral clears run/runView/ui/drafts/paint but keeps hydrationStatus", () => {
+  it("resetEphemeral clears run/runView/ui/paint but keeps hydrationStatus", () => {
     const hot = createHotStore();
     hot.getState().setHydrationStatus("ready");
     hot.getState().setRun({ phase: "running", jobId: "job-1" });
@@ -61,7 +56,6 @@ describe("hot store never triggers a durable write", () => {
       }),
     );
     hot.getState().setUi({ selectedPerson: "p1" });
-    hot.getState().setDraft("d", { x: 1 });
     hot.getState().beginPaint();
     hot.getState().stagePaintDayState("p1", "2026-01-01", { kind: "leave" });
 
@@ -70,7 +64,6 @@ describe("hot store never triggers a durable write", () => {
     expect(hot.getState().run.phase).toBe("idle");
     expect(hot.getState().runView).toEqual(INITIAL_OPTIMIZE_RUN_VIEW);
     expect(hot.getState().ui).toEqual({});
-    expect(hot.getState().drafts).toEqual({});
     expect(hot.getState().paint).toBeNull();
     // Status is deliberately preserved (owned by the lifecycle transition).
     expect(hot.getState().hydrationStatus).toBe("ready");
