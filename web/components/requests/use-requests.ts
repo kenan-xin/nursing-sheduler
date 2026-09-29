@@ -189,6 +189,47 @@ function cellSelectorKey(cell: UiRequestCell): string {
 }
 
 /**
+ * Replace ONE coordinate's cells with a cell-editor result. The Requests cell
+ * editor and the Roster's "Also record as leave / day off" (kyh3) both write
+ * through this, so the two paths cannot disagree about identity or shape.
+ */
+export function replaceCoordinateCells(
+  reqData: readonly UiRequestCell[],
+  person: PersonRef,
+  date: DateRef,
+  result: CellEditorResult,
+): UiRequestCell[] {
+  const atCoordinate = reqData.filter((c) => c.person === person && c.date === date);
+  const others = reqData.filter((c) => !(c.person === person && c.date === date));
+  // Preserve durable identity per selector/day-state so an edit re-using an
+  // existing selector keeps its `uid` (Workspace identity never depends on array
+  // position); a genuinely new cell is minted a fresh `uid` at creation (T17r
+  // review P1 — every manual create path allocates identity).
+  const uidBySelector = new Map<string, string>();
+  for (const cell of atCoordinate) {
+    if (cell.uid) uidBySelector.set(cellSelectorKey(cell), cell.uid);
+  }
+  const uidFor = (selector: string): string => uidBySelector.get(selector) ?? crypto.randomUUID();
+
+  let cells: UiRequestCell[] = [];
+  if (result.kind === "leave") cells = [{ kind: "leave", person, date, uid: uidFor("leave") }];
+  else if (result.kind === "off")
+    cells = [{ kind: "off", person, date, weight: result.weight, uid: uidFor("off") }];
+  else if (result.kind === "requests") {
+    // Empty prefs is an erase (parity note): `cells` stays `[]`.
+    cells = result.prefs.map((p) => ({
+      kind: "request",
+      person,
+      date,
+      shiftType: p.shiftType,
+      weight: p.weight,
+      uid: uidFor(`request:${p.shiftType}`),
+    }));
+  }
+  return [...others, ...cells];
+}
+
+/**
  * Cell-level diff of two matrices, keyed by coordinate + selector: a key only in
  * `after` is added, only in `before` removed, in both with another weight changed.
  */
@@ -506,37 +547,9 @@ export function useRequests({
    * whatever the previous command committed.
    */
   function writeCellEdit(person: PersonRef, date: DateRef, result: CellEditorResult): void {
-    scenarioCommands.setReqData((scenario) => {
-      const atCoordinate = scenario.reqData.filter((c) => c.person === person && c.date === date);
-      const others = scenario.reqData.filter((c) => !(c.person === person && c.date === date));
-      // Preserve durable identity per selector/day-state so an edit re-using an
-      // existing selector keeps its `uid` (Workspace identity never depends on array
-      // position); a genuinely new cell is minted a fresh `uid` at creation (T17r
-      // review P1 — every manual create path allocates identity).
-      const uidBySelector = new Map<string, string>();
-      for (const cell of atCoordinate) {
-        if (cell.uid) uidBySelector.set(cellSelectorKey(cell), cell.uid);
-      }
-      const uidFor = (selector: string): string =>
-        uidBySelector.get(selector) ?? crypto.randomUUID();
-
-      let cells: UiRequestCell[] = [];
-      if (result.kind === "leave") cells = [{ kind: "leave", person, date, uid: uidFor("leave") }];
-      else if (result.kind === "off")
-        cells = [{ kind: "off", person, date, weight: result.weight, uid: uidFor("off") }];
-      else if (result.kind === "requests") {
-        // Empty prefs is an erase (parity note): `cells` stays `[]`.
-        cells = result.prefs.map((p) => ({
-          kind: "request",
-          person,
-          date,
-          shiftType: p.shiftType,
-          weight: p.weight,
-          uid: uidFor(`request:${p.shiftType}`),
-        }));
-      }
-      return [...others, ...cells];
-    });
+    scenarioCommands.setReqData((scenario) =>
+      replaceCoordinateCells(scenario.reqData, person, date, result),
+    );
   }
 
   function clearCell(person: PersonRef, date: DateRef): void {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { getMissingPreferredScatterDateGroups, scatterShiftRequests } from "./anonymize";
+import { parse } from "yaml";
+import { generateDateItems } from "@/lib/dates/date-id";
+import { makeValidUiState } from "./test-fixtures";
 import type { CanonicalScenarioDocument } from "./types";
+import { prepareAnonymizedWorkspaceExport } from "./workspace-export";
 
 // A deterministic RNG (Math.random is unavailable in some execution contexts, so
 // scatter always takes an injected source). `() => 0` makes Fisher–Yates fully
@@ -194,5 +198,55 @@ describe("scatterShiftRequests — WEEKDAY/WEEKEND fallback (FR-SL-38)", () => {
     const result = scatterShiftRequests(doc, rng0);
     const moved = (result.preferences[0] as { date: string }).date;
     expect(isWeekend(moved)).toBe(false);
+  });
+});
+
+describe("scatter on the Workspace backup path (A-08)", () => {
+  function spanState() {
+    const state = makeValidUiState();
+    state.rangeStart = "2026-05-04";
+    state.rangeEnd = "2026-05-31";
+    state.dateGroups = [];
+    state.reqData = [
+      { uid: "c1", kind: "request", person: "Bob", date: "05", shiftType: "D", weight: 2 },
+      { uid: "c2", kind: "request", person: "Bob", date: "06", shiftType: "D", weight: 2 },
+    ];
+    return state;
+  }
+  const requestDates = (yaml: string) =>
+    (parse(yaml) as { preferences: { type: string; date?: unknown }[] }).preferences
+      .filter((p) => p.type === "shift request")
+      .map((p) => p.date);
+
+  it("moves span-id requests and writes them back as span ids", () => {
+    let tick = 0;
+    const result = prepareAnonymizedWorkspaceExport(spanState(), {
+      people: false,
+      groups: false,
+      scatter: true,
+      rng: () => (tick += 0.37) % 1,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const dates = requestDates(result.yaml);
+    expect(dates).not.toEqual(["05", "06"]);
+    for (const date of dates) expect(date).toMatch(/^\d{2}$/);
+  });
+
+  it("classifies span-id WORKDAY / NON-WORKDAY members", () => {
+    const state = spanState();
+    const items = generateDateItems({ start: state.rangeStart, end: state.rangeEnd });
+    const weekend = (iso: string) => [0, 6].includes(new Date(`${iso}T00:00:00Z`).getUTCDay());
+    state.dateGroups = [
+      { id: "WORKDAY", members: items.filter((i) => !weekend(i.iso)).map((i) => i.id) },
+      { id: "NON-WORKDAY", members: items.filter((i) => weekend(i.iso)).map((i) => i.id) },
+    ];
+    const result = prepareAnonymizedWorkspaceExport(state, {
+      people: false,
+      groups: false,
+      scatter: true,
+      rng: () => 0.5,
+    });
+    expect(result).toMatchObject({ ok: true });
   });
 });

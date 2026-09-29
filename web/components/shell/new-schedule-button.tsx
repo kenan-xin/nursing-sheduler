@@ -184,7 +184,7 @@ export function StartOverCard({
             {exampleError}
           </p>
         ) : null}
-        {issues ? <ScenarioIssuesList issues={issues} /> : null}
+        {issues ? <ScenarioIssuesList issues={issues} action="the example can load" /> : null}
         {warnings ? <ImportWarningsBanner warnings={warnings} onDismiss={dismissWarnings} /> : null}
       </div>
       <ConfirmDialog

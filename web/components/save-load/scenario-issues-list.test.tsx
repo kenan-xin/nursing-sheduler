@@ -21,4 +21,11 @@ describe("ScenarioIssuesList — the blocked-action clause", () => {
       "1 issue must be fixed before this scenario can be exported.",
     );
   });
+
+  it("shows a next step under the list when given one", () => {
+    render(<ScenarioIssuesList issues={ONE_ISSUE} hint="Paste the file into Edit YAML." />);
+    expect(screen.getByTestId("scenario-export-issues")).toHaveTextContent(
+      "Paste the file into Edit YAML.",
+    );
+  });
 });

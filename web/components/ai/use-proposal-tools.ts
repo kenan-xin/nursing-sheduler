@@ -28,7 +28,7 @@ import {
   type AssistantCommandV1,
 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
-import { assistantProposalCommands } from "@/lib/store";
+import { assistantProposalCommands, useScenarioStore } from "@/lib/store";
 import {
   BALANCE_RULE_NOTE,
   REST_PRACTICE_WARNING,
@@ -232,7 +232,10 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
           (screen
             ? `Apply opens the "${screen}" screen; call it by that name, never another. `
             : "") +
-          (relaxesRestRule(outcome.proposal.commands)
+          (relaxesRestRule(
+            outcome.proposal.commands,
+            useScenarioStore.getState().cardsByKind.successions,
+          )
             ? `This change relaxes a rest rule, so also say, in one short line: "${REST_PRACTICE_WARNING}" `
             : "") +
           (setsBalanceRule(outcome.proposal.commands)

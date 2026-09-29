@@ -94,6 +94,33 @@ function mount(document: RosterDocument) {
   );
 }
 
+describe("setup changed since the solve (C-20)", () => {
+  const shifts = [{ id: "D" }, { id: "N" }];
+
+  it("is quiet while Setup still matches the roster", async () => {
+    await scenarioCommands.mutate({ staff: [{ id: "Alice Ng" }, { id: 7 }], shifts });
+    mount(await fixtureRosterDocument());
+    expect(screen.queryByTestId("roster-setup-changed")).toBeNull();
+  });
+
+  it("says so after a person is renamed or removed", async () => {
+    await scenarioCommands.mutate({ staff: [{ id: "Alice Ng" }, { id: "Bo" }], shifts });
+    mount(await fixtureRosterDocument());
+    expect(screen.getByTestId("roster-setup-changed")).toHaveTextContent(
+      "Setup changed since this roster was solved",
+    );
+  });
+
+  it("says so after a shift type is removed", async () => {
+    await scenarioCommands.mutate({
+      staff: [{ id: "Alice Ng" }, { id: 7 }],
+      shifts: [{ id: "D" }],
+    });
+    mount(await fixtureRosterDocument());
+    expect(screen.getByTestId("roster-setup-changed")).toBeDefined();
+  });
+});
+
 describe("temporary cover on the roster (d582)", () => {
   it("control: with no cover the scoped cell is short", async () => {
     mount(await fixtureRosterDocument({ document: documentNeeding(2) }));

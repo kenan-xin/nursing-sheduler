@@ -121,11 +121,10 @@ import {
   buildRequirementShiftTypeOptions,
   emptyRequirementForm,
   preferredDiffersFromRequired,
-  REQUIREMENT_MESSAGES,
+  requiredCountError,
   requirementCoveredIsos,
   requirementToForm,
   savedOverrides,
-  skillMixFloor,
   validateRequirementForm,
   type RequirementFormState,
   type RequirementNumberValue,
@@ -697,6 +696,14 @@ function contractedRejection(
   index: number,
   held?: unknown,
 ): OperationResult | undefined {
+  // First, so the refusal names the real reason: the form only holds half-hour rows.
+  if (command.hoursPerShift !== undefined && !Number.isInteger(command.hoursPerShift * 2)) {
+    return reject(
+      index,
+      "invalid_value",
+      `${name}: hoursPerShift must be on the half-hour grid, such as 7.5 or 8.`,
+    );
+  }
   const people = countPeopleOptions(state);
   const offeredPeople = [...people.items, ...people.groups];
   const person = firstUnofferedPerson(command.people, offeredPeople, held);
@@ -1521,15 +1528,11 @@ function applySetRequirementPeople(
       "That requirement covers more than one shift type, so it has no single head count to change. It has to be edited on the Staffing requirements screen.",
     );
   }
-  // The Guided quick field's own rule, restated (see the parity test): a finite,
-  // non-negative number. Deliberately NOT stricter -- an assistant that refused what
-  // the manual control accepts would be a second, quieter definition of "valid".
-  if (!(Number.isFinite(command.requiredNumPeople) && command.requiredNumPeople >= 0)) {
-    return reject(index, "invalid_value", "Required people must be zero or more.");
-  }
-  if (command.requiredNumPeople < skillMixFloor(card)) {
-    return reject(index, "invalid_value", `${REQUIREMENT_MESSAGES.skillMixAboveRequired}.`);
-  }
+  // The Guided quick field's own check (see the parity test). Deliberately NOT stricter --
+  // an assistant that refused what the manual control accepts would be a second, quieter
+  // definition of "valid".
+  const error = requiredCountError(card, command.requiredNumPeople);
+  if (error) return reject(index, "invalid_value", `${error}.`);
   if (card.requiredNumPeople === command.requiredNumPeople) {
     return reject(index, "no_effect", "That requirement already asks for that many people.");
   }
@@ -1576,6 +1579,18 @@ function applyMoveLeave(
   );
   if (!source) {
     return reject(index, "unknown_target", "There is no leave on that date to move.");
+  }
+  // The move replaces the target cell, so leave already there would be lost unasked.
+  if (
+    cellsAtCoordinate(state.reqData, command.personId, command.toDate).some(
+      (cell) => cell.kind === "leave",
+    )
+  ) {
+    return reject(
+      index,
+      "invalid_value",
+      "They are already on leave that day, so moving leave there would lose a leave day.",
+    );
   }
 
   // The leave KEEPS ITS IDENTITY across the move: it is the same agreement on a

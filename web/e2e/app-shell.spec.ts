@@ -262,7 +262,7 @@ test.describe("T08 app shell", () => {
       page.waitForEvent("download"),
       page.getByTestId("scenario-download-button").click(),
     ]);
-    expect(download.suggestedFilename()).toBe("scenario.yaml");
+    expect(download.suggestedFilename()).toMatch(/^nurse-scheduling-\d{4}-\d{2}-\d{2}\.yaml$/);
     expect(await backupStatus(page)).toBe("current");
   });
 

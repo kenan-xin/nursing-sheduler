@@ -1304,7 +1304,7 @@ describe("pairing and supervision rules in the Preview", () => {
       before:
         "On · “Ana and Ben apart on nights” · ana with ben on the same shift on the same day (Night), every date: apart where possible (weight -10)",
       after:
-        "On · “Ana and Ben together on weekends” · ana with ben on the same shift on the same day (Working shifts), weekends: together where possible (weight 5)",
+        "On · “Ana and Ben together on weekends” · ana with ben on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together (Working shifts), weekends: together where possible (weight 5)",
     });
     expect(diff.cascade).toEqual([]);
 

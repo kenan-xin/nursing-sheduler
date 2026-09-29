@@ -42,7 +42,8 @@ describe("validateShiftRequestCsv", () => {
     const result = validateShiftRequestCsv("garbage", shiftRequestOptions({ weight: "abc" }));
     expect(result).toEqual({
       ok: false,
-      error: "Weight must be a valid number, Infinity, or -Infinity.",
+      error:
+        "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity.",
     });
   });
 
