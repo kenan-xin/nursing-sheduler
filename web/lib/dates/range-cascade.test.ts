@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
-import { applyRangeChange } from "./range-cascade";
+import { applyRangeChange, countRangeRemovals } from "./range-cascade";
 
 function seeded(): ScenarioUiState {
   const state = createEmptyScenarioUiState("alpha");
@@ -217,5 +217,28 @@ describe("applyRangeChange range cascade (FR-DC-41 / AC-DC-18)", () => {
       },
     );
     expect(next.dateGroups.map((g) => g.id)).not.toContain("PH");
+  });
+});
+
+describe("countRangeRemovals", () => {
+  it("counts the request and leave cells the cascade drops, and nothing it migrates", () => {
+    const state = seeded();
+    state.reqData = [
+      ...state.reqData, // request on "15"
+      { kind: "leave", person: "P1", date: "25" },
+      { kind: "leave", person: "P1", date: "31" },
+      { kind: "off", person: "P1", date: "31", weight: 2 },
+      { kind: "request", person: "P1", date: "01", shiftType: "D", weight: -1 },
+    ];
+    // Shrink to 01..20: 25 and 31 leave the range.
+    expect(countRangeRemovals(state, { start: "2026-07-01", end: "2026-07-20" })).toEqual({
+      requests: 1,
+      leaveDays: 2,
+    });
+    // Widen into August: every July id is re-keyed, nothing removed.
+    expect(countRangeRemovals(state, { start: "2026-07-01", end: "2026-08-15" })).toEqual({
+      requests: 0,
+      leaveDays: 0,
+    });
   });
 });

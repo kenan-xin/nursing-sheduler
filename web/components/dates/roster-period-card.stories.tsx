@@ -17,8 +17,10 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   play: async ({ args, canvas }) => {
-    // A complete, valid edit commits immediately with the effective import flag.
+    // An edit is a draft; Apply commits it with the effective import flag.
     fireEvent.change(canvas.getByTestId("range-end"), { target: { value: "2026-08-20" } });
+    await expect(args.onCommit).not.toHaveBeenCalled();
+    fireEvent.click(canvas.getByTestId("range-apply"));
     await expect(args.onCommit).toHaveBeenCalledWith(
       { start: "2026-08-01", end: "2026-08-20" },
       false,

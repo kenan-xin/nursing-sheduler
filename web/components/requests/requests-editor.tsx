@@ -45,7 +45,7 @@ import {
 import { downloadBlob } from "@/lib/utils/download";
 import { useRequests, pickRequestsScenario } from "./use-requests";
 
-type ConfirmState = { text: string; onConfirm: () => void } | null;
+type ConfirmState = { text: string; confirmLabel?: string; onConfirm: () => void } | null;
 type CsvKind = "requests" | "history" | null;
 // `origin` is the exact matrix element that opened the editor. It is held
 // ALONGSIDE the coordinate, never derived from it: after a commit the matrix
@@ -97,6 +97,7 @@ export function RequestsEditor() {
     clearCell,
     commitHistorySet,
     commitHistoryClear,
+    previewRequestsCsv,
     applyRequestsCsv,
     applyHistoryCsv,
     clearAllRequests,
@@ -108,8 +109,8 @@ export function RequestsEditor() {
   });
 
   // FR-SR-34: BOTH CSV uploads are Quick-paint-only — the toolbar renders them
-  // only in quick mode. Within quick mode the Requests CSV applies at the
-  // shared quick-paint weight, so it needs a *parseable* weight — 0 is a valid
+  // only in quick mode. Within quick mode a Requests CSV entry without its own
+  // `:weight` applies at the shared quick-paint weight, so it needs a *parseable* weight — 0 is a valid
   // (removal) weight, so only an unparsed/invalid entry disables it.
   const requestsCsvDisabled = parseQuickPaintWeight(quickWeightText) === null;
   const requestsCsvDisabledReason = "Set a valid weight to import shift requests.";
@@ -262,9 +263,29 @@ export function RequestsEditor() {
       toast.error("No valid shift preferences found in CSV file.");
       return;
     }
-    applyRequestsCsv(result.data, parsedWeight!);
+    const deltas = result.data;
+    const counts = previewRequestsCsv(deltas, parsedWeight!);
     setCsvOpen(null);
-    toast.success(`Successfully processed CSV file with ${result.data.length} shift preferences!`);
+    const run = () => {
+      applyRequestsCsv(deltas, parsedWeight!);
+      const { added, changed, removed } = counts;
+      toast.success(
+        added + changed + removed === 0
+          ? "CSV imported: no changes, the file matches the current requests."
+          : `CSV imported: ${added} added, ${changed} changed, ${removed} removed.`,
+      );
+    };
+    // A bare cell at the quick-paint weight 0, or a day-state over requests,
+    // deletes existing cells: say how many before doing it.
+    if (counts.removed > 0) {
+      setConfirm({
+        text: `This import will remove ${counts.removed} existing request${counts.removed === 1 ? "" : "s"}. Import anyway?`,
+        confirmLabel: "Import",
+        onConfirm: run,
+      });
+    } else {
+      run();
+    }
   }
 
   function handleHistoryCsvFile(text: string) {
@@ -645,6 +666,7 @@ export function RequestsEditor() {
       <ClearConfirmDialog
         open={confirm !== null}
         text={confirm?.text ?? ""}
+        confirmLabel={confirm?.confirmLabel}
         onConfirm={() => {
           confirm?.onConfirm();
           setConfirm(null);
