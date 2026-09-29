@@ -7,8 +7,37 @@
 import {
   createEmptyScenarioUiState,
   serializeScenario,
+  type V1LeaveShiftPlan,
   type VersionConfirmStatus,
 } from "@/lib/scenario";
+
+// ---------------------------------------------------------------------------
+// v1 "Leave" shift conversion offer (nursing-sheduler-objg). v1 let a file define
+// its own "Leave" shift; v2 reserves LEAVE as the paid-leave pin.
+// ---------------------------------------------------------------------------
+
+/** Copy for the confirm that offers converting a v1 "Leave" shift to paid leave. */
+export function v1LeaveShiftOfferCopy(plan: V1LeaveShiftPlan): {
+  title: string;
+  description: string;
+  detail: string;
+} {
+  const lines = [
+    `Requests that become paid leave: ${plan.convertedRequests}`,
+    `History entries that become LEAVE: ${plan.historyEntries}`,
+  ];
+  if (plan.droppedRequests > 0)
+    lines.push(`Requests dropped (zero or negative weight): ${plan.droppedRequests}`);
+  return {
+    title: `Convert "${plan.shiftId}" to paid leave?`,
+    description:
+      `This file has its own shift type "${plan.shiftId}". This app has a built-in LEAVE for ` +
+      `paid leave, so the two clash. Convert it: the shift type is removed and its requests ` +
+      `become fixed paid-leave days, which the schedule always keeps. ` +
+      `To keep it as a worked shift instead, choose Don't convert.`,
+    detail: lines.join("\n"),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // FR-SL-19/20 version-mismatch wording (spec 08, ported from the current
