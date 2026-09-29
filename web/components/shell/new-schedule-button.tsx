@@ -198,7 +198,6 @@ export function StartOverCard({
         consequences={[
           "All people, shift types and dates",
           "Every rule and request",
-          "Your export layout",
           "The saved roster and the last run's result",
         ]}
         onConfirm={handleConfirm}

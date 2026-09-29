@@ -224,7 +224,7 @@ describe("deriveProposalDiff", () => {
     ]);
     const entry = (key: string) => diff.direct.find((candidate) => candidate.key === key);
     expect(entry('cell:"Ana"|"10"')).toMatchObject({
-      label: "Ana on 10",
+      label: "Ana on Sat 10 Oct",
       before: null,
       after: "On leave",
       kind: "created",
@@ -275,7 +275,21 @@ describe("deriveProposalDiff", () => {
     ]);
   });
 
-  it("reads an imported weight-0 day-off request as a plain ask, not a weighted one", () => {
+  it("names a group row and a date keyword in words, not ids (F13)", () => {
+    const before = ruleWardScenario();
+    const after = {
+      ...before,
+      reqData: [
+        ...before.reqData,
+        { kind: "off" as const, person: "Senior", date: "WEEKEND", weight: 5 },
+      ],
+    };
+    expect(diffScenarioDocuments(before, after).map((entry) => entry.label)).toEqual([
+      "everyone in Senior on weekends",
+    ]);
+  });
+
+  it("says an imported weight-0 day-off request has no effect", () => {
     const ward = octoberWard();
     const before = {
       ...ward,
@@ -297,8 +311,8 @@ describe("deriveProposalDiff", () => {
       {
         key: 'cell:"Chris"|"01"',
         scope: "leave-and-requests",
-        label: "Chris on 01",
-        before: "Asked for the day off",
+        label: "Chris on Thu 1 Oct",
+        before: "Day off at weight 0 (no effect)",
         after: null,
         kind: "removed",
       },
@@ -331,7 +345,7 @@ describe("deriveProposalDiff", () => {
       {
         key: 'cell:"Ana"|"14"',
         scope: "leave-and-requests",
-        label: "Ana on 14",
+        label: "Ana on Wed 14 Oct",
         before: "On leave",
         after: "Must work N",
         kind: "changed",
@@ -751,7 +765,43 @@ describe("rule sentences state what the solver enforces", () => {
         preferredNumPeople: 3,
         weight: -50,
       }),
-    ).toBe("On · At least 2, ideally 3 people on Night, every date (weight -50)");
+    ).toBe("On · 2 to 3 people on Night, every date, aiming for 3 (weight -50)");
+  });
+
+  it("a preferred count at -∞ is exactly that count, a must (C-14)", () => {
+    expect(
+      sentence("requirements", {
+        ...requirement,
+        preferredNumPeople: 3,
+        weight: Number.NEGATIVE_INFINITY,
+      }),
+    ).toBe("On · Exactly 3 people on Night, every date (a must)");
+  });
+
+  it("a count with coefficients says it is a weighted count (C5)", () => {
+    expect(
+      sentence("counts", { ...count, countShiftTypeCoefficients: [["Night", 2]], weight: -1 }),
+    ).toBe(
+      "On · At most 5 Night shifts (weighted count) for everyone, across every date: " +
+        "avoided where possible (weight -1)",
+    );
+  });
+
+  it("an edit that leaves a rule off says the optimiser ignores it (C-13)", () => {
+    const card = { ...count, weight: -1, disabled: true };
+    const scenario = ruleWardScenario();
+    const withCount = (target: number) => ({
+      ...scenario,
+      cardsByKind: {
+        ...scenario.cardsByKind,
+        counts: [...scenario.cardsByKind.counts, { ...card, target }],
+      },
+    });
+    const [entry] = diffScenarioDocuments(withCount(5), withCount(4));
+    expect(entry.after).toMatch(
+      /^Off · At most 4 Night shifts.* · This rule is off\. The optimiser ignores it\.$/,
+    );
+    expect(entry.before).not.toContain("optimiser ignores");
   });
 
   it("an aggregate group is one combined count, and qualified people ban everyone else", () => {
@@ -1237,15 +1287,29 @@ describe("the temporary-cover commands in the Preview (d582)", () => {
 });
 
 describe("scope identities", () => {
-  it("every scope but the deferred export route is a real shipped capability id", () => {
+  it("every scope is a real shipped capability id", () => {
     // The Preview says "this affects these screens" by naming capability ids. If one
     // of them were not in the deployed registry, the assistant would be pointing at
     // a screen the app does not have -- the exact failure the registry exists to stop.
     const ids = new Set(getCapabilityRegistry().entries.map((entry) => entry.id));
     for (const scope of Object.keys(SCOPE_LABEL) as DiffScope[]) {
-      if (scope === "export-layout") continue;
       expect(ids.has(scope), `${scope} is not a shipped capability id`).toBe(true);
     }
+  });
+
+  it("badges use the sidebar's screen names (C-28)", () => {
+    expect(SCOPE_LABEL["shift-type-coverings"]).toBe("Shift Type Coverings");
+    expect(SCOPE_LABEL["shift-affinities"]).toBe("Affinities");
+    expect(SCOPE_LABEL["leave-and-requests"]).toBe("Requests & Leave");
+  });
+
+  it("lists no export-layout change: that screen does not ship (C-26)", () => {
+    const before = ruleWardScenario();
+    const after = {
+      ...before,
+      exportLayout: { ...before.exportLayout, extraRows: [...before.exportLayout.extraRows, {}] },
+    } as unknown as ScenarioUiState;
+    expect(diffScenarioDocuments(before, after)).toEqual([]);
   });
 });
 
