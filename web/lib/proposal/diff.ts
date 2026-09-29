@@ -41,6 +41,12 @@ import { generateDateItems } from "@/lib/dates";
 import { formatShortDate } from "@/lib/dates/date-id";
 import { cardNeedOn, coverStatuses } from "@/lib/scenario/temporary-cover";
 import { requiredOn } from "@/lib/rules/shortfalls";
+import {
+  MAX_WORKED_IN_7,
+  REST_DAYS_RULE_DESCRIPTION,
+  REST_DAYS_WEIGHT,
+  isRestDaysRuleCard,
+} from "@/lib/rules/rest-days";
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
 import { rosterDatesBetween } from "./operations";
@@ -307,8 +313,9 @@ function describeSuccession(card: SuccessionCard): string {
 
 /**
  * A count's strength, per `shift_count` in core (the objective is maximised): a linear
- * expression is a yes/no the weight REWARDS, so a negative weight pays for breaking it;
- * `|x - T|^2` is a squared gap, so a negative weight pulls toward T.
+ * expression is a yes/no the weight is added for, so a positive weight rewards it
+ * holding and a negative one penalises it (the solver avoids it); `|x - T|^2` is a
+ * squared gap, so a negative weight pulls toward T.
  */
 function renderCountStrength(squared: boolean, weight: number, target: number): string {
   if (weight === 0) return "no effect (weight 0)";
@@ -320,7 +327,7 @@ function renderCountStrength(squared: boolean, weight: number, target: number): 
   if (weight === Infinity) return "must always hold";
   if (weight === -Infinity) return "must never hold, the solver forces the opposite";
   if (weight > 0) return `kept to where possible (weight ${weight})`;
-  return `worked against, the solver is rewarded for breaking it (weight ${weight})`;
+  return `avoided where possible (weight ${weight})`;
 }
 
 /** A contracted-hours card (4h5a): the hours, what each shift and leave day counts, a must. */
@@ -339,6 +346,10 @@ function describeContract(card: ContractedHoursCountCard): string | null {
 /** `null` for a list-shaped count: no single sentence says it honestly. */
 function describeCount(card: CountCard): string | null {
   if (isContractedHoursCard(card)) return describeContract(card);
+  if (isRestDaysRuleCard(card) && card.weight === REST_DAYS_WEIGHT) {
+    const people = renderPeople(card.person, "");
+    return `${people ? `Each of ${people}` : "Every nurse"} gets ${REST_DAYS_RULE_DESCRIPTION} (at most ${MAX_WORKED_IN_7} shifts); strong preference`;
+  }
   if (typeof card.expression !== "string" || typeof card.target !== "number") return null;
   const op = EXPRESSION_OPS.find((candidate) => candidate.value === card.expression);
   if (!op) return null;
