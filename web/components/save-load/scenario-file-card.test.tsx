@@ -7,6 +7,9 @@ import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import { loadScenario, pickScenario, useScenarioStore } from "@/lib/store";
 import { ScenarioFileCard, type ScenarioFileCardProps } from "./scenario-file-card";
 import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
+import { toast } from "sonner";
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 async function seedValidScenario() {
   await resetScenarioForTest();
@@ -91,9 +94,11 @@ describe("ScenarioFileCard — the prototype's four file actions", () => {
     renderCard({
       importIssues: [{ path: "preferences[0]", message: "Unknown preference type" }],
     });
-    expect(screen.getByTestId("scenario-export-issues")).toHaveTextContent(
-      "Unknown preference type",
-    );
+    const list = screen.getByTestId("scenario-export-issues");
+    expect(list).toHaveTextContent("Unknown preference type");
+    // An import names the load it blocks and where to fix the file (C-21).
+    expect(list).toHaveTextContent("must be fixed before this file can load.");
+    expect(list).toHaveTextContent("Paste the file into Edit YAML to fix it.");
   });
 });
 
@@ -125,6 +130,10 @@ describe("ScenarioFileCard — Copy clipboard failure (FR-SL-09)", () => {
     );
     expect(screen.getByTestId("scenario-copy-button")).toHaveTextContent("Copy");
     expect(screen.queryByText("Copied!")).not.toBeInTheDocument();
+    // The failure is not silent (C-39).
+    expect(toast.error).toHaveBeenCalledWith(
+      "Could not copy to the clipboard. Use Download instead.",
+    );
 
     consoleError.mockRestore();
   });

@@ -43,6 +43,14 @@ describe("parseWeightInput (parity with the historical parseWeightValue)", () =>
 });
 
 describe("isValidWeightValue / isWeightNonPositive", () => {
+  it("caps finite weights at 1t either way (bug hunt B3: 9000t overflows the solver)", () => {
+    expect(isValidWeightValue(parseWeightInput("1t"))).toBe(true);
+    expect(isValidWeightValue(parseWeightInput("-1t"))).toBe(true);
+    expect(isValidWeightValue(parseWeightInput("9000t"))).toBe(false);
+    expect(isValidWeightValue(-1e12 - 1)).toBe(false);
+    expect(isValidWeightValue(-Infinity)).toBe(true);
+  });
+
   it("accepts finite numbers and both infinities; rejects any string", () => {
     expect(isValidWeightValue(-1)).toBe(true);
     expect(isValidWeightValue(0)).toBe(true);

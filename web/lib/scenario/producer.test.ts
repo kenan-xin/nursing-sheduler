@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { validateScenario } from "./serialize";
 import { toCanonicalScenarioDocument } from "./canonical";
 import { makeValidUiState } from "./test-fixtures";
+import { WEIGHT_RANGE_MESSAGE } from "./schemas/primitives";
 import type { CanonicalScenarioDocument } from "./types";
 
 function docFrom(
@@ -197,5 +198,96 @@ describe("producer schema — required preference", () => {
     const doc = docFrom();
     doc.preferences = doc.preferences.filter((p) => p.type !== "at most one shift per day");
     expect(issuesFor(doc).some((m) => /Missing required preference/.test(m))).toBe(true);
+  });
+});
+
+// Bug hunt BH2 (6ysj): documents core refuses or cannot solve, caught at preflight.
+describe("producer schema — web-to-solver contract (BH2)", () => {
+  const withSeniorsMix = (s: ReturnType<typeof makeValidUiState>) => {
+    s.cardsByKind.requirements[0] = {
+      ...s.cardsByKind.requirements[0],
+      requiredNumPeople: 2,
+      skillMix: [{ people: "Seniors", minNumPeople: 2 }],
+    };
+  };
+
+  it("rejects a per-date count below a skill-mix floor (core models.py:421)", () => {
+    const doc = docFrom((s) => {
+      withSeniorsMix(s);
+      s.cardsByKind.requirements[0].requiredNumPeopleOverrides = [["2026-05-15", 1]];
+    });
+    expect(issuesFor(doc)).toContain(
+      "requiredNumPeopleOverrides count for 2026-05-15 is below skillMix minNumPeople for 'Seniors'.",
+    );
+  });
+
+  it("accepts a per-date count at the skill-mix floor", () => {
+    const doc = docFrom((s) => {
+      withSeniorsMix(s);
+      s.cardsByKind.requirements[0].requiredNumPeopleOverrides = [["2026-05-15", 2]];
+    });
+    expect(validateScenario(doc).ok).toBe(true);
+  });
+
+  it("rejects an empty staff group as supervisors", () => {
+    const doc = docFrom((s) => {
+      s.staffGroups.push({ id: "Empty", members: [] });
+      s.cardsByKind.coverings = [
+        {
+          uid: "cv1",
+          description: "Night cover",
+          preceptors: ["Empty"],
+          preceptees: ["Bob"],
+          shiftTypes: ["D"],
+          weight: Infinity,
+        },
+      ];
+    });
+    expect(issuesFor(doc)).toContain(
+      "Rule 'Night cover': preceptors names only staff groups with no members ('Empty'), so it covers no one.",
+    );
+  });
+
+  it("rejects an empty staff group as the qualified people", () => {
+    const doc = docFrom((s) => {
+      s.staffGroups.push({ id: "Empty", members: [] });
+      s.cardsByKind.requirements[0].qualifiedPeople = ["Empty"];
+    });
+    expect(issuesFor(doc)).toContain(
+      "Rule 2 (shift type requirement): qualifiedPeople names only staff groups with no members ('Empty'), so it covers no one.",
+    );
+  });
+
+  it("accepts an empty staff group next to a person", () => {
+    const doc = docFrom((s) => {
+      s.staffGroups.push({ id: "Empty", members: [] });
+      s.cardsByKind.requirements[0].qualifiedPeople = ["Empty", "Bob"];
+    });
+    expect(validateScenario(doc).ok).toBe(true);
+  });
+
+  it("rejects a negative required count", () => {
+    const doc = docFrom((s) => (s.cardsByKind.requirements[0].requiredNumPeople = -1));
+    expect(issuesFor(doc)).toContain("requiredNumPeople must be 0 or more.");
+  });
+
+  it("rejects a preferred count below the required count", () => {
+    const doc = docFrom((s) => {
+      s.cardsByKind.requirements[0].requiredNumPeople = 2;
+      s.cardsByKind.requirements[0].preferredNumPeople = 1;
+    });
+    expect(issuesFor(doc)).toContain(
+      "Rule 2 (shift type requirement): preferredNumPeople (1) must be at least requiredNumPeople (2).",
+    );
+  });
+
+  it("caps finite weights at 1t either way and keeps the infinities", () => {
+    const weighted = (weight: number) =>
+      docFrom((s) => (s.cardsByKind.requirements[0].weight = weight));
+    expect(validateScenario(weighted(-1e12)).ok).toBe(true);
+    expect(validateScenario(weighted(-Infinity)).ok).toBe(true);
+    expect(validateScenario(weighted(Infinity)).ok).toBe(true);
+    expect(issuesFor(weighted(9e15))).toContain(WEIGHT_RANGE_MESSAGE);
+    expect(issuesFor(weighted(-1e12 - 1))).toContain(WEIGHT_RANGE_MESSAGE);
   });
 });

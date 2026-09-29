@@ -240,6 +240,10 @@ describe("affinitiesMapper", () => {
       "P1 with P2 on the same shift on the same day (D), ALL.",
     );
     expect(affinitiesMapper.summary(advanced)).toContain("even on different shifts");
+    // Bug hunt B2: ALL is one term in core, any shift that day (v1).
+    expect(affinitiesMapper.summary({ ...supported, shiftTypes: ["ALL"] })).toBe(
+      "P1 with P2 on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together (ALL), ALL.",
+    );
   });
 
   it("declares weight as the sole quick field for a single-term affinity", () => {

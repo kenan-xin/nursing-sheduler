@@ -39,7 +39,7 @@ type Draft =
 const EYEBROW = "CONSTRAINT · AFFINITIES";
 const TITLE = "Affinities";
 const SUBTITLE =
-  "Encourage or discourage people working together — on the same shift on the same day. Each person and each shift is scored on its own. For enforced preceptor supervision, use Shift type coverings instead.";
+  "Encourage or discourage people working together — on the same shift on the same day. Each person and each shift is scored on its own, but ALL or a group counts as one: any of its shifts or members that day. For enforced preceptor supervision, use Shift type coverings instead.";
 const ADD_LABEL = "Add Affinity";
 const LIST_TITLE = "Current Affinities";
 const EMPTY_MESSAGE = 'No affinities defined yet. Click "Add Affinity" to get started.';
@@ -187,6 +187,7 @@ export function AffinitiesEditor() {
       ) : affinities.length > 0 ? (
         <AffinityCardList
           affinities={affinities}
+          groups={state}
           onEdit={openEdit}
           onDuplicate={(uid) => withDraftDismissed(() => duplicate(uid))}
           onDelete={(uid) => withDraftDismissed(() => remove(uid))}

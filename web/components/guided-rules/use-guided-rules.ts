@@ -190,7 +190,12 @@ export interface GuidedRulesController {
 /** The two slices the Rules screen reads. Kept next to the hook rather than in
  *  `lib/store` because it is this screen's read list, not a store concept. */
 function pickGuidedRulesScenario(state: ScenarioStoreState): GuidedRulesScenario {
-  return { cardsByKind: state.cardsByKind, maxOneShiftPerDay: state.maxOneShiftPerDay };
+  return {
+    cardsByKind: state.cardsByKind,
+    maxOneShiftPerDay: state.maxOneShiftPerDay,
+    staffGroups: state.staffGroups,
+    shiftGroups: state.shiftGroups,
+  };
 }
 
 export function useGuidedRules(): GuidedRulesController {

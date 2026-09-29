@@ -27,7 +27,7 @@
 // is still real at that fixed size.
 
 import * as React from "react";
-import { FaCircleExclamation } from "@/components/icons";
+import { FaCircleExclamation, FaTriangleExclamation } from "@/components/icons";
 
 export interface FieldShellProps {
   label: string;
@@ -42,10 +42,21 @@ export interface FieldShellProps {
    */
   hint?: string;
   error?: string;
+  /** A non-blocking caution under the control: the value saves, but likely misbehaves. */
+  warning?: string;
   children: React.ReactNode;
 }
 
-export function FieldShell({ label, required, hint, error, children }: FieldShellProps) {
+/** The shared non-blocking caution line (FieldShell and WeightField). */
+export function FieldWarning({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="flex items-center gap-1.5 text-meta font-semibold text-warnink" role="status">
+      <FaTriangleExclamation className="size-3 flex-none" /> {children}
+    </p>
+  );
+}
+
+export function FieldShell({ label, required, hint, error, warning, children }: FieldShellProps) {
   return (
     <div className="flex flex-col gap-1.5">
       {/* Prototype label row: the hint sits directly BESIDE the label (gap 8px),
@@ -58,6 +69,7 @@ export function FieldShell({ label, required, hint, error, children }: FieldShel
         {hint && <span className="text-meta italic text-ink3">{hint}</span>}
       </div>
       {children}
+      {warning && <FieldWarning>{warning}</FieldWarning>}
       {error && (
         <p className="flex items-center gap-1.5 text-meta font-semibold text-error" role="alert">
           <FaCircleExclamation className="size-3 flex-none" /> {error}

@@ -435,3 +435,46 @@ describe("POST /api/ai/openrouter/summarize (bead ypo)", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+// Bug hunt BH4 / D-02: the body is read through a byte ceiling BEFORE it is parsed,
+// so an anonymous caller cannot make the route buffer an unbounded request.
+describe("POST /api/ai/openrouter/summarize -- request size", () => {
+  it("stops reading a body far past the transcript ceiling and answers 413", async () => {
+    const chunk = new Uint8Array(1024 * 1024).fill(0x20);
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled >= 64) return controller.close();
+        pulled += 1;
+        controller.enqueue(chunk);
+      },
+    });
+    const fetchImpl = vi.fn();
+    const response = await handleSummaryRequest(
+      new Request("https://app.test/api/ai/openrouter/summarize", {
+        method: "POST",
+        headers: credentialHeaders(),
+        body,
+        duplex: "half",
+      } as RequestInit),
+      { fetchImpl },
+    );
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ ok: false, code: AI_SETUP_CODES.summaryInvalid });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(pulled).toBeLessThan(4);
+  });
+
+  it("refuses an oversized declared content-length without reading the body", async () => {
+    const fetchImpl = vi.fn();
+    const request = summaryRequest({ previousSummary: null, transcript: "x" });
+    const response = await handleSummaryRequest(
+      new Request(request, {
+        headers: { ...credentialHeaders(), "content-length": String(64 * 1024 * 1024) },
+      }),
+      { fetchImpl },
+    );
+    expect(response.status).toBe(413);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});

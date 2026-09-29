@@ -15,9 +15,11 @@ import type { GuidedRuleConstraintKind, ScenarioUiState } from "@/lib/scenario";
  * label. A `Pick` rather than the whole `ScenarioUiState` because it is ALSO the
  * shape of the screen's store subscription (`useGuidedRules`) — narrowing both to
  * the same set is what keeps an edit to any OTHER slice (a staff name, a shift
- * colour) from re-rendering, and reprojecting, this screen.
+ * colour) from re-rendering, and reprojecting, this screen. The staff and shift groups
+ * are read too: a pairing's summary says whether a group counts as one term.
  */
-export type GuidedRulesScenario = Pick<ScenarioUiState, "cardsByKind" | "maxOneShiftPerDay">;
+export type GuidedRulesScenario = Pick<ScenarioUiState, "cardsByKind" | "maxOneShiftPerDay"> &
+  Partial<Pick<ScenarioUiState, "staffGroups" | "shiftGroups">>;
 
 /** One numeric field a mapper declares eligible for the Guided inline Adjust
  *  control, with its current value and validator. People/shift-type/date fields
@@ -51,7 +53,10 @@ export interface GuidedRuleMapper<TCard> {
    *  kind-specific fallback derived from the card's own fields. */
   defaultTitle(card: TCard): string;
   /** The plain-English one-line summary shown under the title. */
-  summary(card: TCard): string;
+  summary(
+    card: TCard,
+    groups?: Partial<Pick<ScenarioUiState, "staffGroups" | "shiftGroups">>,
+  ): string;
   /** Mapper-declared numeric quick fields, `[]` when `card` is unsupported. */
   quickFields(card: TCard): GuidedQuickField[];
   /** A read-only fallback reason when the record's shape is outside Guided
