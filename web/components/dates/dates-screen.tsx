@@ -22,8 +22,13 @@
 import { useMemo } from "react";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import { addGroup, renameGroup, setGroupMembers } from "@/components/entity-editor/core";
-import { deleteWithSummary } from "@/components/entity-editor/delete-with-summary";
+import {
+  deleteWithSummary,
+  saveRefusalMessage,
+} from "@/components/entity-editor/delete-with-summary";
+import { toast } from "sonner";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
+import { countDateExceptions } from "@/lib/cascade";
 import {
   applyRangeChange,
   countRangeRemovals,
@@ -97,11 +102,25 @@ export function DatesScreen() {
     );
   };
 
-  const handleSaveGroup = (oldId: string, name: string, memberIds: string[]) => {
+  const handleSaveGroup = async (oldId: string, name: string, memberIds: string[]) => {
     if (isDerivedDateGroupId(oldId) || isReservedDateGroupId(name)) return;
-    scenarioCommands.mutate((state) => {
+    // A member change drops date exceptions on dates the group no longer covers
+    // (setGroupMembers); count them at the queue head so the toast can say so.
+    let dropped = 0;
+    const outcome = await scenarioCommands.mutate((state) => {
       const renamed = name === oldId ? state : renameGroup(state, datesDescriptor, oldId, name);
-      return setGroupMembers(renamed, datesDescriptor, name, memberIds);
+      const next = setGroupMembers(renamed, datesDescriptor, name, memberIds);
+      dropped = countDateExceptions(state) - countDateExceptions(next);
+      return next;
+    });
+    if (!outcome.ok) {
+      toast.error(saveRefusalMessage(outcome, "date group"));
+      return;
+    }
+    if (!outcome.committed || dropped === 0) return;
+    const lost = `${dropped} date ${dropped === 1 ? "exception" : "exceptions"}`;
+    toast(`Saved date group “${name}”; removed ${lost}.`, {
+      action: { label: "Undo", onClick: () => void scenarioCommands.undo() },
     });
   };
 
