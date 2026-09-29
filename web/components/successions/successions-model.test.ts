@@ -8,6 +8,7 @@ import {
   buildPatternShiftTypeOptions,
   buildPeopleTransferOptions,
   buildSuccessionCard,
+  countSuccessionWindows,
   emptySuccessionForm,
   flattenPattern,
   isAdvancedSuccessionCard,
@@ -308,5 +309,28 @@ describe("withCardDisabled", () => {
     const reenabled = withCardDisabled(disabled, false);
     expect(reenabled.disabled).toBeUndefined();
     expect("disabled" in reenabled).toBe(false);
+  });
+});
+
+// Q1: core runs a pattern only from a start day whose whole window is in the
+// card's dates, so a 2-step pattern on Mondays alone never runs.
+describe("countSuccessionWindows (Q1)", () => {
+  // Mon 5 Oct .. Sun 18 Oct 2026: two weeks.
+  const range = scenario({ rangeStart: "2026-10-05", rangeEnd: "2026-10-18" });
+
+  it("counts every start day on ALL", () => {
+    expect(countSuccessionWindows(range, 2, ["ALL"])).toBe(13);
+    expect(countSuccessionWindows(range, 3, ["ALL"])).toBe(12);
+  });
+
+  it("finds no window on isolated days", () => {
+    expect(countSuccessionWindows(range, 2, ["MONDAY"])).toBe(0);
+    expect(countSuccessionWindows(range, 2, ["2026-10-07"])).toBe(0);
+  });
+
+  it("counts only runs long enough for the pattern", () => {
+    expect(countSuccessionWindows(range, 2, ["WEEKEND"])).toBe(2);
+    expect(countSuccessionWindows(range, 3, ["WEEKEND"])).toBe(0);
+    expect(countSuccessionWindows(range, 2, ["2026-10-07", "2026-10-08"])).toBe(1);
   });
 });
