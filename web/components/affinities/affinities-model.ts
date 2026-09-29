@@ -297,6 +297,16 @@ export function isAdvancedAffinityCard(card: AffinityCard): boolean {
 /** The v1 meaning the flat form authors (each person, each shift on its own). */
 export const AFFINITY_SAME_SHIFT = "on the same shift on the same day";
 
+/** A pairing's strength, per `shift_affinity` in core: the weight is gained on each
+ *  date both sides work. Shared by the Rules overview and the assistant Preview. */
+export function describePairingStrength(weight: number): string {
+  if (weight === Infinity) return "must work together on every date";
+  if (weight === -Infinity) return "never together";
+  if (weight > 0) return `together where possible (weight ${weight})`;
+  if (weight < 0) return `apart where possible (weight ${weight})`;
+  return "no effect (weight 0)";
+}
+
 /** v1: ALL or a shift group is one term, so any of its shifts that day counts. */
 export const AFFINITY_ANY_SHIFT =
   "on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together";
