@@ -7,11 +7,12 @@
 // stage a combined replacement/version confirmation whenever the current
 // workspace is non-empty OR the version is incompatible (direct commit only for a
 // genuinely empty workspace on a matching version) -> commit via the store's
-// `loadScenario` (one tracked undoable full-slice replacement, backup baseline
-// null) and publish the pre-computed warnings. Both inbound entry points call
-// `handleFile` and render the same confirm / `ImportWarningsBanner` from the
-// state this hook returns -- the Upload modal and the Edit-YAML Apply, both wired
-// in `save-load-workspace.tsx`.
+// `loadScenario` (a switch to a fresh identity, not undoable, backup baseline
+// null) and publish the pre-computed warnings. The Upload modal calls `handleFile`;
+// the Edit-YAML Apply calls `handleEdit`, which commits one undoable edit on the
+// same identity instead of a Load (C-06). Both render the same confirm /
+// `ImportWarningsBanner` from the state this hook returns, wired in
+// `save-load-workspace.tsx`.
 
 import { useState } from "react";
 import { toast } from "sonner";
@@ -29,7 +30,12 @@ import {
   hasBlockingUnsupportedExpression,
   UNSUPPORTED_EXPRESSION_REASON,
 } from "@/lib/optimize/optimize-readiness";
-import { isScenarioSliceEmpty, loadScenario, useScenarioStore } from "@/lib/store";
+import {
+  applyScenarioEdit,
+  isScenarioSliceEmpty,
+  loadScenario,
+  useScenarioStore,
+} from "@/lib/store";
 import { loadConfirmCopy } from "./load-controls-core";
 
 /** Ready-to-render props for the combined load confirmation dialog. */
@@ -40,6 +46,8 @@ export interface PendingImportConfirm {
   description: string;
   /** FR-SL-19 file/current version pair for the mono detail box, when the version case applies. */
   detail?: string;
+  /** Destructive style: the load overwrites a non-empty workspace and cannot be undone. */
+  destructive?: boolean;
   /** Resolves only after the load has committed or been refused -- hold the confirm busy until then. */
   onContinue: () => Promise<void>;
   onCancel: () => void;
@@ -58,6 +66,13 @@ export interface UseScenarioImportResult {
   warnings: string[] | null;
   dismissWarnings: () => void;
   handleFile: (text: string) => void;
+  /**
+   * Apply an Edit-YAML draft as ONE undoable edit on the current scenario identity
+   * (v1 parity, C-06): same validation, warnings and version gate as `handleFile`,
+   * but no replacement confirm and no identity switch, so Undo history and the
+   * assistant thread survive.
+   */
+  handleEdit: (text: string) => void;
 }
 
 interface StagedTarget {
@@ -67,6 +82,8 @@ interface StagedTarget {
   replacement: boolean;
   fileVersion: string | undefined;
   target: ImportNormalizationTarget;
+  /** An Edit-YAML apply (undoable edit) rather than a Load (identity switch). */
+  edit: boolean;
   /**
    * The final merged + deduped warning list — base advanced-syntax survivors plus
    * the uncredited-leave guard findings, computed from `target` BEFORE any
@@ -135,7 +152,28 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
   // Commit performs EXACTLY ONE state replacement, then publishes the warning list
   // that was already computed from the unchanged target before this call. It never
   // runs guard resolution after mutation.
-  const commit = async (target: ImportNormalizationTarget, stagedWarnings: string[]) => {
+  const commit = async (
+    target: ImportNormalizationTarget,
+    stagedWarnings: string[],
+    edit: boolean,
+  ) => {
+    if (edit) {
+      // An Edit-YAML apply is an ordinary tracked edit on THIS identity (C-06).
+      const outcome = await applyScenarioEdit(target);
+      if (!outcome.ok) {
+        toast.error(
+          outcome.reason === "not-owner"
+            ? "This schedule is being edited in another tab. Take over editing, then apply again."
+            : "Could not apply your changes — nothing was changed.",
+        );
+        return;
+      }
+      setWarnings(stagedWarnings.length > 0 ? stagedWarnings : null);
+      setStaged(null);
+      onCommitted?.();
+      toast.success("Changes applied. Undo reverts them.");
+      return;
+    }
     // A Load is an atomic scenario SWITCH: it mints a fresh identity holding the
     // imported content, so the restored file cannot inherit the previous document's
     // history or receipts.
@@ -165,7 +203,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     toast.success("Scenario loaded — this replaces your current setup.");
   };
 
-  const handleFile = (text: string) => {
+  const stage = (text: string, edit: boolean) => {
     const result = prepareScenarioLoad(text);
     if (result.issues.length > 0 || !result.target) {
       setIssues(result.issues);
@@ -178,12 +216,13 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     const mergedWarnings = mergeImportWarnings(result.target, result.warnings);
     const versionStatus = classifyLoadVersion(result.target.meta.appVersion);
     // Emptiness is computed against the CURRENT (pre-load) workspace at the moment
-    // of load — the state the incoming file would overwrite.
-    const replacement = !isScenarioSliceEmpty(useScenarioStore.getState());
+    // of load — the state the incoming file would overwrite. An edit is undoable,
+    // so it overwrites nothing that cannot come back.
+    const replacement = !edit && !isScenarioSliceEmpty(useScenarioStore.getState());
     // DL12: only a genuinely empty workspace on a matching version commits
     // directly; every other load stages one combined confirmation.
     if (versionStatus === null && !replacement) {
-      commit(result.target, mergedWarnings);
+      void commit(result.target, mergedWarnings, edit);
       return;
     }
     setStaged({
@@ -191,6 +230,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
       replacement,
       fileVersion: result.target.meta.appVersion,
       target: result.target,
+      edit,
       warnings: mergedWarnings,
     });
   };
@@ -203,7 +243,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
           staged.fileVersion,
           currentAppVersion(),
         ),
-        onContinue: () => commit(staged.target, staged.warnings),
+        onContinue: () => commit(staged.target, staged.warnings, staged.edit),
         onCancel: () => setStaged(null),
       }
     : null;
@@ -219,6 +259,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     confirm,
     warnings,
     dismissWarnings: () => setWarnings(null),
-    handleFile,
+    handleFile: (text) => stage(text, false),
+    handleEdit: (text) => stage(text, true),
   };
 }

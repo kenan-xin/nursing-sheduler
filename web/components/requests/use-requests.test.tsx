@@ -227,3 +227,53 @@ describe("useRequests — Requests-CSV import routes day-state labels (export ro
     expect(request[0]).toMatchObject({ kind: "request", shiftType: "AM", weight: 5 });
   });
 });
+
+describe("useRequests — Requests-CSV weights and change counts (F1)", () => {
+  async function reqData() {
+    await drainScenarioCommands();
+    return useScenarioStore.getState().reqData;
+  }
+
+  it("a delta's own weight wins over the quick-paint weight; bare deltas take it", async () => {
+    const { result } = renderHook(() =>
+      useRequests({ quickPaintSelectedIds: [], quickPaintWeightText: "0" }),
+    );
+    const deltas: ShiftRequestDelta[] = [
+      { personId: "Aisha", dateId: "01", shiftType: "AM", weight: -4 },
+      { personId: "Aisha", dateId: "02", shiftType: "OFF", weight: 3 },
+      { personId: "Aisha", dateId: "03", shiftType: "PM" },
+    ];
+    act(() => result.current.applyRequestsCsv(deltas, 7));
+    const cells = await reqData();
+    expect(cells.find((c) => c.date === "01")).toMatchObject({ kind: "request", weight: -4 });
+    expect(cells.find((c) => c.date === "02")).toMatchObject({ kind: "off", weight: 3 });
+    expect(cells.find((c) => c.date === "03")).toMatchObject({ kind: "request", weight: 7 });
+    expect((await undoDepth()) > 0).toBe(true);
+  });
+
+  it("previews added / changed / removed cells without writing", async () => {
+    await seed({
+      reqData: [
+        { kind: "request", person: "Aisha", date: "01", shiftType: "AM", weight: 5 },
+        { kind: "request", person: "Aisha", date: "02", shiftType: "AM", weight: 5 },
+        { kind: "request", person: "Aisha", date: "03", shiftType: "PM", weight: 2 },
+      ],
+    });
+    const { result } = renderHook(() =>
+      useRequests({ quickPaintSelectedIds: [], quickPaintWeightText: "0" }),
+    );
+    const deltas: ShiftRequestDelta[] = [
+      { personId: "Aisha", dateId: "01", shiftType: "AM", weight: 5 }, // unchanged
+      { personId: "Aisha", dateId: "02", shiftType: "AM", weight: -1 }, // changed
+      { personId: "Aisha", dateId: "03", shiftType: "PM" }, // bare at 0 -> removed
+      { personId: "Aisha", dateId: "03", shiftType: "AM", weight: 1 }, // added
+    ];
+    const before = await reqData();
+    expect(result.current.previewRequestsCsv(deltas, 0)).toEqual({
+      added: 1,
+      changed: 1,
+      removed: 1,
+    });
+    expect(await reqData()).toBe(before);
+  });
+});

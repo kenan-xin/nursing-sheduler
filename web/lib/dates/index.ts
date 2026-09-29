@@ -48,4 +48,4 @@ export {
   replaceDateGroups,
 } from "./holiday-groups";
 
-export { type RangeChangeOptions, applyRangeChange } from "./range-cascade";
+export { type RangeChangeOptions, applyRangeChange, countRangeRemovals } from "./range-cascade";

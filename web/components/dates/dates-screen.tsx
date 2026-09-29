@@ -30,6 +30,7 @@ import {
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import {
   applyRangeChange,
+  countRangeRemovals,
   hasCompleteRange,
   isDerivedDateGroupId,
   isReservedDateGroupId,
@@ -160,6 +161,7 @@ export function DatesScreen() {
           range={range}
           importedHolidaysPresent={importedHolidaysPresent}
           onCommit={handleCommit}
+          countRemovals={(next) => countRangeRemovals(useScenarioStore.getState(), next)}
         />
         {complete ? (
           <CalendarView range={range} />

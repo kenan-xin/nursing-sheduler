@@ -71,6 +71,7 @@ import {
   type UseOptimizeTerminalDeps,
 } from "@/lib/optimize";
 import { toCoverEntries } from "@/lib/roster/cover-sheet";
+import { useNavGuardStore } from "@/components/shell/nav-guard-store";
 import { CaptureNotice } from "./capture-notice";
 import { Callout } from "./callout";
 import { CoverPreflight } from "./cover-preflight";
@@ -83,6 +84,38 @@ import { ServerIdentity } from "./server-identity";
 /** v1's copy (eacd021), naming the deployment's own bounds. */
 function timeoutErrorFor(bounds: OptimizeTimeoutOptions): string {
   return `Solver timeout must be an integer between ${bounds.minimum} and ${bounds.maximum} seconds.`;
+}
+
+/** The leave warning the shell's nav guard shows while a run is active (C-03). */
+export const RUN_LEAVE_WARNING = "Leaving will cancel the running optimisation.";
+
+// C-03 — set when the user left mid-run, so the NEXT visit can say the run was
+// cancelled. Module scope because the mount that cancelled it is gone by then.
+let runCancelledByExit = false;
+
+/** A run leaving would cancel: its POST is in flight, or its job is live. */
+function isRunLive(lifecycle: OptimizeRunView["lifecycle"]): boolean {
+  return lifecycle === "submitting" || isActiveLifecycle(lifecycle);
+}
+
+/**
+ * One message per real start-failure cause, each with a fix that addresses it (C-04).
+ * Storage only blocks an Anonymized run (a plain run proceeds without recovery), so
+ * turning Anonymize off is a genuine way out of every storage cause.
+ */
+function startFailedCopy(reason: string): string {
+  switch (reason) {
+    case "quota-exceeded":
+      return "Optimisation could not start because browser storage is full. Free browser storage or turn off Anonymize, then click Optimize again.";
+    case "storage-unavailable":
+    case "read-back-failed":
+      return "Optimisation could not start because this browser is blocking site storage. Allow storage for this site or turn off Anonymize, then click Optimize again.";
+    case "invalid-record":
+      return "Optimisation could not start because the run could not be prepared. Reload the page, then click Optimize again.";
+    default:
+      // `session-conflict` and `submission-in-progress`: an earlier start was still settling.
+      return "Optimisation could not start because an earlier start was still finishing. Wait a moment, then click Optimize again.";
+  }
 }
 
 /** Parse the timeout field, enforcing an integer within the backend's bounds. */
@@ -285,6 +318,7 @@ export function OptimizeAndExportScreen({
     window.addEventListener("pagehide", onPageHide);
     return () => {
       window.removeEventListener("pagehide", onPageHide);
+      if (isRunLive(controllerRef.current.view.lifecycle)) runCancelledByExit = true;
       abandonCurrentAttempt("spa");
     };
   }, [abandonCurrentAttempt]);
@@ -354,10 +388,14 @@ export function OptimizeAndExportScreen({
   const timeoutValue = typedTimeout ?? String(timeoutBounds.default);
   const [timeoutError, setTimeoutError] = useState<string | null>(null);
   const [capturePending, setCapturePending] = useState(false);
-  // The one plain-language failure the hidden pre-submit step can produce. It is a
-  // boolean, not a message from the protocol: the copy is settled and must never
-  // vary with the internal reason.
-  const [startFailed, setStartFailed] = useState(false);
+  // Why the hidden pre-submit step refused to start, mapped to one plain-language
+  // message per cause by `startFailedCopy`.
+  const [startFailed, setStartFailed] = useState<string | null>(null);
+  // C-03 — read once on entry, cleared in an effect (StrictMode-safe).
+  const [cancelledOnReturn, setCancelledOnReturn] = useState(() => runCancelledByExit);
+  useEffect(() => {
+    runCancelledByExit = false;
+  }, []);
 
   // ASSISTANT SEAM — publish the solver timeout this screen would submit, so every solve
   // the assistant starts uses the user's own timeout: the value typed here, else the
@@ -379,6 +417,19 @@ export function OptimizeAndExportScreen({
 
   const view = controller.view;
   const active = isActiveLifecycle(view.lifecycle);
+
+  // C-03 — while a run is live, leaving cancels it, so the shell's nav guard and
+  // `beforeunload` guard both warn first (they read the same draft registry).
+  const registerDraft = useNavGuardStore((s) => s.registerDraft);
+  const runLive = isRunLive(view.lifecycle);
+  useEffect(() => {
+    if (!runLive) return;
+    return registerDraft({
+      id: "optimize:run",
+      label: "Optimisation run",
+      leaveWarning: RUN_LEAVE_WARNING,
+    });
+  }, [runLive, registerDraft]);
 
   // G4 — the prototype's `Open & adjust roster` CTA. Only a completed run
   // whose F2 capture committed a loadable candidate may claim a roster
@@ -548,7 +599,8 @@ export function OptimizeAndExportScreen({
     }
     const input = await buildSubmitInput();
     if (input === null) return false;
-    setStartFailed(false);
+    setStartFailed(null);
+    setCancelledOnReturn(false);
 
     // A deliberate new click supersedes whatever came before it, invisibly. This
     // is the same revocation route exit performs, and it happens BEFORE the new
@@ -591,7 +643,7 @@ export function OptimizeAndExportScreen({
       // is still current — an abandoned attempt has no screen to report to.
       // `revoked-before-post` is deliberately silent: the user left.
       if (attempt.isCurrent() && outcome.status === "blocked-before-post") {
-        setStartFailed(true);
+        setStartFailed(outcome.reason);
       }
       return (
         outcome.status !== "invalid" &&
@@ -631,22 +683,13 @@ export function OptimizeAndExportScreen({
 
   // --- derived UI state ------------------------------------------------------
   //
-  // `Optimize` is ALWAYS CLICKABLE except for two facts about the present: the form
-  // is not ready, or the backend is not there. Nothing about any run — previous or
-  // current — participates.
-  //
-  // Four gates have been deleted here, each of which was a way a run could hold the
-  // button down: `recoveryBooting` (a boot inspection that no longer happens),
-  // `recoveryBlocking` (the “still running” state this ticket exists for),
-  // `cleanupBlocking` (an old run's unproven cleanup), and now `!active` — which
-  // disabled the button for every queued/running/cancelling lifecycle and so made
-  // “a later deliberate click supersedes the current run” unreachable in the product
-  // even though the contract describes it.
-  //
-  // What remains is `submitInFlight`, and it is a different thing entirely: not a
-  // RUN in progress but a REQUEST in flight. It exists so the settled promise, not
-  // the wall clock, decides when a second gesture becomes a second attempt.
-  const submitEnabled = readiness.ready && serverInfo.status === "online" && !submitInFlight;
+  // `Optimize` is gated on the form being ready, the backend being there, and THIS
+  // visit's run: a POST in flight (`submitInFlight`) or a live job (`active`). v1
+  // parity (C-02): a second click must not silently throw away a long run, so while
+  // one is live the button reads "Optimizing…" and only Cancel acts on it. Nothing
+  // about a PREVIOUS visit's run participates — that one was abandoned on exit.
+  const runBusy = submitInFlight || active;
+  const submitEnabled = readiness.ready && serverInfo.status === "online" && !runBusy;
   // The unsupported-expression issue is pushed last, so it leads only when it is
   // the sole reason; missing set-up keeps the generic sentence.
   const disabledReason = !readiness.ready
@@ -677,21 +720,14 @@ export function OptimizeAndExportScreen({
       reportOptimizeRunRequest("backend-offline");
       return;
     }
-    if (submitInFlight) {
+    if (runBusy) {
       reportOptimizeRunRequest("busy");
       return;
     }
     // Reported only once `onSubmit` settles: it can still stop short of a POST (bad
     // timeout, lost lease, blocked submit), and "started" would then be false.
     void onSubmit().then((started) => reportOptimizeRunRequest(started ? "started" : "blocked"));
-  }, [
-    runRequested,
-    serverInfo.status,
-    timeoutOptionsPending,
-    readiness.ready,
-    submitInFlight,
-    onSubmit,
-  ]);
+  }, [runRequested, serverInfo.status, timeoutOptionsPending, readiness.ready, runBusy, onSubmit]);
 
   return (
     <Surface
@@ -727,10 +763,15 @@ export function OptimizeAndExportScreen({
 
       <ReadinessBanner issues={readiness.issues} />
       <CoverPreflight />
-      {startFailed ? (
+      {startFailed !== null ? (
         <Callout tone="error" placement="page" data-testid="optimize-start-failed" alert>
-          Optimisation could not start. Click Optimize to try again. If it keeps happening, start a
-          New schedule.
+          {startFailedCopy(startFailed)}
+        </Callout>
+      ) : null}
+      {cancelledOnReturn ? (
+        <Callout tone="info" placement="page" data-testid="optimize-cancelled-on-exit">
+          Your last optimisation was cancelled because you left this page while it was running.
+          Click Optimize to run it again.
         </Callout>
       ) : null}
       <CaptureNotice
@@ -753,11 +794,10 @@ export function OptimizeAndExportScreen({
             timeout={timeoutValue}
             timeoutBounds={timeoutBounds}
             timeoutError={timeoutError}
-            // Editable whenever a new run could be started, so the options a later
-            // deliberate click sends are the ones the user can actually change.
-            optionsDisabled={submitInFlight}
+            // Locked while a run is live: they would not change it (C-02).
+            optionsDisabled={runBusy}
             submitEnabled={submitEnabled}
-            submitting={submitInFlight}
+            submitting={runBusy}
             disabledReason={disabledReason}
             onPrettifyChange={setPrettify}
             onAnonymizeChange={setAnonymize}

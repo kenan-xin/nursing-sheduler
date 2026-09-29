@@ -22,6 +22,8 @@ export interface VersionConfirmModalProps {
   description: string;
   /** File/current version pair for the mono detail box (`loadConfirmCopy`). */
   detail?: string;
+  /** Destructive style when the load overwrites a non-empty workspace (`loadConfirmCopy`). */
+  destructive?: boolean;
   /** Settles once the load has committed (or been refused); the dialog stays busy until then. */
   onContinue: () => Promise<void>;
 }
@@ -32,6 +34,7 @@ export function VersionConfirmModal({
   title,
   description,
   detail,
+  destructive,
   onContinue,
 }: VersionConfirmModalProps) {
   return (
@@ -44,6 +47,7 @@ export function VersionConfirmModal({
       confirmLabel="Continue"
       cancelLabel="Cancel"
       busyLabel="Loading scenario…"
+      variant={destructive ? "destructive" : "default"}
       onConfirm={onContinue}
     />
   );

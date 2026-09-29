@@ -26,6 +26,8 @@ import {
   scenarioCommands,
   type ScenarioStoreState,
 } from "@/lib/store";
+import { foldPaintIntents } from "@/lib/store/paint-fold";
+import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
 import { generateDateItems, hasCompleteRange, type DateRange } from "@/lib/dates";
 import {
   RESERVED_SHIFT_TYPE,
@@ -99,6 +101,8 @@ export interface RequestsController {
   /** Normal-mode history editor "-- Clear --" (truncate through position). */
   commitHistoryClear(personId: PersonRef, historyIndex: number): void;
 
+  /** What {@link applyRequestsCsv} would do to the matrix right now, in cells. */
+  previewRequestsCsv(deltas: ShiftRequestDelta[], weight: number): RequestChangeCounts;
   applyRequestsCsv(deltas: ShiftRequestDelta[], weight: number): void;
   applyHistoryCsv(entries: PeopleHistoryEntry[]): void;
 
@@ -108,6 +112,12 @@ export interface RequestsController {
     personScope: "individual" | "group",
     dateScope: "individual" | "group",
   ): void;
+}
+
+export interface RequestChangeCounts {
+  added: number;
+  changed: number;
+  removed: number;
 }
 
 export interface UseRequestsOptions {
@@ -160,6 +170,28 @@ export function pickRequestsScenario(state: ScenarioStoreState): RequestsScenari
  */
 function cellSelectorKey(cell: UiRequestCell): string {
   return cell.kind === "request" ? `request:${cell.shiftType}` : cell.kind;
+}
+
+/**
+ * Cell-level diff of two matrices, keyed by coordinate + selector: a key only in
+ * `after` is added, only in `before` removed, in both with another weight changed.
+ */
+function countRequestChanges(
+  before: readonly UiRequestCell[],
+  after: readonly UiRequestCell[],
+): RequestChangeCounts {
+  const keyOf = (c: UiRequestCell) => `${paintCellKey(c.person, c.date)}|${cellSelectorKey(c)}`;
+  const weightOf = (c: UiRequestCell) => (c.kind === "leave" ? null : c.weight);
+  const prior = new Map(before.map((c) => [keyOf(c), c]));
+  let added = 0;
+  let changed = 0;
+  for (const cell of after) {
+    const prev = prior.get(keyOf(cell));
+    if (!prev) added++;
+    else if (weightOf(prev) !== weightOf(cell)) changed++;
+    prior.delete(keyOf(cell));
+  }
+  return { added, changed, removed: prior.size };
 }
 
 function stageCellIntent(
@@ -453,8 +485,14 @@ export function useRequests({
     });
   }
 
-  function applyRequestsCsv(deltas: ShiftRequestDelta[], weight: number): void {
-    if (deltas.length === 0) return;
+  /**
+   * The CSV deltas as per-coordinate paint intents, the same shapes a quick-paint
+   * drag stages. A delta's own weight wins; otherwise `weight` (quick paint) applies.
+   */
+  function stageRequestsCsv(
+    deltas: ShiftRequestDelta[],
+    weight: number,
+  ): Map<string, StagedCoordinate> {
     // The CSV delta carries a STRINGIFIED person id (built in `requests-editor.tsx`
     // via `state.staff.map(p => String(p.id))`), but the matrix, manual edits, and
     // quick-paint all key coordinates by the real typed `PersonRef` under strict
@@ -468,27 +506,49 @@ export function useRequests({
     );
     // NOTE: the id map is read from the projection because the CSV rows were parsed
     // against the roster the user was looking at; the staged cells themselves are
-    // folded into the committed matrix at the queue head by `setReqData` below.
-    const hot = useHotStore.getState();
-    hot.beginPaint();
+    // folded into the committed matrix at the queue head by `setReqData`.
+    const staged = new Map<string, StagedCoordinate>();
     for (const d of deltas) {
       const person = typedIdByString.get(d.personId);
       if (person === undefined) continue;
+      const key = paintCellKey(person, d.dateId);
+      const w = d.weight ?? weight;
       // A matrix export writes day-states as their reserved labels (OFF/LEAVE);
       // route them back to a leave/off cell so an export → import round-trip
       // restores the pin rather than a request cell named "OFF"/"LEAVE" (which
       // the projection rejects). Everything else is a worked request delta.
       if (isDayStateSelector(d.shiftType)) {
-        hot.stagePaintDayState(
-          person,
-          d.dateId,
-          d.shiftType === RESERVED_SHIFT_TYPE.leave ? { kind: "leave" } : { kind: "off", weight },
-        );
+        staged.set(key, {
+          mode: "day-state",
+          dayState:
+            d.shiftType === RESERVED_SHIFT_TYPE.leave
+              ? { kind: "leave" }
+              : { kind: "off", weight: w },
+        });
         continue;
       }
-      hot.stagePaintRequestDelta(person, d.dateId, d.shiftType, weight);
+      const prior = staged.get(key);
+      const selectorDeltas = prior?.mode === "requests" ? prior.deltas : new Map<string, number>();
+      selectorDeltas.set(d.shiftType, w);
+      staged.set(key, { mode: "requests", deltas: selectorDeltas });
     }
-    void commitPaintGesture(useHotStore);
+    return staged;
+  }
+
+  function previewRequestsCsv(deltas: ShiftRequestDelta[], weight: number): RequestChangeCounts {
+    const current = useScenarioStore.getState().reqData;
+    const next = foldPaintIntents(current, stageRequestsCsv(deltas, weight), () => "");
+    return countRequestChanges(current, next);
+  }
+
+  function applyRequestsCsv(deltas: ShiftRequestDelta[], weight: number): void {
+    if (deltas.length === 0) return;
+    const staged = stageRequestsCsv(deltas, weight);
+    // One command, one Undo entry, folded against the matrix at the queue head —
+    // the same fold a quick-paint drag commits through.
+    void scenarioCommands.setReqData((current) =>
+      foldPaintIntents(current.reqData, staged, () => crypto.randomUUID()),
+    );
   }
 
   function applyHistoryCsv(entries: PeopleHistoryEntry[]): void {
@@ -564,6 +624,7 @@ export function useRequests({
     clearCell,
     commitHistorySet,
     commitHistoryClear,
+    previewRequestsCsv,
     applyRequestsCsv,
     applyHistoryCsv,
     clearAllRequests,

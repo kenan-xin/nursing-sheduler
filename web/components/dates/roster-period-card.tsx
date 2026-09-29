@@ -14,12 +14,12 @@
 // Fields, the switch and the format chip are the shared v2 primitives, so their
 // radius, focus treatment and coarse-pointer sizing are decided once.
 //
-// The card owns an isolated `{start,end}` draft seeded from the committed range and
-// re-seeded whenever the committed range changes underneath it (undo/redo, external
-// cascade). A change that produces a COMPLETE, valid range commits immediately as
-// ONE tracked mutation (the range cascade + optional holiday overwrite); an
-// incomplete edit is held locally so a half-typed range never runs the destructive
-// cascade. The holiday dataset is bundled offline (ENGLISH-ONLY, no network), so the
+// The card owns an isolated `{start,end}` + import-switch draft seeded from the
+// committed range and re-seeded whenever the committed range changes underneath it
+// (undo/redo, external cascade). Nothing commits while the user types (v1 parity):
+// Apply commits the draft as ONE tracked mutation (the range cascade + optional
+// holiday overwrite), Cancel restores the committed values. Before Apply the card
+// warns how many requests and leave days the cascade will remove. The holiday dataset is bundled offline (ENGLISH-ONLY, no network), so the
 // switch is gated only by the supported-window check (spec 02 FR-DC-29/30).
 
 import { useEffect, useId, useMemo, useState } from "react";
@@ -35,6 +35,7 @@ import {
 import { FaHashtag } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
@@ -57,6 +58,12 @@ export interface RosterPeriodCardProps {
   importedHolidaysPresent: boolean;
   /** Commit a confirmed range + the effective import flag (one tracked mutation). */
   onCommit: (range: DateRange, importHolidays: boolean) => void;
+  /** Requests and leave days the cascade would remove for a draft range. */
+  countRemovals?: (range: DateRange) => { requests: number; leaveDays: number };
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 const HOLIDAY_DAY = new Intl.DateTimeFormat("en-GB", {
@@ -108,6 +115,7 @@ export function RosterPeriodCard({
   range,
   importedHolidaysPresent,
   onCommit,
+  countRemovals,
 }: RosterPeriodCardProps) {
   const changeTarget = useChangeTarget(changeKeys.rosterRange());
   const [draft, setDraft] = useState<DateRange>(range);
@@ -115,9 +123,10 @@ export function RosterPeriodCard({
   // reflects whether the SG holiday groups are actually present, so it never shows
   // a false "N marked". A FRESH roster (no committed range yet) keeps auto-import
   // ON so a brand-new scenario imports SG holidays on its first commit.
-  const [importHolidays, setImportHolidays] = useState(
+  const [appliedImport, setAppliedImport] = useState(
     hasCompleteRange(range) ? importedHolidaysPresent : true,
   );
+  const [importHolidays, setImportHolidays] = useState(appliedImport);
   const startId = useId();
   const endId = useId();
 
@@ -142,17 +151,24 @@ export function RosterPeriodCard({
   const duration = complete ? rangeDayCount(draft) : 0;
   const monthLabel = rangeSpanLabel(draft);
 
-  /** Update one endpoint; commit immediately once the draft is a valid range. */
-  const editEndpoint = (side: "start" | "end", value: string) => {
-    const next = { ...draft, [side]: value };
-    setDraft(next);
-    if (hasCompleteRange(next)) onCommit(next, importHolidays && isRangeSupported(next));
+  const rangeDirty = draft.start !== range.start || draft.end !== range.end;
+  const dirty = rangeDirty || importHolidays !== appliedImport;
+  const removal = useMemo(
+    () => (complete && rangeDirty && countRemovals ? countRemovals(draft) : null),
+    [complete, rangeDirty, countRemovals, draft],
+  );
+
+  const editEndpoint = (side: "start" | "end", value: string) =>
+    setDraft({ ...draft, [side]: value });
+
+  const apply = () => {
+    onCommit(draft, effectiveImport);
+    setAppliedImport(importHolidays);
   };
 
-  const toggleImport = () => {
-    const next = !importHolidays;
-    setImportHolidays(next);
-    if (complete) onCommit(draft, next && supported);
+  const cancel = () => {
+    setDraft({ start: range.start, end: range.end });
+    setImportHolidays(appliedImport);
   };
 
   return (
@@ -217,6 +233,31 @@ export function RosterPeriodCard({
             End date must be on or after the start date.
           </p>
         ) : null}
+        {removal && removal.requests + removal.leaveDays > 0 ? (
+          <p className="mt-3 text-meta text-warnink" data-testid="range-removal-warning">
+            {plural(removal.requests, "request")} and {plural(removal.leaveDays, "leave day")} fall
+            outside the new range and will be removed.
+          </p>
+        ) : null}
+        <div className="mt-3.5 flex justify-end gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            data-testid="range-cancel"
+            disabled={!dirty}
+            onClick={cancel}
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            data-testid="range-apply"
+            disabled={!dirty || !complete}
+            onClick={apply}
+          >
+            Apply
+          </Button>
+        </div>
 
         {/* An inset island inside the card, so it is the `well` level: `--panel`
             with the inset cast and no border of its own (DESIGN.md §4 rule 1). */}
@@ -263,7 +304,7 @@ export function RosterPeriodCard({
             data-testid="import-toggle"
             checked={effectiveImport}
             disabled={!supported}
-            onCheckedChange={toggleImport}
+            onCheckedChange={() => setImportHolidays(!importHolidays)}
           />
         </div>
 
