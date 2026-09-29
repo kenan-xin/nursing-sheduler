@@ -11,6 +11,7 @@ export {
   describeDeleteImpact,
   type DeleteImpact,
 } from "./delete";
+export { cardsReferencing } from "./card-fields";
 export {
   RenameCollisionError,
   type EntityDomain,

@@ -220,6 +220,23 @@ describe("saveShiftTypeCard", () => {
     }
   });
 
+  it("words validation errors with the inline field names", () => {
+    const message = (errors: ConstructorParameters<typeof ShiftRequirementValidationError>[0]) =>
+      new ShiftRequirementValidationError(errors).message;
+    expect(message({ requiredNumPeople: REQUIREMENT_MESSAGES.requiredMin })).toBe(
+      "Min. nurses must be a whole number, 0 or more.",
+    );
+    expect(message({ preferredNumPeople: REQUIREMENT_MESSAGES.preferredLessThanRequired })).toBe(
+      "Preferred must be more than Min. nurses.",
+    );
+    expect(message({ preferredNumPeople: REQUIREMENT_MESSAGES.preferredMin })).toBe(
+      "Preferred must be a whole number, 1 or more.",
+    );
+    expect(message({ skillMix: REQUIREMENT_MESSAGES.skillMixAboveRequired })).toBe(
+      REQUIREMENT_MESSAGES.skillMixAboveRequired,
+    );
+  });
+
   it("rejects validation and rename collisions with zero committed writes", async () => {
     const card = baseline();
     const opened = scenario({
