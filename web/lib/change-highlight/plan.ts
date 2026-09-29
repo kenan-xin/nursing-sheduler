@@ -66,7 +66,6 @@ const VERB: Record<ProposalDiffEntry["kind"], string> = {
 const AFFECTS = /^(binds|narrowed):/;
 
 export function screenForScope(scope: DiffScope, mode: AppMode): string | null {
-  if (scope === "export-layout") return null;
   if (mode === "guided" && RULE_SCOPES.has(scope)) return "rule-library";
   return scope;
 }
@@ -75,7 +74,6 @@ export function screenForScope(scope: DiffScope, mode: AppMode): string | null {
 export function targetKeyFor(entry: ProposalDiffEntry): string | null {
   if (entry.kind === "removed") return null;
   const { key } = entry;
-  if (key === "export:layout") return null;
   // A cover warning restates the count line above it; the count line is the thing to
   // outline, and the warning has no row of its own to point at.
   if (key.startsWith("cover-note:")) return null;
