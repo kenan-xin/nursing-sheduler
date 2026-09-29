@@ -51,6 +51,8 @@ import { RosterGrid } from "./roster-grid";
 import { RosterCoverage } from "./roster-coverage";
 import { RosterDay } from "./roster-day";
 import { RosterEditBar } from "./roster-edit-bar";
+import { RosterRecordOffer } from "./roster-record-offer";
+import type { RecordableEdit } from "./record-as-request";
 import { useRosterContentWidth } from "./roster-content-width";
 import { MOBILE_DEFAULT_LENS_VIEWPORT } from "./use-container-width";
 
@@ -198,6 +200,43 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
     [editing],
   );
 
+  // kyh3: the LV/OFF cells set through the edit bar this session, offered for
+  // recording in Requests. Keyed to the solved grid so a new roster starts empty,
+  // and filtered against the live cell so an undone or overwritten edit drops out.
+  const [recordable, setRecordable] = useState<{
+    solved: RosterDocument["solvedDays"];
+    edits: readonly RecordableEdit[];
+  }>({ solved: document.solvedDays, edits: [] });
+  const liveRecordable = useMemo(
+    () =>
+      recordable.solved !== document.solvedDays
+        ? []
+        : recordable.edits.filter((e) => currentDays[e.personIdx]?.[e.dateIdx]?.kind === e.kind),
+    [recordable, document.solvedDays, currentDays],
+  );
+  const setCell = useCallback(
+    (coordinate: EditCoordinate, day: RosterDayState) => {
+      editing?.setCell(coordinate, day);
+      setRecordable((prev) => {
+        const kept =
+          prev.solved === document.solvedDays
+            ? prev.edits.filter(
+                (e) => e.personIdx !== coordinate.personIdx || e.dateIdx !== coordinate.dateIdx,
+              )
+            : [];
+        return {
+          solved: document.solvedDays,
+          edits: day.kind === "shift" ? kept : [...kept, { ...coordinate, kind: day.kind }],
+        };
+      });
+    },
+    [editing, document.solvedDays],
+  );
+  const clearRecordable = useCallback(
+    () => setRecordable({ solved: document.solvedDays, edits: [] }),
+    [document.solvedDays],
+  );
+
   // The editing callbacks the grid consumes, memoized so the grid does not
   // re-render on every viewer state change.
   const gridEditing = useMemo(
@@ -258,8 +297,15 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
           context={document.context}
           selected={editing.selectedCell}
           current={currentDays[editing.selectedCell.personIdx]?.[editing.selectedCell.dateIdx]}
-          onSetCell={editing.setCell}
+          onSetCell={setCell}
           onCancel={() => editing.selectCell(null)}
+        />
+      ) : null}
+      {editing !== undefined && liveRecordable.length > 0 ? (
+        <RosterRecordOffer
+          context={document.context}
+          edits={liveRecordable}
+          onDone={clearRecordable}
         />
       ) : null}
 
