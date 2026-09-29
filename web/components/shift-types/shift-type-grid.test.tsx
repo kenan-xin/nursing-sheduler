@@ -565,7 +565,11 @@ describe("ShiftTypeGrid — atomic staffing save", () => {
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
     await settleSave();
     expect(screen.getByTestId("shift-edit-string:Day-save-error")).toHaveTextContent(
-      "Required number of people must be at least 0",
+      "Min. nurses must be a whole number, 0 or more.",
+    );
+    expect(screen.getByTestId("shift-edit-string:Day-staffing-remove")).toHaveAttribute(
+      "href",
+      "/shift-type-requirements",
     );
     expect(await historyLength()).toBe(beforeInvalid);
 
@@ -587,7 +591,7 @@ describe("ShiftTypeGrid — atomic staffing save", () => {
       target: { value: "2" },
     });
     expect(screen.getByTestId("shift-edit-string:Day-preferred-collapse")).toHaveTextContent(
-      "weight reset from -25 to -1",
+      "Preferred will be cleared when you save.",
     );
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
     await settleSave();

@@ -16,7 +16,8 @@ import { parse, stringify } from "yaml";
 import { serializeScenario, validateScenario } from "../serialize";
 import { importScenarioYaml } from "../import-scenario";
 import { currentAppVersion } from "../app-version";
-import { toCanonicalScenarioDocument } from "../canonical";
+import { createEmptyScenarioUiState, toCanonicalScenarioDocument } from "../canonical";
+import { buildCoveringCard, emptyCoveringForm } from "@/components/coverings/coverings-model";
 import { anonymizeDocument, buildIdMap } from "../anonymize";
 import { prepareOptimizeSubmission } from "../prepare-optimize-submission";
 import { buildShiftTypeIndexMap } from "../schemas/shift-type-map";
@@ -28,7 +29,12 @@ import {
   type TypedKeyRecord,
 } from "../leave-guard/resolution";
 import { makeValidUiState } from "../test-fixtures";
-import type { CardsByKind, ImportNormalizationTarget, ScenarioUiState } from "../types";
+import type {
+  CardsByKind,
+  CoveringCard,
+  ImportNormalizationTarget,
+  ScenarioUiState,
+} from "../types";
 import {
   callOracleRaw,
   GATED,
@@ -340,6 +346,46 @@ ${dateLine}    weight: .inf
       "OPTIMAL",
     );
   });
+
+  // yzty: the Coverings form's save shape makes core check each shift on its own.
+  it(
+    "supervision is per shift: a Night preceptor does not cover a Day preceptee",
+    { timeout: oracleBudget(3) },
+    () => {
+      const run = (preceptorShift: string, shiftTypes?: CoveringCard["shiftTypes"]) => {
+        const state = createEmptyScenarioUiState("alpha");
+        state.rangeStart = state.rangeEnd = "2026-05-14";
+        state.staff = [{ id: "Senior" }, { id: "Junior" }];
+        state.shifts = [{ id: "D" }, { id: "N" }];
+        state.maxOneShiftPerDay = {};
+        const pin = (person: string, shiftType: string) => ({
+          uid: `${person}-${shiftType}`,
+          kind: "request" as const,
+          person,
+          date: "2026-05-14",
+          shiftType,
+          weight: Infinity,
+        });
+        state.reqData = [pin("Junior", "D"), pin("Senior", preceptorShift)];
+        const card = buildCoveringCard(
+          {
+            ...emptyCoveringForm(),
+            preceptors: ["Senior"],
+            preceptees: ["Junior"],
+            shiftTypes: ["D", "N"],
+          },
+          "cov",
+        );
+        state.cardsByKind.coverings = [shiftTypes ? { ...card, shiftTypes } : card];
+        return callOracle({ op: "schedule", yaml: serializeScenario(state) }, preceptorShift)
+          .status;
+      };
+      expect(run("N")).toBe("INFEASIBLE");
+      expect(run("D")).toBe("OPTIMAL");
+      // The pre-yzty grouped shape (kept read-only) still lets Night cover Day.
+      expect(run("N", [["D", "N"]])).toBe("OPTIMAL");
+    },
+  );
 
   // Contracted-hours coefficient-set equality through Python (DL09 D4).
   it(

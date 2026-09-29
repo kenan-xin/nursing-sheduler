@@ -1069,9 +1069,14 @@ function StaffingEditor({
           className="rounded-control border border-warn bg-warntint px-3 py-2 text-label font-semibold text-warnink"
           data-testid={`${prefix}-preferred-collapse`}
         >
-          Preferred will be cleared and its weight reset from {staffing.baseline?.weight} to -1 when
-          you save.
+          Preferred will be cleared when you save.
         </div>
+      )}
+
+      {staffing.baseline && (
+        <StaffingLink testId={`${prefix}-staffing-remove`}>
+          Remove staffing in Staffing Requirements
+        </StaffingLink>
       )}
 
       <StaffingContextChips chips={staffing.contextChips} testKey={`${prefix}-editor`} />
@@ -1196,9 +1201,7 @@ function ShiftCardEditor({
             staffing: staffingDraft,
           },
     );
-    const collapseCopy = result.preferredCollapsed
-      ? " Preferred was cleared and its weight reset to -1."
-      : "";
+    const collapseCopy = result.preferredCollapsed ? " Preferred was cleared." : "";
     toast.success(
       `Shift “${String(result.effectiveId)}” ${mode === "add" ? "added" : "saved"}.${collapseCopy}`,
     );
