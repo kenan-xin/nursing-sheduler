@@ -55,8 +55,9 @@ export const Off: Story = {
     await waitFor(() => expect(screen.getByTestId("cell-preference-editor")).toBeVisible());
     await userEvent.click(screen.getByTestId("cell-editor-tab-off"));
     await expect(screen.getByTestId("cell-editor-off")).toBeVisible();
+    await expect(screen.getByTestId("cell-editor-off-weight-input")).toHaveValue("20");
     await userEvent.click(screen.getByTestId("cell-editor-save"));
-    await expect(args.onSave).toHaveBeenCalledWith({ kind: "clear" });
+    await expect(args.onSave).toHaveBeenCalledWith({ kind: "off", weight: 20 });
   },
 };
 
