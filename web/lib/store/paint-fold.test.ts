@@ -61,6 +61,32 @@ describe("foldPaintIntents", () => {
     expect(next).toEqual([{ uid: "l", kind: "leave", person: "ana", date: "02" }]);
   });
 
+  it("OFF at weight 0 removes only an OFF cell and never creates one", () => {
+    const reqData: UiRequestCell[] = [
+      { uid: "o", kind: "off", person: "ana", date: "02", weight: 5 },
+      { uid: "l", kind: "leave", person: "ana", date: "03" },
+      { uid: "r", kind: "request", person: "ana", date: "04", shiftType: "D", weight: 3 },
+    ];
+    const offAtZero: StagedCoordinate = {
+      mode: "day-state",
+      dayState: { kind: "off", weight: 0 },
+    };
+    const next = foldPaintIntents(
+      reqData,
+      stage([
+        ["ana", "02", offAtZero],
+        ["ana", "03", offAtZero],
+        ["ana", "04", offAtZero],
+        ["ana", "05", offAtZero],
+      ]),
+      mint,
+    );
+    expect(next).toEqual([
+      { uid: "l", kind: "leave", person: "ana", date: "03" },
+      { uid: "r", kind: "request", person: "ana", date: "04", shiftType: "D", weight: 3 },
+    ]);
+  });
+
   it("erases a whole coordinate and leaves other coordinates verbatim", () => {
     const reqData: UiRequestCell[] = [
       { uid: "l", kind: "leave", person: "ana", date: "02" },

@@ -240,15 +240,18 @@ describe("deriveProposalDiff", () => {
     expect(diff.needsReview).toEqual([]);
   });
 
-  it("reads a weight-0 day-off request as a plain ask, not a weighted one", () => {
-    const before = octoberWard();
+  it("reads an imported weight-0 day-off request as a plain ask, not a weighted one", () => {
+    const ward = octoberWard();
+    const before = {
+      ...ward,
+      reqData: [...ward.reqData, { kind: "off" as const, person: "Chris", date: "01", weight: 0 }],
+    };
     const commands = [
       {
-        type: "set_off_request" as const,
+        type: "clear_requests" as const,
         personId: "Chris",
         startDate: "2026-10-01",
         endDate: "2026-10-01",
-        weight: 0,
       },
     ];
     const applied = applyAssistantCommands(before, commands);
@@ -260,9 +263,9 @@ describe("deriveProposalDiff", () => {
         key: 'cell:"Chris"|"01"',
         scope: "leave-and-requests",
         label: "Chris on 01",
-        before: null,
-        after: "Asked for the day off",
-        kind: "created",
+        before: "Asked for the day off",
+        after: null,
+        kind: "removed",
       },
     ]);
   });

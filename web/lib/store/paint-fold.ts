@@ -11,6 +11,8 @@
 //   • erase     → drop every cell at the coordinate.
 //   • day-state → XOR replace with a single leave/off cell (drops requests),
 //                 preserving an existing day-state cell's `uid` for F2 stability.
+//                 OFF at weight 0 instead removes just the OFF cell, as a weight
+//                 of 0 removes every target in the old app (no no-effect OFF).
 //   • requests  → additive per-selector deltas onto existing `request` cells
 //                 (weight 0 removes that selector). PRECEDENCE: if the
 //                 coordinate already holds a day-state, the delta is SKIPPED -- a
@@ -56,6 +58,13 @@ export function foldPaintIntents(
     if (intent.mode === "day-state") {
       const priorDayState = existing.find(isDayStateCell);
       const { dayState } = intent;
+      if (dayState.kind === "off" && dayState.weight === 0) {
+        byCoordinate.set(
+          key,
+          existing.filter((cell) => cell.kind !== "off"),
+        );
+        continue;
+      }
       const uid = priorDayState?.uid ?? mintUid(person, date, dayState.kind);
       const cell: UiRequestCell =
         dayState.kind === "leave"
