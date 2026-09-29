@@ -104,6 +104,27 @@ describe("outcomeToSignals", () => {
     ]);
   });
 
+  it("submit-rejected rewords the per-client queue cap", () => {
+    const outcome: SubmissionTransactionOutcome = {
+      status: "submit-rejected",
+      error: apiError(429, {
+        error: {
+          code: "job_capacity_exceeded",
+          message:
+            "This client already has 2 optimizations queued or running. Wait for one to finish or cancel one, then try again.",
+        },
+      }),
+      rollback: "removed",
+    };
+    expect(outcomeToSignals(outcome)).toEqual([
+      {
+        type: "submit-rejected",
+        code: "job_capacity_exceeded",
+        message: "You already have 2 optimisations running. Wait for one to finish or cancel it.",
+      },
+    ]);
+  });
+
   it("acceptance-unknown maps to submit-unknown", () => {
     const outcome: SubmissionTransactionOutcome = {
       status: "acceptance-unknown",
