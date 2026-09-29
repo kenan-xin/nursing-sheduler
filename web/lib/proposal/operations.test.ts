@@ -557,8 +557,9 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const added = result.next.shifts.slice(2);
-    expect(added.map((s) => s.id)).toEqual(["am1", "am2", "am3", "pm1", "pm2", "pm3", "L", "N"]);
-    expect(added.find((s) => s.id === "am1")).toMatchObject({
+    // Stored uppercase, as the Shifts page stores a code; the groups name the same ids.
+    expect(added.map((s) => s.id)).toEqual(["AM1", "AM2", "AM3", "PM1", "PM2", "PM3", "L", "N"]);
+    expect(added.find((s) => s.id === "AM1")).toMatchObject({
       startTime: "08:00",
       endTime: "15:00",
       durationMinutes: 420,
@@ -571,8 +572,8 @@ describe("add_shift_type / add_shift_group", () => {
       durationMinutes: 750,
     });
     expect(result.next.shiftGroups.map((g) => [g.id, g.members])).toEqual([
-      ["AM", ["am1", "am2", "am3"]],
-      ["PM", ["pm1", "pm2", "pm3"]],
+      ["AM", ["AM1", "AM2", "AM3"]],
+      ["PM", ["PM1", "PM2", "PM3"]],
       ["Long", ["L"]],
       ["Night shifts", ["N"]],
     ]);
@@ -586,7 +587,7 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const created = result.next.shifts.at(-1);
-    expect(created?.id).toBe("am1");
+    expect(created?.id).toBe("AM1");
     expect(created?.description).toBeUndefined();
   });
 
@@ -595,7 +596,7 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.rejection.code).toBe("invalid_value");
-    expect(result.rejection.message).toContain('Shift "Day"');
+    expect(result.rejection.message).toContain('Shift "DAY"');
   });
 
   it("refuses a duplicate inside the batch at the second occurrence", () => {
@@ -606,7 +607,31 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.rejection.index).toBe(1);
-    expect(result.rejection.message).toContain('Shift "am1"');
+    expect(result.rejection.message).toContain('Shift "AM1"');
+  });
+
+  it("matches a later reference to a code this batch adds in any case (tz3y)", () => {
+    const result = applyAssistantCommands(proposalScenario(), [
+      shift("am1", "08:00", "15:00"),
+      group("Early", ["Am1", "Day"]),
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.shifts.at(-1)?.id).toBe("AM1");
+    expect(result.next.shiftGroups.at(-1)?.members).toEqual(["Day", "AM1"]);
+  });
+
+  it("leaves a lowercase code the document already holds as written (tz3y)", () => {
+    const base = proposalScenario();
+    const state = { ...base, shifts: [...base.shifts, { ...base.shifts[0], id: "early" }] };
+    const result = applyAssistantCommands(state, [
+      shift("pm1", "13:00", "21:00"),
+      group("Mixed", ["early", "pm1"]),
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.shifts.map((s) => s.id)).toContain("early");
+    expect(result.next.shiftGroups.at(-1)?.members).toEqual(["early", "PM1"]);
   });
 
   it("refuses a case-variant code, as the Shifts page does (T4)", () => {
@@ -629,7 +654,7 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.rejection.code).toBe("invalid_value");
-    expect(result.rejection.message).toContain('Shift "am1"');
+    expect(result.rejection.message).toContain('Shift "AM1"');
     expect(result.rejection.message).toContain("09:00");
   });
 
@@ -649,7 +674,7 @@ describe("add_shift_type / add_shift_group", () => {
     const result = applyAssistantCommand(proposalScenario(), shift("am1", "08:15", "15:00"));
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.rejection.message).toContain('Shift "am1"');
+    expect(result.rejection.message).toContain('Shift "AM1"');
     expect(result.rejection.message).toContain("30-minute grid");
   });
 
@@ -691,7 +716,7 @@ describe("add_shift_type / add_shift_group", () => {
       expect(result.ok, String(restMinutes)).toBe(false);
       if (result.ok) continue;
       expect(result.rejection.code).toBe("invalid_value");
-      expect(result.rejection.message).toContain('Shift "am1"');
+      expect(result.rejection.message).toContain('Shift "AM1"');
       expect(result.rejection.message).toContain(text);
     }
   });
