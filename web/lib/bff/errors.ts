@@ -100,7 +100,8 @@ const JOB_FAILURE_MESSAGES: Record<string, string> = {
   cancelled: "Optimisation cancelled.",
   worker_lost: "The optimisation worker stopped before the job completed.",
   process_timeout: "The optimisation run did not finish within its time limit and was stopped.",
-  invalid_model: "The generated solver model is invalid.",
+  invalid_model:
+    "The generated solver model is invalid. A rule weight may be too large for the solver; use a smaller weight or Infinity/-Infinity for a hard rule.",
   no_solution_found: "No schedule was produced.",
 };
 

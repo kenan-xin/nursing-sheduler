@@ -56,9 +56,10 @@ export const OPTIMIZE_SOLVER = "ortools/cp-sat";
  * FormData serializer already applies, and it is idempotent, so the bytes on the wire
  * are identical either way. It only makes the digest describe them.
  *
- * NOT for a `file` part -- a File's bytes are transmitted verbatim, with no newline
- * normalization. Neither basis-claiming path submits one; a future path that does
- * must digest the file's own bytes instead.
+ * Since bug hunt BH4 / D-06 the submit sends the YAML as a `file` part instead (a
+ * plain field is capped at 1 MiB by the backend's form parser). A file's bytes are
+ * sent verbatim, so `buildOptimizeForm` applies this same transformation to the
+ * file's contents: the wire bytes, and so this digest, are unchanged.
  */
 export function toTransmittedYaml(yaml: string): string {
   return yaml.replace(/\r\n|\r|\n/g, "\r\n");

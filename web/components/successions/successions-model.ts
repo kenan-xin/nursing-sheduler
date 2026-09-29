@@ -24,6 +24,7 @@ import type { TransferOption } from "@/components/entity-editor/transfer-list";
 import type { DateScopeOption, DateScopeItem } from "@/components/card-editor/date-scope-field";
 import { isValidWeightValue, type WeightFieldValue } from "@/components/card-editor/weight-value";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
+import { makeDates } from "@/lib/rules/requirement-dates";
 
 /**
  * The scenario fields the Successions screen reads: the people and shift-type
@@ -44,14 +45,21 @@ export const SUCCESSION_MESSAGES = {
   person: "At least one person must be selected",
   pattern: "At least 2 shift types must be selected for a succession pattern",
   date: "At least one date must be selected",
-  weightInvalid: "Weight must be a valid number, Infinity, or -Infinity",
+  weightInvalid:
+    "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
   // A numeric shift-type ENTITY id has no valid `ShiftTypeRef` (pattern positions
   // are string-only — see `lib/scenario/types.ts`); the Python shift map keys the
   // raw numeric id, so a stringified "7" would not resolve it. Mirrors the same
   // structural constraint Counts/Coverings document for their own selectors.
   numericShiftId:
     "A numeric shift type ID cannot be used as a pattern entry; reference it by a string ID instead",
+  plusInf: "Forces this sequence at every start day. This is usually impossible.",
 } as const;
+
+/** Q1: the Dates warning when no pattern window fits inside the chosen dates. */
+export function successionNeverRunsMessage(patternLength: number): string {
+  return `This pattern never runs: these dates have no ${patternLength} days in a row.`;
+}
 
 /** The flat draft the form edits. */
 export interface SuccessionFormState {
@@ -217,6 +225,28 @@ export function validateSuccessionForm(form: SuccessionFormState): SuccessionErr
   if (form.date.length === 0) errors.date = SUCCESSION_MESSAGES.date;
   if (!isValidWeightValue(form.weight)) errors.weight = SUCCESSION_MESSAGES.weightInvalid;
   return errors;
+}
+
+/**
+ * How many start days the pattern can run from: core only checks a window whose
+ * every day is in the card's dates (`shift_type_successions` in
+ * `core/nurse_scheduling/preference_types.py`), so this counts the runs of
+ * consecutive in-scope days at least `patternLength` long.
+ */
+export function countSuccessionWindows(
+  state: Pick<ScenarioUiState, "rangeStart" | "rangeEnd" | "dateGroups">,
+  patternLength: number,
+  date: readonly DateRef[],
+): number {
+  const { allDateIds, expand } = makeDates(state);
+  const covered = expand([...date]);
+  let run = 0;
+  let windows = 0;
+  for (const id of allDateIds) {
+    run = covered.has(id) ? run + 1 : 0;
+    if (run >= patternLength) windows += 1;
+  }
+  return windows;
 }
 
 /**

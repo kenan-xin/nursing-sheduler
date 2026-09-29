@@ -336,9 +336,16 @@ function scenarioCovers(
   const personIdx =
     args.reason === "sick_or_emergency" ? findPersonIdx({ people: live.staff }, args.person) : -1;
   const leave = personIdx < 0 ? [] : addLeave(live.staff[personIdx].id, args.dates);
-  // A leave the record refuses (already on leave, a date off the period) is left out.
-  const withLeave = applyAssistantCommands(live, leave);
-  const [state, recorded] = withLeave.ok ? [withLeave.next, leave] : [live, []];
+  // Each date on its own: a leave the record refuses (already on leave, a date off the
+  // period) is left out, and the other dates still go in.
+  let state = live;
+  const recorded: AssistantCommandV1[] = [];
+  for (const command of leave) {
+    const withLeave = applyAssistantCommands(state, [command]);
+    if (!withLeave.ok) continue;
+    state = withLeave.next;
+    recorded.push(command);
+  }
   const borrow = rankRepairOptions(state, findStaffingShortfalls(state), {
     runInfeasible: true,
   }).find((option) => option.repairId === "borrow_temporary_nurse");

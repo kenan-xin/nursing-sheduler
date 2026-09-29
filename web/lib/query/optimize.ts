@@ -9,7 +9,7 @@ import {
   type OptimizeErrorInfo,
 } from "@/lib/bff/errors";
 import type { JobPurpose, JobResponse } from "@/lib/bff/types";
-import type { BasisSubmissionFields } from "@/lib/optimize/basis/basis-record";
+import { type BasisSubmissionFields, toTransmittedYaml } from "@/lib/optimize/basis/basis-record";
 import {
   parseControlChangedPayload,
   parseJobResponse,
@@ -61,23 +61,44 @@ async function requestOptimizeJob(
  * `OptimizeApiError` on a non-2xx so the caller can classify the rejection code.
  */
 export async function postOptimizeJob(input: SubmitOptimizeInput): Promise<JobResponse> {
+  return requestOptimizeJob(
+    "/api/optimize",
+    { method: "POST", body: buildOptimizeForm(input) },
+    "submit",
+  );
+}
+
+/**
+ * The multipart body of a submit. YAML text goes as a FILE part, never the
+ * `yaml_content` field: the backend's form parser caps a plain field at 1 MiB but
+ * a file at the stated 2 MiB (bug hunt BH4 / D-06). A file's bytes are sent
+ * verbatim, so they are pre-normalized with `toTransmittedYaml` -- the exact bytes a
+ * string field put on the wire, and the bytes the basis digest was taken over.
+ */
+function buildOptimizeForm(input: SubmitOptimizeInput): FormData {
   const form = new FormData();
   if (input.file) {
     form.set("file", input.file);
   } else if (input.yamlContent !== undefined) {
-    form.set("yaml_content", input.yamlContent);
+    const yaml = new Blob([toTransmittedYaml(input.yamlContent)], { type: "application/yaml" });
+    form.set("file", yaml, "schedule.yaml");
   }
   if (input.prettify !== undefined) form.set("prettify", String(input.prettify));
   if (input.timeout !== undefined) form.set("timeout", String(input.timeout));
+  // The backend defaults `purpose` to `ordinary`; set it explicitly only when
+  // the caller named a different purpose, so the ordinary path is byte-identical.
   if (input.purpose !== undefined && input.purpose !== "ordinary") {
     form.set("purpose", input.purpose);
   }
   if (input.basis !== undefined) {
+    // Sent as flat form fields matching api/optimize.py::create_job. Written
+    // field by field so an added basis field that is not forwarded is a
+    // compile error here rather than a silent identity mismatch at the server.
     for (const [key, value] of Object.entries(input.basis)) {
       if (value !== undefined) form.set(key, value);
     }
   }
-  return requestOptimizeJob("/api/optimize", { method: "POST", body: form }, "submit");
+  return form;
 }
 
 /**
@@ -180,31 +201,12 @@ export function useSubmitOptimize() {
   const queryClient = useQueryClient();
 
   return useMutation<JobResponse, OptimizeApiError, SubmitOptimizeInput>({
-    mutationFn: (input) => {
-      const form = new FormData();
-      if (input.file) {
-        form.set("file", input.file);
-      } else if (input.yamlContent !== undefined) {
-        form.set("yaml_content", input.yamlContent);
-      }
-      if (input.prettify !== undefined) form.set("prettify", String(input.prettify));
-      if (input.timeout !== undefined) form.set("timeout", String(input.timeout));
-      // The backend defaults `purpose` to `ordinary`; set it explicitly only when
-      // the caller named a different purpose, so the ordinary path is byte-identical.
-      if (input.purpose !== undefined && input.purpose !== "ordinary") {
-        form.set("purpose", input.purpose);
-      }
-      if (input.basis !== undefined) {
-        // Sent as flat form fields matching api/optimize.py::create_job. Written
-        // field by field so an added basis field that is not forwarded is a
-        // compile error here rather than a silent identity mismatch at the server.
-        for (const [key, value] of Object.entries(input.basis)) {
-          if (value !== undefined) form.set(key, value);
-        }
-      }
-
-      return requestOptimizeJob("/api/optimize", { method: "POST", body: form }, "submit");
-    },
+    mutationFn: (input) =>
+      requestOptimizeJob(
+        "/api/optimize",
+        { method: "POST", body: buildOptimizeForm(input) },
+        "submit",
+      ),
     onSuccess: (job) => {
       queryClient.setQueryData(optimizeKeys.job(job.id), job);
     },

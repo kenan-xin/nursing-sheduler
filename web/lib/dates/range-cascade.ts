@@ -9,8 +9,10 @@
 //   • a date that STAYS but is re-keyed → MIGRATE its references old-id → new-id
 //     (`remapDateReferences`) so matrix cells, date-group members, and export-
 //     layout date rows/columns follow the new format instead of being destroyed.
-// (Full-ISO preference-card date fields are not span ids, so neither the delete
-// nor the migrate ever matches them — they are out of scope by construction.)
+// Preference cards store full ISO dates, never span ids, so the migrate never
+// touches them; a date that LEFT is purged under its ISO form too, so a card
+// date outside the new range is pruned (and the card dropped if emptied,
+// AC-RI-14) exactly like a span-id reference.
 // Requirement overrides are the exception: each is a single ISO date, so one
 // whose date left the range is dropped, or it would reach the solver as an
 // out-of-range date.
@@ -57,6 +59,7 @@ export function applyRangeChange(
     const newId = newIdByIso.get(item.iso);
     if (newId === undefined) {
       removed.push(item.id);
+      if (item.iso !== item.id) removed.push(item.iso);
     } else if (newId !== item.id) {
       migration.set(item.id, newId);
     }
