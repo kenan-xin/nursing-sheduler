@@ -32,6 +32,25 @@ function isDayStateCell(cell: UiRequestCell): boolean {
   return cell.kind === "leave" || cell.kind === "off";
 }
 
+/**
+ * How many staged `requests` coordinates the fold will skip because the cell
+ * already holds a leave/off day-state (the PRECEDENCE rule above), so the page can
+ * say why part of a drag did nothing.
+ */
+export function countSkippedRequestPaints(
+  reqData: readonly UiRequestCell[],
+  staged: ReadonlyMap<string, StagedCoordinate>,
+): number {
+  const dayStateKeys = new Set(
+    reqData.filter(isDayStateCell).map((cell) => paintCellKey(cell.person, cell.date)),
+  );
+  let skipped = 0;
+  for (const [key, intent] of staged) {
+    if (intent.mode === "requests" && dayStateKeys.has(key)) skipped++;
+  }
+  return skipped;
+}
+
 /** Reconcile staged per-coordinate intents against a matrix. Untouched coordinates pass through verbatim. */
 export function foldPaintIntents(
   reqData: readonly UiRequestCell[],

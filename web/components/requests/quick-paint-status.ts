@@ -4,29 +4,25 @@
 // (web-frontend/src/app/shift-requests/page.tsx ~362/381) — the strings below are
 // copied verbatim (only the tone names are renamed to this ticket's vocabulary:
 // old "warning" splits into "clear" (no targets) vs "removal" (weight 0); old
-// "neutral" is "apply").
+// "neutral" is "apply"). The LEAVE line and the OFF "replaces" suffix are v2
+// additions: v1 had no LEAVE, and its OFF was additive.
 
+import { isValidWeightValue, parseWeightInput } from "@/components/card-editor/weight-value";
 import { RESERVED_SHIFT_TYPE } from "@/lib/scenario";
 import { computeQuickPaintCellIntent } from "./requests-gestures";
 import { weightDisplayLabel } from "./requests-model";
 
-const INFINITY_TOKENS = ["∞", "+∞", "inf", "+inf", "infinity", "+infinity"];
-const NEG_INFINITY_TOKENS = ["-∞", "-inf", "-infinity"];
-
 /**
- * Parse quick-paint weight text 1:1 with the old app's `parseW`: infinity
- * spellings (case-insensitive), `""` → `0`, otherwise `parseInt`; `NaN` → `null`
- * (invalid). Deliberately simpler than `weight-field.tsx`'s `parseWeightInput`
- * (no k/m/b/t suffixes, no raw-text-on-invalid fallback) — quick-paint's status
- * line needs a clean invalid signal, not a partial draft to keep typing into.
+ * Parse quick-paint weight text with the cell editor's `parseWeightInput`, so the
+ * same text means the same weight on both paths (`10k` is 10000). `""` → `0`;
+ * anything the shared parser keeps as raw text → `null` (invalid), because the
+ * status line needs a clean invalid signal.
  */
 export function parseQuickPaintWeight(raw: string): number | null {
-  const trimmed = raw.trim().toLowerCase();
-  if (INFINITY_TOKENS.includes(trimmed)) return Infinity;
-  if (NEG_INFINITY_TOKENS.includes(trimmed)) return -Infinity;
+  const trimmed = raw.trim();
   if (trimmed === "") return 0;
-  const parsed = Number.parseInt(trimmed, 10);
-  return Number.isNaN(parsed) ? null : parsed;
+  const parsed = parseWeightInput(trimmed);
+  return isValidWeightValue(parsed) ? parsed : null;
 }
 
 export interface QuickPaintStatus {
@@ -71,6 +67,12 @@ export function quickPaintStatus(selectedIds: readonly string[], weight: string)
     };
   }
 
+  // LEAVE wins over every other target and ignores the weight
+  // (`computeQuickPaintCellIntent`), so it is announced before the weight is read.
+  if (selectedIds.includes(RESERVED_SHIFT_TYPE.leave)) {
+    return { tone: "apply", text: "Drag to pin paid leave. Weight is not used." };
+  }
+
   const parsed = parseQuickPaintWeight(weight);
   if (parsed === null) {
     return {
@@ -79,7 +81,8 @@ export function quickPaintStatus(selectedIds: readonly string[], weight: string)
     };
   }
 
-  const targets = appliedQuickPaintTargets(selectedIds, parsed).join(", ");
+  const applied = appliedQuickPaintTargets(selectedIds, parsed);
+  const targets = applied.join(", ");
   if (parsed === 0) {
     return {
       tone: "removal",
@@ -89,6 +92,8 @@ export function quickPaintStatus(selectedIds: readonly string[], weight: string)
 
   return {
     tone: "apply",
-    text: `Drag over cells to apply ${targets} with weight ${weightDisplayLabel(parsed)}.`,
+    text:
+      `Drag over cells to apply ${targets} with weight ${weightDisplayLabel(parsed)}.` +
+      (applied[0] === RESERVED_SHIFT_TYPE.off ? " This replaces shift requests in each cell." : ""),
   };
 }

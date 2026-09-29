@@ -293,7 +293,8 @@ export function RosterPeriodCard({
           <div>
             <div className="text-body font-semibold">Import Singapore public holidays</div>
             <div className="mt-[3px] max-w-[38ch] text-meta text-ink2">
-              Marks gazetted holidays as non-work days so the roster staffs them like weekends.
+              Adds WORKDAY, NON-WORKDAY and PH date groups. They change nothing until a staffing
+              rule uses them.
             </div>
           </div>
           {/* The shared Base UI Switch: the pressable root IS the 44x44 coarse
