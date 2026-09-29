@@ -229,18 +229,25 @@ describe("affinitiesMapper", () => {
   const advanced: AffinityCard = {
     uid: "a2",
     date: "ALL",
-    people1: [["P1"], ["P3"]],
+    people1: [["P1", "P3"]],
     people2: ["P2"],
     shiftTypes: ["D"],
     weight: 1,
   };
+
+  it("says together means the same shift on the same day, and describes a grouped card honestly", () => {
+    expect(affinitiesMapper.summary(supported)).toBe(
+      "P1 with P2 on the same shift on the same day (D), ALL.",
+    );
+    expect(affinitiesMapper.summary(advanced)).toContain("even on different shifts");
+  });
 
   it("declares weight as the sole quick field for a single-term affinity", () => {
     expect(affinitiesMapper.unsupportedReason(supported)).toBeUndefined();
     expect(affinitiesMapper.quickFields(supported).map((f) => f.key)).toEqual(["weight"]);
   });
 
-  it("marks a multi-term affinity unsupported", () => {
+  it("marks a grouped affinity unsupported", () => {
     expect(affinitiesMapper.unsupportedReason(advanced)).toBeDefined();
     expect(affinitiesMapper.quickFields(advanced)).toEqual([]);
   });
