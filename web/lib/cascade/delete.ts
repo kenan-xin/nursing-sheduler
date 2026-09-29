@@ -247,5 +247,42 @@ function isAuthoredDateGroup(state: ScenarioUiState, id: EntityRef): boolean {
   return state.dateGroups.some((group) => group.id === id);
 }
 
+/** What a delete drops: whole rules, request cells, and history entries. */
+export interface DeleteImpact {
+  rules: number;
+  requests: number;
+  history: number;
+}
+
+/** Count what {@link deleteEntity} would drop, by running it and diffing — so the
+ *  confirm can never disagree with the cascade. */
+export function deleteImpact(
+  state: ScenarioUiState,
+  domain: EntityDomain,
+  id: EntityRef,
+): DeleteImpact {
+  const next = deleteEntity(state, domain, id);
+  const rules = (s: ScenarioUiState) =>
+    Object.values(s.cardsByKind).reduce((sum, cards) => sum + cards.length, 0);
+  const history = (s: ScenarioUiState) =>
+    s.staff.reduce((sum, person) => sum + (person.history?.length ?? 0), 0);
+  return {
+    rules: rules(state) - rules(next),
+    requests: state.reqData.length - next.reqData.length,
+    history: history(state) - history(next),
+  };
+}
+
+/** The non-zero parts of an impact as confirm lines ("3 rules", "4 history entries"). */
+export function describeDeleteImpact(impact: DeleteImpact): string[] {
+  const part = (count: number, one: string, many: string) =>
+    count > 0 ? [`${count} ${count === 1 ? one : many}`] : [];
+  return [
+    ...part(impact.rules, "rule", "rules"),
+    ...part(impact.requests, "request", "requests"),
+    ...part(impact.history, "history entry", "history entries"),
+  ];
+}
+
 /** Acceptance-matrix alias for {@link deleteEntity} (`applyDelete(state, …)`). */
 export const applyDelete = deleteEntity;

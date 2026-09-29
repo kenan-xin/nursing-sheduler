@@ -31,7 +31,11 @@ import type {
   UiShiftType,
   UiTemporaryCover,
 } from "@/lib/scenario";
-import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
+import {
+  describeCountStrength,
+  EXPRESSION_OPS,
+  substituteTarget,
+} from "@/components/card-editor/expression-model";
 import {
   AFFINITY_SAME_SHIFT,
   isEditableAffinityCard,
@@ -39,6 +43,7 @@ import {
 import { isEditableCoveringCard } from "@/components/coverings/coverings-model";
 import { isContractedHoursCard } from "@/components/counts/counts-model";
 import { formatHalfHours } from "@/components/counts/half-hour-codec";
+import { groupLeaveReach, leaveReachText } from "@/components/requests/requests-model";
 import { calendarSpan } from "./assumptions";
 import { generateDateItems } from "@/lib/dates";
 import { formatShortDate } from "@/lib/dates/date-id";
@@ -314,25 +319,6 @@ function describeSuccession(card: SuccessionCard): string {
   return `${pattern} on consecutive days for ${renderPeople(card.person, "everyone")}, ${renderDates(card.date)}: ${renderStrength(card.weight)}`;
 }
 
-/**
- * A count's strength, per `shift_count` in core (the objective is maximised): a linear
- * expression is a yes/no the weight is added for, so a positive weight rewards it
- * holding and a negative one penalises it (the solver avoids it); `|x - T|^2` is a
- * squared gap, so a negative weight pulls toward T.
- */
-function renderCountStrength(squared: boolean, weight: number, target: number): string {
-  if (weight === 0) return "no effect (weight 0)";
-  if (squared) {
-    if (weight === -Infinity) return `must be exactly ${target}`;
-    if (weight < 0) return `pulled toward ${target} (weight ${weight})`;
-    return `refused by the solver (a positive weight is not allowed here)`;
-  }
-  if (weight === Infinity) return "must always hold";
-  if (weight === -Infinity) return "must never hold, the solver forces the opposite";
-  if (weight > 0) return `kept to where possible (weight ${weight})`;
-  return `avoided where possible (weight ${weight})`;
-}
-
 /** A contracted-hours card (4h5a): the hours, what each shift and leave day counts, a must. */
 function describeContract(card: ContractedHoursCountCard): string | null {
   const { target } = card;
@@ -360,7 +346,7 @@ function describeCount(card: CountCard): string | null {
   const amount = squared ? `Close to ${card.target}` : substituteTarget(op.title, card.target);
   const shifts = flattenRefs(card.countShiftTypes).map(String).join(" + ");
   const people = renderPeople(card.person, "");
-  return `${amount} ${shifts} shifts for ${people ? `each of ${people}` : "everyone"}, across ${renderDates(card.countDates)}: ${renderCountStrength(squared, card.weight, card.target)}`;
+  return `${amount} ${shifts} shifts for ${people ? `each of ${people}` : "everyone"}, across ${renderDates(card.countDates)}: ${describeCountStrength(squared, card.weight, card.target)}`;
 }
 
 /** A pairing's strength, per `shift_affinity` in core: the weight is gained on each date both sides work. */
@@ -894,6 +880,34 @@ function collapseOffRuns(
 }
 
 /**
+ * Leave on a staff-group row pins every member on every date (bb8t). The per-date
+ * rows only name the group, so one line states the person-days it reaches; the
+ * Preview is the confirmation, so it must say so before Apply.
+ */
+function groupLeaveLines(commands: readonly AssistantCommandV1[], after: ScenarioUiState): Entry[] {
+  return commands.flatMap((command): Entry[] => {
+    if (command.type !== "add_leave") return [];
+    const span = rosterDatesBetween(after, command.startDate, command.endDate);
+    if (!span.ok) return [];
+    const reach = groupLeaveReach(
+      after,
+      span.ids.map((date) => [command.personId, date] as const),
+    );
+    if (!reach) return [];
+    return [
+      {
+        key: `groupleave:${stableStringify(command.personId)}|${command.startDate}|${command.endDate}`,
+        scope: "leave-and-requests",
+        label: `${String(command.personId)}: paid leave for every member`,
+        before: null,
+        after: `Pins paid leave for ${leaveReachText(reach)}`,
+        kind: "created",
+      },
+    ];
+  });
+}
+
+/**
  * A person added in this change and marked must-be-off around the days they cover (a
  * borrowed nurse) gets one line saying when they ARE here -- the thing the manager
  * actually asked for. Only when those days are one unbroken run; otherwise the runs
@@ -1192,6 +1206,7 @@ export function deriveProposalDiff(
       after,
     ),
     ...availabilityLines(commands, after),
+    ...groupLeaveLines(commands, after),
   ];
   const cascade = [
     ...all.filter((entry) => !named.has(entry.key)),

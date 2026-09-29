@@ -51,6 +51,8 @@ export interface WeightFieldProps {
   note?: string;
   /** Root `data-testid` prefix (`<testId>-input`/`-plus-inf`/`-minus-inf`). */
   testId?: string;
+  /** `false` hides the ±∞ buttons where core refuses an infinite weight. Default `true`. */
+  allowInfinity?: boolean;
 }
 
 const DEFAULT_HELP = "Positive encourages · negative discourages · ±∞ makes it a hard rule.";
@@ -65,6 +67,7 @@ export function WeightField({
   plusInfWarning,
   note,
   testId = "weight-field",
+  allowInfinity = true,
 }: WeightFieldProps) {
   if (note) {
     return (
@@ -90,24 +93,28 @@ export function WeightField({
           placeholder={placeholder}
           className="font-mono"
         />
-        <Button
-          variant="outline"
-          data-testid={`${testId}-plus-inf`}
-          title="Set to positive infinity (∞)"
-          onClick={() => onChange(Infinity)}
-          className="font-mono"
-        >
-          +∞
-        </Button>
-        <Button
-          variant="outline"
-          data-testid={`${testId}-minus-inf`}
-          title="Set to negative infinity (-∞)"
-          onClick={() => onChange(-Infinity)}
-          className="font-mono"
-        >
-          −∞
-        </Button>
+        {allowInfinity && (
+          <>
+            <Button
+              variant="outline"
+              data-testid={`${testId}-plus-inf`}
+              title="Set to positive infinity (∞)"
+              onClick={() => onChange(Infinity)}
+              className="font-mono"
+            >
+              +∞
+            </Button>
+            <Button
+              variant="outline"
+              data-testid={`${testId}-minus-inf`}
+              title="Set to negative infinity (-∞)"
+              onClick={() => onChange(-Infinity)}
+              className="font-mono"
+            >
+              −∞
+            </Button>
+          </>
+        )}
       </div>
       <p className="text-meta text-ink3">{help}</p>
       {plusInfWarning && value === Infinity && <FieldWarning>{plusInfWarning}</FieldWarning>}

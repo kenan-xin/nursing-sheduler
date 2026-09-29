@@ -63,6 +63,15 @@ async function openPicker() {
   await screen.findByTestId("roster-shift-option-AM");
 }
 
+describe("RosterEditBar — edit scope (audit C-08)", () => {
+  it("says a hand edit is roster-only and the next run will not keep it", () => {
+    renderBar();
+    expect(screen.getByTestId("roster-edit-scope")).toHaveTextContent(
+      "Roster only. The next run will not keep this.",
+    );
+  });
+});
+
 describe("RosterEditBar — aria-hidden must not cover tabbable content", () => {
   it("hides no tabbable content from assistive tech while the picker is closed", () => {
     renderBar();

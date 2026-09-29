@@ -19,6 +19,7 @@ import {
   dayStateOf,
   historyValueAt,
   isHistorySlotClickable,
+  type GroupSourceMarker,
   type RequestColumn,
   type RequestRow,
   type ShiftTypeOrderIndex,
@@ -60,6 +61,8 @@ export interface RequestsMatrixProps {
   onCellPointerEnter(person: PersonRef, colRef: DateRef): void;
   onHistoryPointerDown(person: PersonRef, columnIndex: number): void;
   onHistoryPointerEnter(person: PersonRef, columnIndex: number): void;
+  /** `groupSourceMarkers(...)`: person cells a group row / date-group column covers. */
+  groupSources?: ReadonlyMap<string, GroupSourceMarker>;
 }
 
 const ROW_HEIGHT = 40;
@@ -246,6 +249,7 @@ export function RequestsMatrix({
   onCellPointerEnter,
   onHistoryPointerDown,
   onHistoryPointerEnter,
+  groupSources,
 }: RequestsMatrixProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Pointer-aware geometry: dense 40px rows / 40px history columns on a precise
@@ -532,6 +536,14 @@ export function RequestsMatrix({
                   const view = buildCellView(cellsAt, shiftTypeOrderIndex);
                   const staged = stagedKeys?.has(key) ?? false;
                   const visual = cellVisual(view, cellsAt);
+                  // Inherited from a group row / date-group column: a small top-aligned
+                  // glyph plus (on an empty cell) the bare selector with no tint or
+                  // border, so it stays secondary to a direct request; the sources are
+                  // named in full in the title and accessible name. The glyph stays in
+                  // flow: positioning the cell (`relative`) changes how axe resolves the
+                  // opacity-faded request cells.
+                  const group = groupSources?.get(key);
+                  const groupText = group ? group.sources.join("\n") : "";
                   // Identical presentation for both element types — see the
                   // history slot above.
                   const cellPresentation = {
@@ -542,17 +554,36 @@ export function RequestsMatrix({
                       staged ? "outline outline-2 outline-brand -outline-offset-2" : null,
                     ),
                     style: visual.style,
-                    title: view.primaryText || undefined,
+                    title: [view.primaryText, groupText].filter(Boolean).join("\n") || undefined,
                     "data-testid": `cell-${row.id}-${colRef}`,
                     ...changeTargetProps(changeKey, highlighted.has(changeKey)),
                   };
-                  const cellContent = view.empty ? null : (
-                    <span className="truncate">
-                      {view.primaryText}
-                      {view.shadowedCount > 0 ? (
-                        <span className="text-faint"> (+{view.shadowedCount})</span>
-                      ) : null}
-                    </span>
+                  const groupMark = group ? (
+                    <FaLayerGroup
+                      aria-hidden
+                      data-testid={`group-source-${row.id}-${colRef}`}
+                      className="ml-0.5 mt-0.5 size-[7px] shrink-0 self-start text-ink3"
+                    />
+                  ) : null;
+                  const cellContent = view.empty ? (
+                    group ? (
+                      <>
+                        <span className="truncate font-mono text-[9px] text-ink3">
+                          {group.short}
+                        </span>
+                        {groupMark}
+                      </>
+                    ) : null
+                  ) : (
+                    <>
+                      <span className="truncate">
+                        {view.primaryText}
+                        {view.shadowedCount > 0 ? (
+                          <span className="text-faint"> (+{view.shadowedCount})</span>
+                        ) : null}
+                      </span>
+                      {groupMark}
+                    </>
                   );
 
                   // Normal mode opens the cell editor, so the cell is a real
@@ -566,7 +597,7 @@ export function RequestsMatrix({
                         {...cellPresentation}
                         aria-label={`Edit ${row.label} on ${col.label}${
                           view.primaryText ? `, currently ${view.primaryText}` : ", no request"
-                        }`}
+                        }${group ? `; ${group.sources.join("; ")}` : ""}`}
                         onClick={(event: MouseEvent<HTMLButtonElement>) =>
                           onCellClick(row.id, colRef, event.currentTarget)
                         }

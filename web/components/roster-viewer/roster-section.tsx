@@ -38,6 +38,7 @@ import type { CurrentCandidatePointer } from "@/lib/store";
 import type { RosterCaptureSurface } from "@/lib/optimize";
 import { Callout } from "@/components/optimize/callout";
 import { ConfirmDialog } from "@/components/shell/confirm-dialog";
+import { ReplaceRosterDialog } from "./replace-roster-dialog";
 import { EmptyRosterActions } from "./roster-actions";
 import { describeReplacementFailure, ROSTER_CLEAR_PARTIAL_MESSAGE } from "./replacement-outcome";
 import { useWorkingRoster } from "./use-working-roster";
@@ -60,7 +61,10 @@ export function RosterSection({ capture }: RosterSectionProps) {
   const [loadPending, setLoadPending] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dismissPending, setDismissPending] = useState(false);
-  const [confirmReplace, setConfirmReplace] = useState<CurrentCandidatePointer | null>(null);
+  const [confirmReplace, setConfirmReplace] = useState<{
+    pointer: CurrentCandidatePointer;
+    viewed: RosterDocument | null;
+  } | null>(null);
   // The empty-state document actions. Kept in a channel of their own so an
   // Import/Clear failure never overwrites (or is overwritten by) a candidate
   // Load/Dismiss message describing a different action.
@@ -220,11 +224,14 @@ export function RosterSection({ capture }: RosterSectionProps) {
   const onLoadClick = useCallback(() => {
     if (loadable === null) return;
     if (hasWorkingRoster) {
-      setConfirmReplace(loadable.pointer);
+      setConfirmReplace({
+        pointer: loadable.pointer,
+        viewed: panelRef.current?.viewedDocument() ?? roster.document,
+      });
       return;
     }
     void promoteEmpty(loadable.pointer);
-  }, [hasWorkingRoster, loadable, promoteEmpty]);
+  }, [hasWorkingRoster, loadable, promoteEmpty, roster.document]);
 
   /**
    * The confirmed replacement of an existing roster. Routes through the panel's
@@ -232,7 +239,7 @@ export function RosterSection({ capture }: RosterSectionProps) {
    * Import share one coordinator.
    */
   const onConfirmReplace = useCallback(async () => {
-    const pointer = confirmReplace;
+    const pointer = confirmReplace?.pointer ?? null;
     setConfirmReplace(null);
     if (pointer === null) return;
     const handle = panelRef.current;
@@ -407,13 +414,13 @@ export function RosterSection({ capture }: RosterSectionProps) {
 
   const replaceDialog =
     loadable === null ? null : (
-      <ConfirmDialog
+      <ReplaceRosterDialog
         open={confirmReplace !== null}
         onOpenChange={(open) => !open && setConfirmReplace(null)}
-        title="Replace the roster on screen?"
         description="The roster you are viewing will be replaced by your latest saved result."
-        confirmLabel="Replace roster"
+        viewed={confirmReplace?.viewed ?? null}
         onConfirm={() => void onConfirmReplace()}
+        onSaveError={setLoadError}
       />
     );
 

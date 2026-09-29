@@ -28,6 +28,7 @@ import { Surface, surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 import { rangeDayCount } from "@/lib/dates";
 import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
+import { withDefaultExportLayout } from "@/lib/scenario/default-export-layout";
 import { applyCovers } from "@/lib/scenario/temporary-cover";
 import { countEnabledRules } from "@/lib/scenario";
 import {
@@ -556,7 +557,9 @@ export function OptimizeAndExportScreen({
     // keeps, so the roster knows exactly what this solve subtracted (d582).
     const scenario = useScenarioStore.getState();
     const applied = applyCovers(scenario);
-    const document = toCanonicalScenarioDocument(applied.state);
+    // No saved layout: send v1's default one, so the XLSX keeps its count
+    // rows/columns and unmet-request marks (audit C-01).
+    const document = withDefaultExportLayout(toCanonicalScenarioDocument(applied.state));
     return {
       document,
       cover: {
