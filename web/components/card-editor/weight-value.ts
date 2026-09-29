@@ -3,6 +3,8 @@
 // operations in `lib/proposal` -- can share it. `weight-field.tsx` re-exports every name,
 // so none of its importers change.
 
+import { MAX_FINITE_WEIGHT } from "@/lib/scenario/schemas/primitives";
+
 /** A weight field's value — see the file header for the `number | string` contract. */
 export type WeightFieldValue = number | string;
 
@@ -31,10 +33,14 @@ export function parseWeightInput(raw: string): WeightFieldValue {
   return Number.isNaN(parsed) ? raw : parsed;
 }
 
-/** Whether a weight value is valid: a finite number or exactly `Infinity`/`-Infinity`
- *  — any raw (unparsed) string is invalid (`isValidWeightValue` ground truth). */
+/** Whether a weight value is valid: a finite number within `zWeight`'s ±1t cap or exactly
+ *  `Infinity`/`-Infinity` — any raw (unparsed) string is invalid (`isValidWeightValue`
+ *  ground truth). */
 export function isValidWeightValue(value: WeightFieldValue): value is number {
-  return typeof value === "number" && (Number.isFinite(value) || Math.abs(value) === Infinity);
+  return (
+    typeof value === "number" &&
+    (Math.abs(value) <= MAX_FINITE_WEIGHT || Math.abs(value) === Infinity)
+  );
 }
 
 /** Whether a valid numeric weight is `<= 0` (`isWeightNonPositive` ground truth). */

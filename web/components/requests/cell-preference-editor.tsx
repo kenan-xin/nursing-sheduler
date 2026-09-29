@@ -39,7 +39,8 @@ import {
 } from "@/components/card-editor/weight-field";
 
 /** Verbatim guard, matching `weightInvalid` in requirements/successions/counts/affinities models. */
-const WEIGHT_INVALID_MESSAGE = "Weight must be a valid number, Infinity, or -Infinity";
+const WEIGHT_INVALID_MESSAGE =
+  "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity";
 
 export type DayStateChoice = "available" | "leave" | "off";
 

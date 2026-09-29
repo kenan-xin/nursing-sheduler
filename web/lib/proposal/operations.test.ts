@@ -1182,7 +1182,7 @@ describe("add_shift_sequence_rule / edit_shift_sequence_rule", () => {
       if (result.ok) continue;
       expect(result.rejection.message).toContain('Shift sequence rule "No day after night"');
       expect(result.rejection.message).toContain(
-        "Weight must be a valid number, Infinity, or -Infinity",
+        "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
       );
     }
   });

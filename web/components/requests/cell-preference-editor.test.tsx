@@ -127,7 +127,7 @@ describe("CellPreferenceEditor — save (strict XOR, FR-SR-17/21-23)", () => {
     });
     fireEvent.click(screen.getByTestId("cell-editor-save"));
     expect(screen.getByTestId("cell-editor-error")).toHaveTextContent(
-      "Weight must be a valid number, Infinity, or -Infinity",
+      "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
     );
     expect(onSave).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
@@ -141,7 +141,7 @@ describe("CellPreferenceEditor — save (strict XOR, FR-SR-17/21-23)", () => {
     });
     fireEvent.click(screen.getByTestId("cell-editor-save"));
     expect(screen.getByTestId("cell-editor-error")).toHaveTextContent(
-      "Weight must be a valid number, Infinity, or -Infinity",
+      "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
     );
     expect(onSave).not.toHaveBeenCalled();
   });

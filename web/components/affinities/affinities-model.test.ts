@@ -5,7 +5,12 @@ import {
   type ScenarioUiState,
 } from "@/lib/scenario";
 import {
+  AFFINITY_ANY_MEMBER,
+  AFFINITY_ANY_SHIFT,
+  AFFINITY_GROUPED_MEANING,
   AFFINITY_MESSAGES,
+  AFFINITY_SAME_SHIFT,
+  affinityTogetherMeaning,
   affinityToForm,
   buildAffinityCard,
   buildAffinityShiftTypeTransferOptions,
@@ -278,5 +283,45 @@ describe("v1-shaped vs grouped affinity detection (rqfx)", () => {
       expect(isAdvancedAffinityCard(grouped)).toBe(true);
       expect(isEditableAffinityCard(grouped)).toBe(false);
     }
+  });
+});
+
+// Bug hunt B2: core scores ALL, a shift group and a staff group as ONE term (v1), so the
+// card must not promise "the same shift" for them.
+describe("affinityTogetherMeaning", () => {
+  const card = (patch: Partial<AffinityCard>): AffinityCard => ({
+    uid: "a",
+    date: ["ALL"],
+    people1: ["A"],
+    people2: ["B"],
+    shiftTypes: ["D"],
+    weight: -Infinity,
+    ...patch,
+  });
+  const groups = scenario({
+    staffGroups: [{ id: "Seniors", members: ["A"] }],
+    shiftGroups: [{ id: "Any", members: ["D", "N"] }],
+  });
+
+  it("keeps 'the same shift' for concrete shifts and people", () => {
+    expect(affinityTogetherMeaning(card({ shiftTypes: ["D", "N"] }), groups)).toBe(
+      AFFINITY_SAME_SHIFT,
+    );
+  });
+
+  it.each([["ALL"], ["all"], ["Any"]])("says any shift in %s counts", (shift) => {
+    expect(affinityTogetherMeaning(card({ shiftTypes: [shift] }), groups)).toBe(AFFINITY_ANY_SHIFT);
+  });
+
+  it("says a staff group counts as one person", () => {
+    expect(affinityTogetherMeaning(card({ people2: ["Seniors"] }), groups)).toBe(
+      `${AFFINITY_SAME_SHIFT}; ${AFFINITY_ANY_MEMBER}`,
+    );
+  });
+
+  it("keeps the grouped meaning for an advanced card", () => {
+    expect(affinityTogetherMeaning(card({ people1: [["A", "B"]] }), groups)).toBe(
+      AFFINITY_GROUPED_MEANING,
+    );
   });
 });

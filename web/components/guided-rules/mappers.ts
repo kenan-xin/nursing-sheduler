@@ -35,7 +35,7 @@ import {
 import {
   AFFINITY_MESSAGES,
   AFFINITY_GROUPED_MEANING,
-  AFFINITY_SAME_SHIFT,
+  affinityTogetherMeaning,
   isAdvancedAffinityCard,
   summarizeRefs as summarizeAffinityRefs,
 } from "@/components/affinities/affinities-model";
@@ -220,13 +220,13 @@ export const affinitiesMapper: GuidedRuleMapper<AffinityCard> = {
     if (trimmed) return trimmed;
     return `${summarizeAffinityRefs(card.people1)} × ${summarizeAffinityRefs(card.people2)} pairing`;
   },
-  summary(card) {
+  summary(card, groups) {
     const shiftLabel = summarizeAffinityRefs(card.shiftTypes);
     const dateLabel = summarizeAffinityRefs(card.date);
     if (isAdvancedAffinityCard(card)) {
       return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} on ${shiftLabel}, ${dateLabel}. ${AFFINITY_GROUPED_MEANING}`;
     }
-    return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} ${AFFINITY_SAME_SHIFT} (${shiftLabel}), ${dateLabel}.`;
+    return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} ${affinityTogetherMeaning(card, groups)} (${shiftLabel}), ${dateLabel}.`;
   },
   quickFields(card): GuidedQuickField[] {
     if (isAdvancedAffinityCard(card)) return [];

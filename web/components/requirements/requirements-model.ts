@@ -82,7 +82,8 @@ export const REQUIREMENT_MESSAGES = {
     "Preferred number of people must be greater than required number of people",
   qualifiedEmpty: "At least one person must be selected",
   dateEmpty: "At least one date must be selected",
-  weightInvalid: "Weight must be a valid number, Infinity, or -Infinity",
+  weightInvalid:
+    "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
   weightPositive: "Weight must be 0 or less",
   // Core refuses ±inf beside `preferredNumPeople` (models.py, shift type requirement).
   weightInfinite:

@@ -45,6 +45,7 @@ export function guidedRuleMapperFor(
 function projectCard<TCard extends { uid: string; disabled?: boolean }>(
   mapper: GuidedRuleMapper<TCard>,
   card: TCard,
+  state?: GuidedRulesScenario,
 ): GuidedRuleRow {
   const unsupportedReason = mapper.unsupportedReason(card);
   const quickFields = unsupportedReason ? [] : mapper.quickFields(card);
@@ -55,7 +56,7 @@ function projectCard<TCard extends { uid: string; disabled?: boolean }>(
     constraintId: card.uid,
     category: mapper.category,
     title: mapper.defaultTitle(card),
-    summary: mapper.summary(card),
+    summary: mapper.summary(card, state),
     enabled: !card.disabled,
     locked: false,
     advancedRoute: mapper.advancedRoute,
@@ -84,7 +85,7 @@ export function projectGuidedRules(state: GuidedRulesScenario): GuidedRuleRow[] 
     rows.push(projectCard(countsMapper, card));
   }
   for (const card of state.cardsByKind.affinities) {
-    rows.push(projectCard(affinitiesMapper, card));
+    rows.push(projectCard(affinitiesMapper, card, state));
   }
   for (const card of state.cardsByKind.coverings) {
     rows.push(projectCard(coveringsMapper, card));
