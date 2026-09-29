@@ -447,8 +447,9 @@ describe("the live journey: tool call to Preview to user Apply to Undo", () => {
     expect(direct).toHaveTextContent("2026-09-01 to 2026-09-07");
 
     // The explicit choice the user made is visible as a fact of the change, not an
-    // assumption: no holiday groups are imported.
-    expect(direct.textContent ?? "").not.toMatch(/holiday/i);
+    // assumption: the holiday import is off (bead 6975) and no groups are imported.
+    expect(direct).toHaveTextContent("Import Singapore public holidays");
+    expect(direct).toHaveTextContent("On → Off");
     expect(useScenarioStore.getState().dateGroups).toEqual(before.dateGroups);
 
     // NOTHING HAS BEEN APPLIED. The Preview exists, the document does not move.

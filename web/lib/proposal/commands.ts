@@ -778,8 +778,11 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     importPublicHolidays: z
       .boolean()
       .describe(
-        "Whether to (re)import the Singapore public-holiday date groups for the new period. " +
-          "Ask the user; never assume.",
+        "The Dates screen's 'Import Singapore public holidays' switch for the new period. " +
+          "true (re)imports and overwrites the WORKDAY, NON-WORKDAY and PH date groups; " +
+          "false keeps those groups as they are and leaves the switch off. " +
+          "The schedule's importPublicHolidays: false means the user turned it off, so send false " +
+          "unless the user asks to turn it back on. Otherwise ask the user; never assume.",
       ),
   }),
   z.strictObject({

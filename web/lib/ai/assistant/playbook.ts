@@ -40,7 +40,7 @@ import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/co
 import type { SuccessionCard } from "@/lib/scenario";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 
-export const PLAYBOOK_VERSION = "2026-09-29.2";
+export const PLAYBOOK_VERSION = "2026-09-30.1";
 
 /**
  * How every `offer_choices` option must read (bead tpt2). The card is a pick, not a prompt:
@@ -137,7 +137,7 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     ask: [
       "The first and last day of the roster.",
       "Recommend 28 days (4 weeks) first, since a roster period is usually 4 weeks, not a calendar month: offer '4 weeks: 1-28 Oct', or, when the previous period's end or the staff's history is known, 'day after the last period + 27 days'. Offer the calendar month as the second option. Never present 28 days as \"only\".",
-      "Whether to import the public holidays.",
+      "Whether to import the public holidays. When the schedule says importPublicHolidays: false, the user turned the import off: keep it off unless they ask.",
     ],
     proposeWith: ["set_roster_range"],
   },

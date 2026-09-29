@@ -11,6 +11,7 @@ import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
 import type { AssistantCommandV1 } from "./commands";
 import { applyAssistantCommand, applyAssistantCommands } from "./operations";
+import { deriveProposalDiff } from "./diff";
 import {
   octoberWard,
   pairingWardScenario,
@@ -68,6 +69,63 @@ describe("set_roster_range", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.rejection.code).toBe("no_effect");
+  });
+});
+
+describe("set_roster_range holiday-import switch (bead 6975)", () => {
+  const imported = (): ScenarioUiState => {
+    const result = applyAssistantCommand(proposalScenario(), {
+      type: "set_roster_range",
+      start: "2026-05-01",
+      end: "2026-05-31",
+      importPublicHolidays: true,
+    });
+    if (!result.ok) throw new Error("import failed");
+    return result.next;
+  };
+
+  it("false keeps the holiday groups as they are and remembers the switch off", () => {
+    const before = imported();
+    expect(before.importPublicHolidays).toBe(true);
+    const result = applyAssistantCommand(before, {
+      type: "set_roster_range",
+      start: "2026-05-01",
+      end: "2026-05-20",
+      importPublicHolidays: false,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.importPublicHolidays).toBe(false);
+    expect(result.next.dateGroups.map((g) => g.id)).toEqual(before.dateGroups.map((g) => g.id));
+
+    // Preview reports the switch, as the user asked for it.
+    const diff = deriveProposalDiff(before, result.next, [
+      {
+        type: "set_roster_range",
+        start: "2026-05-01",
+        end: "2026-05-20",
+        importPublicHolidays: false,
+      },
+    ]);
+    expect(diff.direct.find((entry) => entry.key === "dates:holiday-import")).toMatchObject({
+      label: "Import Singapore public holidays",
+      before: "On",
+      after: "Off",
+    });
+  });
+
+  it("true turns a stored-off switch back on and rebuilds the groups", () => {
+    const off = { ...imported(), importPublicHolidays: false, dateGroups: [] };
+    const result = applyAssistantCommand(off, {
+      type: "set_roster_range",
+      start: "2026-05-01",
+      end: "2026-05-31",
+      importPublicHolidays: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.importPublicHolidays).toBe(true);
+    expect(result.next.dateGroups.map((g) => g.id)).toContain("PH");
   });
 });
 

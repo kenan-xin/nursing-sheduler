@@ -77,7 +77,7 @@ const RETIRED_V1_CLASSES = [
 
 describe("R2a — roster-period card surface roles", () => {
   it("is a resting L1 card, with the Date-IDs explainer as an inset well", () => {
-    render(<RosterPeriodCard range={AUG} importedHolidaysPresent onCommit={vi.fn()} />);
+    render(<RosterPeriodCard range={AUG} importApplied onCommit={vi.fn()} />);
 
     expectRole(screen.getByTestId("roster-period-card"), {
       role: "surface",
@@ -93,7 +93,7 @@ describe("R2a — roster-period card surface roles", () => {
   });
 
   it("renders the holiday heading as a FULL-BLEED square band, not a rounded chip", () => {
-    render(<RosterPeriodCard range={AUG} importedHolidaysPresent onCommit={vi.fn()} />);
+    render(<RosterPeriodCard range={AUG} importApplied onCommit={vi.fn()} />);
 
     const list = screen.getByTestId("import-changes");
     // The box rounds and clips; the band inside it must not round.
@@ -107,7 +107,7 @@ describe("R2a — roster-period card surface roles", () => {
   });
 
   it("drives the import toggle through the shared Switch, not a hand-rolled button", () => {
-    render(<RosterPeriodCard range={AUG} importedHolidaysPresent onCommit={vi.fn()} />);
+    render(<RosterPeriodCard range={AUG} importApplied onCommit={vi.fn()} />);
 
     const toggle = screen.getByTestId("import-toggle");
     expect(toggle.getAttribute("data-slot")).toBe("switch");
@@ -118,7 +118,7 @@ describe("R2a — roster-period card surface roles", () => {
   });
 
   it("uses the shared field primitives for both endpoints, each explicitly labelled", () => {
-    render(<RosterPeriodCard range={AUG} importedHolidaysPresent onCommit={vi.fn()} />);
+    render(<RosterPeriodCard range={AUG} importApplied onCommit={vi.fn()} />);
 
     for (const [testId, name] of [
       ["range-start", "Start date"],
@@ -135,9 +135,7 @@ describe("R2a — roster-period card surface roles", () => {
   });
 
   it("authors no retired v1 control class", () => {
-    const { container } = render(
-      <RosterPeriodCard range={AUG} importedHolidaysPresent onCommit={vi.fn()} />,
-    );
+    const { container } = render(<RosterPeriodCard range={AUG} importApplied onCommit={vi.fn()} />);
     for (const cls of RETIRED_V1_CLASSES) {
       expect(container.querySelectorAll(`[class*="${cls}"]`), cls).toHaveLength(0);
     }
