@@ -26,7 +26,7 @@ import {
   scenarioCommands,
   type ScenarioStoreState,
 } from "@/lib/store";
-import { foldPaintIntents } from "@/lib/store/paint-fold";
+import { countSkippedRequestPaints, foldPaintIntents } from "@/lib/store/paint-fold";
 import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
 import { generateDateItems, hasCompleteRange, type DateRange } from "@/lib/dates";
 import {
@@ -112,6 +112,19 @@ export interface RequestsController {
     personScope: "individual" | "group",
     dateScope: "individual" | "group",
   ): void;
+  /** What a clear would remove right now: every cell, or one shape's cells. */
+  countClearable(shape?: ClearShape): ClearCounts;
+}
+
+export interface ClearShape {
+  personScope: "individual" | "group";
+  dateScope: "individual" | "group";
+}
+
+export interface ClearCounts {
+  requests: number;
+  off: number;
+  leave: number;
 }
 
 export interface RequestChangeCounts {
@@ -192,6 +205,26 @@ function countRequestChanges(
     prior.delete(keyOf(cell));
   }
   return { added, changed, removed: prior.size };
+}
+
+/** Whether a cell sits in a person-scope × date-scope shape of `scenario`. */
+function shapeMatcher(
+  scenario: Pick<ScenarioUiState, "staff" | "rangeStart" | "rangeEnd">,
+  personScope: "individual" | "group",
+  dateScope: "individual" | "group",
+): (cell: UiRequestCell) => boolean {
+  const individualPersonIds = new Set(scenario.staff.map((p) => p.id));
+  const scopeRange: DateRange = { start: scenario.rangeStart, end: scenario.rangeEnd };
+  const individualDateIds = hasCompleteRange(scopeRange)
+    ? new Set<DateRef>(generateDateItems(scopeRange).map((d) => d.id))
+    : new Set<DateRef>();
+  return (cell) => {
+    const personIsIndividual = individualPersonIds.has(cell.person);
+    const dateIsIndividual = individualDateIds.has(cell.date);
+    const matchesPerson = personScope === "individual" ? personIsIndividual : !personIsIndividual;
+    const matchesDate = dateScope === "individual" ? dateIsIndividual : !dateIsIndividual;
+    return matchesPerson && matchesDate;
+  };
 }
 
 function stageCellIntent(
@@ -294,12 +327,11 @@ export function useRequests({
   function applyHistoryPaintCell(personId: PersonRef, columnIndex: number): void {
     const selection = resolveHistoryPaintSelection(quickPaintSelectedIds, historyItemIds);
     if (selection.kind === "error") {
-      // FR-SR-32's verbatim multi-select error must be VISIBLE — the reducer
-      // produces it; surface it (previously swallowed silently).
-      toast.error(selection.message);
+      // The reducer's errors must be VISIBLE. The id collapses the per-cell
+      // repeats of one drag into a single toast.
+      toast.error(selection.message, { id: selection.message });
       return;
     }
-    if (selection.kind === "skip") return;
     const liveStaff = useScenarioStore.getState().staff;
     const person = liveStaff.find((p) => p.id === personId);
     if (!person) return;
@@ -356,7 +388,18 @@ export function useRequests({
   useEffect(() => {
     function handleMouseUp() {
       if (dragCellTypeRef.current === "preference") {
+        const staged = useHotStore.getState().paint;
+        const skipped = staged
+          ? countSkippedRequestPaints(useScenarioStore.getState().reqData, staged)
+          : 0;
         void commitPaintGesture(useHotStore);
+        if (skipped > 0) {
+          toast.warning(
+            skipped === 1
+              ? "1 cell skipped: it holds leave or OFF. Clear it first."
+              : `${skipped} cells skipped: they hold leave or OFF. Clear them first.`,
+          );
+        }
       } else if (dragCellTypeRef.current === "history") {
         flushHistoryGesture();
       }
@@ -589,20 +632,21 @@ export function useRequests({
     dateScope: "individual" | "group",
   ): void {
     scenarioCommands.setReqData((scenario) => {
-      const individualPersonIds = new Set(scenario.staff.map((p) => p.id));
-      const scopeRange: DateRange = { start: scenario.rangeStart, end: scenario.rangeEnd };
-      const individualDateIds = hasCompleteRange(scopeRange)
-        ? new Set<DateRef>(generateDateItems(scopeRange).map((d) => d.id))
-        : new Set<DateRef>();
-      return scenario.reqData.filter((cell) => {
-        const personIsIndividual = individualPersonIds.has(cell.person);
-        const dateIsIndividual = individualDateIds.has(cell.date);
-        const matchesPerson =
-          personScope === "individual" ? personIsIndividual : !personIsIndividual;
-        const matchesDate = dateScope === "individual" ? dateIsIndividual : !dateIsIndividual;
-        return !(matchesPerson && matchesDate);
-      });
+      const inShape = shapeMatcher(scenario, personScope, dateScope);
+      return scenario.reqData.filter((cell) => !inShape(cell));
     });
+  }
+
+  function countClearable(shape?: ClearShape): ClearCounts {
+    const scenario = useScenarioStore.getState();
+    const inShape = shape ? shapeMatcher(scenario, shape.personScope, shape.dateScope) : () => true;
+    const counts: ClearCounts = { requests: 0, off: 0, leave: 0 };
+    for (const cell of scenario.reqData) {
+      if (!inShape(cell)) continue;
+      if (cell.kind === "request") counts.requests++;
+      else counts[cell.kind]++;
+    }
+    return counts;
   }
 
   return {
@@ -630,5 +674,6 @@ export function useRequests({
     clearAllRequests,
     clearAllHistory,
     clearRequestsByShape,
+    countClearable,
   };
 }
