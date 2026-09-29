@@ -52,9 +52,11 @@ export {
   projectImportTarget,
   prepareScenarioLoad,
   classifyLoadVersion,
+  type PrepareScenarioLoadOptions,
   type PrepareScenarioLoadResult,
   type VersionConfirmStatus,
 } from "./prepare-scenario-load";
+export { planV1LeaveShiftConversion, type V1LeaveShiftPlan } from "./v1-leave-shift";
 export {
   buildIdMap,
   anonymizeDocument,

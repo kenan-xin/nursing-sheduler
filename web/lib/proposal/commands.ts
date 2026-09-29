@@ -354,7 +354,8 @@ export type AssistantCommandV1 =
     }
   /**
    * Add one supervision rule -- the Shift Type Coverings screen's Add form: whenever one
-   * of `supervisedPeople` works one of the shifts, one of `supervisors` works it too.
+   * of `supervisedPeople` works one of the shifts, one of `supervisors` works that same
+   * shift on the same day (each shift checked on its own).
    * Always a hard rule, so it has no weight. `dates: []` means every date.
    */
   | {
@@ -705,13 +706,15 @@ function supervisionFields() {
       .describe(
         "Who needs a supervisor on shift with them, e.g. a new nurse or a student: person " +
           "ids and staff group ids. Whenever one of them works one of the shifts, at least " +
-          "one supervisor works it too. Always a hard rule.",
+          "one supervisor works that same shift on the same day. Always a hard rule.",
       ),
     shiftTypes: z
       .array(z.string())
       .describe(
-        "The shifts it applies to: shift codes or shift group ids. OFF and LEAVE are not " +
-          "allowed, and neither is ALL: list every worked shift it applies to.",
+        "The shifts it applies to: shift codes or shift group ids. Each is checked on its " +
+          "own, so a supervisor on a different listed shift does not count (a shift group id " +
+          "counts as one shift, any of its members). OFF and LEAVE are not allowed, and " +
+          "neither is ALL: list every worked shift it applies to.",
       ),
     dates: z.array(z.string()).describe(
       // Deliberately NOT `ruleDatesSchema()`: unlike the other rule dates fields,

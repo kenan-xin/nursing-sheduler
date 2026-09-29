@@ -148,6 +148,8 @@ export function SaveLoadWorkspace() {
           description={confirm.description}
           detail={confirm.detail}
           destructive={confirm.destructive}
+          confirmLabel={confirm.confirmLabel}
+          cancelLabel={confirm.cancelLabel}
           onContinue={confirm.onContinue}
         />
       ) : null}
