@@ -306,6 +306,26 @@ describe("set_skill_mix is the Staffing requirements Edit form's skill mix rows"
     expect(manual.kind).toBe("invalid-value");
     expect(assistant.ok).toBe(false);
   });
+
+  it("the Guided quick edit and set_staffing_requirement_people agree above the preferred count (8g1f C1)", () => {
+    const state = skillMixWard();
+    state.cardsByKind.requirements[0].preferredNumPeople = 5;
+    const edit = (value: number) => ({
+      manual: applyRequirementQuickEdit(
+        state.cardsByKind.requirements,
+        "req-day",
+        "requiredNumPeople",
+        value,
+      ).kind,
+      assistant: applyAssistantCommand(state, {
+        type: "set_staffing_requirement_people",
+        ruleId: "req-day",
+        requiredNumPeople: value,
+      }).ok,
+    });
+    expect(edit(5)).toEqual({ manual: "applied", assistant: true });
+    expect(edit(6)).toEqual({ manual: "invalid-value", assistant: false });
+  });
 });
 
 describe("move_leave matches the manual cell contract", () => {

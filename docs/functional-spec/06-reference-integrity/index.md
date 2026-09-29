@@ -194,6 +194,12 @@ After filtering, a second pass removes any preference that lost a required field
 | `shift type covering` | `preceptors, preceptees, shiftTypes (date is optional)` |
 | `at most one shift per day` | (none — **always retained)** |
 
+A `shift type successions` preference is also dropped when pruning removes any
+whole step from its `pattern` (every id in that step was deleted). A shortened
+pattern is a different rule (`[N, D]` "no Night then Day" would become `[N]`
+"never Night"), so the cascade never shortens a pattern. A step that only loses
+some of its alternatives (`[[N, D]]` to `[[D]]`) keeps its position and survives.
+
 Any preference type not matched by the guards returns `true and is retained`
 `; at most one shift per day has no`
 reference fields and therefore always survives.

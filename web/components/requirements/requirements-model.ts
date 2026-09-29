@@ -76,8 +76,13 @@ export const REQUIREMENT_MESSAGES = {
   shiftTypeMultiple: "Select exactly one shift type or group",
   requiredInvalid: "Required number of people must be a valid number",
   requiredMin: "Required number of people must be at least 0",
+  requiredWhole: "Required number of people must be a whole number",
+  // The optimiser needs at least Required and at most Preferred: no roster could meet both.
+  requiredAbovePreferred:
+    "Required number of people cannot be more than the preferred number of people",
   preferredInvalid: "Preferred number of people must be a valid number",
   preferredMin: "Preferred number of people must be at least 1",
+  preferredWhole: "Preferred number of people must be a whole number",
   preferredLessThanRequired:
     "Preferred number of people must be greater than required number of people",
   qualifiedEmpty: "At least one person must be selected",
@@ -461,6 +466,8 @@ export function validateRequirementForm(
     errors.requiredNumPeople = REQUIREMENT_MESSAGES.requiredInvalid;
   } else if (form.requiredNumPeople < 0) {
     errors.requiredNumPeople = REQUIREMENT_MESSAGES.requiredMin;
+  } else if (!Number.isInteger(form.requiredNumPeople)) {
+    errors.requiredNumPeople = REQUIREMENT_MESSAGES.requiredWhole;
   }
 
   const prefRaw = form.preferredNumPeople;
@@ -470,6 +477,8 @@ export function validateRequirementForm(
       errors.preferredNumPeople = REQUIREMENT_MESSAGES.preferredInvalid;
     } else if (prefRaw < 1) {
       errors.preferredNumPeople = REQUIREMENT_MESSAGES.preferredMin;
+    } else if (!Number.isInteger(prefRaw)) {
+      errors.preferredNumPeople = REQUIREMENT_MESSAGES.preferredWhole;
     } else if (
       typeof form.requiredNumPeople === "number" &&
       Number.isFinite(form.requiredNumPeople) &&
@@ -530,6 +539,23 @@ function validateSkillMix(form: RequirementFormState): string | undefined {
 /** The lowest head count this card's skill mix allows: its largest minimum. */
 export function skillMixFloor(card: Pick<RequirementCardBody, "skillMix">): number {
   return Math.max(0, ...(card.skillMix ?? []).map((entry) => entry.minNumPeople));
+}
+
+/**
+ * A new Required count on a card whose other fields stay as they are: the Guided quick
+ * field and the assistant's `set_staffing_requirement_people` both check with this.
+ */
+export function requiredCountError(
+  card: Pick<RequirementCardBody, "skillMix" | "preferredNumPeople">,
+  value: number,
+): string | undefined {
+  if (!Number.isFinite(value)) return REQUIREMENT_MESSAGES.requiredInvalid;
+  if (value < 0) return REQUIREMENT_MESSAGES.requiredMin;
+  if (!Number.isInteger(value)) return REQUIREMENT_MESSAGES.requiredWhole;
+  if (value < skillMixFloor(card)) return REQUIREMENT_MESSAGES.skillMixAboveRequired;
+  if (card.preferredNumPeople != null && value > card.preferredNumPeople)
+    return REQUIREMENT_MESSAGES.requiredAbovePreferred;
+  return undefined;
 }
 
 /**

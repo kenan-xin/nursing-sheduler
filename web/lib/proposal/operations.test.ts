@@ -582,11 +582,11 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.rejection.message).toContain('Shift "am1"');
   });
 
-  it("accepts a case-variant code, as the Shifts page does", () => {
-    // Ids are exact-identity across the app; `Night` and `NIGHT` are distinct.
-    expect(applyAssistantCommand(proposalScenario(), shift("NIGHT", "20:00", "08:30")).ok).toBe(
-      true,
-    );
+  it("refuses a case-variant code, as the Shifts page does (T4)", () => {
+    // A card uppercases its code, so `Night` and `NIGHT` would read as one shift.
+    const result = applyAssistantCommand(proposalScenario(), shift("NIGHT", "20:00", "08:30"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("invalid_value");
   });
 
   it("refuses reserved, numbers-only and empty codes", () => {

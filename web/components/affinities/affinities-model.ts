@@ -49,6 +49,7 @@ export const AFFINITY_MESSAGES = {
   // selectors.
   numericShiftId:
     "A numeric shift type ID cannot be used as an affinity selector; reference it by a string ID instead",
+  plusInf: "At +∞, both sides must then work every day in these dates. This is usually impossible.",
 } as const;
 
 /** The flat draft the form edits. */

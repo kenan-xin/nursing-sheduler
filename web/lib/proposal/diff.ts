@@ -670,11 +670,12 @@ function compareRequestMatrix(before: ScenarioUiState, after: ScenarioUiState): 
     const from = describeCoordinateCells(beforeCells.get(key) ?? []);
     const to = describeCoordinateCells(afterCells.get(key) ?? []);
     if (from === to) continue;
-    const [person, date] = key.split("|");
+    // A person id may hold "|"; a date never does, so the last one is the separator.
+    const cut = key.lastIndexOf("|");
     entries.push({
       key: `cell:${key}`,
       scope: "leave-and-requests",
-      label: `${JSON.parse(person)} on ${JSON.parse(date)}`,
+      label: `${JSON.parse(key.slice(0, cut))} on ${JSON.parse(key.slice(cut + 1))}`,
       before: from,
       after: to,
       kind: from === null ? "created" : to === null ? "removed" : "changed",
