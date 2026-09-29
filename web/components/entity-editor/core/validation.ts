@@ -4,9 +4,10 @@
 // Reserved keywords come from the descriptor (sourced from the shared
 // `RESERVED_SHIFT_TYPE` constant, never hardcoded), matched case-insensitively —
 // exactly as the producer schema + T07 collision authority compare. Duplicate
-// detection uses EXACT identity (mirroring the producer/T07 duplicate rule), so
-// the distinct ids `1` and `"1"` never falsely collide; the entity being edited
-// is excluded so a no-op re-save is not flagged.
+// detection ignores case for string ids ("d" next to "D" reads as one code on a
+// card, which uppercases), but a number only ever matches itself, so the distinct
+// ids `1` and `"1"` never falsely collide; the entity being edited is excluded so
+// a no-op re-save is not flagged.
 //
 // Rename/inline-id changes are still ultimately guarded by T07's `renameEntity`
 // (it throws `RenameCollisionError` before touching state); these checks produce
@@ -31,7 +32,7 @@ function usedIds(items: readonly { id: EntityId }[], groups: readonly EditorGrou
 
 /**
  * Whether `candidate` (an authored string id) collides with an existing item or
- * group id under exact identity, excluding the entity currently being edited.
+ * group id, ignoring case, excluding the entity currently being edited.
  */
 function isDuplicateId(
   items: readonly { id: EntityId }[],
@@ -39,7 +40,10 @@ function isDuplicateId(
   candidate: string,
   currentId?: EntityId,
 ): boolean {
-  return usedIds(items, groups).some((id) => id !== currentId && id === candidate);
+  const upper = candidate.toUpperCase();
+  return usedIds(items, groups).some(
+    (id) => id !== currentId && typeof id === "string" && id.toUpperCase() === upper,
+  );
 }
 
 /**

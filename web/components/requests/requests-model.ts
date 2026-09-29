@@ -18,6 +18,7 @@ import {
   type GroupId,
   type PersonId,
   type PersonRef,
+  type ScenarioUiState,
   type ShiftTypeRef,
   type UiPeopleGroup,
   type UiPerson,
@@ -25,6 +26,9 @@ import {
   type Weight,
 } from "@/lib/scenario";
 import { generateDateItems, utcDayOfWeek, type DateRange } from "@/lib/dates";
+import { expandPersonRefs } from "@/lib/rules/expansion";
+import { makeDates } from "@/lib/rules/requirement-dates";
+import { paintCellKey } from "@/lib/store/types";
 
 // --- Weight display (FR-SR-14 / FR-SR-43) -----------------------------------
 
@@ -481,4 +485,122 @@ export function resolveDayStatePrecedence(reqData: readonly UiRequestCell[]): Ui
     resolved.push(...cells.filter((c) => c.kind === state));
   }
   return resolved;
+}
+
+// --- Group rows and date-group columns (bb8t) --------------------------------
+
+/** The roster slices a group row or date-group column expands against. */
+export type GroupScope = Pick<
+  ScenarioUiState,
+  "staff" | "staffGroups" | "rangeStart" | "rangeEnd" | "dateGroups"
+>;
+
+/**
+ * Expands a matrix coordinate to the (person, date-item) cells it covers, with the
+ * shared selector helpers. A coordinate is a group coordinate when its row is not a
+ * person (a people group) or its column is not a date item (ALL/WEEKDAY/WEEKEND or
+ * an authored date group). Expanded people keep their authored id type.
+ */
+function coordinateExpander(scope: GroupScope) {
+  const { allDateIds, expand } = makeDates(scope);
+  const dateIds = new Set<DateRef>(allDateIds);
+  const staffById = new Map(scope.staff.map((p) => [String(p.id), p.id]));
+  const staffIds = new Set<PersonRef>(scope.staff.map((p) => p.id));
+  return {
+    personIsGroup: (person: PersonRef) => !staffIds.has(person),
+    dateIsGroup: (date: DateRef) => !dateIds.has(date),
+    people: (person: PersonRef): PersonId[] =>
+      [...expandPersonRefs(person, scope)].flatMap((id) => {
+        const typed = staffById.get(id);
+        return typed === undefined ? [] : [typed];
+      }),
+    dates: (date: DateRef): DateRef[] => [...expand([date])].filter((id) => dateIds.has(id)),
+  };
+}
+
+function requestLabel(cell: UiRequestCell): string {
+  if (cell.kind === "leave") return "LEAVE";
+  const selector = cell.kind === "off" ? "OFF" : cell.shiftType;
+  return `${selector} ${weightDisplayLabel(cell.weight)}`;
+}
+
+/** What a person cell inherits from group rows and date-group columns. */
+export interface GroupSourceMarker {
+  /** One line per source, in `reqData` order, e.g. `From Seniors · AM +5`. */
+  sources: string[];
+  /** The first source's selector, shown faintly in an otherwise empty cell. */
+  short: string;
+}
+
+/**
+ * Every person × date-item cell covered by a request authored on a people-group
+ * row and/or a date-group column, keyed by `paintCellKey(person, date)`. A request
+ * on both a group row and a date-group column names both: `From Seniors × WEEKEND`.
+ */
+export function groupSourceMarkers(
+  scope: GroupScope,
+  reqData: readonly UiRequestCell[],
+): Map<string, GroupSourceMarker> {
+  const expander = coordinateExpander(scope);
+  const markers = new Map<string, GroupSourceMarker>();
+  for (const cell of reqData) {
+    const personIsGroup = expander.personIsGroup(cell.person);
+    const dateIsGroup = expander.dateIsGroup(cell.date);
+    if (!personIsGroup && !dateIsGroup) continue;
+    const from = [personIsGroup ? cell.person : null, dateIsGroup ? cell.date : null]
+      .filter((ref) => ref !== null)
+      .join(" × ");
+    const line = `From ${from} · ${requestLabel(cell)}`;
+    const short = cell.kind === "request" ? cell.shiftType : cell.kind === "off" ? "OFF" : "LEAVE";
+    const dates = expander.dates(cell.date);
+    for (const person of expander.people(cell.person)) {
+      for (const date of dates) {
+        const key = paintCellKey(person, date);
+        const marker = markers.get(key);
+        if (marker) marker.sources.push(line);
+        else markers.set(key, { sources: [line], short });
+      }
+    }
+  }
+  return markers;
+}
+
+/** How much paid leave a set of coordinates pins, counted in distinct person-days. */
+export interface LeaveReach {
+  people: number;
+  days: number;
+  personDays: number;
+}
+
+/**
+ * The leave a paint or cell save would pin across `coords`, or `null` when no
+ * coordinate is a group row or date-group column (a person × date pin needs no
+ * confirmation). Overlapping coordinates count each person-day once.
+ */
+export function groupLeaveReach(
+  scope: GroupScope,
+  coords: readonly (readonly [PersonRef, DateRef])[],
+): LeaveReach | null {
+  const expander = coordinateExpander(scope);
+  if (!coords.some(([p, d]) => expander.personIsGroup(p) || expander.dateIsGroup(d))) return null;
+  const people = new Set<PersonId>();
+  const days = new Set<DateRef>();
+  const personDays = new Set<string>();
+  for (const [person, date] of coords) {
+    const dates = expander.dates(date);
+    for (const p of expander.people(person)) {
+      people.add(p);
+      for (const d of dates) {
+        days.add(d);
+        personDays.add(paintCellKey(p, d));
+      }
+    }
+  }
+  return { people: people.size, days: days.size, personDays: personDays.size };
+}
+
+/** `6 people on 28 days (168 person-days)` */
+export function leaveReachText({ people, days, personDays }: LeaveReach): string {
+  const n = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+  return `${people} ${people === 1 ? "person" : "people"} on ${n(days, "day")} (${n(personDays, "person-day")})`;
 }

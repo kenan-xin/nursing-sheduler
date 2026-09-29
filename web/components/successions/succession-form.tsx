@@ -26,6 +26,9 @@ import {
   buildDateScopeDateItems,
   buildPatternShiftTypeOptions,
   buildPeopleTransferOptions,
+  countSuccessionWindows,
+  SUCCESSION_MESSAGES,
+  successionNeverRunsMessage,
   toggleInSelection,
   validateSuccessionForm,
   type SuccessionErrors,
@@ -64,6 +67,12 @@ export function SuccessionForm({
   const dateItems = buildDateScopeDateItems(state);
   const noPeople = people.items.length === 0 && people.groups.length === 0;
   const noDates = autoScopes.length === 0 && dateGroups.length === 0 && dateItems.length === 0;
+  // Only once the pattern and dates are both chosen, so the warning never doubles a required error.
+  const neverRuns =
+    !noDates &&
+    form.pattern.length >= 2 &&
+    form.date.length > 0 &&
+    countSuccessionWindows(state, form.pattern.length, form.date) === 0;
 
   function submit() {
     const nextErrors = validateSuccessionForm(form);
@@ -154,7 +163,12 @@ export function SuccessionForm({
         />
       </FieldShell>
 
-      <FieldShell label="Dates" required error={errors.date}>
+      <FieldShell
+        label="Dates"
+        required
+        error={errors.date}
+        warning={neverRuns ? successionNeverRunsMessage(form.pattern.length) : undefined}
+      >
         {noDates ? (
           <p className="rounded-control bg-panel px-3.5 py-3 text-center text-meta italic text-ink3 shadow-well">
             No dates available. Please set up dates in the Dates screen first.
@@ -182,6 +196,7 @@ export function SuccessionForm({
         value={form.weight}
         error={errors.weight}
         help="Set positive weight to encourage successions and negative weight to discourage them."
+        plusInfWarning={SUCCESSION_MESSAGES.plusInf}
         onChange={(next) => {
           setForm((prev) => ({ ...prev, weight: next }));
           setErrors((prev) => (prev.weight ? { ...prev, weight: undefined } : prev));

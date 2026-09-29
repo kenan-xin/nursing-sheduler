@@ -69,6 +69,14 @@ describe("validateFullEditId (V1/V2/V3)", () => {
     });
   });
 
+  it("ignores case: a code that differs only in case is a duplicate (T4)", () => {
+    expect(validateFullEditId(desc, items, groups, "d").ok).toBe(false);
+    expect(validateFullEditId(desc, items, groups, "sg1").ok).toBe(false);
+    expect(validateInlineId(desc, items, groups, "n").ok).toBe(false);
+    // Re-casing the entity being edited is not a collision with itself.
+    expect(validateFullEditId(desc, items, groups, "d", false, "D").ok).toBe(true);
+  });
+
   it("exact identity: numeric 1 and string '1' do not falsely collide", () => {
     const numericItems = [{ id: 1 }];
     expect(validateFullEditId(desc, numericItems, [], "1")).toEqual({ ok: true, id: "1" });
