@@ -57,6 +57,7 @@ describe("classifyOptimizeError — code-first", () => {
     expect(jobFailureMessage("worker_lost", "x")).toBe(
       "The optimisation worker stopped before the job completed.",
     );
+    expect(jobFailureMessage("invalid_model", "x")).toMatch(/weight/i);
     expect(jobFailureMessage("some_new_code", "Backend text.")).toBe("Backend text.");
     expect(jobFailureMessage(null, "Backend text.")).toBe("Backend text.");
   });

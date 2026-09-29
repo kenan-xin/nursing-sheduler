@@ -671,8 +671,8 @@ function pairingFields() {
       .array(z.string())
       .describe(
         "The shifts it is about: shift codes, shift group ids, OFF, LEAVE or ALL. Each is " +
-          "scored on its own: together means on the same shift on the same day (a shift " +
-          "group id counts as one shift, any of its members).",
+          "scored on its own: together means on the same shift on the same day (ALL or a " +
+          "shift group id counts as one shift, any of its members).",
       ),
     dates: ruleDatesSchema(),
     weight: z

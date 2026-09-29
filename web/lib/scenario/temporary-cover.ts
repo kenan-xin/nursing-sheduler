@@ -258,11 +258,6 @@ function lower(
 ): Lowered {
   const count = requiredOn(card, iso);
   const credit = target ? coverCredit(target, iso, covers, closure) : 0;
-  const required = wardNeed(count, credit);
-  const preferred =
-    card.preferredNumPeople === undefined || credit === 0
-      ? card.preferredNumPeople
-      : Math.max(required, card.preferredNumPeople - credit);
   const mix = (card.skillMix ?? []).map((entry) =>
     target && credit > 0
       ? Math.max(
@@ -271,6 +266,13 @@ function lower(
         )
       : entry.minNumPeople,
   );
+  // A cover outside a skill-mix group lowers the head count but not that floor, and core
+  // rejects a count below any skill-mix minimum: the ward still needs those people.
+  const required = Math.max(wardNeed(count, credit), Math.min(count, Math.max(0, ...mix)));
+  const preferred =
+    card.preferredNumPeople === undefined || credit === 0
+      ? card.preferredNumPeople
+      : Math.max(required, card.preferredNumPeople - credit);
   return { count, credit, required, preferred, mix };
 }
 

@@ -8,6 +8,7 @@ import {
   type ScenarioUiState,
   type UiTemporaryCover,
 } from "@/lib/scenario";
+import { validateScenario } from "./serialize";
 import {
   applyCovers,
   cardNeedOn,
@@ -308,6 +309,25 @@ const MIX: SlotRow[] = [
       },
     },
   },
+  {
+    // Bug hunt B4: the ward still needs 2 RNs, so the head count cannot drop below that
+    // floor (core rejects an override below a skill-mix minNumPeople).
+    title: "non-RN cover does not lower the head count below the RN skill-mix floor",
+    state: scenario([mixN(2, 2)], [cover("Haseena", "N", ["HCA"])]),
+    slots: {
+      mix: { required: 2, preferred: undefined, skillMix: [{ people: "RN", minNumPeople: 2 }] },
+    },
+  },
+  {
+    title: "non-RN cover lowers the head count only down to the RN skill-mix floor",
+    state: scenario(
+      [mixN(4, 2)],
+      [cover("Haseena", "N", ["HCA"]), cover("Ola", "N"), cover("Ben", "N")],
+    ),
+    slots: {
+      mix: { required: 2, preferred: undefined, skillMix: [{ people: "RN", minNumPeople: 2 }] },
+    },
+  },
 ];
 
 const F2: SlotRow[] = [
@@ -395,7 +415,10 @@ describe("F1 overlapping cards, groups, skill mix and shift-type groups", () => 
   });
 
   it.each(MIX)("$title", ({ state, slots }) => {
-    expect(slotsOn(applyCovers(state).state)).toEqual(slots);
+    const applied = applyCovers(state).state;
+    expect(slotsOn(applied)).toEqual(slots);
+    // Every lowered document still passes the preflight that mirrors core's checks.
+    expect(validateScenario(toCanonicalScenarioDocument(applied)).ok).toBe(true);
   });
 
   it.each(DATE_SPLITS)(

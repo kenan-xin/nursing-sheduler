@@ -45,7 +45,8 @@ export const SUCCESSION_MESSAGES = {
   person: "At least one person must be selected",
   pattern: "At least 2 shift types must be selected for a succession pattern",
   date: "At least one date must be selected",
-  weightInvalid: "Weight must be a valid number, Infinity, or -Infinity",
+  weightInvalid:
+    "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
   // A numeric shift-type ENTITY id has no valid `ShiftTypeRef` (pattern positions
   // are string-only — see `lib/scenario/types.ts`); the Python shift map keys the
   // raw numeric id, so a stringified "7" would not resolve it. Mirrors the same

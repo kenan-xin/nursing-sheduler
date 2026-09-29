@@ -37,7 +37,7 @@ import {
   substituteTarget,
 } from "@/components/card-editor/expression-model";
 import {
-  AFFINITY_SAME_SHIFT,
+  affinityTogetherMeaning,
   isEditableAffinityCard,
 } from "@/components/affinities/affinities-model";
 import { isEditableCoveringCard } from "@/components/coverings/coverings-model";
@@ -359,10 +359,10 @@ function renderPairingStrength(weight: number): string {
 }
 
 /** `null` for a grouped card: flattening its groups would state a different rule. */
-function describePairing(card: AffinityCard): string | null {
+function describePairing(card: AffinityCard, groups: ScenarioUiState): string | null {
   if (!isEditableAffinityCard(card)) return null;
   const shifts = flattenRefs(card.shiftTypes).map(String).join(" or ");
-  return `${renderPeople(card.people1, "everyone")} with ${renderPeople(card.people2, "everyone")} ${AFFINITY_SAME_SHIFT} (${shifts}), ${renderDates(card.date)}: ${renderPairingStrength(card.weight)}`;
+  return `${renderPeople(card.people1, "everyone")} with ${renderPeople(card.people2, "everyone")} ${affinityTogetherMeaning(card, groups)} (${shifts}), ${renderDates(card.date)}: ${renderPairingStrength(card.weight)}`;
 }
 
 /** Restates `shift_type_covering` in core: a hard implication, so no strength. */
@@ -373,7 +373,11 @@ function describeSupervision(card: CoveringCard): string | null {
 }
 
 /** The plain sentence for the families the assistant authors; `null` keeps the opaque form. */
-function describeRule(kind: keyof CardsByKind, card: Record<string, unknown>): string | null {
+function describeRule(
+  kind: keyof CardsByKind,
+  card: Record<string, unknown>,
+  state: ScenarioUiState,
+): string | null {
   switch (kind) {
     case "requirements":
       return describeRequirement(card as unknown as RequirementCard);
@@ -382,7 +386,7 @@ function describeRule(kind: keyof CardsByKind, card: Record<string, unknown>): s
     case "counts":
       return describeCount(card as unknown as CountCard);
     case "affinities":
-      return describePairing(card as unknown as AffinityCard);
+      return describePairing(card as unknown as AffinityCard, state);
     case "coverings":
       return describeSupervision(card as unknown as CoveringCard);
   }
@@ -394,9 +398,13 @@ function describeRule(kind: keyof CardsByKind, card: Record<string, unknown>): s
  * sentence omits coefficients; an assistant edit can only change those by changing the
  * counted shifts, which the sentence does show.
  */
-function ruleBody(card: Record<string, unknown>, kind: keyof CardsByKind): string {
+function ruleBody(
+  card: Record<string, unknown>,
+  kind: keyof CardsByKind,
+  state: ScenarioUiState,
+): string {
   const { uid: _uid, disabled, applied: _applied, ...rest } = card;
-  const plain = describeRule(kind, card);
+  const plain = describeRule(kind, card, state);
   if (plain === null) return `${disabled ? "Off" : "On"} · ${stableStringify(rest)}`;
   const title = typeof card.description === "string" ? card.description.trim() : "";
   return `${disabled ? "Off" : "On"} · ${title ? `“${title}” · ` : ""}${plain}`;
@@ -758,7 +766,7 @@ export function diffScenarioDocuments(
         keyPrefix: `rule:${kind}`,
         identity: (card) => card.uid,
         label: (card) => ruleTitle(card, kind),
-        render: (card) => ruleBody(card as unknown as Record<string, unknown>, kind),
+        render: (card) => ruleBody(card as unknown as Record<string, unknown>, kind, after),
         renderChange:
           kind === "requirements"
             ? (from, to) =>
