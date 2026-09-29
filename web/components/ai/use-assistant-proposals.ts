@@ -28,6 +28,7 @@ import {
   describeProposalReadiness,
   type LiveProposalBasis,
   type ProposalDiff,
+  type ProposalDiffEntry,
   type ProposalReadiness,
 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
@@ -59,12 +60,19 @@ export type ApplyOutcomeView =
     }
   | { kind: "failed"; message: string };
 
+/** The receipt the last successful Undo reverted, for the follow-up that says so. */
+export interface UndoneReceiptView {
+  receiptId: string;
+  summary: readonly ProposalDiffEntry[];
+}
+
 export interface AssistantProposalController {
   proposal: AssistantProposalV1 | null;
   readiness: ProposalReadiness | null;
   /** True while the durable Apply transaction is in flight. */
   applying: boolean;
   outcome: ApplyOutcomeView | null;
+  undone: UndoneReceiptView | null;
   receipts: ReceiptStanding[];
   confirm(assumptionId: string): Promise<void>;
   withdraw(assumptionId: string): Promise<void>;
@@ -107,6 +115,14 @@ export function describeApplyFailure(reason: string): string {
   }
 }
 
+/** Why a receipt Undo failed. Only the lease and the reload have their own words. */
+export function describeUndoFailure(reason: string): string {
+  if (reason === "not-owner") {
+    return "This schedule is being edited in another tab, so nothing was undone.";
+  }
+  return describeApplyFailure(reason === "reload-required" ? reason : "history-unavailable");
+}
+
 export function useAssistantProposals(): AssistantProposalController {
   const active = useAssistantStore((state) => state.activeProposal);
   const liveTurnEpoch = useAssistantStore((state) => state.turnEpoch);
@@ -124,6 +140,7 @@ export function useAssistantProposals(): AssistantProposalController {
   const [receipts, setReceipts] = useState<ReceiptStanding[]>([]);
   const [applying, setApplying] = useState(false);
   const [outcome, setOutcome] = useState<ApplyOutcomeView | null>(null);
+  const [undone, setUndone] = useState<UndoneReceiptView | null>(null);
   const navigate = useCapabilityNavigation();
 
   // ASYNC TAILS ABANDON THEIR WORK ON UNMOUNT. Every continuation below runs behind an
@@ -334,18 +351,22 @@ export function useAssistantProposals(): AssistantProposalController {
         toast.error(conflictingDraftMessage(draft));
         return;
       }
-      await assistantProposalCommands.undoReceipt(receiptId);
-      // The reverted receipt is the one the Apply notice is narrating: that claim is
-      // no longer true, so drop it rather than leave the notice pointing at a change
-      // that no longer exists.
-      if (mounted.current) {
+      const result = await assistantProposalCommands.undoReceipt(receiptId);
+      if (!result.ok) {
+        toast.error(describeUndoFailure(result.reason));
+      } else if (mounted.current) {
+        // The reverted receipt is the one the Apply notice is narrating: that claim is
+        // no longer true, so drop it rather than leave the notice pointing at a change
+        // that no longer exists.
         setOutcome((prev) =>
           prev?.kind === "applied" && prev.receiptId === receiptId ? null : prev,
         );
+        const standing = receipts.find((entry) => entry.receipt.receiptId === receiptId);
+        setUndone({ receiptId, summary: standing?.receipt.summary ?? [] });
       }
       await refresh();
     },
-    [refresh],
+    [refresh, receipts],
   );
 
   return {
@@ -353,6 +374,7 @@ export function useAssistantProposals(): AssistantProposalController {
     readiness,
     applying,
     outcome,
+    undone,
     receipts,
     confirm,
     withdraw,

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  isRunStale,
   RUN_REQUEST_TTL_MS,
   isRunLive,
   leavesLiveRun,
@@ -58,6 +59,15 @@ describe("the assistant's run request", () => {
     expect(leavesLiveRun("running", undefined)).toBe(true);
     expect(leavesLiveRun("running", "optimize-and-export")).toBe(false);
     expect(leavesLiveRun("completed", "shift-types")).toBe(false);
+  });
+});
+
+describe("isRunStale (C-12)", () => {
+  it("is true only for a run built from an older revision", () => {
+    expect(isRunStale("completed", 3, 4)).toBe(true);
+    expect(isRunStale("completed", 4, 4)).toBe(false);
+    expect(isRunStale("completed", null, 4)).toBe(false);
+    expect(isRunStale("idle", 3, 4)).toBe(false);
   });
 });
 

@@ -63,6 +63,26 @@ describe("QuickPaintPanel", () => {
     );
   });
 
+  it("greys out the weight controls while LEAVE is selected (F3)", () => {
+    const props = {
+      targets: TARGETS,
+      onToggle: vi.fn(),
+      weight: "5",
+      onWeightChange: vi.fn(),
+      onSetPosInf: vi.fn(),
+      onSetNegInf: vi.fn(),
+    };
+    const { rerender } = render(<QuickPaintPanel {...props} selectedIds={["AM", "LEAVE"]} />);
+    for (const id of ["quick-paint-weight-input", "quick-paint-pos-inf", "quick-paint-neg-inf"]) {
+      expect(screen.getByTestId(id)).toBeDisabled();
+    }
+    expect(screen.getByTestId("quick-paint-status")).toHaveTextContent(
+      "Drag to pin paid leave. Weight is not used.",
+    );
+    rerender(<QuickPaintPanel {...props} selectedIds={["AM"]} />);
+    expect(screen.getByTestId("quick-paint-weight-input")).not.toBeDisabled();
+  });
+
   it("wires the weight input and ±∞ buttons", () => {
     const onWeightChange = vi.fn();
     const onSetPosInf = vi.fn();

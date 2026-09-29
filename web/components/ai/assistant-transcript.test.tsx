@@ -117,11 +117,14 @@ async function makeReady() {
 }
 
 /** Persist a two-turn thread (with one tool call and its result) and open the panel. */
-async function seedThread(withMessages: boolean): Promise<void> {
+async function seedThread(withMessages: boolean, followUp = false): Promise<void> {
   const thread = await selectActiveThread(SCENARIO_ID, harness.config);
   if (withMessages) {
     await persistThreadMessages(
       [
+        ...(followUp
+          ? [{ id: "m0", role: "user" as const, content: "I applied it: Day shift cover, 2." }]
+          : []),
         { id: "m1", role: "user", content: "why is the 15th short?" },
         {
           id: "m2",
@@ -182,6 +185,19 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   delete process.env.NEXT_PUBLIC_APP_VERSION;
+});
+
+describe("a follow-up the app sent (C-36)", () => {
+  it("is marked as sent by the app; a typed message is not", async () => {
+    await seedThread(true, true);
+    render(<AssistantSurface />);
+
+    const marked = await screen.findByTestId("assistant-app-follow-up");
+    expect(marked).toHaveTextContent("I applied it: Day shift cover, 2.");
+    expect(marked).toHaveTextContent("Sent by the app");
+    expect(screen.getAllByText("Sent by the app")).toHaveLength(1);
+    expect(screen.getByText("why is the 15th short?")).toBeInTheDocument();
+  });
 });
 
 describe("the transcript download control", () => {

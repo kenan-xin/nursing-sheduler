@@ -223,7 +223,7 @@ export function describeRefusal(reason: SendRefusal): string {
     case "not_ready":
       return "Turn on AI features and save a tested OpenRouter key in Settings before sending.";
     case "not_writer":
-      return "This tab is not editing the schedule. Take over editing in this tab to use the assistant.";
+      return "This tab is not editing the schedule. Press Edit here on the banner at the top to use the assistant.";
     case "busy":
       return "The assistant is still answering. Stop the current reply before sending another message.";
     case "interrupting":

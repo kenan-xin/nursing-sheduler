@@ -37,6 +37,16 @@ export function describeAnswers(
     .join("\n");
 }
 
+/**
+ * What picking option `index` sends: its label, or "label (detail)" when another
+ * option shares the label, so two picks never send the same words (C-38).
+ */
+export function answerFor(options: ChoiceQuestion["options"], index: number): string {
+  const { label, detail } = options[index]!;
+  const repeated = options.some((other, i) => i !== index && other.label === label);
+  return repeated && detail ? `${label} (${detail})` : label;
+}
+
 export function ChoiceCard(props: ChoiceCardProps) {
   const active = useAssistantStore((state) => state.activeChoices);
   if (active === null) return null;
@@ -63,8 +73,8 @@ function ChoiceCardBody({ offer, onSend, disabled }: ChoiceCardProps & { offer: 
   const close = () => assistantActions.clearChoices();
   const given = answers.some((text) => text !== undefined);
   // x and Esc: part-way through a paged card, the answers so far are still sent.
-  const leave = () =>
-    paged && given && !disabled ? onSend(describeAnswers(questions, answers)) : close();
+  const sendsOnLeave = paged && given && !disabled;
+  const leave = () => (sendsOnLeave ? onSend(describeAnswers(questions, answers)) : close());
 
   return (
     <DockCard
@@ -79,6 +89,7 @@ function ChoiceCardBody({ offer, onSend, disabled }: ChoiceCardProps & { offer: 
           : question.question
       }
       onClose={leave}
+      closeLabel={sendsOnLeave ? "Close and send the answers so far" : "Close"}
       focusRow={0}
       aside={
         paged ? (
@@ -106,11 +117,11 @@ function ChoiceCardBody({ offer, onSend, disabled }: ChoiceCardProps & { offer: 
           </span>
         ) : null
       }
-      options={question.options.map((option) => ({
+      options={question.options.map((option, index) => ({
         label: option.label,
         detail: option.detail,
         disabled,
-        onPick: () => answer(option.label),
+        onPick: () => answer(answerFor(question.options, index)),
       }))}
       multiple={
         question.multiple
@@ -118,7 +129,7 @@ function ChoiceCardBody({ offer, onSend, disabled }: ChoiceCardProps & { offer: 
               disabled,
               onSend: (picked, other) =>
                 answer(
-                  [...picked.map((index) => question.options[index]!.label), other]
+                  [...picked.map((index) => answerFor(question.options, index)), other]
                     .filter(Boolean)
                     .join(", "),
                 ),

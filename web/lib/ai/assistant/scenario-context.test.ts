@@ -328,9 +328,12 @@ describe("what the assistant knows about the ward and the solver", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/The law \(Employment Act\) is/);
     expect(KNOWLEDGE_LINES.join(" ")).not.toMatch(/employment law/i);
   });
-  it("says a staffing number is exact and where the preferred count lives", () => {
+  it("says a staffing number is exact and sets the preferred count itself (C-15)", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/exact, not a minimum/);
-    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Staffing requirements screen/);
+    // Agrees with the playbook's rules step: the tool sets the preferred count; the
+    // Staffing requirements screen is Advanced-only.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/requiredNumPeople 2 and preferredNumPeople 3/);
+    expect(KNOWLEDGE_LINES.join(" ")).not.toMatch(/Staffing requirements screen/);
   });
   it("sets a skill mix with set_skill_mix, and never approximates it with a whole-shift group", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/skill mix .*set_skill_mix/);

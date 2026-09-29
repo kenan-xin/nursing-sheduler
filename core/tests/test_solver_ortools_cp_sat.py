@@ -184,6 +184,10 @@ def test_set_objective_minimize_branch():
     assert solver.maximize is False
 
 
+def test_solver_adds_max_lp_sym_subsolver():
+    assert list(ORToolsSolver().solver.parameters.extra_subsolvers) == ["max_lp_sym"]
+
+
 @pytest.mark.parametrize(
     ("native_status", "expected"),
     [

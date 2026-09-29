@@ -28,6 +28,7 @@ import { Surface, surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 import { rangeDayCount } from "@/lib/dates";
 import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
+import { withDefaultExportLayout } from "@/lib/scenario/default-export-layout";
 import { applyCovers } from "@/lib/scenario/temporary-cover";
 import { countEnabledRules } from "@/lib/scenario";
 import {
@@ -49,6 +50,7 @@ import {
   deriveOptimizeReadiness,
   UNSUPPORTED_EXPRESSION_REASON,
   isActiveLifecycle,
+  isRunStale,
   isSettledLifecycle,
   migrateLegacySession,
   reportOptimizeRunRequest,
@@ -442,6 +444,14 @@ export function OptimizeAndExportScreen({
   const captureStateForView = capture.stateFor(view.jobId);
   const hasLoadableRoster =
     view.lifecycle === "completed" && captureStateForView.status === "committed";
+  // C-17 — a working roster was already there, so this result waits for a choice.
+  const newResultNotLoaded =
+    captureStateForView.status === "committed" &&
+    captureStateForView.working.kind === "awaiting-choice";
+  // C-12 — Undo/Redo or the assistant changed the schedule after this run started.
+  const runRevision = useRunRequestStore((state) => state.runRevision);
+  const documentRevision = useAuthorityStore((state) => state.documentRevision);
+  const runStale = isRunStale(view.lifecycle, runRevision, documentRevision);
 
   // --- observability emissions (bounded, client-only) ------------------------
   const runStartRef = useRef<number | null>(null);
@@ -547,7 +557,9 @@ export function OptimizeAndExportScreen({
     // keeps, so the roster knows exactly what this solve subtracted (d582).
     const scenario = useScenarioStore.getState();
     const applied = applyCovers(scenario);
-    const document = toCanonicalScenarioDocument(applied.state);
+    // No saved layout: send v1's default one, so the XLSX keeps its count
+    // rows/columns and unmet-request marks (audit C-01).
+    const document = withDefaultExportLayout(toCanonicalScenarioDocument(applied.state));
     return {
       document,
       cover: {
@@ -828,6 +840,8 @@ export function OptimizeAndExportScreen({
             // completed artifact block. True only for a completed run whose
             // capture committed a loadable candidate.
             loadableRoster={hasLoadableRoster}
+            newResultNotLoaded={newResultNotLoaded}
+            stale={runStale}
           />
         </Section>
       </div>

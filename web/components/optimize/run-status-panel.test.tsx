@@ -356,6 +356,53 @@ describe("RunStatusPanel — no cleanup surface at all", () => {
   });
 });
 
+describe("RunStatusPanel — audit A8", () => {
+  const inconclusive = view({
+    lifecycle: "completed",
+    jobId: "opt_1",
+    result: {
+      outcome: "inconclusive",
+      score: null,
+      solverStatus: "UNKNOWN",
+      terminationReason: "solver_timeout_no_solution",
+    },
+    download: { status: "unavailable", artifactAvailable: false, filename: null },
+  });
+
+  it("C-11: an inconclusive run says what to do, with no raw code or score block", () => {
+    setup(inconclusive);
+    expect(screen.getByTestId("optimize-no-artifact")).toHaveTextContent(
+      "No roster was found within the Solver Timeout. Raise the Solver Timeout and run again.",
+    );
+    expect(screen.getByTestId("optimize-run-status")).not.toHaveTextContent(
+      /solver_timeout_no_solution|incumbent/i,
+    );
+    expect(screen.queryByTestId("optimize-score")).not.toBeInTheDocument();
+  });
+
+  it("C-12: marks a run whose schedule changed since it started", () => {
+    setup(inconclusive, { stale: true });
+    expect(screen.getByTestId("optimize-run-stale")).toHaveTextContent(
+      "Schedule changed since this run. Optimise again.",
+    );
+    cleanup();
+    setup(inconclusive);
+    expect(screen.queryByTestId("optimize-run-stale")).not.toBeInTheDocument();
+  });
+
+  it("C-30: Cancel and Get Results Now say what they do to the best roster", () => {
+    setup(view({ lifecycle: "running", jobId: "opt_1" }));
+    expect(screen.getByTestId("optimize-finish-now")).toHaveAttribute(
+      "title",
+      "Stop now and keep the best roster found so far",
+    );
+    expect(screen.getByTestId("optimize-cancel")).toHaveAttribute(
+      "title",
+      "Stop the run and discard the best roster found so far",
+    );
+  });
+});
+
 describe("RunStatusPanel — G4 Open & adjust roster CTA", () => {
   // G4 closure: the prototype's `Open & adjust roster` CTA appears inside the
   // completed artifact block ONLY when `loadableRoster` is true. Every other
@@ -376,6 +423,13 @@ describe("RunStatusPanel — G4 Open & adjust roster CTA", () => {
     const cta = screen.getByTestId("optimize-open-roster");
     expect(cta).toHaveAttribute("href", "/roster");
     expect(cta).toHaveTextContent("Open & adjust roster");
+  });
+
+  it("C-17: says the current roster is kept when the new result was not loaded", () => {
+    setup(completedWithArtifact, { loadableRoster: true, newResultNotLoaded: true });
+    expect(screen.getByTestId("optimize-open-roster")).toHaveTextContent(
+      "Review new result (current roster kept)",
+    );
   });
 
   it("omits the CTA on a completed run that has no loadable roster", () => {

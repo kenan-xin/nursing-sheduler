@@ -177,6 +177,14 @@ export interface ProposalPreviewCardProps {
   disabled: boolean;
 }
 
+/** Blocks a fresh preparation clears; another tab or an open form it does not. */
+const PREPARE_AGAIN_BLOCKS: ReadonlySet<string> = new Set([
+  "interrupted",
+  "document_changed",
+  "lease_changed",
+  "registry_changed",
+]);
+
 /** The Preview. Renders nothing at all when there is no live proposal. */
 export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPreviewCardProps) {
   const [details, setDetails] = useState(false);
@@ -184,6 +192,9 @@ export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPr
   if (!proposal || !readiness) return null;
 
   const stale = readiness.status === "stale";
+  // An out-of-date Preview can never be applied; its way forward is to ask again.
+  const askAgain = stale && readiness.blocks.some((block) => PREPARE_AGAIN_BLOCKS.has(block.code));
+  const applying = controller.applying;
   // The affected screens, named as the sidebar names them. A capability with no
   // reachable screen in this context is dropped rather than shown as a raw id.
   const screenNames = screenNamesFor(proposal.diff.capabilityIds);
@@ -204,16 +215,28 @@ export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPr
       // The primary action only; until it is usable the card itself holds focus.
       focusRow={0}
       // The decision, as option rows. Apply waits for the agreements and for a running
-      // turn; the two exits never wait.
+      // turn; the two exits never wait for a turn, only for Apply to finish.
       options={[
         {
-          label: controller.applying ? "Applying…" : "Apply",
+          label: applying ? "Applying…" : "Apply",
           detail: "Make this change now.",
           primary: true,
           testId: "proposal-apply",
-          disabled: disabled || !readiness.applyEnabled || controller.applying,
+          disabled: disabled || !readiness.applyEnabled || applying,
           onPick: () => void controller.apply(),
         },
+        ...(askAgain
+          ? [
+              {
+                label: "Ask again",
+                detail: "Prepare this change again for the schedule as it is now.",
+                testId: "proposal-ask-again",
+                disabled,
+                onPick: () =>
+                  void controller.revise().then(() => onSend("Please prepare that change again.")),
+              },
+            ]
+          : []),
         // REVISE is not a softer Cancel. It marks this change out of date and hands the
         // conversation back, so the next thing the assistant prepares keeps this
         // proposal's identity and moves its revision -- which is exactly what
@@ -222,12 +245,15 @@ export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPr
           label: "Change something",
           detail: "Set it aside and tell me what to adjust.",
           testId: "proposal-revise",
+          // Nothing may be set aside while Apply is writing it.
+          disabled: applying,
           onPick: () => void controller.revise(),
         },
         {
           label: "Cancel",
           detail: "Drop this change. Nothing is applied.",
           testId: "proposal-cancel",
+          disabled: applying,
           onPick: () => void controller.cancel(),
         },
       ]}
@@ -236,7 +262,7 @@ export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPr
       other={{
         label: "Tell me what to change",
         sendLabel: "Send what to change",
-        disabled,
+        disabled: disabled || applying,
         onSend: (text) => void controller.revise().then(() => onSend(text)),
       }}
     >

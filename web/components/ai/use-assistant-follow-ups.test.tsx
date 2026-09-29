@@ -12,6 +12,8 @@ import type { ApplyOutcomeView } from "./use-assistant-proposals";
 import {
   describeAppliedChange,
   describeFinishedRun,
+  describeUndoneChange,
+  isAppFollowUp,
   useAssistantFollowUps,
 } from "./use-assistant-follow-ups";
 
@@ -113,6 +115,33 @@ describe("describeAppliedChange", () => {
   });
 });
 
+describe("after Undo (C-36)", () => {
+  it("names what was undone, without the value it went back to", () => {
+    expect(describeUndoneChange(ROSTER.direct)).toBe("I undid it: Roster period.");
+    expect(describeUndoneChange([])).toBe("I undid it.");
+  });
+
+  it("sends one follow-up per undone receipt", () => {
+    const send = vi.fn(async (_text: string) => true);
+    const undone = { receiptId: "r1", summary: ROSTER.direct };
+    const { rerender } = renderHook(
+      ({ u }: { u: typeof undone | null }) => useAssistantFollowUps(false, null, send, u),
+      { initialProps: { u: null as typeof undone | null } },
+    );
+    rerender({ u: undone });
+    rerender({ u: { ...undone } });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("I undid it: Roster period.");
+  });
+
+  it("recognises every follow-up line as the app's, and a typed message as not", () => {
+    expect(isAppFollowUp(describeAppliedChange(ROSTER))).toBe(true);
+    expect(isAppFollowUp(describeUndoneChange(ROSTER.direct))).toBe(true);
+    expect(isAppFollowUp(describeFinishedRun({ lifecycle: "failed", outcome: null }))).toBe(true);
+    expect(isAppFollowUp("why is the 15th short?")).toBe(false);
+  });
+});
+
 describe("describeFinishedRun", () => {
   it.each([
     ["completed", "infeasible", "no roster could be built"],
@@ -158,7 +187,7 @@ describe("after Apply", () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
-  it("sends nothing for Cancel, Revise, Undo or a failed Apply (no applied outcome)", () => {
+  it("sends nothing for Cancel, Revise or a failed Apply (no applied outcome)", () => {
     const { send, rerender } = mount();
     rerender({ running: false, outcome: { kind: "failed", message: "no" } });
     rerender({ running: false, outcome: null });

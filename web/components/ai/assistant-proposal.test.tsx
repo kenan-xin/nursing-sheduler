@@ -662,3 +662,117 @@ describe("the Preview's decision reads as option-card choices", () => {
     await waitFor(async () => expect(await screen.findByTestId("proposal-apply")).toBeEnabled());
   });
 });
+
+describe("audit batch A7 (b4x8)", () => {
+  function PreviewWith({ onSend }: { onSend: (text: string) => void }) {
+    const controller = useAssistantProposals();
+    return (
+      <>
+        <ProposalPreviewCard controller={controller} onSend={onSend} disabled={false} />
+        <AssistantReceipts controller={controller} />
+      </>
+    );
+  }
+
+  it("C-16: says so when a receipt Undo fails, and keeps the change", async () => {
+    const user = userEvent.setup();
+    const toastError = vi.spyOn(toast, "error");
+    await showProposal(SHRINK);
+    render(<HostSurface />);
+    await user.click(await screen.findByTestId("proposal-apply"));
+    await waitFor(() => expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-15"));
+
+    vi.spyOn(assistantProposalCommands, "undoReceipt").mockResolvedValue({
+      ok: false,
+      reason: "history-unavailable",
+      code: "unknown",
+    });
+    await user.click(await screen.findByTestId("receipt-undo"));
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("That step can no longer be reversed."),
+    );
+    expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-15");
+  });
+
+  it("C-27: holds Cancel, Change something and the text row while Apply runs", async () => {
+    const user = userEvent.setup();
+    await showProposal(SHRINK);
+    const apply = assistantProposalCommands.apply.bind(assistantProposalCommands);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    vi.spyOn(assistantProposalCommands, "apply").mockImplementation(async (input) => {
+      await gate;
+      return apply(input);
+    });
+    render(<HostSurface />);
+
+    await user.click(await screen.findByTestId("proposal-apply"));
+    await waitFor(async () => expect(await screen.findByTestId("proposal-cancel")).toBeDisabled());
+    expect(screen.getByTestId("proposal-revise")).toBeDisabled();
+    expect(screen.getByRole("textbox")).toBeDisabled();
+
+    await act(async () => release());
+    expect(await screen.findByTestId("assistant-receipts")).toHaveTextContent("1 change applied");
+  });
+
+  it("C-35: an out-of-date Preview offers Ask again, which sets it aside and asks", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    await showProposal(SHRINK);
+    render(<PreviewWith onSend={onSend} />);
+    await screen.findByTestId("proposal-apply");
+
+    await assistantActions.interrupt({ trigger: "stop", threadId: "thread-1", scenarioId: null });
+    act(() => void assistantActions.nextTurnEpoch());
+
+    await user.click(await screen.findByTestId("proposal-ask-again"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Please prepare that change again."));
+    expect(screen.queryByTestId("assistant-proposal")).toBeNull();
+  });
+
+  it("C-36: tells the assistant after a receipt Undo in the LIVE rendering", async () => {
+    const user = userEvent.setup();
+    await showProposal(SHRINK);
+    render(<AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />);
+
+    await user.click(await screen.findByTestId("proposal-apply"));
+    await waitFor(() => expect(sessionSend).toHaveBeenCalledTimes(1));
+    await user.click(await screen.findByTestId("receipt-undo"));
+    await waitFor(() => expect(sessionSend).toHaveBeenCalledTimes(2));
+    expect(sessionSend).toHaveBeenLastCalledWith("I undid it: Roster period, bo on 29.");
+  });
+
+  describe("C-37: a Preview lost to a reload", () => {
+    afterEach(() => sessionStorage.clear());
+
+    it("says the Preview closed when this thread had one open before the reload", async () => {
+      sessionStorage.setItem("assistant.open-preview-thread", "thread-1");
+      render(
+        <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />,
+      );
+      expect(await screen.findByTestId("assistant-preview-closed")).toHaveTextContent(
+        "The Preview closed on reload. Ask again.",
+      );
+    });
+
+    it("says nothing for another thread, or with the Preview still on screen", async () => {
+      sessionStorage.setItem("assistant.open-preview-thread", "thread-2");
+      const { unmount } = render(
+        <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />,
+      );
+      await screen.findByTestId("assistant-live-conversation");
+      expect(screen.queryByTestId("assistant-preview-closed")).toBeNull();
+      unmount();
+
+      await showProposal(SHRINK);
+      render(
+        <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />,
+      );
+      await screen.findByTestId("assistant-proposal");
+      expect(screen.queryByTestId("assistant-preview-closed")).toBeNull();
+      // Noted for the next page lifetime.
+      expect(sessionStorage.getItem("assistant.open-preview-thread")).toBe("thread-1");
+    });
+  });
+});
