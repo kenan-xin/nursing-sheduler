@@ -256,11 +256,14 @@ function isAuthoredDateGroup(state: ScenarioUiState, id: EntityRef): boolean {
   return state.dateGroups.some((group) => group.id === id);
 }
 
-/** What a delete drops: whole rules, request cells, and history entries. */
+/** What a delete drops: whole rules, request cells (leave pins apart), history
+ *  entries, and per-date staffing exceptions (requirement overrides). */
 export interface DeleteImpact {
   rules: number;
   requests: number;
+  leave: number;
   history: number;
+  overrides: number;
 }
 
 /** Count what {@link deleteEntity} would drop, by running it and diffing — so the
@@ -275,11 +278,29 @@ export function deleteImpact(
     Object.values(s.cardsByKind).reduce((sum, cards) => sum + cards.length, 0);
   const history = (s: ScenarioUiState) =>
     s.staff.reduce((sum, person) => sum + (person.history?.length ?? 0), 0);
+  const leave = (s: ScenarioUiState) => s.reqData.filter((cell) => cell.kind === "leave").length;
+  const overrides = (s: ScenarioUiState) =>
+    s.cardsByKind.requirements.reduce(
+      (sum, card) => sum + (card.requiredNumPeopleOverrides?.length ?? 0),
+      0,
+    );
+  const leaveDropped = leave(state) - leave(next);
   return {
     rules: rules(state) - rules(next),
-    requests: state.reqData.length - next.reqData.length,
+    requests: state.reqData.length - next.reqData.length - leaveDropped,
+    leave: leaveDropped,
     history: history(state) - history(next),
+    // Overrides on a DROPPED rule go with it; count only those on a surviving one.
+    overrides: overrides(state) - overrides(next) - droppedOverrides(state, next),
   };
+}
+
+/** Overrides carried by requirement cards the delete removed entirely. */
+function droppedOverrides(state: ScenarioUiState, next: ScenarioUiState): number {
+  const kept = new Set(next.cardsByKind.requirements.map((card) => card.uid));
+  return state.cardsByKind.requirements
+    .filter((card) => !kept.has(card.uid))
+    .reduce((sum, card) => sum + (card.requiredNumPeopleOverrides?.length ?? 0), 0);
 }
 
 /** The non-zero parts of an impact as confirm lines ("3 rules", "4 history entries"). */
@@ -289,7 +310,9 @@ export function describeDeleteImpact(impact: DeleteImpact): string[] {
   return [
     ...part(impact.rules, "rule", "rules"),
     ...part(impact.requests, "request", "requests"),
+    ...part(impact.leave, "leave pin", "leave pins"),
     ...part(impact.history, "history entry", "history entries"),
+    ...part(impact.overrides, "date exception", "date exceptions"),
   ];
 }
 
