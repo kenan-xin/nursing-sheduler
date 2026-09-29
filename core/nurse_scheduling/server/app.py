@@ -190,6 +190,7 @@ def create_app(
             max_pending=settings.max_pending_jobs,
             max_retained=settings.max_retained_jobs,
             ordinary_reserved_slots=settings.ordinary_reserved_slots,
+            max_pending_per_client=settings.max_pending_per_client,
         ),
         retention_seconds=settings.job_retention_seconds,
         worker_lease_seconds=settings.worker_lease_seconds,
@@ -202,6 +203,7 @@ def create_app(
         claim_poll_seconds=settings.claim_poll_seconds,
         worker_lease_seconds=settings.worker_lease_seconds,
         timeout_grace_seconds=settings.timeout_grace_seconds,
+        child_memory_limit_bytes=settings.child_memory_limit_mb * 1024 * 1024,
         unexpected_error_formatter=_format_unexpected_error,
     )
     maintenance = JobMaintenance(controller, interval_seconds=settings.maintenance_interval_seconds)

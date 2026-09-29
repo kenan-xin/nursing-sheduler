@@ -675,6 +675,7 @@ test.describe.serial("T12 M2a-4 Convert ↔ generic", () => {
     await gotoReady(page);
     await seed(page, BASE_SEED);
     await seed(page, {
+      shifts: [{ id: "D", durationMinutes: 480 }, { id: "N" }],
       cardsByKind: {
         requirements: [],
         successions: [],
@@ -697,7 +698,7 @@ test.describe.serial("T12 M2a-4 Convert ↔ generic", () => {
             person: ["Aisha"],
             countDates: ["ALL"],
             countShiftTypes: ["D"],
-            countShiftTypeCoefficients: [["D", 16]],
+            countShiftTypeCoefficients: [["D", 2]],
             expression: "x >= T",
             target: 5,
             weight: -1,
@@ -714,7 +715,8 @@ test.describe.serial("T12 M2a-4 Convert ↔ generic", () => {
     await expect(page.getByTestId("card-editor-form")).toBeVisible();
     await expect(page.getByTestId("contracted-policy-exact")).toBeVisible();
     await expect(page.getByTestId("contracted-target-exact")).toHaveValue("");
-    // The carried coefficient satisfies coverage; only the hours target is missing.
+    // The coefficient comes from the 8h shift length, not the generic weight 2;
+    // it satisfies coverage, so only the hours target is missing.
     await expect(page.getByTestId("contracted-coefficient-fields-input-D")).toHaveValue("16");
 
     await page.getByTestId("contracted-target-exact").fill("320");

@@ -100,9 +100,11 @@ function ConvertToGenericConfirm({
   const willBeEditable = isContractedHoursCard(card)
     ? isEditableCountCard(convertContractedToGeneric(card))
     : true;
-  const preview = willBeEditable
-    ? "This becomes an editable Shift Count."
-    : "This becomes an advanced (list) rule, editable via Save & Load (YAML).";
+  const preview = `${
+    willBeEditable
+      ? "This becomes an editable Shift Count."
+      : "This becomes an advanced (list) rule, editable via Save & Load (YAML)."
+  } Values stay in half-hours (320 = 160h).`;
   return (
     // An inline confirm inside a card, so it is an inset well rather than a second
     // bordered box on the same tone. `h-9 px-4` is gone: 9 spacing steps is

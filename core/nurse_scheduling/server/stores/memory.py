@@ -45,6 +45,7 @@ from ..jobs.models import (
     WorkerLease,
 )
 from ..queue_state import (
+    ADMISSION_CLIENT_EXHAUSTED,
     ADMISSION_OK,
     ADMISSION_ORDINARY_RESERVED,
     DIAGNOSTIC_CAPACITY_MESSAGE,
@@ -52,6 +53,7 @@ from ..queue_state import (
     QueueMember,
     QueueStateSnapshot,
     admission_decision,
+    client_capacity_message,
     queue_sort_key,
     validate_transition,
 )
@@ -134,13 +136,17 @@ class MemoryJobStore:
                 raise StoreWriteConflictError(f"Job already exists: {job.id}")
             if job.state != JobState.QUEUED:
                 raise QueueInvariantError("A job may only be admitted in the queued state")
-            pending_count = sum(not record.job.state.terminal for record in self._records.values())
+            pending = [record.job for record in self._records.values() if not record.job.state.terminal]
             decision = admission_decision(
                 job.request.purpose,
-                pending_count=pending_count,
+                pending_count=len(pending),
                 max_pending=limits.max_pending,
                 ordinary_reserved_slots=limits.ordinary_reserved_slots,
+                client_pending_count=sum(p.request.client_id == job.request.client_id for p in pending),
+                max_pending_per_client=limits.max_pending_per_client,
             )
+            if decision == ADMISSION_CLIENT_EXHAUSTED:
+                raise JobCapacityError(client_capacity_message(limits.max_pending_per_client))
             if decision == ADMISSION_ORDINARY_RESERVED:
                 raise DiagnosticCapacityError(DIAGNOSTIC_CAPACITY_MESSAGE)
             if decision != ADMISSION_OK:

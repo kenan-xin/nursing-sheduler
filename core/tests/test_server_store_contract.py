@@ -81,6 +81,23 @@ def test_pending_capacity_enforced(store):
         store.create(make_job("job_3"), b"x", limits, [_state_event("queued")])
 
 
+def test_per_client_pending_cap_enforced(store):
+    # D-07: one client may not fill the whole queue; other clients are still admitted.
+    limits = StoreLimits(max_pending=8, max_retained=128, max_pending_per_client=2)
+
+    def job_for(job_id, client_id):
+        job = make_job(job_id)
+        return replace(job, request=replace(job.request, client_id=client_id))
+
+    first = store.create(job_for("job_1", "alice"), b"x", limits, [_state_event("queued")])
+    store.create(job_for("job_2", "alice"), b"x", limits, [_state_event("queued")])
+    with pytest.raises(JobCapacityError, match="already has 2 optimizations queued or running"):
+        store.create(job_for("job_3", "alice"), b"x", limits, [_state_event("queued")])
+    store.create(job_for("job_4", "bob"), b"x", limits, [_state_event("queued")])
+    store.update_job(_terminal(first), first.revision, [_state_event("completed")])
+    store.create(job_for("job_5", "alice"), b"x", limits, [_state_event("queued")])
+
+
 def test_retained_capacity_evicts_oldest_terminal(store):
     limits = StoreLimits(max_pending=4, max_retained=2)
     first = store.create(make_job("job_old", created_at=utc_now() - timedelta(minutes=5)), b"x", limits, [])

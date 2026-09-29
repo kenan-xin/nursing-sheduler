@@ -25,11 +25,13 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from ..loader import SchedulingDataTooComplexError, measure_yaml_expansion
-from ..models import NurseSchedulingData
+from ..models import CompiledShiftAffinity, NurseSchedulingData
 from .canonical import dump_canonical_strict_yaml
 from .scheduling_errors import (
+    CODE_INVALID_SCHEDULING_DATA,
     CODE_UNSUPPORTED_SOLVER,
     CODE_UNSUPPORTED_WORKSPACE_VERSION,
+    ISSUE_INVALID_VALUE,
     ISSUE_UNSUPPORTED_VALUE,
     MESSAGE_UNSUPPORTED_SOLVER,
     SchedulingContentError,
@@ -45,6 +47,15 @@ SUPPORTED_SOLVER = "ortools/cp-sat"
 
 CODE_SCHEDULING_DATA_TOO_COMPLEX = "scheduling_data_too_complex"
 """400 code: the YAML expands past the node or nesting bound (upstream loader)."""
+
+MAX_MODEL_SIZE = 100_000
+"""Largest admitted model size: people x days x shift types, plus every pairing-rule combination.
+
+Measured at 2 CP-SAT workers (bead 99db): real wards are 1,176 to 28,710 (the 87-person ward
+peaks at 1.19 GiB over 300 s); 100k plain cells peak at 0.74 GiB; the D-01 attack is 3,287,700
+and passes 4 GiB within seconds. Pairing combinations cost more per unit (37k: 0.7 GiB, 84k: 1.9 GiB),
+so the child memory cap, not this guard, stops the band between.
+"""
 
 
 class MalformedInputError(Exception):
@@ -95,6 +106,8 @@ def _parse_once(content: bytes) -> dict[str, Any]:
         raise MalformedInputError(f"The scheduling document is not valid YAML: {error}") from error
     if not isinstance(parsed, dict):
         raise MalformedInputError("The scheduling document must be a YAML mapping.")
+    if not all(isinstance(key, str) for key in parsed):
+        raise MalformedInputError("The scheduling document's top-level keys must be text.")
     return parsed
 
 
@@ -127,6 +140,33 @@ def _validate_workspace_version(parsed: dict[str, Any]) -> NurseSchedulingData:
     )
 
 
+def _check_model_size(model: NurseSchedulingData) -> None:
+    """Refuse a scenario whose solver model would outgrow this server.
+
+    Raises:
+        SchedulingContentError: If the model size passes `MAX_MODEL_SIZE`.
+    """
+    size = len(model.people.items) * len(model.compiled_schedule.dates) * len(model.shiftTypes.items)
+    for preference in model.compiled_schedule.preferences:
+        if isinstance(preference, CompiledShiftAffinity):
+            size += (
+                len(preference.dates)
+                * len(preference.people1_groups)
+                * len(preference.people2_groups)
+                * len(preference.shift_type_groups)
+            )
+    if size <= MAX_MODEL_SIZE:
+        return
+    message = (
+        f"This scenario is too large for this server: its model size is {size:,} "
+        f"(people x days x shift types, plus pairing-rule combinations) and the limit is {MAX_MODEL_SIZE:,}. "
+        "Use fewer people, days, shift types or pairing combinations."
+    )
+    raise SchedulingContentError(
+        CODE_INVALID_SCHEDULING_DATA, message, [SchedulingIssue([], ISSUE_INVALID_VALUE, message)]
+    )
+
+
 def canonicalize_submission(content: bytes) -> bytes:
     """Validate submitted YAML and return canonical strict bytes for a durable job.
 
@@ -140,4 +180,5 @@ def canonicalize_submission(content: bytes) -> bytes:
     """
     parsed = _parse_once(content)
     strict_model = _validate_workspace_version(parsed)
+    _check_model_size(strict_model)
     return dump_canonical_strict_yaml(strict_model)
