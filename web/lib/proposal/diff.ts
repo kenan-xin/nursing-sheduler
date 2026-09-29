@@ -38,9 +38,13 @@ import {
 } from "@/components/card-editor/expression-model";
 import {
   affinityTogetherMeaning,
+  describePairingStrength,
   isEditableAffinityCard,
 } from "@/components/affinities/affinities-model";
-import { isEditableCoveringCard } from "@/components/coverings/coverings-model";
+import {
+  COVERING_SAME_SHIFT,
+  isEditableCoveringCard,
+} from "@/components/coverings/coverings-model";
 import { isContractedHoursCard } from "@/components/counts/counts-model";
 import { formatHalfHours } from "@/components/counts/half-hour-codec";
 import { groupLeaveReach, leaveReachText } from "@/components/requests/requests-model";
@@ -349,27 +353,18 @@ function describeCount(card: CountCard): string | null {
   return `${amount} ${shifts} shifts for ${people ? `each of ${people}` : "everyone"}, across ${renderDates(card.countDates)}: ${describeCountStrength(squared, card.weight, card.target)}`;
 }
 
-/** A pairing's strength, per `shift_affinity` in core: the weight is gained on each date both sides work. */
-function renderPairingStrength(weight: number): string {
-  if (weight === Infinity) return "must work together on every date";
-  if (weight === -Infinity) return "never together";
-  if (weight > 0) return `together where possible (weight ${weight})`;
-  if (weight < 0) return `apart where possible (weight ${weight})`;
-  return "no effect (weight 0)";
-}
-
 /** `null` for a grouped card: flattening its groups would state a different rule. */
 function describePairing(card: AffinityCard, groups: ScenarioUiState): string | null {
   if (!isEditableAffinityCard(card)) return null;
   const shifts = flattenRefs(card.shiftTypes).map(String).join(" or ");
-  return `${renderPeople(card.people1, "everyone")} with ${renderPeople(card.people2, "everyone")} ${affinityTogetherMeaning(card, groups)} (${shifts}), ${renderDates(card.date)}: ${renderPairingStrength(card.weight)}`;
+  return `${renderPeople(card.people1, "everyone")} with ${renderPeople(card.people2, "everyone")} ${affinityTogetherMeaning(card, groups)} (${shifts}), ${renderDates(card.date)}: ${describePairingStrength(card.weight)}`;
 }
 
 /** Restates `shift_type_covering` in core: a hard implication, so no strength. */
 function describeSupervision(card: CoveringCard): string | null {
   if (!isEditableCoveringCard(card)) return null;
   const shifts = flattenRefs(card.shiftTypes).map(String).join(" or ");
-  return `Whenever ${renderPeople(card.preceptees, "everyone")} works ${shifts}, at least one of ${renderPeople(card.preceptors, "everyone")} works it too, ${renderDates(card.date)}`;
+  return `Whenever ${renderPeople(card.preceptees, "everyone")} works ${shifts}, at least one of ${renderPeople(card.preceptors, "everyone")} works ${COVERING_SAME_SHIFT}, ${renderDates(card.date)}`;
 }
 
 /** The plain sentence for the families the assistant authors; `null` keeps the opaque form. */

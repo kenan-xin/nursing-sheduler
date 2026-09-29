@@ -198,6 +198,18 @@ describe("CountCardList — contracted-hours human-hours summary (ds1)", () => {
   });
 });
 
+describe("CountCardList — convert-to-generic confirm (C3)", () => {
+  it("says the values stay in half-hours, for an Exact and a Range contract", () => {
+    for (const card of [exactContractedCard, rangeContractedCard]) {
+      render(<CountCardList counts={[card]} {...NOOP_PROPS} convertToGenericUid={card.uid} />);
+      expect(screen.getByTestId("count-convert-generic-confirm-0").textContent).toContain(
+        "Values stay in half-hours (320 = 160h).",
+      );
+      cleanup();
+    }
+  });
+});
+
 // Fidelity Batch 3 (bmw.3) — the badge casing.
 describe("CountCardList — contracted-hours badge (bmw.3)", () => {
   it("reads '◆ CONTRACTED HOURS', uppercase in the text and not only in CSS", () => {
