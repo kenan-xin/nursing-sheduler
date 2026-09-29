@@ -81,7 +81,7 @@ export const WithError: Story = {
     await userEvent.type(weight, "not-a-number");
     await userEvent.click(screen.getByTestId("cell-editor-save"));
     await expect(screen.getByTestId("cell-editor-error")).toHaveTextContent(
-      "Weight must be a valid number, Infinity, or -Infinity",
+      "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
     );
     await expect(args.onSave).not.toHaveBeenCalled();
     // Cancel discards the draft and closes.

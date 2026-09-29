@@ -21,13 +21,16 @@ import { FaTriangleExclamation } from "@/components/icons";
 export function ScenarioIssuesList({
   issues,
   action = "this scenario can be saved",
+  hint,
 }: {
   issues: ScenarioValidationIssue[];
   /**
    * Completes "N issues must be fixed before ___." Callers whose action is not a
-   * save (e.g. the anonymised export) name what the issues actually block.
+   * save (e.g. the anonymised export, an import) name what the issues actually block.
    */
   action?: string;
+  /** An optional next step shown under the list, e.g. where a failed import can be fixed. */
+  hint?: string;
 }) {
   return (
     <div
@@ -46,6 +49,7 @@ export function ScenarioIssuesList({
           </li>
         ))}
       </ul>
+      {hint ? <p className="mt-1.5">{hint}</p> : null}
     </div>
   );
 }

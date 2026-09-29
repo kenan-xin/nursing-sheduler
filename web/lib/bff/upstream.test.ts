@@ -1,7 +1,12 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { backendUnreachable, proxyJsonRequest, relayJsonResponse } from "@/lib/bff/upstream";
+import {
+  backendUnreachable,
+  PROXY_REQUEST_TIMEOUT_MS,
+  proxyJsonRequest,
+  relayJsonResponse,
+} from "@/lib/bff/upstream";
 
 // Post-header body-consumption failure (this ticket): `fetch()` resolving only
 // proves headers arrived — the body stream itself can still reset or truncate
@@ -167,5 +172,49 @@ describe("relayJsonResponse — real-transport proof that arrayBuffer() (not fet
     } finally {
       consoleError.mockRestore();
     }
+  });
+});
+
+// Bug hunt BH4: a stalled backend must not pin a Next request for undici's ~300 s
+// default, and a browser that went away must not keep the upstream call open.
+describe("proxyJsonRequest — deadline and client abort", () => {
+  it("passes the client's abort through to the upstream fetch", async () => {
+    let upstreamSignal: AbortSignal | undefined;
+    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      upstreamSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) =>
+        init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)),
+      );
+    }) as typeof fetch;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const browser = new AbortController();
+    const pending = proxyJsonRequest(
+      new Request("http://localhost/api/optimize/opt_1", { signal: browser.signal }),
+      { method: "GET", path: "/optimize/opt_1" },
+    );
+    await vi.waitFor(() => expect(upstreamSignal).toBeDefined());
+    browser.abort();
+    await expectBackendUnreachable(await pending);
+    expect(upstreamSignal?.aborted).toBe(true);
+  });
+
+  it("gives up on a stalled backend after the proxy deadline", async () => {
+    // Fake timers do not drive `AbortSignal.timeout`, so the deadline fires at once.
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    globalThis.fetch = vi.fn(
+      async (_url: unknown, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) =>
+          init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)),
+        ),
+    ) as typeof fetch;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const pending = proxyJsonRequest(new Request("http://localhost/api/optimize/opt_1"), {
+      method: "GET",
+      path: "/optimize/opt_1",
+    });
+    expect(timeout).toHaveBeenCalledWith(PROXY_REQUEST_TIMEOUT_MS);
+    deadline.abort(new DOMException("deadline", "TimeoutError"));
+    await expectBackendUnreachable(await pending);
   });
 });

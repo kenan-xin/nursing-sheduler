@@ -83,7 +83,8 @@ export const COUNT_MESSAGES = {
   countShiftTypes: "At least one shift type must be selected",
   expression: "Please select a valid expression",
   target: "Target must be a non-negative integer",
-  weightInvalid: "Weight must be a valid number, Infinity, or -Infinity",
+  weightInvalid:
+    "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
   weightSquaredPositive: 'Weight must be non-positive for shift count with "|x - T|^2"',
   // A numeric shift-type ENTITY id has no valid `ShiftTypeRef` (selectors are
   // string-only — see `lib/scenario/types.ts`); the Python shift map keys the raw

@@ -117,15 +117,26 @@ const zImportRequirement = z
     description: z.string().nullish(),
     shiftType: z.union([z.string(), zNestedShiftRefList]),
     shiftTypeCoefficients: z.array(zCoefficientEntry).nullish(),
-    requiredNumPeople: z.number().int(),
+    requiredNumPeople: z.number().int().min(0, { error: "requiredNumPeople must be 0 or more." }),
     qualifiedPeople: zRefOrList.nullish(),
-    preferredNumPeople: z.number().int().nullish(),
+    preferredNumPeople: z
+      .number()
+      .int()
+      .min(0, { error: "preferredNumPeople must be 0 or more." })
+      .nullish(),
     skillMix: z.array(zImportSkillMixEntry).nullish(),
     requiredNumPeopleOverrides: z.array(z.tuple([zImportDate, z.number().int()])).nullish(),
     date: zDateRefOrList.nullish(),
     weight: zImportWeight.optional(),
   })
   .superRefine((req, ctx) => {
+    // Core has no order check: preferred below required is a silent INFEASIBLE.
+    if (req.preferredNumPeople != null && req.preferredNumPeople < req.requiredNumPeople)
+      ctx.addIssue({
+        code: "custom",
+        message: `preferredNumPeople (${req.preferredNumPeople}) must be at least requiredNumPeople (${req.requiredNumPeople}).`,
+        path: ["preferredNumPeople"],
+      });
     const overrides = req.requiredNumPeopleOverrides;
     if (!overrides?.length) return;
     // The backend's own resolved-dates check (preference_types.shift_type_requirements)

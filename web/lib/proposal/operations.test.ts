@@ -582,11 +582,11 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.rejection.message).toContain('Shift "am1"');
   });
 
-  it("accepts a case-variant code, as the Shifts page does", () => {
-    // Ids are exact-identity across the app; `Night` and `NIGHT` are distinct.
-    expect(applyAssistantCommand(proposalScenario(), shift("NIGHT", "20:00", "08:30")).ok).toBe(
-      true,
-    );
+  it("refuses a case-variant code, as the Shifts page does (T4)", () => {
+    // A card uppercases its code, so `Night` and `NIGHT` would read as one shift.
+    const result = applyAssistantCommand(proposalScenario(), shift("NIGHT", "20:00", "08:30"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("invalid_value");
   });
 
   it("refuses reserved, numbers-only and empty codes", () => {
@@ -1182,7 +1182,7 @@ describe("add_shift_sequence_rule / edit_shift_sequence_rule", () => {
       if (result.ok) continue;
       expect(result.rejection.message).toContain('Shift sequence rule "No day after night"');
       expect(result.rejection.message).toContain(
-        "Weight must be a valid number, Infinity, or -Infinity",
+        "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
       );
     }
   });

@@ -202,7 +202,7 @@ export async function patchFrozenXlsxWithEdits(input: EditedXlsxPatchInput): Pro
 
   // 3. Provenance: a dedicated sheet, never the schedule sheet. Remove any prior
   //    provenance sheet first so a re-export replaces rather than duplicates.
-  writeProvenanceSheet(workbook, input.provenance);
+  writeProvenanceSheet(workbook, input.provenance, input.edits.length > 0);
 
   // 4. Temporary cover: her rows go in under the staff window, and the cover table
   //    is APPENDED to the provenance sheet just written — so it must come after it
@@ -555,7 +555,11 @@ function labelScoreAsSolved(sheet: ExcelJS.Worksheet, coordinateMap: RosterCoord
  * never touched: a separate sheet cannot be misread by the col-A restoration
  * boundary, and replacing (not appending) keeps a re-export honest.
  */
-function writeProvenanceSheet(workbook: ExcelJS.Workbook, provenance: RosterProvenance): void {
+function writeProvenanceSheet(
+  workbook: ExcelJS.Workbook,
+  provenance: RosterProvenance,
+  edited: boolean,
+): void {
   const existing = workbook.worksheets.find((ws) => ws.name === PROVENANCE_SHEET_NAME);
   if (existing !== undefined) {
     workbook.removeWorksheet(existing.id);
@@ -568,7 +572,8 @@ function writeProvenanceSheet(workbook: ExcelJS.Workbook, provenance: RosterProv
   sheet.addRow(["Roster provenance", ""]);
   sheet.addRow(["Solver status (as solved)", provenance.solverStatus]);
   sheet.addRow(["Solver score (as solved)", provenance.score]);
-  sheet.addRow(["Edited since solve", "yes"]);
+  // A cover-only export also takes this path; a cover is not an edit.
+  sheet.addRow(["Edited since solve", edited ? "yes" : "no"]);
   sheet.addRow(["Solved baseline", provenance.solvedBaselineId]);
   sheet.addRow(["Exported by app build", provenance.appBuild]);
 }
