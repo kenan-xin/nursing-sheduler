@@ -148,8 +148,12 @@ test.describe.serial("T13 shift-type coverings editor (rebuild)", () => {
     expect(cards[0].description).toBe("Chloe covered by Aisha");
     expect(cards[0].preceptors).toEqual([["Aisha"]]);
     expect(cards[0].preceptees).toEqual([["Chloe"]]);
-    expect(cards[0].shiftTypes).toEqual([["Day"]]);
+    // Flat: core checks each shift on its own (bead yzty).
+    expect(cards[0].shiftTypes).toEqual(["Day"]);
     expect(cards[0].date).toEqual(["WEEKEND"]);
+    await expect(page.getByTestId("covering-card-0")).toContainText(
+      "A preceptor on the same shift on the same day",
+    );
     expect(cards[0].weight).toBe(1); // inert enforced weight
     expect(cards[0].disabled).toBeUndefined();
     // The compound add is exactly ONE tracked mutation (one undo entry).
@@ -288,8 +292,38 @@ test.describe.serial("T13 shift-type coverings editor (rebuild)", () => {
 
     const cards = await readCoverings(page);
     expect(cards[0].preceptors).toEqual([["Aisha", "Daniel"]]);
-    expect(cards[0].shiftTypes).toEqual([["Day", "Night"]]);
+    expect(cards[0].shiftTypes).toEqual(["Day", "Night"]);
     expect(cards[0].date).toEqual(["2026-01-01", "2026-01-03"]);
+  });
+
+  test("a pre-yzty grouped-shift card stays read-only and says what it really checks", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    await seed(page, {
+      cardsByKind: {
+        requirements: [],
+        successions: [],
+        counts: [],
+        affinities: [],
+        coverings: [
+          {
+            uid: "cov-grouped",
+            preceptors: [["Aisha"]],
+            preceptees: [["Chloe"]],
+            shiftTypes: [["Day", "Night"]],
+            weight: 1,
+          },
+        ],
+      },
+    });
+    const card = page.getByTestId("covering-card-0");
+    await expect(card.getByText("Advanced (grouped)")).toBeVisible();
+    await expect(card).toContainText("even on a different shift from the preceptee");
+    await expect(page.getByTestId("covering-readonly-note-0")).toBeVisible();
+    await expect(page.getByTestId("covering-edit-0")).toHaveCount(0);
+    expect((await readCoverings(page))[0].shiftTypes).toEqual([["Day", "Night"]]);
   });
 
   test("move up/down reorders durably (FR-CV-21)", async ({ page }) => {

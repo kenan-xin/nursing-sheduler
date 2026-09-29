@@ -507,6 +507,14 @@ describe("requirementToForm (FR-PR-26 load — null/undefined → [ALL])", () =>
     expect(requirementToForm(card, domain).preferredNumPeople).toBe("");
   });
 
+  it("opens the dial at the default weight, not the inert -1, when preferred is absent", () => {
+    const card: RequirementCard = { uid: "u", shiftType: ["D"], requiredNumPeople: 2, weight: -1 };
+    expect(requirementToForm(card, domain).weight).toBe(emptyRequirementForm().weight);
+    expect(requirementToForm({ ...card, preferredNumPeople: 3, weight: -7 }, domain).weight).toBe(
+      -7,
+    );
+  });
+
   it("normalizes an EXPLICIT null qualifiedPeople/date to [ALL] (not [null])", () => {
     const card = {
       uid: "u-null",
