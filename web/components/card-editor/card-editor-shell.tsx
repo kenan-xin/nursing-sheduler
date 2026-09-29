@@ -541,6 +541,8 @@ export function CardListItem({
     >
       <div className="mb-4 flex items-center gap-3">
         <div
+          // The solver ignores card order (G5); the number only looks like a rank.
+          title="Order is for reference. Weight sets priority."
           className={`flex size-8 flex-none items-center justify-center rounded-chip border border-line2 bg-panel font-mono text-label-md font-semibold text-ink2 ${
             draggable ? "flex items-center gap-1" : ""
           }`}
