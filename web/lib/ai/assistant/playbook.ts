@@ -38,7 +38,7 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-28.3";
+export const PLAYBOOK_VERSION = "2026-09-29.1";
 
 /**
  * How every `offer_choices` option must read (bead tpt2). The card is a pick, not a prompt:
