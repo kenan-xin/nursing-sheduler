@@ -28,6 +28,7 @@ import {
 } from "@/lib/store";
 import { countSkippedRequestPaints, foldPaintIntents } from "@/lib/store/paint-fold";
 import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
+import { confirmDialog } from "@/components/shell/confirm-store";
 import { generateDateItems, hasCompleteRange, type DateRange } from "@/lib/dates";
 import {
   RESERVED_SHIFT_TYPE,
@@ -43,6 +44,8 @@ import {
   buildColumns,
   buildRows,
   buildShiftTypeOrderIndex,
+  groupLeaveReach,
+  leaveReachText,
   historyColumnCount,
   historyLayout,
   type RequestColumn,
@@ -227,6 +230,45 @@ function shapeMatcher(
   };
 }
 
+/**
+ * Asks before pinning leave on a group row or date-group column (bb8t): one such
+ * cell pins leave for every member on every date it covers. `null` when no
+ * coordinate is a group one, so the caller commits synchronously as before.
+ */
+function groupLeavePrompt(
+  coords: readonly (readonly [PersonRef, DateRef])[],
+): Promise<boolean> | null {
+  const reach = groupLeaveReach(useScenarioStore.getState(), coords);
+  if (!reach) return null;
+  return confirmDialog({
+    title: "Pin leave for a whole group?",
+    description: `Pin paid leave for ${leaveReachText(reach)}? Each pinned day is always honoured and takes these nurses off coverage.`,
+    confirmLabel: "Pin leave",
+  });
+}
+
+/** The coordinates a staged gesture pins leave on. */
+function stagedLeaveCoords(staged: ReadonlyMap<string, StagedCoordinate>): [PersonRef, DateRef][] {
+  return [...staged]
+    .filter(([, intent]) => intent.mode === "day-state" && intent.dayState.kind === "leave")
+    .map(([key]) => JSON.parse(key) as [PersonRef, DateRef]);
+}
+
+function commitStagedPaint(): void {
+  const staged = useHotStore.getState().paint;
+  const skipped = staged
+    ? countSkippedRequestPaints(useScenarioStore.getState().reqData, staged)
+    : 0;
+  void commitPaintGesture(useHotStore);
+  if (skipped > 0) {
+    toast.warning(
+      skipped === 1
+        ? "1 cell skipped: it holds leave or OFF. Clear it first."
+        : `${skipped} cells skipped: they hold leave or OFF. Clear them first.`,
+    );
+  }
+}
+
 function stageCellIntent(
   hot: ReturnType<typeof useHotStore.getState>,
   person: PersonRef,
@@ -388,18 +430,17 @@ export function useRequests({
   useEffect(() => {
     function handleMouseUp() {
       if (dragCellTypeRef.current === "preference") {
+        // A gesture that pins leave on any group cell waits for ONE answer. The
+        // staged buffer (and its highlight) stays up meanwhile; Cancel drops the
+        // whole gesture, confirm commits it as the usual single write.
         const staged = useHotStore.getState().paint;
-        const skipped = staged
-          ? countSkippedRequestPaints(useScenarioStore.getState().reqData, staged)
-          : 0;
-        void commitPaintGesture(useHotStore);
-        if (skipped > 0) {
-          toast.warning(
-            skipped === 1
-              ? "1 cell skipped: it holds leave or OFF. Clear it first."
-              : `${skipped} cells skipped: they hold leave or OFF. Clear them first.`,
-          );
-        }
+        const prompt = staged ? groupLeavePrompt(stagedLeaveCoords(staged)) : null;
+        if (!prompt) commitStagedPaint();
+        else
+          void prompt.then((ok) => {
+            if (ok) commitStagedPaint();
+            else useHotStore.getState().cancelPaint();
+          });
       } else if (dragCellTypeRef.current === "history") {
         flushHistoryGesture();
       }
@@ -445,6 +486,16 @@ export function useRequests({
     applyHistoryPaintCell(person, columnIndex);
   }
 
+  /** Leave saved on a group cell is confirmed first; Cancel writes nothing. */
+  function commitCellEdit(person: PersonRef, date: DateRef, result: CellEditorResult): void {
+    const prompt = result.kind === "leave" ? groupLeavePrompt([[person, date]]) : null;
+    if (!prompt) writeCellEdit(person, date, result);
+    else
+      void prompt.then((ok) => {
+        if (ok) writeCellEdit(person, date, result);
+      });
+  }
+
   /**
    * Save one cell's preferences as a QUEUE-HEAD TRANSFORM over the committed matrix.
    *
@@ -454,7 +505,7 @@ export function useRequests({
    * Only this coordinate's cells are replaced now, and every other cell comes from
    * whatever the previous command committed.
    */
-  function commitCellEdit(person: PersonRef, date: DateRef, result: CellEditorResult): void {
+  function writeCellEdit(person: PersonRef, date: DateRef, result: CellEditorResult): void {
     scenarioCommands.setReqData((scenario) => {
       const atCoordinate = scenario.reqData.filter((c) => c.person === person && c.date === date);
       const others = scenario.reqData.filter((c) => !(c.person === person && c.date === date));

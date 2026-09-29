@@ -42,6 +42,9 @@ import {
 const WEIGHT_INVALID_MESSAGE =
   "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity";
 
+/** The weight the Off tab starts at on a cell with no OFF yet: a normal nurse day-off wish. */
+export const DEFAULT_OFF_WEIGHT = 20;
+
 export type DayStateChoice = "available" | "leave" | "off";
 
 export interface WeightTarget {
@@ -81,7 +84,7 @@ function draftFromCells(cells: readonly UiRequestCell[], targets: readonly Weigh
     weights[t.id] = 0;
   });
   const leave = cells.find((c) => c.kind === "leave");
-  if (leave) return { dayState: "leave", weights, offWeight: 0 };
+  if (leave) return { dayState: "leave", weights, offWeight: DEFAULT_OFF_WEIGHT };
   const off = cells.find((c) => c.kind === "off");
   if (off) return { dayState: "off", weights, offWeight: off.weight };
   cells.forEach((cell) => {
@@ -89,7 +92,7 @@ function draftFromCells(cells: readonly UiRequestCell[], targets: readonly Weigh
       weights[cell.shiftType] = cell.weight;
     }
   });
-  return { dayState: "available", weights, offWeight: 0 };
+  return { dayState: "available", weights, offWeight: DEFAULT_OFF_WEIGHT };
 }
 
 export function CellPreferenceEditor({
@@ -290,13 +293,9 @@ export function CellPreferenceEditor({
 
           {draft.dayState === "off" && (
             <div data-testid="cell-editor-off">
-              <div className="mb-1 text-label font-semibold uppercase tracking-[0.03em] text-ink2">
+              <div className="mb-2.5 text-label font-semibold uppercase tracking-[0.03em] text-ink2">
                 Off weight
               </div>
-              <p className="mb-2.5 text-meta text-ink3">
-                A soft preference for a rest day off. Positive prefers OFF, negative avoids it, 0
-                means no preference. Use ∞ for a hard pin.
-              </p>
               <div className="mb-3 flex items-center gap-2.5">
                 <div className="min-w-11 font-mono text-meta font-bold">OFF</div>
                 <div className="flex-1 text-meta text-ink3">Requests off</div>
@@ -311,9 +310,12 @@ export function CellPreferenceEditor({
                   {formatWeight(draft.offWeight)}
                 </div>
               </div>
-              <div className="border border-error bg-errortint px-3 py-2.5 text-meta text-ink2">
-                Requests a rest day off — the nurse&apos;s weekend equivalent. Leave weight blank
-                for a plain OFF request.
+              <div
+                data-testid="cell-editor-off-note"
+                className="border border-line bg-panel px-3 py-2.5 text-meta text-ink2"
+              >
+                {DEFAULT_OFF_WEIGHT} is a normal day-off wish. A higher number wins more often, 0
+                removes it, and ∞ makes it a must.
               </div>
             </div>
           )}

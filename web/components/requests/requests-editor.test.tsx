@@ -8,6 +8,7 @@ import type { ScenarioUiState } from "@/lib/scenario";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { downloadBlob } from "@/lib/utils/download";
 import { RequestsEditor } from "./requests-editor";
+import { GlobalConfirmDialog } from "@/components/shell/app-shell";
 import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -495,5 +496,133 @@ describe("RequestsEditor — Requests CSV import round trip (F1)", () => {
     );
     await drainScenarioCommands();
     expect(useScenarioStore.getState().reqData).toEqual([]);
+  });
+});
+
+describe("RequestsEditor — group requests and group leave (bb8t)", () => {
+  // 2026-01-01..03: Thu, Fri, Sat. Seniors = Aisha + Chloe.
+  const GROUP_SEED: Partial<ScenarioUiState> = {
+    ...BASE_SEED,
+    staffGroups: [{ id: "Seniors", members: ["Aisha", "Chloe"] }],
+  };
+
+  function renderWithConfirm() {
+    render(
+      <>
+        <RequestsEditor />
+        <GlobalConfirmDialog />
+      </>,
+    );
+  }
+
+  async function leaveCells() {
+    await act(async () => {
+      await drainScenarioCommands();
+    });
+    return useScenarioStore
+      .getState()
+      .reqData.filter((c) => c.kind === "leave")
+      .map((c) => `${String(c.person)}@${String(c.date)}`)
+      .sort();
+  }
+
+  function quickPaintLeave() {
+    fireEvent.click(screen.getByTestId("requests-tab-quick"));
+    fireEvent.click(screen.getByTestId("quick-paint-chip-LEAVE"));
+  }
+
+  it("marks person cells a group row covers, named in the title and accessible name", async () => {
+    await seed({
+      ...GROUP_SEED,
+      reqData: [
+        { kind: "request", person: "Seniors", date: "02", shiftType: "AM", weight: 5 },
+        { kind: "off", person: "Chloe", date: "WEEKEND", weight: 20 },
+      ],
+    });
+    render(<RequestsEditor />);
+
+    const aisha = screen.getByTestId("cell-Aisha-02");
+    expect(screen.getByTestId("group-source-Aisha-02")).toBeInTheDocument();
+    expect(aisha).toHaveAttribute("title", "From Seniors · AM +5");
+    expect(aisha).toHaveAccessibleName(/no request; From Seniors · AM \+5$/);
+    expect(screen.getByTestId("cell-Chloe-03")).toHaveAccessibleName(/From WEEKEND · OFF \+20$/);
+    // The group row itself and uncovered person cells carry no marker.
+    expect(screen.queryByTestId("group-source-Seniors-02")).toBeNull();
+    expect(screen.queryByTestId("group-source-Aisha-01")).toBeNull();
+    expect(screen.getByText("From a group row or date-group column")).toBeInTheDocument();
+  });
+
+  it("quick paint: LEAVE on a group cell asks first; Cancel changes nothing", async () => {
+    await seed(GROUP_SEED);
+    renderWithConfirm();
+    quickPaintLeave();
+
+    fireEvent.pointerDown(screen.getByTestId("cell-Seniors-01"));
+    fireEvent.mouseUp(window);
+    const dialog = await screen.findByTestId("confirm-dialog");
+    expect(dialog).toHaveTextContent("Pin paid leave for 2 people on 1 day (2 person-days)?");
+
+    fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("confirm-dialog")).toBeNull());
+    expect(await leaveCells()).toEqual([]);
+  });
+
+  it("quick paint: a drag starting on a group cell asks ONCE and applies the whole gesture", async () => {
+    await seed(GROUP_SEED);
+    renderWithConfirm();
+    quickPaintLeave();
+
+    fireEvent.pointerDown(screen.getByTestId("cell-Seniors-02"));
+    fireEvent.pointerEnter(screen.getByTestId("cell-Aisha-02"));
+    fireEvent.pointerEnter(screen.getByTestId("cell-Chloe-03"));
+    fireEvent.pointerEnter(screen.getByTestId("cell-Seniors-WEEKEND"));
+    fireEvent.mouseUp(window);
+
+    // People {Aisha, Chloe}; days {02, 03}; person-days {A02, C02, C03, A03}.
+    expect(await screen.findAllByTestId("confirm-dialog")).toHaveLength(1);
+    expect(screen.getByTestId("confirm-dialog")).toHaveTextContent(
+      "Pin paid leave for 2 people on 2 days (4 person-days)?",
+    );
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    await waitFor(async () =>
+      expect(await leaveCells()).toEqual(["Aisha@02", "Chloe@03", "Seniors@02", "Seniors@WEEKEND"]),
+    );
+  });
+
+  it("quick paint: a person-only LEAVE drag commits without asking", async () => {
+    await seed(GROUP_SEED);
+    renderWithConfirm();
+    quickPaintLeave();
+
+    fireEvent.pointerDown(screen.getByTestId("cell-Aisha-01"));
+    fireEvent.pointerEnter(screen.getByTestId("cell-Chloe-01"));
+    fireEvent.mouseUp(window);
+
+    expect(await leaveCells()).toEqual(["Aisha@01", "Chloe@01"]);
+    expect(screen.queryByTestId("confirm-dialog")).toBeNull();
+  });
+
+  it("Edit cell: saving LEAVE on a date-group column asks first; Cancel writes nothing", async () => {
+    await seed(GROUP_SEED);
+    renderWithConfirm();
+
+    const saveLeave = () => {
+      fireEvent.click(screen.getByTestId("cell-Chloe-WEEKDAY"));
+      fireEvent.click(screen.getByTestId("cell-editor-tab-leave"));
+      fireEvent.click(screen.getByTestId("cell-editor-save"));
+    };
+
+    saveLeave();
+    expect(await screen.findByTestId("confirm-dialog")).toHaveTextContent(
+      "Pin paid leave for 1 person on 2 days (2 person-days)?",
+    );
+    fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("confirm-dialog")).toBeNull());
+    expect(await leaveCells()).toEqual([]);
+
+    saveLeave();
+    await screen.findByTestId("confirm-dialog");
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    await waitFor(async () => expect(await leaveCells()).toEqual(["Chloe@WEEKDAY"]));
   });
 });
