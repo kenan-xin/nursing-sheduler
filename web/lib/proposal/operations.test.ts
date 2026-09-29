@@ -2267,9 +2267,9 @@ describe("add_pairing_rule / edit_pairing_rule", () => {
     expect(result.next.cardsByKind.affinities.at(-1)).toEqual({
       uid: expect.any(String),
       description: "Keep Ana and Ben apart on nights",
-      people1: [["ana"]],
-      people2: [["ben"]],
-      shiftTypes: [["Night"]],
+      people1: ["ana"],
+      people2: ["ben"],
+      shiftTypes: ["Night"],
       date: ["ALL"],
       weight: Number.NEGATIVE_INFINITY,
     });
@@ -2344,7 +2344,7 @@ describe("add_pairing_rule / edit_pairing_rule", () => {
   it("edit refuses a card the form cannot open, and an unknown rule", () => {
     const state = pairingWardScenario();
     state.cardsByKind.affinities = [
-      { ...state.cardsByKind.affinities[0], people1: [["ana"], ["cai"]] },
+      { ...state.cardsByKind.affinities[0], people1: [["ana", "cai"]] },
     ];
     const multi = applyAssistantCommand(state, edit({ weight: "-5" }));
     expect(multi.ok).toBe(false);

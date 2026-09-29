@@ -1257,7 +1257,7 @@ describe("pairing and supervision rules in the Preview", () => {
     expect(pairing).toMatchObject({
       scope: "shift-affinities",
       after:
-        "On · “Keep Ana and Cai apart on nights” · ana with cai on Night, every date: never together",
+        "On · “Keep Ana and Cai apart on nights” · ana with cai on the same shift on the same day (Night), every date: never together",
     });
     expect(supervision).toMatchObject({
       scope: "shift-type-coverings",
@@ -1267,9 +1267,9 @@ describe("pairing and supervision rules in the Preview", () => {
     expect(edited).toMatchObject({
       kind: "changed",
       before:
-        "On · “Ana and Ben apart on nights” · ana with ben on Night, every date: apart where possible (weight -10)",
+        "On · “Ana and Ben apart on nights” · ana with ben on the same shift on the same day (Night), every date: apart where possible (weight -10)",
       after:
-        "On · “Ana and Ben together on weekends” · ana with ben on Working shifts, weekends: together where possible (weight 5)",
+        "On · “Ana and Ben together on weekends” · ana with ben on the same shift on the same day (Working shifts), weekends: together where possible (weight 5)",
     });
     expect(diff.cascade).toEqual([]);
 
