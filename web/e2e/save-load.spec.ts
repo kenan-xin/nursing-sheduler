@@ -157,7 +157,7 @@ test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
     await expect(badge).toContainText(/saved/i);
   });
 
-  test("Download on a valid scenario writes a scenario.yaml file and marks the backup current", async ({
+  test("Download on a valid scenario writes a dated YAML file and marks the backup current", async ({
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
@@ -175,7 +175,7 @@ test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
       page.waitForEvent("download"),
       page.getByTestId("scenario-download-button").click(),
     ]);
-    expect(download.suggestedFilename()).toBe("scenario.yaml");
+    expect(download.suggestedFilename()).toMatch(/^nurse-scheduling-\d{4}-\d{2}-\d{2}\.yaml$/);
 
     // Download is the ONLY path that records a backup / marks it current (unblocks qq0.22).
     expect(await backupStatus(page)).toBe("current");
@@ -201,7 +201,7 @@ test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
     expect(await backupStatus(page)).toBe("stale");
   });
 
-  test("an incomplete draft still backs up (DL12 §2): Download writes scenario.yaml and marks the backup current", async ({
+  test("an incomplete draft still backs up (DL12 §2): Download writes a dated YAML file and marks the backup current", async ({
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
@@ -223,7 +223,7 @@ test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
       page.waitForEvent("download"),
       page.getByTestId("scenario-download-button").click(),
     ]);
-    expect(download.suggestedFilename()).toBe("scenario.yaml");
+    expect(download.suggestedFilename()).toMatch(/^nurse-scheduling-\d{4}-\d{2}-\d{2}\.yaml$/);
     // A successful plain Workspace Download is the one path that records a backup.
     expect(await backupStatus(page)).toBe("current");
   });
@@ -367,7 +367,7 @@ test.describe("T08e — Workspace-backup freshness indicator", () => {
       page.waitForEvent("download"),
       page.getByTestId("scenario-download-button").click(),
     ]);
-    expect(download.suggestedFilename()).toBe("scenario.yaml");
+    expect(download.suggestedFilename()).toMatch(/^nurse-scheduling-\d{4}-\d{2}-\d{2}\.yaml$/);
     await expect(badge).toHaveAttribute("data-status", "current");
     await expect(badge).toContainText(/backup current/i);
 

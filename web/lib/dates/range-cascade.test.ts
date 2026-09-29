@@ -213,7 +213,7 @@ describe("applyRangeChange range cascade (FR-DC-41 / AC-DC-18)", () => {
   it("does not import when the range is outside the supported window", () => {
     const next = applyRangeChange(
       seeded(),
-      { start: "2020-01-01", end: "2020-01-31" },
+      { start: "2019-01-01", end: "2019-01-31" },
       {
         importSingaporeHolidays: true,
       },

@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from pathlib import Path
+
 import pytest
 
 from nurse_scheduling import scheduler
@@ -24,6 +26,7 @@ from nurse_scheduling.loader import load_data
 from nurse_scheduling.server.canonical import dump_canonical_strict_yaml
 from nurse_scheduling.server.scheduling_errors import SchedulingContentError
 from nurse_scheduling.server.scheduling_input import (
+    MAX_MODEL_SIZE,
     MalformedInputError,
     canonicalize_submission,
     parse_solver,
@@ -840,3 +843,55 @@ def test_workspace_disabled_override_is_not_checked():
         extra="    enabled: false\n    date: [2025-01-01]\n    requiredNumPeopleOverrides: [[2025-01-02, 1]]"
     )
     canonicalize_submission(document.encode())
+
+
+# --- Bug hunt CR1 (bead 99db): admission hardening ------------------------------
+
+
+def _sized_ward(people: int, end_date: str, preferences: str = "") -> bytes:
+    ids = "\n".join(f"    - id: p{i}" for i in range(people))
+    return (
+        f"apiVersion: alpha\ndates:\n  range:\n    startDate: 2023-01-01\n    endDate: {end_date}\n"
+        f"people:\n  items:\n{ids}\nshiftTypes:\n  items:\n    - id: D\n    - id: E\n    - id: N\n"
+        "preferences:\n  - type: at most one shift per day\n  - type: shift type requirement\n"
+        f"    shiftType: [D, E, N]\n    requiredNumPeople: 2\n{preferences}"
+    ).encode()
+
+
+def test_model_size_guard_refuses_oversized_scenarios_and_admits_real_wards():
+    # D-01: 300 people x 3653 days x 3 shift types from 4.7 KB of YAML grew the solver past 8 GiB.
+    error = _content_error(_sized_ward(300, "2032-12-31").decode())
+    assert error.error_code == "invalid_scheduling_data"
+    assert "3,287,700" in error.message and f"{MAX_MODEL_SIZE:,}" in error.message
+    # A pairing rule listing 50 people on each side is 50 x 50 x 31 x 3 combinations (2.9 GiB measured).
+    ids = ", ".join(f"p{i}" for i in range(50))
+    pairing = f"  - type: shift affinity\n    date: ALL\n    people1: [{ids}]\n    people2: [{ids}]\n"
+    pairing += "    shiftTypes: [D, E, N]\n    weight: -1\n"
+    error = _content_error(_sized_ward(50, "2023-01-31", pairing).decode())
+    assert "237,150" in error.message
+    # The 87-person real ward (87 x 30 x 11 = 28,710) is admitted.
+    real = Path(__file__).parent / "testcases" / "real" / "large-ward-with-87-people-2025-11.yaml"
+    canonicalize_submission(real.read_bytes())
+
+
+@pytest.mark.parametrize("document", [b"1: foo\n", b"null: 1\n", b"[a]: 1\n"])
+def test_non_string_top_level_key_is_malformed_not_a_server_error(document):
+    # D-04: NurseSchedulingData(**parsed) raised TypeError (HTTP 500) for these.
+    with pytest.raises(MalformedInputError, match="keys must be text"):
+        canonicalize_submission(document)
+
+
+def test_head_count_above_the_bound_is_a_located_422():
+    # D-05: requiredNumPeople 1e30 used to pass admission and crash OR-Tools.
+    document = LEGACY_EQUIVALENT.replace("requiredNumPeople: 1", "requiredNumPeople: 1000000000000000000000000000000")
+    error = _content_error(document)
+    assert error.error_code == "invalid_scheduling_data"
+    assert ["preferences", 1, "requiredNumPeople"] in [issue.path for issue in error.issues]
+
+
+def test_required_above_preferred_is_refused():
+    # C1: required 3 > preferred 2 was a silent INFEASIBLE.
+    document = LEGACY_EQUIVALENT.replace("requiredNumPeople: 1", "requiredNumPeople: 3\n    preferredNumPeople: 2")
+    error = _content_error(document)
+    assert error.error_code == "invalid_scheduling_data"
+    assert "requiredNumPeople (3) must not exceed preferredNumPeople (2)" in " ".join(i.message for i in error.issues)

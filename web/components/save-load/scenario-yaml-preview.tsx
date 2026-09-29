@@ -96,7 +96,9 @@ export function ScenarioYamlPreview({
               "focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30",
             )}
           />
-          {issues ? <ScenarioIssuesList issues={issues} /> : null}
+          {issues ? (
+            <ScenarioIssuesList issues={issues} action="these changes can be applied" />
+          ) : null}
           <div className="flex flex-wrap gap-2.5">
             <Button type="button" onClick={onApply} data-testid="yaml-apply-button">
               <FaCheck aria-hidden />

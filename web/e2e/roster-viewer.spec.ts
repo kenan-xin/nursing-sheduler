@@ -1527,7 +1527,7 @@ test.describe("F5 roster documents — real downloads and real imports", () => {
 
     const error = page.getByTestId("roster-action-error");
     await expect(error).toBeVisible();
-    await expect(error).toContainText(/edited workbook could not be exported/i);
+    await expect(error).toContainText(/Excel file could not be made/i);
     expect(downloaded, "a failed patch must not produce a download").toBe(false);
 
     // The roster and its edit survive the failed export — nothing was lost.

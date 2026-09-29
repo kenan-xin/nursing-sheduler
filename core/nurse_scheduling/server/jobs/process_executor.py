@@ -35,6 +35,7 @@
 
 import logging
 import multiprocessing
+import signal
 import time
 import traceback
 from collections.abc import Callable
@@ -47,9 +48,24 @@ from . import process_tree
 from .models import Job, JobFailure
 from .runner import EventCallback, OptimizationRunner, RunOutput
 
+try:
+    import resource
+except ImportError:  # Windows has no rlimits; the child runs uncapped there.
+    resource = None
+
 server_logger = logging.getLogger("nurse_scheduling.server")
 PROCESS_POLL_SECONDS = 1.0
 """Maximum delay for progress, controls, aborts, and watchdog checks."""
+SCENARIO_TOO_LARGE = JobFailure(
+    code="scenario_too_large",
+    message=(
+        "This scenario is too large for this server: the solver ran out of memory. "
+        "Use fewer people, days, shift types or pairing combinations."
+    ),
+)
+"""Failure for a child that ran out of memory (bead 99db)."""
+# A C++ allocation failure aborts; the kernel OOM killer sends SIGKILL.
+OUT_OF_MEMORY_EXIT_CODES = frozenset(-getattr(signal, name) for name in ("SIGKILL", "SIGABRT") if hasattr(signal, name))
 
 
 class ProcessControl(str, Enum):
@@ -99,12 +115,17 @@ def _run_child(
     finish_now_event: Any,
     finish_now_enabled: bool,
     expected_parent_pid: int,
+    memory_limit_bytes: int = 0,
 ) -> None:
     """Execute the runner and send events or its terminal message to the parent."""
     # Isolate the child first, then wait until the supervisor has installed its
     # guard. This prevents a PuLP solver descendant from starting during the
     # interval where abrupt supervisor death could leave it unprotected.
     process_tree.prepare_optimization_child(expected_parent_pid)
+    if memory_limit_bytes and resource is not None:
+        # RLIMIT_DATA, not RLIMIT_AS: CP-SAT reserves address space per worker thread, so an AS cap
+        # sized for a 2-core host aborts even a tiny scenario on a 32-core one (bead 99db).
+        resource.setrlimit(resource.RLIMIT_DATA, (memory_limit_bytes, memory_limit_bytes))
     try:
         start_connection.recv()
     except (EOFError, OSError):
@@ -145,6 +166,7 @@ def run_optimization_process(
     control: ControlCallback,
     hard_timeout_seconds: float,
     finish_now_enabled: bool,
+    memory_limit_bytes: int = 0,
 ) -> ProcessResult:
     """Run one directly supervised child until it returns or must be stopped.
 
@@ -175,6 +197,7 @@ def run_optimization_process(
             finish_now_event,
             finish_now_enabled,
             multiprocessing.current_process().pid,
+            memory_limit_bytes,
         ),
         name=f"optimization-job-{job.id}",
     )
@@ -215,6 +238,9 @@ def run_optimization_process(
         try:
             message = receive_connection.recv()
         except EOFError:
+            process.join(PROCESS_POLL_SECONDS)
+            if process.exitcode in OUT_OF_MEMORY_EXIT_CODES:
+                return ProcessResult(status=ProcessStatus.FAILED, failure=SCENARIO_TOO_LARGE)
             raise ChildOptimizationError(
                 "ChildProcessCommunicationError",
                 (
@@ -243,6 +269,8 @@ def run_optimization_process(
                 exception_type,
                 child_traceback,
             )
+            if exception_type == "MemoryError":
+                return ProcessResult(status=ProcessStatus.FAILED, failure=SCENARIO_TOO_LARGE)
             raise ChildOptimizationError(exception_type, error_message, child_traceback)
         raise RuntimeError(f"Unknown optimization child message: {message_type}")
 
@@ -324,6 +352,8 @@ def run_optimization_process(
             if process.sentinel in ready:
                 if receive_connection.poll():
                     continue
+                if process.exitcode in OUT_OF_MEMORY_EXIT_CODES:
+                    return ProcessResult(status=ProcessStatus.FAILED, failure=SCENARIO_TOO_LARGE)
                 raise ChildOptimizationError(
                     "ChildProcessExit",
                     f"Optimization process exited with code {process.exitcode}",

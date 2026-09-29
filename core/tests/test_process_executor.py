@@ -877,6 +877,35 @@ def test_returned_invalid_model_failure_becomes_a_structured_failed_result():
     )
 
 
+class MemoryHungryRunner:
+    def run(self, job, input_bytes, *, event_callback, should_stop):
+        return bytearray(2 * 1024 * 1024 * 1024)
+
+
+class SigkilledRunner:
+    def run(self, job, input_bytes, *, event_callback, should_stop):
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="RLIMIT_DATA and the OOM-kill signal are Linux behaviour")
+@pytest.mark.parametrize("runner", [MemoryHungryRunner(), SigkilledRunner()], ids=["memory_error", "sigkill"])
+def test_child_out_of_memory_fails_as_scenario_too_large(runner):
+    # D-01: the capped child's MemoryError, or a kernel OOM kill, is a plain result, not a crash.
+    result = run_optimization_process(
+        runner,
+        _control_job("job_out_of_memory"),
+        b"apiVersion: alpha\n",
+        event_callback=lambda *_args: None,
+        control=lambda: None,
+        hard_timeout_seconds=61,
+        finish_now_enabled=False,
+        memory_limit_bytes=512 * 1024 * 1024,
+    )
+    assert result.status is ProcessStatus.FAILED
+    assert result.failure.code == "scenario_too_large"
+    assert "too large for this server" in result.failure.message
+
+
 def test_unexpected_child_exception_raises_child_optimization_error():
     with pytest.raises(ChildOptimizationError, match="solver exploded"):
         run_optimization_process(
