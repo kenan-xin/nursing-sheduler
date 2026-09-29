@@ -35,11 +35,19 @@ import { FaTriangleExclamation } from "@/components/icons";
 export interface ClearConfirmDialogProps {
   open: boolean;
   text: string;
+  /** The destructive action's label; defaults to `Clear`. */
+  confirmLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-export function ClearConfirmDialog({ open, text, onConfirm, onCancel }: ClearConfirmDialogProps) {
+export function ClearConfirmDialog({
+  open,
+  text,
+  confirmLabel = "Clear",
+  onConfirm,
+  onCancel,
+}: ClearConfirmDialogProps) {
   return (
     <AlertDialog
       open={open}
@@ -70,7 +78,7 @@ export function ClearConfirmDialog({ open, text, onConfirm, onCancel }: ClearCon
             data-testid="clear-confirm-confirm"
             onClick={onConfirm}
           >
-            Clear
+            {confirmLabel}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

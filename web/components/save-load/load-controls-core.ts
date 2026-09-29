@@ -79,13 +79,16 @@ export function versionMismatchCopy(
 
 /** Title/lead for the replacement half of the combined load confirmation. */
 export const REPLACEMENT_CONFIRM_TITLE = "Replace your current workspace?";
+// A Load mints a new scenario identity, so Undo cannot reach back across it
+// (`lib/store/lifecycle.ts`). The copy must not promise otherwise (C-05).
 export const REPLACEMENT_CONFIRM_BODY =
-  "Loading this file replaces your current workspace — your current setup will be " +
-  "overwritten. You can undo the load afterwards to restore it.";
+  "This replaces your current schedule and cannot be undone. Download a copy first.";
 
 export interface LoadConfirmCopy {
   title: string;
   description: string;
+  /** True when the load overwrites a non-empty workspace — render the destructive style. */
+  destructive?: boolean;
   /** The FR-SL-19 mono version box lines, when the version case applies (see `VersionMismatchCopy.detail`). */
   detail?: string;
 }
@@ -111,10 +114,15 @@ export function loadConfirmCopy(
       title: REPLACEMENT_CONFIRM_TITLE,
       description: `${REPLACEMENT_CONFIRM_BODY}\n\n${version.title}\n\n${version.description}`,
       detail: version.detail,
+      destructive: true,
     };
   }
   if (version) return version;
-  return { title: REPLACEMENT_CONFIRM_TITLE, description: REPLACEMENT_CONFIRM_BODY };
+  return {
+    title: REPLACEMENT_CONFIRM_TITLE,
+    description: REPLACEMENT_CONFIRM_BODY,
+    destructive: true,
+  };
 }
 
 // ---------------------------------------------------------------------------

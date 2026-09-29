@@ -15,6 +15,7 @@ import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import {
   loadScenario,
   pickScenario,
+  scenarioCommands,
   selectBackupStatus,
   useAuthorityStore,
   useScenarioStore,
@@ -172,6 +173,9 @@ describe("SaveLoadWorkspace — Upload flow", () => {
 
     await screen.findByTestId("confirm-dialog-confirm");
     expect(screen.getByText(/replace your current workspace/i)).toBeInTheDocument();
+    // C-05: truthful copy — a Load cannot be undone.
+    expect(screen.getByText(/cannot be undone\. Download a copy first\./)).toBeInTheDocument();
+    expect(screen.queryByText(/undo the load/i)).not.toBeInTheDocument();
 
     // Continue commits the replacement, as another atomic switch.
     fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
@@ -321,23 +325,28 @@ describe("SaveLoadWorkspace — Edit YAML flow", async () => {
     expect(screen.queryByTestId("scenario-yaml-content")).not.toBeInTheDocument();
   });
 
-  it("Apply on a valid edit replaces state through the same staged load pipeline as Upload", async () => {
+  it("Apply on a valid edit is ONE undoable edit on the same scenario identity (C-06)", async () => {
     render(<SaveLoadWorkspace />);
+    const identity = useAuthorityStore.getState().scenarioId;
+    const before = await stateSnapshot();
 
     fireEvent.click(screen.getByTestId("scenario-edit-yaml-button"));
-    editYaml(serializeScenario(makeValidUiState()));
+    const edited = (await currentYaml()).replace("Alice", "Alicia");
+    editYaml(edited);
     fireEvent.click(screen.getByTestId("yaml-apply-button"));
 
-    // Apply into the seeded (non-empty) workspace stages the same combined
-    // replacement confirmation as Upload rather than committing directly (T17r P0).
-    fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
-
-    await waitFor(async () => expect((await currentState()).rangeStart).toBe("2026-05-14"));
-    expect((await currentState()).staff.map((p) => p.id)).toEqual(["Alice", "Bob"]);
-    // An applied edit goes through the same atomic switch as Upload: a fresh
-    // identity with its own empty history, and no fresh local backup (T17r P0).
-    expect(await undoDepth()).toBe(0);
-    expect((await currentState()).backupFingerprint).toBeNull();
+    // No replacement confirm: an undoable edit overwrites nothing for good.
+    await waitFor(async () =>
+      expect((await currentState()).staff.map((p) => p.id)).toContain("Alicia"),
+    );
+    expect(screen.queryByTestId("confirm-dialog-confirm")).not.toBeInTheDocument();
+    // Same identity (so the assistant thread stays), one history step, and Undo
+    // restores the pre-edit document.
+    expect(useAuthorityStore.getState().scenarioId).toBe(identity);
+    expect(await undoDepth()).toBe(1);
+    await waitFor(() => expect(useAuthorityStore.getState().canUndo).toBe(true));
+    await scenarioCommands.undo();
+    expect(await stateSnapshot()).toBe(before);
 
     // Editing mode closes back to the read-only preview once the replace commits.
     await waitFor(() =>

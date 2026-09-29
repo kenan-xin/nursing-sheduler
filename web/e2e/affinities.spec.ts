@@ -127,7 +127,7 @@ test.describe.serial("T12 shift affinities editor (M1 clone)", () => {
     });
   });
 
-  test("create via transfer panes + WEEKEND date chip + weight; nested shape; one undo entry", async ({
+  test("create via transfer panes + WEEKEND date chip + weight; flat v1 shape; one undo entry", async ({
     page,
   }) => {
     await gotoReady(page);
@@ -159,9 +159,9 @@ test.describe.serial("T12 shift affinities editor (M1 clone)", () => {
     expect(cards).toHaveLength(1);
     expect(cards[0].description).toBe("Keep Chloe and Aisha together");
     // Nested one-element-wrap shape — parity with Coverings' preceptors/preceptees.
-    expect(cards[0].people1).toEqual([["Chloe"]]);
-    expect(cards[0].people2).toEqual([["Aisha"]]);
-    expect(cards[0].shiftTypes).toEqual([["Day"]]);
+    expect(cards[0].people1).toEqual(["Chloe"]);
+    expect(cards[0].people2).toEqual(["Aisha"]);
+    expect(cards[0].shiftTypes).toEqual(["Day"]);
     // `date` is FLAT (never nested) — Dates is required here.
     expect(cards[0].date).toEqual(["WEEKEND"]);
     expect(cards[0].weight).toBe(30);
@@ -549,7 +549,7 @@ test.describe.serial("T12 Affinities — numeric/string identity (mirrors Coveri
 
     const cards = await readAffinities(page);
     // Both refs coexist with their original types (numeric 1, string "1").
-    expect(cards[0].people1).toEqual([[1, "1"]]);
+    expect(cards[0].people1).toEqual([1, "1"]);
   });
 });
 
@@ -693,21 +693,21 @@ test.describe.serial("T12 Affinities — empty-state gate hides while the form i
 });
 
 test.describe
-  .serial("T12 Affinities — advanced multi-term card read-only + lossless (FR-PR-55a-style)", () => {
+  .serial("T12 Affinities — advanced grouped card read-only + lossless (FR-PR-55a-style)", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
       (window as unknown as { __NS_ENABLE_TEST_BRIDGE?: boolean }).__NS_ENABLE_TEST_BRIDGE = true;
     });
   });
 
-  test("a multi-term affinity renders read-only and survives edit-attempt/duplicate/move/disable byte-for-byte", async ({
+  test("a grouped affinity renders read-only and survives edit-attempt/duplicate/move/disable byte-for-byte", async ({
     page,
   }) => {
     await gotoReady(page);
     await seed(page, BASE_SEED);
-    // `people1: [["Chloe"], ["Aisha"]]` is TWO separate C3 affinity terms — a
-    // shape the single-term form cannot author. It must be preserved verbatim;
-    // routing it through flatten+build would collapse it to `[["Chloe","Aisha"]]`.
+    // `people1: [["Chloe", "Aisha"]]` is ONE grouped term ("any of Chloe/Aisha") —
+    // the pre-rqfx v2 form shape. It must be preserved verbatim; flatten+build
+    // would split it into per-person terms (`["Chloe", "Aisha"]`), changing meaning.
     await seed(page, {
       cardsByKind: {
         requirements: [],
@@ -718,7 +718,7 @@ test.describe
           {
             uid: "aff-adv",
             description: "Multi-term rule",
-            people1: [["Chloe"], ["Aisha"]],
+            people1: [["Chloe", "Aisha"]],
             people2: [["Daniel"]],
             shiftTypes: [["Day"]],
             date: ["ALL"],
@@ -750,28 +750,28 @@ test.describe
     await expect(page.getByTestId("card-editor-form")).toHaveCount(0);
 
     // Duplicate the advanced card → one tracked mutation; the clone preserves the
-    // two-term shape EXACTLY (the assertion that catches a silent collapse).
+    // grouped shape EXACTLY (the assertion that catches a silent collapse).
     const before = await pastCount(page);
     await page.getByTestId("affinity-dup-0").click();
     expect((await pastCount(page)) - before).toBe(1);
     let cards = await readAffinities(page);
     expect(cards).toHaveLength(3);
     // Source (index 0) unchanged; clone inserted after it (index 1).
-    expect(cards[0].people1).toEqual([["Chloe"], ["Aisha"]]);
-    expect(cards[1].people1).toEqual([["Chloe"], ["Aisha"]]);
+    expect(cards[0].people1).toEqual([["Chloe", "Aisha"]]);
+    expect(cards[1].people1).toEqual([["Chloe", "Aisha"]]);
     expect(cards[1].description).toBe("Multi-term rule copy");
 
     // Disable the advanced source → marker on, selectors untouched.
     await page.getByTestId("affinity-disable-0").click();
     cards = await readAffinities(page);
     expect(cards[0].disabled).toBe(true);
-    expect(cards[0].people1).toEqual([["Chloe"], ["Aisha"]]);
+    expect(cards[0].people1).toEqual([["Chloe", "Aisha"]]);
 
     // Move the advanced source down → order changes, shape still byte-for-byte.
     await page.getByTestId("affinity-down-0").click();
     cards = await readAffinities(page);
     const moved = cards.find((c) => c.uid === "aff-adv")!;
-    expect(moved.people1).toEqual([["Chloe"], ["Aisha"]]);
+    expect(moved.people1).toEqual([["Chloe", "Aisha"]]);
     expect(moved.people2).toEqual([["Daniel"]]);
     expect(moved.shiftTypes).toEqual([["Day"]]);
   });
