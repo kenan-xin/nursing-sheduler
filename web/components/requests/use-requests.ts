@@ -397,7 +397,7 @@ export function useRequests({
       let cells: UiRequestCell[] = [];
       if (result.kind === "leave") cells = [{ kind: "leave", person, date, uid: uidFor("leave") }];
       else if (result.kind === "off")
-        cells = [{ kind: "off", person, date, weight: result.weight ?? 0, uid: uidFor("off") }];
+        cells = [{ kind: "off", person, date, weight: result.weight, uid: uidFor("off") }];
       else if (result.kind === "requests") {
         // Empty prefs is an erase (parity note): `cells` stays `[]`.
         cells = result.prefs.map((p) => ({

@@ -875,13 +875,19 @@ describe("leave and request arms", () => {
   });
 
   it("replaces leave with a day-off request, as painting OFF does", () => {
-    const result = applyAssistantCommand(octoberWard(), off("Ana", "2026-10-14", "2026-10-14", 0));
+    const result = applyAssistantCommand(octoberWard(), off("Ana", "2026-10-14", "2026-10-14", 5));
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(at(result.next, "Ana", "14")).toEqual([
-        { kind: "off", person: "Ana", date: "14", weight: 0 },
+        { kind: "off", person: "Ana", date: "14", weight: 5 },
       ]);
     }
+  });
+
+  it("refuses a day off at weight 0, which would have no effect", () => {
+    const result = applyAssistantCommand(octoberWard(), off("Ana", "2026-10-14", "2026-10-14", 0));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("invalid_value");
   });
 
   it("accepts a staff group row, a shift group and ALL", () => {

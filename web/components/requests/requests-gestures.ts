@@ -23,7 +23,8 @@ export type PaintCellIntent =
  * coordinate transaction (mirrors the prototype's `_computeCell`):
  *   - no targets selected → erase the coordinate.
  *   - `LEAVE` selected (alone or with anything else) → LEAVE wins, day-state leave.
- *   - selection is exactly `[OFF]` → day-state off at `weight`.
+ *   - selection is exactly `[OFF]` → day-state off at `weight` (at `0` the fold
+ *     removes an existing OFF instead, `lib/store/paint-fold.ts`).
  *   - otherwise → additive request deltas for every selected id that is NOT
  *     OFF/LEAVE (OFF mixed with worked targets is dropped — only a *sole* OFF
  *     selection is a day-state, matching the old app's `_computeCell`).

@@ -39,6 +39,7 @@ describe("computeQuickPaintCellIntent", () => {
       mode: "day-state",
       dayState: { kind: "off", weight: 5 },
     });
+    // At weight 0 the fold removes an existing OFF instead (paint-fold.test.ts).
     expect(computeQuickPaintCellIntent(["OFF"], 0)).toEqual({
       mode: "day-state",
       dayState: { kind: "off", weight: 0 },

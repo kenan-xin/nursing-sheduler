@@ -174,7 +174,7 @@ describe("leave and request arms", () => {
         personId: "Ana",
         startDate: "2026-10-14",
         endDate: "2026-10-14",
-        weight: 0,
+        weight: 5,
       },
     ]);
     expect(assumptions.map((a) => [a.type, a.person, a.date])).toEqual([

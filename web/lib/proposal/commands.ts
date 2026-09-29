@@ -859,8 +859,8 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     startDate: startDateSchema,
     endDate: endDateSchema,
     weight: requestWeightSchema.describe(
-      "How much they want those days off: a positive number wants them (e.g. 5), 0 is a plain " +
-        'day-off request, a negative number would rather not be off. "must" makes it a hard ' +
+      "How much they want those days off: a positive number wants them (e.g. 5), a negative " +
+        'number would rather not be off; 0 is refused. "must" makes it a hard ' +
         "rule; use it only when the user says it is not negotiable. Replaces anything already " +
         "on those dates, including leave.",
     ),

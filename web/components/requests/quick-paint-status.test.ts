@@ -109,5 +109,12 @@ describe("quickPaintStatus (FR-SR-29)", () => {
         text: "Drag over cells to apply OFF with weight +5.",
       });
     });
+
+    it("removal: a sole OFF at weight 0 removes OFF (old app wording)", () => {
+      expect(quickPaintStatus(["OFF"], "0")).toEqual({
+        tone: "removal",
+        text: "Drag over cells to remove OFF. Empty cells without it will not change.",
+      });
+    });
   });
 });

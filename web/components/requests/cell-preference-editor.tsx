@@ -51,7 +51,7 @@ export interface WeightTarget {
 
 export type CellEditorResult =
   | { kind: "leave" }
-  | { kind: "off"; weight?: number }
+  | { kind: "off"; weight: number }
   | { kind: "requests"; prefs: { shiftType: string; weight: number }[] }
   | { kind: "clear" };
 
@@ -130,7 +130,8 @@ export function CellPreferenceEditor({
         setError(WEIGHT_INVALID_MESSAGE);
         return;
       }
-      onSave({ kind: "off", weight: draft.offWeight !== 0 ? draft.offWeight : undefined });
+      // Weight 0 removes the OFF, as in the old app — never store a no-effect OFF.
+      onSave(draft.offWeight === 0 ? { kind: "clear" } : { kind: "off", weight: draft.offWeight });
       onClose();
       return;
     }

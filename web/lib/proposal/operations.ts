@@ -1765,6 +1765,17 @@ function paintIntent(
         intent: { mode: "day-state", dayState: { kind: "leave" } },
       };
     case "set_off_request":
+      // Weight 0 removes an OFF (the paint fold), so it never records a day off.
+      if (command.weight === 0) {
+        return {
+          ok: false,
+          refusal: reject(
+            index,
+            "invalid_value",
+            "A day off at weight 0 has no effect. Use a positive weight, or clear_requests to remove a day off.",
+          ),
+        };
+      }
       return {
         ok: true,
         intent: {

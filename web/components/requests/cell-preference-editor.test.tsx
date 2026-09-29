@@ -95,11 +95,11 @@ describe("CellPreferenceEditor — save (strict XOR, FR-SR-17/21-23)", () => {
     expect(onSave).toHaveBeenCalledWith({ kind: "off", weight: 3 });
   });
 
-  it("Save on the Requests off tab with weight 0 omits the weight field", () => {
+  it("Save on the Requests off tab with weight 0 clears the cell (weight 0 removes OFF)", () => {
     const { onSave } = renderEditor();
     fireEvent.click(screen.getByTestId("cell-editor-tab-off"));
     fireEvent.click(screen.getByTestId("cell-editor-save"));
-    expect(onSave).toHaveBeenCalledWith({ kind: "off", weight: undefined });
+    expect(onSave).toHaveBeenCalledWith({ kind: "clear" });
   });
 
   it("Save on Available builds prefs only for nonzero weights", () => {
