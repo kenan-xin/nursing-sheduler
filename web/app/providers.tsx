@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { ThemeProvider } from "@/components/theme/theme-provider";
+import { useLoadSingaporeHolidays } from "@/lib/query/singapore-holidays";
 
 // App-wide client providers. Wired into the root layout so every client component
 // has a TanStack Query context (T06's BFF hooks depend on it). The QueryClient is
@@ -31,7 +32,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <SingaporeHolidayLoader />
       <ThemeProvider>{children}</ThemeProvider>
     </QueryClientProvider>
   );
+}
+
+/** Loads the live holiday list once per session (bead si4j); renders nothing. */
+function SingaporeHolidayLoader() {
+  useLoadSingaporeHolidays();
+  return null;
 }

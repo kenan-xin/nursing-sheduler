@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Surface } from "@/components/ui/surface";
 import { MonthGrids } from "./month-grids";
 import type { DayCellInfo } from "./month-calendar";
+import { useSingaporeHolidayList } from "@/lib/query/singapore-holidays";
 
 export interface DateScopePickerProps {
   /** The committed roster range (defines the selectable in-range day set). */
@@ -66,6 +67,7 @@ export function DateScopePicker({
     [items],
   );
 
+  useSingaporeHolidayList(); // re-render when the live holiday list arrives
   const inRange = (iso: string) => iso >= range.start && iso <= range.end;
 
   const handleDayClick = (iso: string) => {

@@ -79,8 +79,9 @@ export function targetKeyFor(entry: ProposalDiffEntry): string | null {
   // A cover warning restates the count line above it; the count line is the thing to
   // outline, and the warning has no row of its own to point at.
   if (key.startsWith("cover-note:")) return null;
-  // offrun:<person>|<start>|<end>; the person is already stableStringified and may hold "|".
-  const offrun = /^offrun:(.*)\|[^|]*\|[^|]*$/.exec(key);
+  // offrun:<person>|<start>|<end> (groupleave: likewise, for a staff-group row); the
+  // person is already stableStringified and may hold "|".
+  const offrun = /^(?:offrun|groupleave):(.*)\|[^|]*\|[^|]*$/.exec(key);
   if (offrun) return `person:${offrun[1]}`;
   if (key.startsWith("available:")) return `person:${key.slice("available:".length)}`;
   // binds:<uid>|<person>; a uid never holds "|".

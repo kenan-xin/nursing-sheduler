@@ -10,7 +10,7 @@ import {
 } from "@/lib/store";
 import { withToaster, type ScenarioSeed } from "../../.storybook/harness";
 import { ScenarioFileCard } from "./scenario-file-card";
-import { SCENARIO_DOWNLOAD_FILENAME } from "./scenario-file-export";
+import { scenarioDownloadFilename } from "./scenario-file-export";
 
 // The card clicks a generated <a download>; a window bubble listener cancels the
 // download after React has handled the click.
@@ -68,7 +68,7 @@ export const Download: Story = {
   play: async ({ args, canvas, userEvent }) => {
     const before = selectBackupStatus(useScenarioStore.getState());
     await userEvent.click(canvas.getByTestId("scenario-download-button"));
-    const toast = await screen.findByText(`Downloaded ${SCENARIO_DOWNLOAD_FILENAME}`);
+    const toast = await screen.findByText(`Downloaded ${scenarioDownloadFilename()}`);
     await waitFor(() => expect(toast).toBeVisible());
     // Recorded through the real `recordBackup` command.
     await drainScenarioCommands();

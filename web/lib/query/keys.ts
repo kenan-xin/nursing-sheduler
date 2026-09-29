@@ -12,3 +12,5 @@ export const optimizeKeys = {
 
 // Not under `optimizeKeys.all`: `["optimize", x]` is a job key, and "options" is not a job.
 export const optimizeOptionsKey = ["optimize-options"] as const;
+
+export const singaporeHolidaysKey = ["singapore-holidays"] as const;

@@ -18,14 +18,16 @@ import {
   type DropPosition,
 } from "@/components/card-editor/card-editor-shell";
 import {
-  AFFINITY_GROUPED_MEANING,
-  AFFINITY_SAME_SHIFT,
+  affinityTogetherMeaning,
   isAdvancedAffinityCard,
+  type AffinityGroups,
   summarizeRefs,
 } from "./affinities-model";
 
 interface AffinityCardListProps {
   affinities: AffinityCard[];
+  /** The staff and shift groups, so "Together means" can say when a group is one term. */
+  groups?: AffinityGroups;
   onEdit: (uid: string) => void;
   onDuplicate: (uid: string) => void;
   onDelete: (uid: string) => void;
@@ -37,6 +39,7 @@ interface AffinityCardListProps {
 
 export function AffinityCardList({
   affinities,
+  groups,
   onEdit,
   onDuplicate,
   onDelete,
@@ -93,7 +96,7 @@ export function AffinityCardList({
               { label: "Dates", value: summarizeRefs(card.date) },
               {
                 label: "Together means",
-                value: advanced ? AFFINITY_GROUPED_MEANING : AFFINITY_SAME_SHIFT,
+                value: affinityTogetherMeaning(card, groups),
               },
             ]}
             actions={

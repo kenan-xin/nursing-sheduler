@@ -322,6 +322,32 @@ describe("undo and redo", () => {
     expect(history.redoAvailable).toBe(true);
   });
 
+  it("undo and redo keep a backup recorded after the edit (A-10)", async () => {
+    const { repo } = createHarness();
+    const a = await repo.selectOrSwitchScenario({ tabId: "tab-1", target: { kind: "new" } });
+    const id = a.envelope.scenarioId;
+    const c = await patch(repo, a.owner!, id, a.envelope.documentRevision, {
+      rangeStart: "2026-05-01",
+    });
+    await repo.commit({
+      owner: a.owner!,
+      expectedScenarioId: id,
+      expectedDocumentRevision: c.envelope.documentRevision,
+      command: { type: "record_backup", backupFingerprint: "fp-of-state-A" },
+    });
+    const u = await repo.undo({
+      owner: a.owner!,
+      expectedDocumentRevision: c.envelope.documentRevision,
+    });
+    expect(u.envelope.backupFingerprint).toBe("fp-of-state-A");
+    const r = await repo.redo({
+      owner: a.owner!,
+      expectedDocumentRevision: u.envelope.documentRevision,
+    });
+    expect(r.envelope.scenario.rangeStart).toBe("2026-05-01");
+    expect(r.envelope.backupFingerprint).toBe("fp-of-state-A");
+  });
+
   it("redo reapplies the undone commit", async () => {
     const { repo } = createHarness();
     const a = await repo.selectOrSwitchScenario({ tabId: "tab-1", target: { kind: "new" } });

@@ -19,16 +19,16 @@
 // (undo/redo, external cascade). Nothing commits while the user types (v1 parity):
 // Apply commits the draft as ONE tracked mutation (the range cascade + optional
 // holiday overwrite), Cancel restores the committed values. Before Apply the card
-// warns how many requests and leave days the cascade will remove. The holiday dataset is bundled offline (ENGLISH-ONLY, no network), so the
-// switch is gated only by the supported-window check (spec 02 FR-DC-29/30).
+// warns how many requests and leave days the cascade will remove. The switch is gated by
+// holiday-data coverage (spec 02 FR-DC-29/30; bead si4j): a draft touching a year the
+// loaded list does not cover disables it and says which year has no data.
 
 import { useEffect, useId, useMemo, useState } from "react";
 import {
   getDateIdForRange,
   getHolidaysInRange,
-  getSupportLabel,
   hasCompleteRange,
-  isRangeSupported,
+  holidayCoverageWarning,
   rangeDayCount,
   type DateRange,
 } from "@/lib/dates";
@@ -44,6 +44,7 @@ import { changeKeys } from "@/lib/change-highlight/keys";
 import { useChangeTarget } from "@/lib/change-highlight/store";
 import { DATES_ROSTER_PERIOD_ANCHOR } from "./capability-anchors";
 import { Switch } from "@/components/ui/switch";
+import { useSingaporeHolidayList } from "@/lib/query/singapore-holidays";
 import { rangeSpanLabel } from "./range-span-label";
 
 export interface RosterPeriodCardProps {
@@ -141,12 +142,13 @@ export function RosterPeriodCard({
   // present but out of order. `type="date"` inputs only emit valid ISO or "", so a
   // non-empty pair that isn't `complete` can only be `start > end`.
   const invalid = Boolean(draft.start && draft.end) && draft.start > draft.end;
-  const supported = useMemo(
-    () => Boolean(draft.start && draft.end) && isRangeSupported(draft),
-    [draft],
-  );
+  // Subscribed so the card re-renders when the live holiday list replaces the bundle;
+  // the two reads below are cheap scans of ~100 rows, so they are not memoised.
+  useSingaporeHolidayList();
+  const coverageWarning = complete ? holidayCoverageWarning(draft) : null;
+  const supported = complete && coverageWarning === null;
   const effectiveImport = importHolidays && supported;
-  const holidays = useMemo(() => (complete ? getHolidaysInRange(draft) : []), [draft, complete]);
+  const holidays = complete ? getHolidaysInRange(draft) : [];
   const ids = useMemo(() => dateIdInfo(draft), [draft]);
   const duration = complete ? rangeDayCount(draft) : 0;
   const monthLabel = rangeSpanLabel(draft);
@@ -309,9 +311,9 @@ export function RosterPeriodCard({
           />
         </div>
 
-        {!supported ? (
+        {coverageWarning ? (
           <p className="mt-3 text-meta text-warnink" data-testid="import-unsupported">
-            Available only when the roster range stays within {getSupportLabel()}.
+            {coverageWarning}
           </p>
         ) : effectiveImport ? (
           // A small bordered list, so the heading band it clips is FULL-BLEED and

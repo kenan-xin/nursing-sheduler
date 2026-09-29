@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
+import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
+import { validateScenario } from "@/lib/scenario/serialize";
 import { applyRangeChange, countRangeRemovals } from "./range-cascade";
 
 function seeded(): ScenarioUiState {
@@ -211,12 +213,42 @@ describe("applyRangeChange range cascade (FR-DC-41 / AC-DC-18)", () => {
   it("does not import when the range is outside the supported window", () => {
     const next = applyRangeChange(
       seeded(),
-      { start: "2020-01-01", end: "2020-01-31" },
+      { start: "2019-01-01", end: "2019-01-31" },
       {
         importSingaporeHolidays: true,
       },
     );
     expect(next.dateGroups.map((g) => g.id)).not.toContain("PH");
+  });
+});
+
+describe("applyRangeChange prunes rule-card dates that left the range (A-04)", () => {
+  it("prunes an out-of-range ISO card date and drops a card left with none", () => {
+    const state = createEmptyScenarioUiState("alpha");
+    state.rangeStart = "2026-01-01";
+    state.rangeEnd = "2026-01-31";
+    state.staff = [{ id: "P1" }];
+    state.shifts = [{ id: "D" }];
+    state.cardsByKind.requirements = [
+      { uid: "r1", shiftType: "D", requiredNumPeople: 1, date: ["2026-01-05"], weight: -1 },
+    ];
+    state.cardsByKind.counts = [
+      {
+        uid: "c1",
+        person: "ALL",
+        countDates: ["2026-01-31", "2026-02-01"],
+        countShiftTypes: "D",
+        expression: "x >= T",
+        target: 1,
+        weight: 1,
+      },
+    ];
+
+    const next = applyRangeChange(state, { start: "2026-02-01", end: "2026-02-28" });
+
+    expect(next.cardsByKind.requirements).toEqual([]);
+    expect(next.cardsByKind.counts[0].countDates).toEqual(["2026-02-01"]);
+    expect(validateScenario(toCanonicalScenarioDocument(next)).ok).toBe(true);
   });
 });
 

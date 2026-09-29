@@ -330,6 +330,8 @@ describe("patchFrozenXlsxWithEdits — temporary cover", () => {
     const rows = readSheetRows(provenance!);
     // The "as solved" block and the cover table live on the same sheet.
     expect(rows.find((r) => r[0] === "Solver status (as solved)")?.[1]).toBe("OPTIMAL");
+    // A cover alone is not an edit (C-33).
+    expect(rows.find((r) => r[0] === "Edited since solve")?.[1]).toBe("no");
     expect(rows).toContainEqual(["Temporary cover", null, null, null]);
     expect(rows).toContainEqual(["Name", "Date", "Shift type", "Groups"]);
     expect(rows).toContainEqual(["Haseena (Ward 3)", "2023-08-20", "N", '["Ward 3"]']);

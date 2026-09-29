@@ -9,6 +9,7 @@
     "lint": "oxlint && ast-grep scan --no-ignore hidden",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
+    "refresh:sg-holidays": "node scripts/refresh-sg-holidays.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "capability:generate": "UPDATE_CAPABILITY_REGISTRY=1 vitest run lib/capability/registry.generated",

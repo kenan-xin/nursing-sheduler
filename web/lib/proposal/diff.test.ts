@@ -240,6 +240,41 @@ describe("deriveProposalDiff", () => {
     expect(diff.needsReview).toEqual([]);
   });
 
+  it("states the person-days leave on a staff-group row pins (bb8t)", () => {
+    const before = octoberWard();
+    const commands = [
+      {
+        type: "add_leave" as const,
+        personId: "Seniors",
+        startDate: "2026-10-05",
+        endDate: "2026-10-07",
+      },
+      {
+        type: "add_leave" as const,
+        personId: "Ana",
+        startDate: "2026-10-20",
+        endDate: "2026-10-20",
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(`fixture should apply: ${applied.rejection.message}`);
+
+    const lines = deriveProposalDiff(before, applied.next, commands).direct.filter((entry) =>
+      entry.key.startsWith("groupleave:"),
+    );
+    // Seniors = Ana + Chris; a person row needs no such line.
+    expect(lines).toEqual([
+      {
+        key: 'groupleave:"Seniors"|2026-10-05|2026-10-07',
+        scope: "leave-and-requests",
+        label: "Seniors: paid leave for every member",
+        before: null,
+        after: "Pins paid leave for 2 people on 3 days (6 person-days)",
+        kind: "created",
+      },
+    ]);
+  });
+
   it("reads an imported weight-0 day-off request as a plain ask, not a weighted one", () => {
     const ward = octoberWard();
     const before = {
@@ -1269,7 +1304,7 @@ describe("pairing and supervision rules in the Preview", () => {
       before:
         "On · “Ana and Ben apart on nights” · ana with ben on the same shift on the same day (Night), every date: apart where possible (weight -10)",
       after:
-        "On · “Ana and Ben together on weekends” · ana with ben on the same shift on the same day (Working shifts), weekends: together where possible (weight 5)",
+        "On · “Ana and Ben together on weekends” · ana with ben on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together (Working shifts), weekends: together where possible (weight 5)",
     });
     expect(diff.cascade).toEqual([]);
 

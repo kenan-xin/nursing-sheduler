@@ -66,6 +66,15 @@ function pruneCardFields<T extends object>(
       );
     }
   }
+  // A sequence that loses a whole step is a different rule ("no N then D" would
+  // become "never N"), so empty the pattern and let FR-RI-11 drop the card.
+  if (
+    kind === "successions" &&
+    Array.isArray(next.pattern) &&
+    next.pattern.length < (card as { pattern: unknown[] }).pattern.length
+  ) {
+    next.pattern = [];
+  }
   if (kind === "coverings" && domain === "date" && isEmptyRefField(next.date as RefTree)) {
     delete next.date;
   }
