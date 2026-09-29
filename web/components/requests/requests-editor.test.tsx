@@ -384,6 +384,26 @@ describe("RequestsEditor — History Editor restores focus to its exact origin",
   });
 });
 
+describe("RequestsEditor — clear confirms name what goes (F5)", () => {
+  it("All requests counts shift requests, OFF days and paid-leave pins", async () => {
+    await seed({
+      ...BASE_SEED,
+      reqData: [
+        { kind: "request", person: "Aisha", date: "01", shiftType: "AM", weight: 5 },
+        { kind: "off", person: "Chloe", date: "02", weight: 5 },
+        { kind: "leave", person: "Chloe", date: "03" },
+        { kind: "leave", person: "Aisha", date: "03" },
+      ],
+    });
+    render(<RequestsEditor />);
+    fireEvent.click(screen.getByTestId("requests-toggle-clear"));
+    fireEvent.click(screen.getByTestId("clear-data-button-All requests"));
+    expect(await screen.findByTestId("clear-confirm-dialog")).toHaveTextContent(
+      "Are you sure you want to clear all requests? This removes 1 shift request, 1 OFF day and 2 paid-leave pins.",
+    );
+  });
+});
+
 describe("RequestsEditor — leave copy (FR-SR-48)", async () => {
   it("does not promise a built-in 8h contracted-hours credit", async () => {
     await seed(BASE_SEED);

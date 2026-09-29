@@ -31,6 +31,7 @@ patch_order = [
   "W2-tests-test_public_diagnostic.patch",
   "W5-tests-real-README.patch",
   "W5-AGENTS.patch",
+  "3c91-solver-max-lp-sym.patch",
 ]
 
 file = [
@@ -91,7 +92,7 @@ file = [
   { path = "nurse_scheduling/server/usage_report.py", class = "excluded", note = "X6: no usage telemetry" },
   { path = "nurse_scheduling/server/workspace.py", class = "v2-only", note = "P5 Workspace V1 input and located errors (X14)" },
   { path = "nurse_scheduling/solver_interface.py", class = "verbatim", upstream_blob = "63db2a420257b3ee09a28add74253f722a2061f6" },
-  { path = "nurse_scheduling/solver_ortools_cp_sat.py", class = "verbatim", upstream_blob = "346f334d671384e11d4ffdc0473ef7f7d45842dc" },
+  { path = "nurse_scheduling/solver_ortools_cp_sat.py", class = "patched", upstream_blob = "346f334d671384e11d4ffdc0473ef7f7d45842dc", patches = ["3c91-solver-max-lp-sym.patch"] },
   { path = "nurse_scheduling/solver_ortools_linear.py", class = "verbatim", upstream_blob = "36c4d411e7ae69af9cb96d301590035d3b540426" },
   { path = "nurse_scheduling/solver_ortools_mathopt.py", class = "verbatim", upstream_blob = "b2a2cf0db5477154d3f1fbb82b3445b1d75180fa" },
   { path = "nurse_scheduling/solver_pulp.py", class = "verbatim", upstream_blob = "a796fcb7e6846b9cce9dcda88695e86ef65c25ba" },
@@ -214,7 +215,7 @@ file = [
   { path = "tests/test_shift_type_working_time.py", class = "verbatim", upstream_blob = "8c8caf53830a87a18565573ddf6af216c7a1fdea" },
   { path = "tests/test_skill_mix.py", class = "v2-only", note = "P2 skillMix" },
   { path = "tests/test_solver_interface.py", class = "verbatim", upstream_blob = "523fc735d17e16dc7e4ac9cb956f7e9ef312bce8" },
-  { path = "tests/test_solver_ortools_cp_sat.py", class = "verbatim", upstream_blob = "794aad1fceb468ef595bb48ea1bd7601a5aa6c7b" },
+  { path = "tests/test_solver_ortools_cp_sat.py", class = "patched", upstream_blob = "794aad1fceb468ef595bb48ea1bd7601a5aa6c7b", patches = ["3c91-solver-max-lp-sym.patch"] },
   { path = "tests/test_solver_ortools_linear.py", class = "verbatim", upstream_blob = "ad85c5496d0f0d8a3e8eb690cec281b1fa50f7fa" },
   { path = "tests/test_solver_ortools_mathopt.py", class = "verbatim", upstream_blob = "5dd68e6d1afe72a2e236016f299ff8a97e0697b9" },
   { path = "tests/test_solver_pulp_glpk.py", class = "verbatim", upstream_blob = "be94ac4ce248247bc6ae498261a46768ed39a852" },
@@ -563,6 +564,7 @@ file = [
   { path = "tests/testcases/real/large-ward-with-87-people-2025-11.yaml", class = "verbatim", upstream_blob = "8ec166c666d570b49c1b2cc888be6598772c24b4" },
   { path = "tests/testcases/real/sg-28day-160h-compliance-14-nurses.yaml", class = "v2-only", note = "SG compliance ward case" },
   { path = "tests/testcases/real/ward-8-shift-patterns-senior-on-every-shift.yaml", class = "v2-only", note = "8-shift-pattern ward case" },
+  { path = "upstream-patches/3c91-solver-max-lp-sym.patch", class = "v2-only", note = "sync patch or manifest" },
   { path = "upstream-patches/P0-fixture-restamp.patch", class = "v2-only", note = "sync patch or manifest" },
   { path = "upstream-patches/P2-P3-skillmix-overrides.patch", class = "v2-only", note = "sync patch or manifest" },
   { path = "upstream-patches/P4-on-roster.patch", class = "v2-only", note = "sync patch or manifest" },

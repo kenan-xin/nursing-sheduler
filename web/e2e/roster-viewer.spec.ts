@@ -160,6 +160,7 @@ test.describe("F4 roster viewer — durable candidate through production storage
     await expect(page.getByTestId("roster-candidate-dismiss")).toBeVisible();
 
     await page.getByTestId("roster-candidate-dismiss").click();
+    await page.getByTestId("confirm-dialog-confirm").click();
     await expect(page.getByTestId("roster-candidate-available")).toBeHidden();
 
     // A reload does not resurrect the offer.
@@ -270,6 +271,7 @@ test.describe("F4 roster viewer — durable A beside a current failed run B", ()
     //    CURRENT run — which would have minted a token for B and let the terminal
     //    chain destroy B's job. Zero DELETEs is what says it did not.
     await page.getByTestId("roster-candidate-dismiss").click();
+    await page.getByTestId("confirm-dialog-confirm").click();
     await expect(page.getByTestId("roster-candidate-available")).toBeHidden();
     expect(bDeletes, "dismissing A must not authorize deleting B's job").toBe(0);
 

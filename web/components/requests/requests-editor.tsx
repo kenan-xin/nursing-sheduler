@@ -43,7 +43,7 @@ import {
   validateShiftRequestCsv,
 } from "./requests-csv";
 import { downloadBlob } from "@/lib/utils/download";
-import { useRequests, pickRequestsScenario } from "./use-requests";
+import { useRequests, pickRequestsScenario, type ClearShape } from "./use-requests";
 
 type ConfirmState = { text: string; confirmLabel?: string; onConfirm: () => void } | null;
 type CsvKind = "requests" | "history" | null;
@@ -103,6 +103,7 @@ export function RequestsEditor() {
     clearAllRequests,
     clearAllHistory,
     clearRequestsByShape,
+    countClearable,
   } = useRequests({
     quickPaintSelectedIds: quickSelectedIds,
     quickPaintWeightText: quickWeightText,
@@ -335,6 +336,20 @@ export function RequestsEditor() {
   // Labels + order match the canonical set (ScreenRequests.dc.html:607-614):
   // all-history, all-requests, then the four person/group x individual/group
   // shapes with a right arrow between the two axes.
+  // Every requests clear names what goes, day-states included (F5): "requests"
+  // alone does not suggest that approved leave and OFF days go too.
+  function removesText(shape?: ClearShape): string {
+    const { requests, off, leave } = countClearable(shape);
+    const n = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+    return ` This removes ${n(requests, "shift request")}, ${n(off, "OFF day")} and ${n(leave, "paid-leave pin")}.`;
+  }
+
+  function askClearShape(text: string, shape: ClearShape) {
+    askConfirm(text + removesText(shape), () =>
+      clearRequestsByShape(shape.personScope, shape.dateScope),
+    );
+  }
+
   const clearButtons: ClearButton[] = [
     {
       label: "All people history",
@@ -344,38 +359,41 @@ export function RequestsEditor() {
     {
       label: "All requests",
       onClick: () =>
-        askConfirm("Are you sure you want to clear ALL shift requests?", clearAllRequests),
+        askConfirm(
+          "Are you sure you want to clear all requests?" + removesText(),
+          clearAllRequests,
+        ),
     },
     {
       label: "Person → individual dates",
       onClick: () =>
-        askConfirm(
+        askClearShape(
           "Are you sure you want to clear all requests between individual people and individual dates?",
-          () => clearRequestsByShape("individual", "individual"),
+          { personScope: "individual", dateScope: "individual" },
         ),
     },
     {
       label: "Group → individual dates",
       onClick: () =>
-        askConfirm(
+        askClearShape(
           "Are you sure you want to clear all requests between people groups and individual dates?",
-          () => clearRequestsByShape("group", "individual"),
+          { personScope: "group", dateScope: "individual" },
         ),
     },
     {
       label: "Person → date groups",
       onClick: () =>
-        askConfirm(
+        askClearShape(
           "Are you sure you want to clear all requests between individual people and date groups?",
-          () => clearRequestsByShape("individual", "group"),
+          { personScope: "individual", dateScope: "group" },
         ),
     },
     {
       label: "Group → date groups",
       onClick: () =>
-        askConfirm(
+        askClearShape(
           "Are you sure you want to clear all requests between people groups and date groups?",
-          () => clearRequestsByShape("group", "group"),
+          { personScope: "group", dateScope: "group" },
         ),
     },
   ];

@@ -15,7 +15,7 @@ import {
   AssistantLiveConversation,
 } from "./assistant-conversation";
 import { CHOICE_OPTION_SOURCE_RULE, choiceParameters, useChoiceTools } from "./use-choice-tools";
-import { describeAnswers } from "./choice-card";
+import { answerFor, describeAnswers } from "./choice-card";
 import { bindTurnForTest, type TestTurnHandle } from "./turn-authority.test-support";
 
 interface CapturedTool {
@@ -132,6 +132,17 @@ describe("the option card", () => {
     expect(screen.queryByRole("group", { name: SINGLE.question })).toBeNull();
   });
 
+  it("sends 'label (detail)' only when another option shares the label (C-38)", () => {
+    const options = [
+      { label: "Ana", detail: "Ward 3" },
+      { label: "Ana", detail: "Ward 5" },
+      { label: "Ben", detail: "Ward 3" },
+    ];
+    expect(answerFor(options, 0)).toBe("Ana (Ward 3)");
+    expect(answerFor(options, 1)).toBe("Ana (Ward 5)");
+    expect(answerFor(options, 2)).toBe("Ben");
+  });
+
   it("multi-select sends the checked labels in option order, and not before one is checked", async () => {
     assistantActions.showChoices(MULTI, 1);
     renderLive();
@@ -244,7 +255,8 @@ describe("the option card", () => {
     expect(first).toBeChecked();
     expect(second).not.toBeChecked();
     await userEvent.click(screen.getByRole("button", { name: "Send selected" }));
-    expect(send).toHaveBeenCalledExactlyOnceWith("Ana");
+    // The message tells them apart too (C-38), not just the checkboxes.
+    expect(send).toHaveBeenCalledExactlyOnceWith("Ana (Ward 3)");
   });
 
   it("does not render in a historical conversation", async () => {
@@ -448,7 +460,10 @@ describe("several questions on one card", () => {
     expect(screen.getByTestId("assistant-dock-announcer")).toHaveTextContent(
       "Question 2 of 3: Meal break on a 12-hour shift?",
     );
-    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    // The x says it sends (C-38): Close has no hidden effect.
+    await userEvent.click(
+      screen.getByRole("button", { name: "Close and send the answers so far" }),
+    );
 
     expect(send).toHaveBeenCalledExactlyOnceWith(
       "Add public holidays? — Yes, add them\n" +

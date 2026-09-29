@@ -375,7 +375,7 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS).toContain(TRUTHFUL_SUMMARY_RULE);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-28.3");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-29.1");
   });
 });
 

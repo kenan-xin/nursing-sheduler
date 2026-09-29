@@ -39,6 +39,8 @@ class ORToolsSolver(SolverInterface):
         super().__init__()
         self.model = cp_model.CpModel()
         self.solver: cp_model.CpSolver = cp_model.CpSolver()
+        # 2-core servers otherwise run only default_lp and never prove optimality (benchmark: bead 3c91); ignored at num_workers=1.
+        self.solver.parameters.extra_subsolvers.append("max_lp_sym")
         self.status = None
         self.solver_status = SolverStatus.UNKNOWN
         self._active_solution_callback = None

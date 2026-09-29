@@ -125,8 +125,11 @@ describe("resolveHistoryPaintSelection", () => {
     });
   });
 
-  it("a group (not in validItemIds) is skipped", () => {
-    expect(resolveHistoryPaintSelection(["EARLY"], validItemIds)).toEqual({ kind: "skip" });
+  it("a group (not in validItemIds) is an error", () => {
+    expect(resolveHistoryPaintSelection(["EARLY"], validItemIds)).toEqual({
+      kind: "error",
+      message: "History needs one shift type, not a group.",
+    });
   });
 
   it("multiple selections error verbatim", () => {

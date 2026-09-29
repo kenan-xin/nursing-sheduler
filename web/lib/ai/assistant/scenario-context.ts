@@ -114,7 +114,7 @@ export function summarizeScenario(
  */
 export const KNOWLEDGE_LINES: readonly string[] = [
   "Beyond those Employment Act facts, you are not a source of law or policy: never state a ministry rule or nurse ratio as fact; say the ward decides. To offer to set the ward's own numbers, use offer_choices, never a question in text.",
-  "A staffing number is exact, not a minimum: for 'at least 2, ideally 3', prepare 2 and say the preferred 3 is set on the Staffing requirements screen.",
+  "A staffing number alone is exact, not a minimum: for 'at least 2, ideally 3', prepare requiredNumPeople 2 and preferredNumPeople 3 on the same requirement, never 2 alone.",
   "A skill mix (for example at least 1 RN on a shift, others allowed too) is set with set_skill_mix, or skillMix on add_staffing_requirement; never lower or remove one, and never approximate it by naming who may work the whole shift.",
   "Before promising a rule, make sure the app can express it; when unsure, read explain_app_capability for scheduler-limits and say plainly what it cannot do.",
   "A new optimiser run can change everyone's shifts: for one change to a roster staff already have, such as a nurse on MC, say so and use the cover steps above, or hand edits on the Roster screen, before offering a run.",

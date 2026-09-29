@@ -1,7 +1,7 @@
 "use client";
 
-// The assistant carries on by itself after the user presses Apply, and after an
-// optimiser run it offered finishes, instead of waiting for "continue".
+// The assistant carries on by itself after the user presses Apply or a receipt's Undo,
+// and after an optimiser run it offered finishes, instead of waiting for "continue".
 //
 // It does so with ONE ordinary user message through the composer's own send path, so
 // the model gets no new authority: it reads what happened like any other message. At
@@ -10,11 +10,11 @@
 // Apply (proposal revision) and each run is offered once.
 
 import { useEffect, useRef, useState } from "react";
-import type { ProposalDiff } from "@/lib/proposal";
+import type { ProposalDiff, ProposalDiffEntry } from "@/lib/proposal";
 import { useHotStore } from "@/lib/store";
 import type { OptimizeRunView, RunLifecycle } from "@/lib/optimize/run-view";
 import { useRunRequestStore } from "@/lib/optimize/run-request";
-import type { ApplyOutcomeView } from "./use-assistant-proposals";
+import type { ApplyOutcomeView, UndoneReceiptView } from "./use-assistant-proposals";
 import type { AssistantSendOptions } from "./use-assistant-session";
 
 const FINISHED: ReadonlySet<RunLifecycle> = new Set(["completed", "cancelled", "failed"]);
@@ -26,29 +26,57 @@ const MAX_LINE = 120;
 const MAX_NAMES = 3;
 
 /**
+ * How every follow-up this hook sends begins. The transcript renders a user message
+ * that starts with one as sent by the app, since the user did not type it (C-36).
+ */
+export const APP_FOLLOW_UP_PREFIXES = [
+  "I applied it",
+  "I undid it",
+  "The optimiser run finished:",
+] as const;
+
+export function isAppFollowUp(text: string): boolean {
+  return APP_FOLLOW_UP_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
+const fitLine = (prefix: string, detail: string, suffix: string) => {
+  const room = MAX_LINE - prefix.length - suffix.length;
+  const fitted = detail.length <= room ? detail : `${detail.slice(0, room - 1).trimEnd()}…`;
+  return `${prefix}${fitted}${suffix}`;
+};
+
+/** "Mei, Raj, Staff group “SN”" plus ", and N more" as the suffix; null when empty. */
+function nameList(entries: readonly ProposalDiffEntry[]): [string, string] | null {
+  const labels = [...new Set(entries.map((entry) => entry.label))];
+  if (labels.length === 0) return null;
+  const shown = labels.slice(0, MAX_NAMES);
+  const more = labels.length - shown.length;
+  return [shown.join(", "), more > 0 ? `, and ${more} more.` : "."];
+}
+
+/**
  * "I applied it: Roster period, 2026-10-01 to 2026-10-31." for one change;
  * "I applied it: Mei, Raj, Staff group “SN”." for several. One line, no ids.
  */
 export function describeAppliedChange(diff: ProposalDiff): string {
   const entries = diff.direct.length > 0 ? diff.direct : diff.cascade;
   const prefix = "I applied it: ";
-  const fit = (detail: string, suffix: string) => {
-    const room = MAX_LINE - prefix.length - suffix.length;
-    const fitted = detail.length <= room ? detail : `${detail.slice(0, room - 1).trimEnd()}…`;
-    return `${prefix}${fitted}${suffix}`;
-  };
   // One change reads best with its new value; an added record's value repeats its
   // name ("Mei, Mei"), so the name stands alone then.
-  const labels = [...new Set(entries.map((entry) => entry.label))];
-  if (labels.length === 0) return "I applied it.";
+  const names = nameList(entries);
+  if (names === null) return "I applied it.";
   if (entries.length === 1) {
     const [only] = entries;
     const value = only.after ?? "removed";
-    return fit(value === only.label ? only.label : `${only.label}, ${value}`, ".");
+    return fitLine(prefix, value === only.label ? only.label : `${only.label}, ${value}`, ".");
   }
-  const shown = labels.slice(0, MAX_NAMES);
-  const more = labels.length - shown.length;
-  return fit(shown.join(", "), more > 0 ? `, and ${more} more.` : ".");
+  return fitLine(prefix, ...names);
+}
+
+/** "I undid it: Roster period." Names only: the value it went back to is the receipt's. */
+export function describeUndoneChange(summary: readonly ProposalDiffEntry[]): string {
+  const names = nameList(summary);
+  return names === null ? "I undid it." : fitLine("I undid it: ", ...names);
 }
 
 /** "The optimiser run finished: no roster could be built." */
@@ -93,6 +121,7 @@ export function useAssistantFollowUps(
   running: boolean,
   outcome: ApplyOutcomeView | null,
   send: (text: string, options?: AssistantSendOptions) => Promise<boolean>,
+  undone: UndoneReceiptView | null = null,
 ): (text: string, options?: AssistantSendOptions) => Promise<boolean> {
   // The one waiting follow-up. `refused`: a send was refused as busy, so it waits for
   // the session's next busy-to-idle report (`sawBusy` marks the busy half).
@@ -122,6 +151,15 @@ export function useAssistantFollowUps(
     if (outcome.reloadRequired) return;
     setWaiting((current) => join(current, describeAppliedChange(outcome.diff)));
   }, [outcome, offered]);
+
+  // After an Undo the chat would otherwise still read as if the change were in place.
+  useEffect(() => {
+    if (undone === null) return;
+    const key = `undo:${undone.receiptId}`;
+    if (offered.has(key)) return;
+    offered.add(key);
+    setWaiting((current) => join(current, describeUndoneChange(undone.summary)));
+  }, [undone, offered]);
 
   useEffect(() => {
     if (!fromCard || jobId === null || !FINISHED.has(lifecycle)) return;

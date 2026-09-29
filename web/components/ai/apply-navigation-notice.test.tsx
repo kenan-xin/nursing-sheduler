@@ -50,6 +50,7 @@ function controller(outcome: ApplyOutcomeView | null): AssistantProposalControll
     readiness: null,
     applying: false,
     outcome,
+    undone: null,
     receipts: [],
     confirm: vi.fn(),
     withdraw: vi.fn(),

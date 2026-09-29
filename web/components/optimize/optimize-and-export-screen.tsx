@@ -50,6 +50,7 @@ import {
   deriveOptimizeReadiness,
   UNSUPPORTED_EXPRESSION_REASON,
   isActiveLifecycle,
+  isRunStale,
   isSettledLifecycle,
   migrateLegacySession,
   reportOptimizeRunRequest,
@@ -443,6 +444,14 @@ export function OptimizeAndExportScreen({
   const captureStateForView = capture.stateFor(view.jobId);
   const hasLoadableRoster =
     view.lifecycle === "completed" && captureStateForView.status === "committed";
+  // C-17 — a working roster was already there, so this result waits for a choice.
+  const newResultNotLoaded =
+    captureStateForView.status === "committed" &&
+    captureStateForView.working.kind === "awaiting-choice";
+  // C-12 — Undo/Redo or the assistant changed the schedule after this run started.
+  const runRevision = useRunRequestStore((state) => state.runRevision);
+  const documentRevision = useAuthorityStore((state) => state.documentRevision);
+  const runStale = isRunStale(view.lifecycle, runRevision, documentRevision);
 
   // --- observability emissions (bounded, client-only) ------------------------
   const runStartRef = useRef<number | null>(null);
@@ -831,6 +840,8 @@ export function OptimizeAndExportScreen({
             // completed artifact block. True only for a completed run whose
             // capture committed a loadable candidate.
             loadableRoster={hasLoadableRoster}
+            newResultNotLoaded={newResultNotLoaded}
+            stale={runStale}
           />
         </Section>
       </div>

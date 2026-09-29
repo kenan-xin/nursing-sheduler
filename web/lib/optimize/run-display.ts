@@ -157,6 +157,22 @@ export function elapsedLabel(view: OptimizeRunView): string {
 }
 
 /**
+ * Plain words for a completed run that found no roster and proved nothing (C-11),
+ * one per core reason code (`core/.../jobs/runner.py` INCONCLUSIVE_*). An unknown
+ * code gets the generic retry, never the raw code.
+ */
+export function inconclusiveMessage(reason: string | null | undefined): string {
+  switch (reason) {
+    case "solver_timeout_no_solution":
+      return "No roster was found within the Solver Timeout. Raise the Solver Timeout and run again.";
+    case "no_proof":
+      return "The run was stopped before a roster was found. Click Optimize to run it again.";
+    default:
+      return "The solver stopped without finding a roster. Click Optimize to run it again.";
+  }
+}
+
+/**
  * The large terminal-outcome heading (proto `ScreenGenerate.dc.html:88-89,315`),
  * shown above the success grid / infeasible panel / cancelled notice — not just
  * the status Badge. Null for every non-terminal lifecycle and for `failed`

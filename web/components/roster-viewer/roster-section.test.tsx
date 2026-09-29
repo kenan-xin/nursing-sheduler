@@ -718,7 +718,32 @@ describe("RosterSection — replacing a working roster", () => {
 // Job/version-keyed dismissal
 // ---------------------------------------------------------------------------
 
+/** C-18 — Delete this result asks first; confirm it. */
+async function confirmDelete(): Promise<void> {
+  fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+  await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
+  fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+}
+
 describe("RosterSection — keyed dismissal", () => {
+  it("asks first: Delete this result does nothing until confirmed", async () => {
+    await seedCandidate();
+    const recording = recordingSurface();
+    render(<RosterSection capture={recording.surface} />);
+    await waitFor(() => expect(screen.getByTestId("roster-candidate-dismiss")).toBeDefined());
+    expect(screen.getByTestId("roster-candidate-dismiss").textContent).toBe("Delete this result");
+
+    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
+    expect(screen.getByTestId("confirm-dialog").textContent).toMatch(
+      /downloaded XLSX is unaffected/,
+    );
+    expect(recording.refs.length).toBe(0);
+    fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("confirm-dialog")).toBeNull());
+    expect(recording.refs.length).toBe(0);
+  });
+
   // THE DEFECT THIS REPLACES. Dismiss used to call the terminal hook's unkeyed
   // `dismissCapture()`, which resolves the CURRENT run at click time. With
   // durable candidate A displayed and later run B in the panel above, that
@@ -730,7 +755,7 @@ describe("RosterSection — keyed dismissal", () => {
     render(<RosterSection capture={recording.surface} />);
     await waitFor(() => expect(screen.getByTestId("roster-candidate-dismiss")).toBeDefined());
 
-    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await confirmDelete();
     await waitFor(() => expect(recording.refs.length).toBe(1));
 
     expect(recording.refs[0]).toEqual({
@@ -748,7 +773,7 @@ describe("RosterSection — keyed dismissal", () => {
     const recording = recordingSurface();
     render(<RosterSection capture={recording.surface} />);
     await waitFor(() => expect(screen.getByTestId("roster-candidate-dismiss")).toBeDefined());
-    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await confirmDelete();
     await waitFor(() => expect(recording.refs.length).toBe(1));
 
     expect(recording.refs[0].jobId).toBe(JOB_A);
@@ -763,7 +788,7 @@ describe("RosterSection — keyed dismissal", () => {
     const recording = recordingSurface();
     render(<RosterSection capture={recording.surface} />);
     await waitFor(() => expect(screen.getByTestId("roster-candidate-dismiss")).toBeDefined());
-    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await confirmDelete();
     await waitFor(() => expect(recording.refs.length).toBe(1));
 
     // The version displayed is the version dismissed — not a stale first capture.
@@ -778,7 +803,7 @@ describe("RosterSection — keyed dismissal", () => {
     });
     render(<RosterSection capture={refusing.surface} />);
     await waitFor(() => expect(screen.getByTestId("roster-candidate-dismiss")).toBeDefined());
-    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await confirmDelete();
 
     await waitFor(() => expect(screen.getByTestId("roster-load-error")).toBeDefined());
     // A refusal must not look like success: the candidate is still on offer.
@@ -799,7 +824,7 @@ describe("RosterSection — keyed dismissal", () => {
       candidateVersion: pointer.candidateVersion,
       expectedClearEpoch: epoch,
     });
-    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await confirmDelete();
 
     await waitFor(() => expect(screen.queryByTestId("roster-candidate-available")).toBeNull());
   });
