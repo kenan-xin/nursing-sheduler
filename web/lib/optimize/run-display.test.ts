@@ -5,6 +5,7 @@ import {
   formatElapsedSeconds,
   formatRunStatus,
   formatScore,
+  inconclusiveMessage,
   jobDetailLine,
   scoreLabel,
   terminalHeading,
@@ -165,6 +166,18 @@ describe("elapsedLabel (terminal grid)", () => {
         view({ lifecycle: "completed", startedAt: "not-a-date", finishedAt: "2026-07-20+00:00" }),
       ),
     ).toBe("—");
+  });
+});
+
+describe("inconclusiveMessage (C-11)", () => {
+  it("maps each core reason to plain words, never the raw code", () => {
+    expect(inconclusiveMessage("solver_timeout_no_solution")).toMatch(
+      /Raise the Solver Timeout and run again/,
+    );
+    expect(inconclusiveMessage("no_proof")).toMatch(/stopped before a roster was found/);
+    for (const reason of ["solver_unknown", null, "some_future_reason"]) {
+      expect(inconclusiveMessage(reason)).toMatch(/Click Optimize to run it again/);
+    }
   });
 });
 

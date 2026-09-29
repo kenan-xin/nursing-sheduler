@@ -251,6 +251,7 @@ export function RosterSection({ capture }: RosterSectionProps) {
   }, [confirmReplace, promoteEmpty]);
 
   const onClear = useCallback(() => setConfirmClear(true), []);
+  const [confirmDismiss, setConfirmDismiss] = useState(false);
 
   /**
    * Dismissal goes to the gate keyed by the EXACT `{jobId, candidateVersion}`
@@ -336,12 +337,25 @@ export function RosterSection({ capture }: RosterSectionProps) {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => void onDismissClick()}
+              onClick={() => setConfirmDismiss(true)}
               disabled={loadPending || dismissPending}
               data-testid="roster-candidate-dismiss"
             >
-              Dismiss
+              Delete this result
             </Button>
+            <ConfirmDialog
+              open={confirmDismiss}
+              onOpenChange={setConfirmDismiss}
+              title="Delete this result?"
+              description={
+                hasWorkingRoster
+                  ? "This deletes the saved result from this browser. The roster below stays as it is."
+                  : "This deletes the saved result from this browser. Your downloaded XLSX is unaffected."
+              }
+              confirmLabel="Delete this result"
+              variant="destructive"
+              onConfirm={() => void onDismissClick()}
+            />
           </>
         }
       >

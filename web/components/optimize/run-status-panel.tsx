@@ -60,6 +60,7 @@ import {
   elapsedLabel,
   formatRunStatus,
   formatScore,
+  inconclusiveMessage,
   isActiveLifecycle,
   jobDetailLine,
   scoreLabel,
@@ -95,6 +96,14 @@ export interface RunStatusPanelProps {
    * roster is on hand, and is silent for every other terminal outcome.
    */
   loadableRoster?: boolean;
+  /**
+   * The captured result did NOT become the working roster (one was already there),
+   * so the CTA opens the Roster screen on the OLD roster with this one offered above
+   * it. The label says so (C-17).
+   */
+  newResultNotLoaded?: boolean;
+  /** The schedule changed after this run was started (C-12). */
+  stale?: boolean;
 }
 
 /**
@@ -132,6 +141,8 @@ export function RunStatusPanel({
   onDownloadAgain,
   onStartRun,
   loadableRoster,
+  newResultNotLoaded,
+  stale,
 }: RunStatusPanelProps) {
   const status = formatRunStatus(view, submitting);
   const active = isActiveLifecycle(view.lifecycle);
@@ -172,6 +183,8 @@ export function RunStatusPanel({
   const outcome = view.result?.outcome;
   const isSuccess = isCompleted && (outcome === "optimal" || outcome === "feasible");
   const isInfeasible = isCompleted && outcome === "infeasible";
+  // No roster and no proof: the "No incumbent yet" score block has nothing to say.
+  const isInconclusive = isCompleted && outcome === "inconclusive";
   const isSubmitPre =
     view.lifecycle === "submit-blocked" ||
     view.lifecycle === "submit-rejected" ||
@@ -179,7 +192,7 @@ export function RunStatusPanel({
   // The live score header (label + incumbent + badge + detail) renders for every
   // non-idle state EXCEPT the terminal success/infeasible outcomes, which present a
   // dedicated outcome block instead.
-  const showLiveHeader = !isSuccess && !isInfeasible;
+  const showLiveHeader = !isSuccess && !isInfeasible && !isInconclusive;
   const heading = terminalHeading(view);
   const isTerminalError =
     view.lifecycle === "failed" || view.lifecycle === "cancelled" || isSubmitPre;
@@ -214,6 +227,12 @@ export function RunStatusPanel({
             {heading}
           </h3>
         </div>
+      ) : null}
+
+      {stale === true ? (
+        <Callout tone="warn" data-testid="optimize-run-stale">
+          Schedule changed since this run. Optimise again.
+        </Callout>
       ) : null}
 
       {/* Success summary grid: SOLVER STATUS · FINAL SCORE · ELAPSED (proto :93-97).
@@ -328,6 +347,7 @@ export function RunStatusPanel({
             variant="secondary"
             onClick={onFinishNow}
             disabled={!view.controls.earlyCompletionAvailable || view.lifecycle === "cancelling"}
+            title="Stop now and keep the best roster found so far"
             data-testid="optimize-finish-now"
           >
             <FaDownload aria-hidden /> Get Results Now
@@ -336,6 +356,7 @@ export function RunStatusPanel({
             variant="outline"
             onClick={onCancel}
             disabled={!view.controls.cancellable || view.lifecycle === "cancelling"}
+            title="Stop the run and discard the best roster found so far"
             data-testid="optimize-cancel"
           >
             <FaBan aria-hidden />
@@ -406,7 +427,10 @@ export function RunStatusPanel({
                 className={cn(buttonVariants({ variant: "default", size: "default" }))}
                 data-testid="optimize-open-roster"
               >
-                <FaCalendarCheck className="size-4" aria-hidden /> Open &amp; adjust roster
+                <FaCalendarCheck className="size-4" aria-hidden />{" "}
+                {newResultNotLoaded === true
+                  ? "Review new result (current roster kept)"
+                  : "Open & adjust roster"}
               </GuardedLink>
             ) : null}
           </div>
@@ -417,12 +441,19 @@ export function RunStatusPanel({
           anomaly (infeasible is handled by its dedicated panel above). */}
       {isCompleted && !download.artifactAvailable && !isInfeasible ? (
         <Callout tone="warn" data-testid="optimize-no-artifact" alert>
-          No downloadable schedule is available. Job outcome:{" "}
-          {view.result?.outcome ?? view.lifecycle}
-          {view.result?.terminationReason !== null && view.result?.terminationReason !== undefined
-            ? ` (${view.result.terminationReason})`
-            : ""}
-          .
+          {isInconclusive ? (
+            inconclusiveMessage(view.result?.terminationReason)
+          ) : (
+            <>
+              No downloadable schedule is available. Job outcome:{" "}
+              {view.result?.outcome ?? view.lifecycle}
+              {view.result?.terminationReason !== null &&
+              view.result?.terminationReason !== undefined
+                ? ` (${view.result.terminationReason})`
+                : ""}
+              .
+            </>
+          )}
         </Callout>
       ) : null}
 

@@ -20,7 +20,12 @@ import {
 import { deriveOptimizeReadiness } from "@/lib/optimize/optimize-readiness";
 import { terminalHeading } from "@/lib/optimize/run-display";
 import type { OptimizeRunView } from "@/lib/optimize/run-view";
-import { isRunLive, useRunRequestStore, type RunRequestOutcome } from "@/lib/optimize/run-request";
+import {
+  isRunLive,
+  isRunStale,
+  useRunRequestStore,
+  type RunRequestOutcome,
+} from "@/lib/optimize/run-request";
 import { isRosterSaved } from "@/lib/optimize/roster-generated";
 import { assistantActions, useAssistantStore, type RunFollowUp } from "@/lib/ai/assistant/store";
 import { assertTurnAuthority, SUPERSEDED } from "./turn-authority";
@@ -236,10 +241,11 @@ export function useOptimizeTools(agentId: string, turnEpoch: number): void {
       handler: async () => {
         const view = useHotStore.getState().runView;
         const { last, runRevision } = useRunRequestStore.getState();
-        const stale =
-          view.lifecycle !== "idle" &&
-          runRevision !== null &&
-          runRevision !== useAuthorityStore.getState().documentRevision;
+        const stale = isRunStale(
+          view.lifecycle,
+          runRevision,
+          useAuthorityStore.getState().documentRevision,
+        );
         return summarizeOptimizeRun(
           view,
           isRosterSaved(view),
