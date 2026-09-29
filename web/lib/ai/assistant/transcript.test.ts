@@ -170,7 +170,7 @@ describe("buildTranscriptMarkdown", () => {
     expect(markdown).toContain("## Changes applied");
     expect(markdown).toContain("### 2026-09-26T14:01:00.000Z");
     expect(markdown).toContain("Day shift cover");
-    expect(markdown).toContain("(Shift counts)");
+    expect(markdown).toContain("(Shift Counts)");
     expect(markdown).toContain("Nothing → 2");
     expect(markdown).toContain("Ana Lim leave");
     expect(markdown).toContain("Approved → Removed");
