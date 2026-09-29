@@ -148,7 +148,7 @@ describe("the Preview states host-derived facts", () => {
 
     // The knock-on effect, shown WITH it rather than behind a disclosure.
     const cascade = await screen.findByTestId("proposal-cascade");
-    expect(cascade).toHaveTextContent("bo on 29");
+    expect(cascade).toHaveTextContent("bo on Wed 29 Apr");
     expect(cascade).toHaveTextContent("Removed");
 
     // The rest waits behind Show details, collapsed by default.
@@ -157,7 +157,7 @@ describe("the Preview states host-derived facts", () => {
     await userEvent.click(screen.getByRole("button", { name: "Show details" }));
 
     expect(await screen.findByTestId("proposal-needs-review")).toHaveTextContent(
-      "Leave and requests",
+      "Requests & Leave",
     );
     // The affected screens are named as the SIDEBAR names them, never as raw
     // capability ids ("leave-and-requests, roster-period").
@@ -740,7 +740,7 @@ describe("audit batch A7 (b4x8)", () => {
     await waitFor(() => expect(sessionSend).toHaveBeenCalledTimes(1));
     await user.click(await screen.findByTestId("receipt-undo"));
     await waitFor(() => expect(sessionSend).toHaveBeenCalledTimes(2));
-    expect(sessionSend).toHaveBeenLastCalledWith("I undid it: Roster period, bo on 29.");
+    expect(sessionSend).toHaveBeenLastCalledWith("I undid it: Roster period, bo on Wed 29 Apr.");
   });
 
   describe("C-37: a Preview lost to a reload", () => {

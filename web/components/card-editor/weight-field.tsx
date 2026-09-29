@@ -24,6 +24,7 @@ import { formatWeight, parseWeightInput, type WeightFieldValue } from "./weight-
 
 export {
   formatWeight,
+  invalidWeightMessage,
   isValidWeightValue,
   isWeightNonPositive,
   parseWeightInput,

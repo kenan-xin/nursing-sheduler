@@ -337,7 +337,21 @@ export const importScenarioSchema = z.strictObject({
     items: z.array(zImportShiftType),
     groups: z.array(zImportShiftTypeGroup).optional(),
   }),
-  preferences: z.array(zImportPreference),
+  // Core reads `date: []` as "no dates" while the UI stores an omitted date as "all",
+  // so an explicit empty scope is refused rather than widened on load (bug hunt A-09).
+  preferences: z.array(zImportPreference).superRefine((preferences, ctx) => {
+    preferences.forEach((pref, i) => {
+      const field = "countDates" in pref ? "countDates" : "date";
+      const dates = (pref as { [key: string]: unknown })[field];
+      if (!Array.isArray(dates) || dates.length > 0) return;
+      const rule = pref.description?.trim() ? `Rule '${pref.description.trim()}'` : `Rule ${i + 1}`;
+      ctx.addIssue({
+        code: "custom",
+        message: `${rule}: This rule has no dates. Remove it or add dates.`,
+        path: [i, field],
+      });
+    });
+  }),
   export: z
     .strictObject({
       formatting: z.array(zImportExportFormattingRule).optional(),

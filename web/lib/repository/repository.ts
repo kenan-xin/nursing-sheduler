@@ -1251,10 +1251,14 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
               { proposalId: proposal.proposalId, revision: proposal.revision },
             );
           }
-          if (stored.status === "applied" || stored.status === "cancelled") {
+          if (
+            stored.status === "applied" ||
+            stored.status === "cancelled" ||
+            stored.status === "stale"
+          ) {
             throw new RepositoryError(
               "proposal_conflict",
-              `this change was already ${stored.status}`,
+              `this change was already ${stored.status === "stale" ? "replaced" : stored.status}`,
               { proposalId: proposal.proposalId, status: stored.status },
             );
           }

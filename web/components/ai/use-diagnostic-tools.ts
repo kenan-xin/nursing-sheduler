@@ -227,6 +227,8 @@ export function useDiagnosticTools(agentId: string, turnEpoch: number): void {
           outcome: "optimizer_tested",
         });
 
+        // A refused revision set the earlier Preview aside durably; show it that way.
+        if (live && !outcome.ok) assistantActions.rereadProposal();
         const afterPreview = assertTurnAuthority(token, context.signal);
         if (afterPreview) return afterPreview;
 

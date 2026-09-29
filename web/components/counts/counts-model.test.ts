@@ -141,7 +141,7 @@ describe("validateCountForm (spec 05 Shift Counts validation table)", () => {
       target: 5,
     });
     expect(validateCountForm({ ...base, weight: "abc" }, domain).weight).toBe(
-      COUNT_MESSAGES.weightInvalid,
+      `Not a number. ${COUNT_MESSAGES.weightInvalid}`,
     );
   });
 

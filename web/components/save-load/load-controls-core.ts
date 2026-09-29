@@ -117,7 +117,8 @@ export const REPLACEMENT_CONFIRM_TITLE = "Replace your current workspace?";
 // A Load mints a new scenario identity, so Undo cannot reach back across it
 // (`lib/store/lifecycle.ts`). The copy must not promise otherwise (C-05).
 export const REPLACEMENT_CONFIRM_BODY =
-  "This replaces your current schedule and cannot be undone. Download a copy first.";
+  "This replaces your current schedule and cannot be undone. Download a copy first. " +
+  "The current roster will also be cleared.";
 
 export interface LoadConfirmCopy {
   title: string;

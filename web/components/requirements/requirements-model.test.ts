@@ -377,7 +377,7 @@ describe("validateRequirementForm (spec 05 Shift Type Requirements validation ta
       weight: "abc",
     });
     expect(validateRequirementForm(invalid, domain).weight).toBe(
-      REQUIREMENT_MESSAGES.weightInvalid,
+      `Not a number. ${REQUIREMENT_MESSAGES.weightInvalid}`,
     );
   });
 

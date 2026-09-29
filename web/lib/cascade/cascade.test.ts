@@ -279,11 +279,10 @@ describe("deleteEntity — cascade + prune emptied preferences (findings #3/#4)"
     expect(after.staffGroups[0].members).toEqual(["P3"]); // TeamA pruned from TeamB
   });
 
-  it("deleting all covering dates omits the field (all-dates), not date: [] (DL08)", () => {
-    // Covering date ["2026-05-14"] is the only date → delete it → omitted.
+  it("deleting all of a covering's dates drops it, never widens it to all dates (bug hunt A-06)", () => {
+    // Covering date ["2026-05-14"] is the only date → delete it → the rule goes.
     const after = deleteEntity(fixture(), "date", "2026-05-14");
-    expect(after.cardsByKind.coverings).toHaveLength(1); // date is optional → not dropped
-    expect(after.cardsByKind.coverings[0].date).toBeUndefined();
+    expect(after.cardsByKind.coverings).toHaveLength(0);
     // requirement date ["2026-05-14"]→[] is required → requirement dropped
     expect(after.cardsByKind.requirements).toHaveLength(0);
   });

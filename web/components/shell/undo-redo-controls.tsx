@@ -10,20 +10,30 @@
 //    Alt or Shift additionally held disables both shortcuts. Not suppressed
 //    while typing (FR-ST-22).
 //
-// The USER-FACING behaviour is unchanged — same controls, same shortcuts, same
-// disabled-at-the-ends semantics, and no new keyboard feature. What changed is
-// what backs them. zundo kept its stack in this tab's process memory, so it could
-// offer a reversal after a reload that no durable record could perform, and it
-// could not be checked against a revision another tab had moved.
+// Same controls, same shortcuts, same disabled-at-the-ends semantics. What
+// changed is what backs them, and one user-facing result: Undo no longer reaches
+// back past a reload (v1's 50-step history did). zundo kept its stack in this
+// tab's process memory, so it could offer a reversal after a reload that no
+// durable record could perform, and it could not be checked against a revision
+// another tab had moved.
 //
 // Availability now comes from persisted commit facts: a reversal is offered only
 // when the commit at the history cursor still carries live reversal material in
 // the CURRENT session. After a reload, or once the 50-entry session bound has
 // evicted a payload, the control is disabled — truthfully, rather than inviting a
-// restore that would fail.
+// restore that would fail. `useUndoFreshNote` tells the user so once (C-24).
+
+import { toast } from "sonner";
 
 import { useEffect } from "react";
-import { canMutateScenario, scenarioCommands, useAuthorityStore } from "@/lib/store";
+import {
+  canMutateScenario,
+  isScenarioSliceEmpty,
+  scenarioCommands,
+  useAuthorityStore,
+  useHotStore,
+  useScenarioStore,
+} from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { FaRotateLeft, FaArrowRotateRight } from "@/components/icons";
 import { CARD_EDITOR_DRAFT_PREFIX } from "@/components/card-editor/card-editor-shell";
@@ -107,6 +117,28 @@ export function UndoRedoControls() {
       </UndoRedoButton>
     </div>
   );
+}
+
+export const UNDO_FRESH_NOTE =
+  "Undo starts fresh after a reload. Your earlier changes are saved, but Undo cannot reach them.";
+const UNDO_FRESH_NOTE_SEEN_KEY = "ns-undo-fresh-note-seen";
+
+/**
+ * C-24: the first time this browser opens saved work, say once that Undo starts
+ * fresh. One-time per browser, not per reload, so it informs without nagging.
+ */
+export function useUndoFreshNote(): void {
+  const ready = useHotStore((s) => s.hydrationStatus === "ready");
+  useEffect(() => {
+    if (!ready || isScenarioSliceEmpty(useScenarioStore.getState())) return;
+    try {
+      if (localStorage.getItem(UNDO_FRESH_NOTE_SEEN_KEY) !== null) return;
+      localStorage.setItem(UNDO_FRESH_NOTE_SEEN_KEY, "1");
+    } catch {
+      return; // no storage: stay quiet rather than repeat on every load
+    }
+    toast(UNDO_FRESH_NOTE);
+  }, [ready]);
 }
 
 // An open card-editor draft OWNS the undo keys (AC-CH-09c): the scenario history

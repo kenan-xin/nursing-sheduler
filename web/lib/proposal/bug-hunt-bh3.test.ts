@@ -120,7 +120,7 @@ describe("C3 a person id containing '|'", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.proposal.diff.direct.map((entry) => entry.label)).toContain(
-        "Float | Ward 3 on 01",
+        "Float | Ward 3 on Thu 1 Oct",
       );
     }
   });

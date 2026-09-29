@@ -311,6 +311,31 @@ describe("confirmations and cancellation", () => {
     expect(stored?.revision).toBe(applied.proposal.revision);
   });
 
+  it("a refused revision still sets the earlier proposal aside, so it cannot be applied (S1)", async () => {
+    const first = await prepare();
+    if (!first.ok) throw new Error("prepare failed");
+    const revised = await assistantProposalCommands.prepare({
+      proposalId: crypto.randomUUID(),
+      previousProposalId: first.proposal.proposalId,
+      threadId: "thread-1",
+      turnId: "turn-2",
+      registryStamp: STAMP,
+      commands: [{ type: "remove_person", personId: "nobody" }],
+      rationale: null,
+      evidence: [],
+      outcome: "untested",
+    });
+    expect(revised.ok).toBe(false);
+    expect((await assistantProposalCommands.read(first.proposal.proposalId))?.status).toBe("stale");
+
+    const result = await assistantProposalCommands.apply({
+      proposalId: first.proposal.proposalId,
+      receiptId: crypto.randomUUID(),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("proposal-conflict");
+  });
+
   it("a cancelled proposal can never be applied", async () => {
     const prepared = await prepare();
     if (!prepared.ok) throw new Error("prepare failed");
