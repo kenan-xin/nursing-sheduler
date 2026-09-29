@@ -163,6 +163,8 @@ export {
   type CoverSheetRow,
 } from "./cover-sheet";
 
+export { buildCountCellDeltas, type CountCellDelta } from "./count-cells";
+
 export {
   buildEditedCellPatches,
   EditedXlsxError,

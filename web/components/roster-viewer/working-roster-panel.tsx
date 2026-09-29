@@ -31,6 +31,7 @@ import type { RosterImportOutcome, WorkingPromotionOutcome } from "@/lib/roster"
 import { useRosterChangeRequest } from "./use-roster-change-request";
 import { Callout } from "@/components/optimize/callout";
 import { ConfirmDialog } from "@/components/shell/confirm-dialog";
+import { ReplaceRosterDialog } from "./replace-roster-dialog";
 import { RosterActions } from "./roster-actions";
 import { RosterContentWidthProvider } from "./roster-content-width";
 import { describeReplacementFailure, ROSTER_CLEAR_PARTIAL_MESSAGE } from "./replacement-outcome";
@@ -49,6 +50,8 @@ type PendingReplacement =
 export interface WorkingRosterPanelHandle {
   /** Coordinate a candidate Load through the save authority and promote it. */
   requestLoadCandidate(pointer: CurrentCandidatePointer): Promise<void>;
+  /** The roster on screen, including edits not yet autosaved. */
+  viewedDocument(): RosterDocument;
 }
 
 export interface WorkingRosterPanelProps {
@@ -137,8 +140,9 @@ export const WorkingRosterPanel = forwardRef<WorkingRosterPanelHandle, WorkingRo
         async requestLoadCandidate(pointer: CurrentCandidatePointer) {
           await coordinate({ kind: "load", pointer });
         },
+        viewedDocument: () => editing.editedDocument,
       }),
-      [coordinate],
+      [coordinate, editing.editedDocument],
     );
 
     // Import entry — always confirms replacement of an existing roster (the
@@ -235,13 +239,13 @@ export const WorkingRosterPanel = forwardRef<WorkingRosterPanelHandle, WorkingRo
           variant="destructive"
           onConfirm={() => void onConfirmClear()}
         />
-        <ConfirmDialog
+        <ReplaceRosterDialog
           open={confirmReplace !== null}
           onOpenChange={(open) => !open && setConfirmReplace(null)}
-          title="Replace the roster on screen?"
           description={replaceDescription}
-          confirmLabel="Replace roster"
+          viewed={editing.editedDocument}
           onConfirm={() => void onConfirmReplace()}
+          onSaveError={setActionError}
         />
         <ConfirmDialog
           open={confirmDiscard !== null}
