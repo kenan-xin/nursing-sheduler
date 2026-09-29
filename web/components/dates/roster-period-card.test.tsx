@@ -4,6 +4,11 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { DateRange } from "@/lib/dates";
 import { changeKeys } from "@/lib/change-highlight/keys";
 import { clearChangeHighlight, showChangeHighlight } from "@/lib/change-highlight/store";
+import {
+  mergeSingaporeHolidays,
+  setSingaporeHolidays,
+  SINGAPORE_HOLIDAYS,
+} from "@/lib/dates/holidays-sg";
 import { RosterPeriodCard } from "./roster-period-card";
 
 afterEach(() => {
@@ -217,5 +222,37 @@ describe("RosterPeriodCard — import switch honest initial state (FR-DC-40)", (
     // No import summary is shown, so nothing implies an import that never happened.
     expect(screen.queryByTestId("import-changes")).toBeNull();
     expect(screen.queryByTestId("import-count")).toBeNull();
+  });
+});
+
+describe("RosterPeriodCard — holiday data coverage (bead si4j)", () => {
+  afterEach(() => setSingaporeHolidays(SINGAPORE_HOLIDAYS));
+  const INTO_2028: DateRange = { start: "2027-12-01", end: "2028-01-31" };
+
+  it("warns which year has no holiday data and disables the switch", () => {
+    render(<RosterPeriodCard range={INTO_2028} importedHolidaysPresent onCommit={vi.fn()} />);
+    expect(screen.getByTestId("import-unsupported").textContent).toBe(
+      "No public-holiday data for 2028 yet. Holidays in those dates are not marked.",
+    );
+    expect(screen.getByTestId("import-toggle")).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("clears the warning when the live list covering 2028 arrives", () => {
+    render(<RosterPeriodCard range={INTO_2028} importedHolidaysPresent onCommit={vi.fn()} />);
+    act(() =>
+      setSingaporeHolidays(
+        mergeSingaporeHolidays(
+          [{ date: "2028-01-01", name: "New Year's Day", isObserved: false }],
+          SINGAPORE_HOLIDAYS,
+        ),
+      ),
+    );
+    expect(screen.queryByTestId("import-unsupported")).toBeNull();
+    expect(screen.getByTestId("holiday-2028-01-01")).toHaveTextContent("New Year's Day");
+  });
+
+  it("shows no warning for a covered range", () => {
+    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={vi.fn()} />);
+    expect(screen.queryByTestId("import-unsupported")).toBeNull();
   });
 });
