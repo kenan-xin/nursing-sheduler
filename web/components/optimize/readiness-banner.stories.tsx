@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { getRouter } from "@storybook/nextjs-vite/navigation.mock";
 import { expect } from "storybook/test";
 import { deriveOptimizeReadiness } from "@/lib/optimize/optimize-readiness";
+import { createEmptyScenarioUiState } from "@/lib/scenario";
 import { ReadinessBanner } from "./readiness-banner";
 
 // Reference story, next/navigation (bead w0e.2; canary for storybookjs/storybook#34688):
@@ -12,6 +13,7 @@ const ALL_ISSUES = deriveOptimizeReadiness({
   shiftGroups: [],
   rangeStart: "",
   rangeEnd: "",
+  cardsByKind: createEmptyScenarioUiState().cardsByKind,
   counts: [],
 }).issues;
 

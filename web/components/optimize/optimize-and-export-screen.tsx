@@ -357,17 +357,25 @@ export function OptimizeAndExportScreen({
   const shiftGroups = useScenarioStore((state) => state.shiftGroups);
   const rangeStart = useScenarioStore((state) => state.rangeStart);
   const rangeEnd = useScenarioStore((state) => state.rangeEnd);
-  const counts = useScenarioStore((state) => state.cardsByKind.counts);
+  const cardsByKind = useScenarioStore((state) => state.cardsByKind);
   const readiness = useMemo(
-    () => deriveOptimizeReadiness({ staff, shifts, shiftGroups, rangeStart, rangeEnd, counts }),
-    [staff, shifts, shiftGroups, rangeStart, rangeEnd, counts],
+    () =>
+      deriveOptimizeReadiness({
+        staff,
+        shifts,
+        shiftGroups,
+        rangeStart,
+        rangeEnd,
+        cardsByKind,
+        counts: cardsByKind.counts,
+      }),
+    [staff, shifts, shiftGroups, rangeStart, rangeEnd, cardsByKind],
   );
 
   // B2-2 — the scenario stat grid (NURSES / DAYS / SHIFTS / RULES ON) rendered
   // with the run settings (proto ScreenGenerate.dc.html:32-37). RULES ON is the
   // ENABLED count, the same number the Guided Rules screen and Home report —
   // `countEnabledRules` is the one owner of that rule (lib/scenario/rule-counts.ts).
-  const cardsByKind = useScenarioStore((state) => state.cardsByKind);
   const runOptionsStats = useMemo(
     () => ({
       nurses: staff.length,

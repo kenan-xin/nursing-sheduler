@@ -14,8 +14,9 @@
 //
 // WHY A STRUCTURAL DIFF RATHER THAN PER-ARM DESCRIPTIONS. A per-arm description
 // states what its author believed the arm does. The range cascade alone reaches date
-// groups, every preference card, the request matrix and the export layout, through
-// two different mechanisms (purge and re-key). Comparing documents cannot forget a
+// groups, every preference card and the request matrix, through two different
+// mechanisms (purge and re-key). The export layout it also reaches has no screen
+// (deferred route), so its changes are not listed. Comparing documents cannot forget a
 // surface, and it keeps working when an arm's transform is improved underneath it.
 
 import type {
@@ -49,6 +50,9 @@ import { isContractedHoursCard } from "@/components/counts/counts-model";
 import { formatHalfHours } from "@/components/counts/half-hour-codec";
 import { groupLeaveReach, leaveReachText } from "@/components/requests/requests-model";
 import { calendarSpan } from "./assumptions";
+import { CAPABILITY_ENTRIES } from "@/lib/capability/help-content";
+import type { CapabilityEntryV1 } from "@/lib/capability/types";
+import { findNavItemById } from "@/components/shell/nav-config";
 import { generateDateItems, holidayImportApplied } from "@/lib/dates";
 import { formatShortDate } from "@/lib/dates/date-id";
 import { cardNeedOn, coverStatuses } from "@/lib/scenario/temporary-cover";
@@ -66,9 +70,9 @@ import { rosterDatesBetween } from "./operations";
 /**
  * Where a change lands, named as the capability the user would go to see it.
  *
- * These are capability-registry ids (except `export-layout`, whose route is
- * deferred), so "which screens does this affect?" needs no second mapping table and
- * cannot drift from the deployed registry -- `diff.test.ts` pins that.
+ * These are capability-registry ids, so "which screens does this affect?" needs no
+ * second mapping table and cannot drift from the deployed registry -- `diff.test.ts`
+ * pins that.
  */
 export type DiffScope =
   | "roster-period"
@@ -79,11 +83,7 @@ export type DiffScope =
   | "shift-counts"
   | "shift-affinities"
   | "shift-type-coverings"
-  | "leave-and-requests"
-  | "export-layout";
-
-/** The one scope with no capability entry: the Export Layout route is deferred. */
-const SCOPE_WITHOUT_CAPABILITY: DiffScope = "export-layout";
+  | "leave-and-requests";
 
 /** The progressive setup domains, in dependency order (guided-setup flow). */
 export const SETUP_DOMAINS = ["dates", "people", "shifts", "rules", "requests"] as const;
@@ -99,7 +99,6 @@ const SCOPE_DOMAIN: Record<DiffScope, SetupDomain> = {
   "shift-affinities": "rules",
   "shift-type-coverings": "rules",
   "leave-and-requests": "requests",
-  "export-layout": "requests",
 };
 
 const RULE_SCOPE: Record<keyof CardsByKind, DiffScope> = {
@@ -158,7 +157,8 @@ function describeCell(cell: UiRequestCell): string {
         ];
   if (cell.weight === Infinity) return must;
   if (cell.weight === -Infinity) return never;
-  if (cell.weight === 0 && cell.kind === "off") return "Asked for the day off";
+  // Only a loaded file can still carry one: the app treats weight 0 on OFF as a removal.
+  if (cell.weight === 0 && cell.kind === "off") return "Day off at weight 0 (no effect)";
   return cell.weight < 0 ? `${avoids} (weight ${cell.weight})` : `${wants} (weight ${cell.weight})`;
 }
 
@@ -266,8 +266,12 @@ function describeRequirement(card: RequirementCard): string {
   if (p == null || p === n) {
     return `Exactly ${n} ${n === 1 ? "person" : "people"} on ${shifts}, ${dates}${exceptions}${ban}${mix}`;
   }
+  // p is always a ceiling; -∞ forces the gap to p to zero, so the count is exactly p.
+  if (card.weight === -Infinity) {
+    return `Exactly ${p} ${p === 1 ? "person" : "people"} on ${shifts}, ${dates}${exceptions} (a must)${ban}${mix}`;
+  }
   if (card.weight < 0) {
-    return `At least ${n}, ideally ${p} people on ${shifts}, ${dates}${exceptions} (weight ${card.weight})${ban}${mix}`;
+    return `${n} to ${p} people on ${shifts}, ${dates}${exceptions}, aiming for ${p} (weight ${card.weight})${ban}${mix}`;
   }
   const lean = card.weight > 0 ? `${n} preferred` : "no preference";
   return `${n} to ${p} people on ${shifts}, ${dates}${exceptions} (${lean}, weight ${card.weight})${ban}${mix}`;
@@ -349,8 +353,9 @@ function describeCount(card: CountCard): string | null {
   const squared = op.value === "|x - T|^2";
   const amount = squared ? `Close to ${card.target}` : substituteTarget(op.title, card.target);
   const shifts = flattenRefs(card.countShiftTypes).map(String).join(" + ");
+  const weighted = card.countShiftTypeCoefficients?.length ? " (weighted count)" : "";
   const people = renderPeople(card.person, "");
-  return `${amount} ${shifts} shifts for ${people ? `each of ${people}` : "everyone"}, across ${renderDates(card.countDates)}: ${describeCountStrength(squared, card.weight, card.target)}`;
+  return `${amount} ${shifts} shifts${weighted} for ${people ? `each of ${people}` : "everyone"}, across ${renderDates(card.countDates)}: ${describeCountStrength(squared, card.weight, card.target)}`;
 }
 
 /** `null` for a grouped card: flattening its groups would state a different rule. */
@@ -413,6 +418,26 @@ function renderStaffGroup(members: readonly string[], description: string | unde
 
 function coordinateKey(cell: UiRequestCell): string {
   return `${stableStringify(cell.person)}|${stableStringify(cell.date)}`;
+}
+
+/**
+ * A request row and date as the Preview says them (F13): "Ana on Mon 5 Oct",
+ * "everyone in Seniors on weekends". A roster date id is looked up in each document,
+ * `after` first, so a date that left the period still reads as a date.
+ */
+function cellLabel(person: unknown, date: unknown, states: readonly ScenarioUiState[]): string {
+  const who = renderPeople(person, "everyone");
+  const group = states.some((state) => state.staffGroups.some((g) => String(g.id) === who));
+  const iso = states
+    .map(
+      (state) =>
+        generateDateItems({ start: state.rangeStart, end: state.rangeEnd }).find(
+          (day) => day.id === String(date),
+        )?.iso,
+    )
+    .find((found) => found !== undefined);
+  const when = iso ? formatShortDate(iso, true) : renderDates(date);
+  return `${group ? `everyone in ${who}` : who} on ${when}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -670,7 +695,10 @@ function compareRequestMatrix(before: ScenarioUiState, after: ScenarioUiState): 
     entries.push({
       key: `cell:${key}`,
       scope: "leave-and-requests",
-      label: `${JSON.parse(key.slice(0, cut))} on ${JSON.parse(key.slice(cut + 1))}`,
+      label: cellLabel(JSON.parse(key.slice(0, cut)), JSON.parse(key.slice(cut + 1)), [
+        after,
+        before,
+      ]),
       before: from,
       after: to,
       kind: from === null ? "created" : to === null ? "removed" : "changed",
@@ -775,14 +803,19 @@ export function diffScenarioDocuments(
         identity: (card) => card.uid,
         label: (card) => ruleTitle(card, kind),
         render: (card) => ruleBody(card as unknown as Record<string, unknown>, kind, after),
-        renderChange:
-          kind === "requirements"
-            ? (from, to) =>
-                requirementChange(
+        renderChange: (from, to) => {
+          const change =
+            kind === "requirements"
+              ? requirementChange(
                   from as unknown as RequirementCard,
                   to as unknown as RequirementCard,
                 )
-            : undefined,
+              : undefined;
+          // An edit that leaves a rule off changes nothing the next run does (C-13).
+          if (!from.disabled || !to.disabled) return change;
+          const body = change ?? ruleBody(to as unknown as Record<string, unknown>, kind, after);
+          return `${body} · This rule is off. The optimiser ignores it.`;
+        },
       }),
     );
   }
@@ -794,23 +827,6 @@ export function diffScenarioDocuments(
   entries.push(...coverWarningEntries(before, after));
 
   entries.push(...compareRequestMatrix(before, after));
-
-  const exportBefore = stableStringify(before.exportLayout);
-  const exportAfter = stableStringify(after.exportLayout);
-  if (exportBefore !== exportAfter) {
-    const count = (state: ScenarioUiState) =>
-      state.exportLayout.formatting.length +
-      state.exportLayout.extraColumns.length +
-      state.exportLayout.extraRows.length;
-    entries.push({
-      key: "export:layout",
-      scope: "export-layout",
-      label: "Export layout rules",
-      before: `${count(before)} rule${count(before) === 1 ? "" : "s"}`,
-      after: `${count(after)} rule${count(after) === 1 ? "" : "s"}`,
-      kind: "changed",
-    });
-  }
 
   return entries;
 }
@@ -1238,34 +1254,30 @@ export function deriveProposalDiff(
       !directDomains.has(domain) && cascade.some((entry) => SCOPE_DOMAIN[entry.scope] === domain),
   );
 
-  const capabilityIds = [
-    ...new Set(
-      all.map((entry) => entry.scope).filter((scope) => scope !== SCOPE_WITHOUT_CAPABILITY),
-    ),
-  ].sort();
+  const capabilityIds = [...new Set(all.map((entry) => entry.scope))].sort();
 
   return { direct, cascade, capabilityIds, needsReview };
 }
 
-/** The screen label a Preview shows for a scope. */
-export const SCOPE_LABEL: Record<DiffScope, string> = {
-  "roster-period": "Dates",
-  "staff-list": "Staff",
-  "shift-types": "Shift types",
-  "staffing-requirements": "Staffing requirements",
-  "shift-successions": "Shift sequences",
-  "shift-counts": "Shift counts",
-  "shift-affinities": "Pairings",
-  "shift-type-coverings": "Supervision",
-  "leave-and-requests": "Leave and requests",
-  "export-layout": "Export layout",
-};
+/**
+ * The screen label a Preview shows for a scope: the SIDEBAR's name for the scope's
+ * screen (C-28), so a badge and the "Affects:" line never name one screen twice.
+ */
+export const SCOPE_LABEL = Object.fromEntries(
+  (Object.keys(SCOPE_DOMAIN) as DiffScope[]).map((scope) => {
+    const entry: CapabilityEntryV1 | undefined = CAPABILITY_ENTRIES.find(
+      (candidate) => candidate.id === scope,
+    );
+    if (entry?.routeId === undefined) throw new Error(`diff: scope "${scope}" has no screen`);
+    return [scope, findNavItemById(entry.routeId).label];
+  }),
+) as Record<DiffScope, string>;
 
-/** The setup-domain label the “Needs review” markers use. */
+/** The setup-domain label the “Needs review” markers use: the Guided step's sidebar name. */
 export const SETUP_DOMAIN_LABEL: Record<SetupDomain, string> = {
-  dates: "Dates",
-  people: "People and groups",
-  shifts: "Shift types",
-  rules: "Rules and staffing",
-  requests: "Leave and requests",
+  dates: findNavItemById("dates").label,
+  people: findNavItemById("people").label,
+  shifts: findNavItemById("shift-types").label,
+  rules: findNavItemById("rules").label,
+  requests: findNavItemById("shift-requests").label,
 };
