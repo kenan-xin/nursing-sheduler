@@ -2302,6 +2302,17 @@ describe("add_pairing_rule / edit_pairing_rule", () => {
     });
   });
 
+  it("reads a thousands separator and refuses unclear weight text (bug hunt C6)", () => {
+    const thousand = applyAssistantCommand(pairingWardScenario(), { ...apart, weight: "1,000" });
+    expect(thousand.ok && thousand.next.cardsByKind.affinities.at(-1)?.weight).toBe(1000);
+    for (const weight of ["10abc", "1e3", "1.2.3", "10.5"]) {
+      const result = applyAssistantCommand(pairingWardScenario(), { ...apart, weight });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.rejection.message).toContain("Not a number");
+    }
+  });
+
   it("refuses ALL as people, naming the rule", () => {
     const result = applyAssistantCommand(pairingWardScenario(), { ...apart, withPeople: ["ALL"] });
     expect(result.ok).toBe(false);

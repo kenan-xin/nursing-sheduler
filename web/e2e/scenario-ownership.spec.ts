@@ -591,6 +591,50 @@ test.describe("T03 — single-writer scenario ownership across two real tabs", (
   });
 });
 
+test.describe("bug hunt A-02 — a tab left behind by another tab's Load", () => {
+  test("offers Switch and never reclaims the schedule the loading tab let go", async ({
+    browser,
+  }) => {
+    const context = await browser.newContext();
+    try {
+      const loader = await openTab(context, "/save-and-load");
+      expect(await ownership(loader)).toBe("owner");
+      const reader = await openTab(context);
+      expect(await ownership(reader)).toBe("read-only");
+      const oldScenario = (await authority(reader)).scenarioId;
+
+      await loader.getByTestId("scenario-upload-button").click();
+      await loader.getByTestId("upload-file-input").setInputFiles({
+        name: "other.yaml",
+        mimeType: "text/yaml",
+        buffer: Buffer.from(OTHER_WORKSPACE_YAML),
+      });
+      await loader.getByTestId("confirm-dialog-confirm").click();
+      await expect.poll(async () => (await authority(loader)).scenarioId).not.toBe(oldScenario);
+      const loaded = (await authority(loader)).scenarioId;
+
+      const banner = reader.getByTestId("ownership-banner");
+      await expect(banner).toHaveAttribute("data-ownership", "peer-loaded");
+      await expect(banner).toContainText("Another tab loaded a different schedule.");
+
+      // The upkeep re-check finds the old lease free, and still does not take it.
+      await reader.evaluate(() => (window as unknown as NsWindow).__nsStore.commands.reconcile());
+      expect(await authority(reader)).toMatchObject({
+        scenarioId: oldScenario,
+        ownership: "read-only",
+      });
+      expect(await mutate(reader, { rangeStart: "2026-06-01" })).toMatchObject({ ok: false });
+
+      await reader.getByTestId("ownership-switch").click();
+      await expect.poll(async () => (await authority(reader)).scenarioId).toBe(loaded);
+      expect(await rangeStart(reader)).toBe("2026-12-01");
+      await expect(banner).toHaveAttribute("data-ownership", "read-only");
+    } finally {
+      await context.close();
+    }
+  });
+});
+
 /** A valid Workspace document, deliberately without `appVersion`. */
 const OTHER_WORKSPACE_YAML = `apiVersion: alpha
 dates:

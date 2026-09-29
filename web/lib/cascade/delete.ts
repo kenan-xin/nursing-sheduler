@@ -38,9 +38,9 @@ import {
 } from "./card-fields";
 import { isEmptyRefField, pruneRefTree, type RefLeaf, type RefTree } from "./reference-tree";
 
-/** Prune deleted ids from every domain-referencing field on one card. For a
- *  covering, an emptied `date` is *omitted* (= all dates, DL08 / finding #18),
- *  never left as `date: []`. */
+/** Prune deleted ids from every domain-referencing field on one card. An emptied
+ *  `date` stays empty so FR-RI-11 drops the card: omitting it would widen the rule
+ *  to every date (bug hunt A-06). */
 function pruneCardFields<T extends object>(
   card: T,
   kind: CardKind,
@@ -74,9 +74,6 @@ function pruneCardFields<T extends object>(
     next.pattern.length < (card as { pattern: unknown[] }).pattern.length
   ) {
     next.pattern = [];
-  }
-  if (kind === "coverings" && domain === "date" && isEmptyRefField(next.date as RefTree)) {
-    delete next.date;
   }
   return next as T;
 }
@@ -260,6 +257,8 @@ function isAuthoredDateGroup(state: ScenarioUiState, id: EntityRef): boolean {
  *  entries, and per-date staffing exceptions (requirement overrides). */
 export interface DeleteImpact {
   rules: number;
+  /** The descriptions of the dropped rules that have one, so the confirm names them. */
+  ruleNames: string[];
   requests: number;
   leave: number;
   history: number;
@@ -285,8 +284,17 @@ export function deleteImpact(
       0,
     );
   const leaveDropped = leave(state) - leave(next);
+  const kept = new Set(
+    Object.values(next.cardsByKind)
+      .flat()
+      .map((card) => card.uid),
+  );
   return {
     rules: rules(state) - rules(next),
+    ruleNames: Object.values(state.cardsByKind)
+      .flat()
+      .filter((card) => !kept.has(card.uid) && card.description?.trim())
+      .map((card) => card.description!.trim()),
     requests: state.reqData.length - next.reqData.length - leaveDropped,
     leave: leaveDropped,
     history: history(state) - history(next),
@@ -307,8 +315,9 @@ function droppedOverrides(state: ScenarioUiState, next: ScenarioUiState): number
 export function describeDeleteImpact(impact: DeleteImpact): string[] {
   const part = (count: number, one: string, many: string) =>
     count > 0 ? [`${count} ${count === 1 ? one : many}`] : [];
+  const names = impact.ruleNames.map((name) => `“${name}”`).join(", ");
   return [
-    ...part(impact.rules, "rule", "rules"),
+    ...part(impact.rules, "rule", "rules").map((line) => (names ? `${line} (${names})` : line)),
     ...part(impact.requests, "request", "requests"),
     ...part(impact.leave, "leave pin", "leave pins"),
     ...part(impact.history, "history entry", "history entries"),

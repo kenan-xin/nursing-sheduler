@@ -41,6 +41,7 @@ import {
   type CoefficientPair,
 } from "@/components/card-editor/coefficient-model";
 import {
+  invalidWeightMessage,
   isValidWeightValue,
   isWeightNonPositive,
   type WeightFieldValue,
@@ -497,7 +498,7 @@ export function validateRequirementForm(
 
   if (preferredDiffersFromRequired(form)) {
     if (!isValidWeightValue(form.weight)) {
-      errors.weight = REQUIREMENT_MESSAGES.weightInvalid;
+      errors.weight = invalidWeightMessage(form.weight, REQUIREMENT_MESSAGES.weightInvalid);
     } else if (!Number.isFinite(form.weight)) {
       errors.weight = REQUIREMENT_MESSAGES.weightInfinite;
     } else if (!isWeightNonPositive(form.weight)) {
