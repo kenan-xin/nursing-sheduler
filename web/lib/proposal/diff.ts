@@ -39,6 +39,7 @@ import {
 import { isEditableCoveringCard } from "@/components/coverings/coverings-model";
 import { isContractedHoursCard } from "@/components/counts/counts-model";
 import { formatHalfHours } from "@/components/counts/half-hour-codec";
+import { groupLeaveReach, leaveReachText } from "@/components/requests/requests-model";
 import { calendarSpan } from "./assumptions";
 import { generateDateItems } from "@/lib/dates";
 import { formatShortDate } from "@/lib/dates/date-id";
@@ -894,6 +895,34 @@ function collapseOffRuns(
 }
 
 /**
+ * Leave on a staff-group row pins every member on every date (bb8t). The per-date
+ * rows only name the group, so one line states the person-days it reaches; the
+ * Preview is the confirmation, so it must say so before Apply.
+ */
+function groupLeaveLines(commands: readonly AssistantCommandV1[], after: ScenarioUiState): Entry[] {
+  return commands.flatMap((command): Entry[] => {
+    if (command.type !== "add_leave") return [];
+    const span = rosterDatesBetween(after, command.startDate, command.endDate);
+    if (!span.ok) return [];
+    const reach = groupLeaveReach(
+      after,
+      span.ids.map((date) => [command.personId, date] as const),
+    );
+    if (!reach) return [];
+    return [
+      {
+        key: `groupleave:${stableStringify(command.personId)}|${command.startDate}|${command.endDate}`,
+        scope: "leave-and-requests",
+        label: `${String(command.personId)}: paid leave for every member`,
+        before: null,
+        after: `Pins paid leave for ${leaveReachText(reach)}`,
+        kind: "created",
+      },
+    ];
+  });
+}
+
+/**
  * A person added in this change and marked must-be-off around the days they cover (a
  * borrowed nurse) gets one line saying when they ARE here -- the thing the manager
  * actually asked for. Only when those days are one unbroken run; otherwise the runs
@@ -1192,6 +1221,7 @@ export function deriveProposalDiff(
       after,
     ),
     ...availabilityLines(commands, after),
+    ...groupLeaveLines(commands, after),
   ];
   const cascade = [
     ...all.filter((entry) => !named.has(entry.key)),

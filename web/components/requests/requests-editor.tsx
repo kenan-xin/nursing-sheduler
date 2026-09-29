@@ -33,6 +33,7 @@ import { CurrentRequestsTable, type CurrentRequestRow } from "./current-requests
 import { CurrentHistoryTable, type CurrentHistoryPerson } from "./current-history-table";
 import {
   cellPreferenceSet,
+  groupSourceMarkers,
   historyValueAt,
   resolveDayStatePrecedence,
   weightDisplayLabel,
@@ -172,6 +173,10 @@ export function RequestsEditor() {
   // yields ONE row (the surviving day-state), not a row per raw cell. The
   // resolved list also backs the footer count so the two always agree.
   const resolvedCells = useMemo(() => resolveDayStatePrecedence(reqData), [reqData]);
+
+  // Person cells a group row or date-group column reaches (bb8t). `state` is the
+  // shallow-picked slice, so this recomputes only when one of these slices moves.
+  const groupSources = useMemo(() => groupSourceMarkers(state, reqData), [state, reqData]);
 
   const currentRequestRows: CurrentRequestRow[] = useMemo(() => {
     return resolvedCells.map((cell, index) => {
@@ -581,6 +586,10 @@ export function RequestsEditor() {
         <span className="inline-flex items-center gap-1.5">
           <span className="size-3 border border-brand bg-brandtint" /> Date-group column
         </span>
+        <span className="inline-flex items-center gap-1.5">
+          <FaLayerGroup className="size-2.5 text-ink3" aria-hidden /> From a group row or date-group
+          column
+        </span>
       </div>
       {/* Full-bleed note strips are square and flat (DESIGN.md §4 rule 2): the
           shortcut strip is a --panel band with its prototype hairline, and the
@@ -621,6 +630,7 @@ export function RequestsEditor() {
         onCellPointerEnter={onCellPointerEnter}
         onHistoryPointerDown={onHistoryPointerDown}
         onHistoryPointerEnter={onHistoryPointerEnter}
+        groupSources={groupSources}
       />
 
       <div
