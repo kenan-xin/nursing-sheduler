@@ -29,7 +29,8 @@ import {
   resetRosterCaptureGate,
   type SessionTransactionStorage,
 } from "@/lib/optimize";
-import { OptimizeAndExportScreen } from "./optimize-and-export-screen";
+import { hasLosableDrafts, useNavGuardStore } from "@/components/shell/nav-guard-store";
+import { OptimizeAndExportScreen, RUN_LEAVE_WARNING } from "./optimize-and-export-screen";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -517,28 +518,18 @@ describe("one click owns one attempt", () => {
     expect(useHotStore.getState().runView.jobId).toBe("opt_1");
   });
 
-  it("a later deliberate click supersedes a genuinely RUNNING run, cleanup parked", async () => {
+  it("a genuinely RUNNING run holds Optimize and the options down; Cancel stays (C-02)", async () => {
     await readyStore();
     const storage = memStorage();
     let posts = 0;
-    const cancelled: string[] = [];
-    // The old run's cleanup is PARKED and never resolves. A new click must not
-    // wait on it, be blocked by it, or have its own record touched by it.
-    const cancelGate = Promise.withResolvers<Response>();
     routeFetch((u, init) => {
       const method = init?.method ?? "GET";
       if (u.endsWith("/api/optimize") && method === "POST") {
         posts += 1;
         return json(202, baseJob({ id: `opt_${posts}` }));
       }
-      if (u.endsWith("/cancel")) {
-        cancelled.push(u);
-        return cancelGate.promise;
-      }
+      if (u.endsWith("/cancel")) return json(200, runningJob());
       if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
-      // The job stays RUNNING for the whole test: the second click has to work
-      // against a live lifecycle, which is exactly the state `!active` used to
-      // make unreachable.
       if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, runningJob());
       throw new Error(`unexpected request: ${u}`);
     });
@@ -547,9 +538,7 @@ describe("one click owns one attempt", () => {
       <OptimizeAndExportScreen
         serverInfoDeps={onlineInfo()}
         controllerDeps={{ prepare: () => okPrep, storage }}
-        // The retirement lane's snapshot purge is parked too — an unproven purge
-        // must not stop the record removal or the next click.
-        retirementDeps={{ storage, purgeSnapshot: async () => ({ status: "pending" }) }}
+        retirementDeps={{ storage }}
       />,
       { wrapper },
     );
@@ -557,33 +546,124 @@ describe("one click owns one attempt", () => {
     const submit = await waitFor(() => screen.getByTestId("optimize-submit"));
     await waitFor(() => expect(submit).toBeEnabled());
     await userEvent.click(submit);
-    await waitFor(() => expect(posts).toBe(1));
-    const firstKeys = storage.optimizeKeys();
-    expect(firstKeys).toHaveLength(1);
-
-    // THE RUN IS GENUINELY LIVE. Nothing here mutates the hot store to fake a
-    // terminal state — that is what the previous version of this test did, and it
-    // is precisely why the product could keep disabling the button for every
-    // queued/running/cancelling lifecycle without any test noticing.
-    await waitFor(() => expect(useHotStore.getState().runView.jobId).toBe("opt_1"));
     await waitFor(() =>
       expect(isActiveLifecycle(useHotStore.getState().runView.lifecycle)).toBe(true),
     );
 
-    // The exact primary action, still live, on a running job.
-    const stillLive = screen.getByTestId("optimize-submit");
-    expect(stillLive).toBeEnabled();
-    expect(screen.queryByTestId("optimize-disabled-reason")).not.toBeInTheDocument();
-    await userEvent.click(stillLive);
+    // v1 parity: the live run cannot be thrown away by a second click, and the
+    // options that would not change it are locked.
+    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeDisabled());
+    expect(screen.getByTestId("optimize-submit")).toHaveTextContent("Optimizing…");
+    expect(screen.getByLabelText("Solver Timeout")).toBeDisabled();
+    expect(screen.getByRole("switch", { name: /anonymize/i })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: /prettify/i })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    fireEvent.click(screen.getByTestId("optimize-submit"));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(posts).toBe(1);
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeEnabled();
+  });
+});
 
-    await waitFor(() => expect(posts).toBe(2));
-    // The superseded run was cancelled best-effort...
+describe("leaving mid-run is guarded and reported (C-03)", () => {
+  it("registers the leave warning while live, and the next visit says the run was cancelled", async () => {
+    await readyStore();
+    const storage = memStorage();
+    const cancelled: string[] = [];
+    routeFetch((u, init) => {
+      const method = init?.method ?? "GET";
+      if (u.endsWith("/api/optimize") && method === "POST") return json(202, baseJob());
+      if (u.endsWith("/cancel")) {
+        cancelled.push(u);
+        return json(200, runningJob());
+      }
+      if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
+      if (/\/api\/optimize\/[^/]+$/.test(u) && method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, runningJob());
+      throw new Error(`unexpected request: ${u}`);
+    });
+    const screenEl = () => (
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{ prepare: () => okPrep, storage }}
+        retirementDeps={{ storage }}
+      />
+    );
+
+    const first = render(screenEl(), { wrapper });
+    expect(hasLosableDrafts()).toBe(false);
+    const submit = await waitFor(() => screen.getByTestId("optimize-submit"));
+    await waitFor(() => expect(submit).toBeEnabled());
+    await userEvent.click(submit);
+    await waitFor(() =>
+      expect(isActiveLifecycle(useHotStore.getState().runView.lifecycle)).toBe(true),
+    );
+
+    // The shared guard (sidebar confirm + beforeunload) is armed with the run's copy.
+    await waitFor(() => expect(hasLosableDrafts()).toBe(true));
+    expect([...useNavGuardStore.getState().drafts.values()].map((d) => d.leaveWarning)).toEqual([
+      RUN_LEAVE_WARNING,
+    ]);
+    expect(screen.queryByTestId("optimize-cancelled-on-exit")).not.toBeInTheDocument();
+
+    // The user leaves anyway: the guard disarms and the run is cancelled.
+    first.unmount();
+    expect(hasLosableDrafts()).toBe(false);
     await waitFor(() => expect(cancelled).toHaveLength(1));
-    // ...and the new run has its OWN key, while the old owner's key was retired by
-    // the abandonment the click performed — without the parked cancel ever settling.
-    const secondKeys = storage.optimizeKeys();
-    expect(secondKeys).toHaveLength(1);
-    expect(secondKeys[0]).not.toBe(firstKeys[0]);
+
+    // On return, one note says what happened — and only once.
+    const second = render(screenEl(), { wrapper });
+    expect(await screen.findByTestId("optimize-cancelled-on-exit")).toHaveTextContent(
+      /last optimisation was cancelled/i,
+    );
+    second.unmount();
+    render(screenEl(), { wrapper });
+    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    expect(screen.queryByTestId("optimize-cancelled-on-exit")).not.toBeInTheDocument();
+  });
+});
+
+describe("a start failure names its real cause and fix (C-04)", () => {
+  it("full storage on an Anonymized run says to free storage or turn off Anonymize", async () => {
+    await readyStore();
+    const storage = memStorage();
+    storage.setItem = () => {
+      throw new DOMException("full", "QuotaExceededError");
+    };
+    let posts = 0;
+    routeFetch((u) => {
+      posts += 1;
+      throw new Error(`nothing may be requested: ${u}`);
+    });
+
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{
+          prepare: () => ({ ok: true, prep: { ...okPrep.prep, anonymized: true } }) as const,
+          storage,
+        }}
+        retirementDeps={{ storage }}
+      />,
+      { wrapper },
+    );
+    const submit = await waitFor(() => screen.getByTestId("optimize-submit"));
+    await waitFor(() => expect(submit).toBeEnabled());
+    await userEvent.click(submit);
+
+    const callout = await screen.findByTestId("optimize-start-failed");
+    expect(callout).toHaveTextContent(
+      "Free browser storage or turn off Anonymize, then click Optimize again.",
+    );
+    expect(callout).not.toHaveTextContent(/new schedule|start over/i);
+    expect(posts).toBe(0);
   });
 });
 

@@ -115,6 +115,15 @@ export function loadScenario(target: ImportNormalizationTarget): Promise<Command
 }
 
 /**
+ * Apply an edited import target (Edit YAML) as ONE tracked, undoable edit on the
+ * CURRENT identity — unlike {@link loadScenario}, history, receipts and assistant
+ * threads stay (v1 parity). Identity is hydrated exactly as a Load would.
+ */
+export function applyScenarioEdit(target: ImportNormalizationTarget): Promise<CommandOutcome> {
+  return getScenarioAuthority().mutate(hydrateImportTarget(target));
+}
+
+/**
  * New scenario: switch to a fresh identity holding the empty workspace. It does
  * NOT invent a backup baseline — an empty workspace has no fresh local backup, so
  * the baseline is `null` (unknown) (DL12/T17r review P0).

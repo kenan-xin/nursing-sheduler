@@ -51,7 +51,7 @@ export const Submitting: Story = {
   play: async ({ canvas }) => {
     const submit = canvas.getByTestId("optimize-submit");
     await expect(submit).toBeDisabled();
-    await expect(submit).toHaveTextContent("Optimising…");
+    await expect(submit).toHaveTextContent("Optimizing…");
   },
 };
 

@@ -409,7 +409,71 @@ describe("RequestsEditor — Download CSV", () => {
     const [blob, filename] = vi.mocked(downloadBlob).mock.calls[0];
     expect(filename).toBe("shift-requests.csv");
     expect(await blob.text()).toBe(
-      ["person,01,02,03", "Aisha,AM,,", "Chloe,,LEAVE,OFF"].join("\n"),
+      ["person,01,02,03", "Aisha,AM:+5,,", "Chloe,,LEAVE,OFF:-2"].join("\n"),
     );
+  });
+});
+
+describe("RequestsEditor — Requests CSV import round trip (F1)", () => {
+  const MATRIX = [
+    { kind: "request" as const, person: "Aisha", date: "01", shiftType: "AM", weight: 5 },
+    { kind: "off" as const, person: "Chloe", date: "02", weight: -3 },
+  ];
+
+  async function openImport() {
+    render(<RequestsEditor />);
+    fireEvent.click(screen.getByTestId("requests-tab-quick"));
+    fireEvent.click(screen.getByTestId("requests-open-requests-csv"));
+  }
+
+  it("re-importing an unedited export at the default weight 0 keeps every weight", async () => {
+    await seed({ ...BASE_SEED, reqData: MATRIX });
+    await openImport();
+    uploadCsv(["person,01,02,03", "Aisha,AM:+5,,", "Chloe,,OFF:-3,"].join("\n"));
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "CSV imported: no changes, the file matches the current requests.",
+      ),
+    );
+    await drainScenarioCommands();
+    expect(useScenarioStore.getState().reqData).toMatchObject(MATRIX);
+    expect(screen.queryByTestId("clear-confirm-dialog")).toBeNull();
+  });
+
+  it("reports added and changed counts", async () => {
+    await seed({ ...BASE_SEED, reqData: MATRIX });
+    await openImport();
+    uploadCsv(["person,01,02,03", "Aisha,AM:+2,,PM:+1", "Chloe,,OFF:-3,"].join("\n"));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("CSV imported: 1 added, 1 changed, 0 removed."),
+    );
+  });
+
+  it("asks before removing cells, says how many, and removes nothing on Cancel", async () => {
+    await seed({ ...BASE_SEED, reqData: MATRIX });
+    await openImport();
+    // Bare entries at the default quick-paint weight 0 delete their selector.
+    uploadCsv(["person,01,02,03", "Aisha,AM,,", "Chloe,,OFF,"].join("\n"));
+
+    const dialog = await screen.findByTestId("clear-confirm-dialog");
+    expect(dialog).toHaveTextContent("This import will remove 2 existing requests. Import anyway?");
+    expect(screen.getByTestId("clear-confirm-confirm")).toHaveTextContent("Import");
+    fireEvent.click(screen.getByTestId("clear-confirm-cancel"));
+    await drainScenarioCommands();
+    expect(useScenarioStore.getState().reqData).toMatchObject(MATRIX);
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("removes and reports the count once confirmed", async () => {
+    await seed({ ...BASE_SEED, reqData: MATRIX });
+    await openImport();
+    uploadCsv(["person,01,02,03", "Aisha,AM,,", "Chloe,,OFF,"].join("\n"));
+    fireEvent.click(await screen.findByTestId("clear-confirm-confirm"));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("CSV imported: 0 added, 0 changed, 2 removed."),
+    );
+    await drainScenarioCommands();
+    expect(useScenarioStore.getState().reqData).toEqual([]);
   });
 });

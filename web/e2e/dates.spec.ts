@@ -31,11 +31,12 @@ async function gotoDates(page: Page) {
   );
 }
 
-/** Set the roster range through the real inputs (commit-on-complete, no button). */
+/** Set the roster range through the real inputs, then Apply the draft. */
 async function setRange(page: Page, start: string, end: string) {
   await page.getByTestId("range-start").fill(start);
   await page.getByTestId("range-end").fill(end);
-  // The completing edit commits the range cascade; wait for it to land in the store.
+  await page.getByTestId("range-apply").click();
+  // Apply commits the range cascade; wait for it to land in the store.
   await page.waitForFunction(
     ([s, e]) => {
       const st = (
@@ -234,6 +235,7 @@ test.describe("T10 Dates & Calendar", () => {
 
     // Extend end to Aug 11 — SAME month, so the grid would not remount on its own.
     await page.getByTestId("range-end").fill("2026-08-11");
+    await page.getByTestId("range-apply").click();
     await page.waitForFunction(() => {
       const st = (
         window as unknown as {
@@ -255,6 +257,7 @@ test.describe("T10 Dates & Calendar", () => {
 
     // Reverse the transition — shrink back to Aug 10.
     await page.getByTestId("range-end").fill("2026-08-10");
+    await page.getByTestId("range-apply").click();
     await page.waitForFunction(() => {
       const st = (
         window as unknown as {
@@ -782,6 +785,7 @@ test.describe("range span-class change migrates refs (rxc)", () => {
 
     // Extend End into August through the REAL input — a same-year span change.
     await page.getByTestId("range-end").fill("2026-08-15");
+    await page.getByTestId("range-apply").click();
     await page.waitForFunction(() => {
       const st = (
         window as unknown as {

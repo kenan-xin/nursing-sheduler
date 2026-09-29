@@ -119,6 +119,10 @@ function DirtyNavDialog() {
   const open = useNavGuardStore((s) => s.open);
   const confirm = useNavGuardStore((s) => s.confirm);
   const cancel = useNavGuardStore((s) => s.cancel);
+  // A draft that names its own loss (a live optimisation run) speaks for itself.
+  const leaveWarning = useNavGuardStore(
+    (s) => [...s.drafts.values()].find((d) => d.leaveWarning)?.leaveWarning,
+  );
 
   return (
     <ConfirmDialog
@@ -126,9 +130,9 @@ function DirtyNavDialog() {
       onOpenChange={(next) => {
         if (!next) cancel();
       }}
-      title="Unsaved changes"
-      description="You have unsaved changes. Leave this page without saving?"
-      confirmLabel="Leave without saving"
+      title={leaveWarning ? "Leave this page?" : "Unsaved changes"}
+      description={leaveWarning ?? "You have unsaved changes. Leave this page without saving?"}
+      confirmLabel={leaveWarning ? "Leave" : "Leave without saving"}
       cancelLabel="Stay"
       variant="destructive"
       onConfirm={confirm}

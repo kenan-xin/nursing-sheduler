@@ -31,7 +31,6 @@ import {
   computeScenarioFingerprint,
   drainScenarioCommands,
   pickScenario,
-  readConflictingEditorDraft,
   readScenarioHistoryDepth,
   scenarioCommands,
   selectBackupStatus,
@@ -45,7 +44,7 @@ import {
 } from "@/lib/store";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import type { CapabilityRegistryStamp } from "@/lib/capability/types";
-import { useNavGuardStore } from "./nav-guard-store";
+import { readConflictingEditorDraft, useNavGuardStore } from "./nav-guard-store";
 import { getPersistenceStatus, type PersistenceStatus } from "./persistence-status";
 
 declare global {
