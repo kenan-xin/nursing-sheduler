@@ -133,6 +133,24 @@ export function hasLosableDrafts(): boolean {
   return useNavGuardStore.getState().drafts.size > 0;
 }
 
+/** The label of an open losable draft, or `null`. */
+export function selectConflictingEditorDraft(state: Pick<NavGuardState, "drafts">): string | null {
+  const [first] = state.drafts.values();
+  return first?.label ?? null;
+}
+
+/**
+ * The open editor draft that blocks an assistant Apply or receipt Undo, or `null`.
+ *
+ * An open form over the same document is a change the user has started and not
+ * committed; applying over it would either lose it or produce a document neither
+ * the form nor the Preview describes. Returns the draft's label so the panel can
+ * name it.
+ */
+export function readConflictingEditorDraft(): string | null {
+  return selectConflictingEditorDraft(useNavGuardStore.getState());
+}
+
 /**
  * Dispatch `intent` through the shared guard: run it immediately when no
  * losable draft is open, otherwise stage it for the shell's confirm dialog.

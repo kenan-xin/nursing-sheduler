@@ -55,7 +55,6 @@ export {
   drainScenarioCommands,
   readAuthoritativeScenarioIdentity,
   readAuthoritativeScenarioOwnership,
-  readConflictingEditorDraft,
   readScenarioHistoryDepth,
   scenarioCommands,
 } from "./commands";

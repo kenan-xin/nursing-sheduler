@@ -27,7 +27,7 @@ import type {
   PrepareAssistantProposalOutcome,
   ReceiptStanding,
 } from "./authority";
-import { getScenarioAuthority, useHotStore } from "./spine";
+import { getScenarioAuthority } from "./spine";
 
 /**
  * The typed scenario command surface. Named for the manual operations they
@@ -159,19 +159,6 @@ export const assistantProposalCommands = {
     return getScenarioAuthority().describeAssistantReceipts();
   },
 } as const;
-
-/**
- * The open editor draft that blocks Apply, or `null`.
- *
- * An unsaved form draft over the same document is a change the user has started and
- * not committed; applying over it would either lose it or produce a document neither
- * the form nor the Preview describes. The panel names it and asks for a decision --
- * which is why this returns the draft's key rather than a boolean.
- */
-export function readConflictingEditorDraft(): string | null {
-  const drafts = Object.keys(useHotStore.getState().drafts);
-  return drafts.length > 0 ? drafts[0] : null;
-}
 
 /** Resolve once every queued command has settled. */
 export function drainScenarioCommands(): Promise<void> {

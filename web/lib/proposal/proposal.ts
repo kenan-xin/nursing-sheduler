@@ -160,6 +160,11 @@ export interface ProposalReadiness {
   outstanding: OperationalAssumption[];
 }
 
+/** Why an open editor form blocks an assistant change (Apply or receipt Undo). */
+export function conflictingDraftMessage(draftLabel: string): string {
+  return `Save or discard the open ${draftLabel} first — it changes the same schedule.`;
+}
+
 /**
  * Whether this proposal may still be applied against `live`, and if not, why.
  *
@@ -216,7 +221,7 @@ export function describeProposalReadiness(
   if (live.conflictingDraft) {
     blocks.push({
       code: "conflicting_draft",
-      message: `Save or discard the open ${live.conflictingDraft} first — it changes the same schedule.`,
+      message: conflictingDraftMessage(live.conflictingDraft),
     });
   }
   if (
