@@ -11,7 +11,7 @@ import { parse } from "yaml";
 // cascade, which imports `@/lib/cascade` at runtime and would close a module
 // cycle back through this package. `date-id` itself depends on `@/lib/scenario`
 // for a TYPE only, so it is cycle-free.
-import { generateDateItems, type DateRange } from "@/lib/dates/date-id";
+import { dateIdToIso, generateDateItems, type DateRange } from "@/lib/dates/date-id";
 import { importScenarioSchema, type ImportScenarioParsed } from "./schemas/import";
 import { truncateHistoryAtBlankEntries } from "./person-history";
 import {
@@ -126,6 +126,10 @@ export type DateRefNormalizer = (ref: unknown) => DateRef;
  * inbound document (the range-change cascade's `remapDateReferences` maintains it
  * thereafter). Preference CARDS deliberately keep full ISO and are not re-keyed.
  *
+ * Core's `D` (int or string) and `MM-DD` shorthands resolve to ISO first, under
+ * core's own rules: `D` only when the range sits in one month, `MM-DD` only when
+ * it sits in one year (otherwise core rejects the ref, so it passes through).
+ *
  * Only an IN-RANGE ISO date is re-keyed. Group ids, keywords (`WEEKEND`), range
  * literals (`01~15`), and already-span-formatted ids have no ISO entry and pass
  * through verbatim; so does an out-of-range ISO date, which must stay reportable
@@ -134,10 +138,16 @@ export type DateRefNormalizer = (ref: unknown) => DateRef;
  */
 function buildDateRefNormalizer(range: DateRange): DateRefNormalizer {
   const spanIdByIso = new Map(generateDateItems(range).map((item) => [item.iso, item.id]));
+  const sameYear = range.start.slice(0, 4) === range.end.slice(0, 4);
+  const sameMonth = range.start.slice(0, 7) === range.end.slice(0, 7);
+  const shorthandAllowed = (id: string) =>
+    /^\d{1,2}$/.test(id) ? sameMonth : /^\d{2}-\d{2}$/.test(id) ? sameYear : true;
   return (ref) => {
     const value = ref instanceof Date ? isoDate(ref) : ref;
-    if (typeof value !== "string") return value as DateRef;
-    return spanIdByIso.get(value) ?? value;
+    if (typeof value !== "string" && typeof value !== "number") return value as DateRef;
+    const id = String(value);
+    const iso = shorthandAllowed(id) ? dateIdToIso(id, range) : null;
+    return spanIdByIso.get(iso ?? id) ?? (value as DateRef);
   };
 }
 

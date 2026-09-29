@@ -282,3 +282,35 @@ describe("prepareScenarioLoad — the no-mutation lock", () => {
     expect(await snapshot()).toEqual(before);
   });
 });
+
+describe("legacy D / MM-DD shift-request dates (A-07)", () => {
+  it("re-keys core's shorthand dates onto the matrix span ids", () => {
+    const yaml = `apiVersion: alpha
+dates:
+  range:
+    startDate: 2023-09-02
+    endDate: 2023-09-08
+people:
+  items:
+    - id: 0
+shiftTypes:
+  items:
+    - id: D
+preferences:
+  - type: at most one shift per day
+  - type: shift request
+    person: 0
+    date: 5
+    shiftType: D
+    weight: 100
+  - type: shift request
+    person: 0
+    date: 09-06
+    shiftType: D
+    weight: 100
+`;
+    const result = prepareScenarioLoad(yaml);
+    expect(result.issues).toEqual([]);
+    expect(result.target!.reqData.map((cell) => cell.date)).toEqual(["05", "06"]);
+  });
+});
