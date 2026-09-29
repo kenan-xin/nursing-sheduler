@@ -59,7 +59,7 @@ export const CONTRACTED_MESSAGES = {
   person: COUNT_MESSAGES.person,
   countDates: COUNT_MESSAGES.countDates,
   countShiftTypes: COUNT_MESSAGES.countShiftTypes,
-  target: "Enter contracted hours on the half-hour grid (e.g. 160h, 8h 30m, or 8.5h)",
+  target: "Enter half-hours (320 = 160h)",
   rangeOrder: "Minimum contracted hours must not exceed the maximum",
 } as const;
 

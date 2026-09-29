@@ -295,6 +295,16 @@ export function isAdvancedAffinityCard(card: AffinityCard): boolean {
 /** The v1 meaning the flat form authors (each person, each shift on its own). */
 export const AFFINITY_SAME_SHIFT = "on the same shift on the same day";
 
+/** A pairing's strength, per `shift_affinity` in core: the weight is gained on each
+ *  date both sides work. Shared by the Rules overview and the assistant Preview. */
+export function describePairingStrength(weight: number): string {
+  if (weight === Infinity) return "must work together on every date";
+  if (weight === -Infinity) return "never together";
+  if (weight > 0) return `together where possible (weight ${weight})`;
+  if (weight < 0) return `apart where possible (weight ${weight})`;
+  return "no effect (weight 0)";
+}
+
 /** What a grouped (pre-rqfx v2) card actually scores, stated honestly. */
 export const AFFINITY_GROUPED_MEANING =
   "Grouped rule: anyone from each group on any of these shifts on the same day counts, even on different shifts, scored once a day. Edit via Save & Load (YAML).";

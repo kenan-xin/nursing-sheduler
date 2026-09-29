@@ -114,37 +114,30 @@ describe("seedContractedFormFromGeneric", () => {
     expect(seeded.targetRangeMax).toBe("");
   });
 
-  it("re-syncs the existing coefficients to the concrete contracted domain", () => {
-    const seeded = seedContractedFormFromGeneric(generic, BASE);
-    // D is the only selected concrete leaf source — its manual override is preserved.
-    expect(seeded.countShiftTypeCoefficients).toEqual([["D", 3]]);
-  });
-
-  it("drops a coefficient id no longer eligible under the concrete domain", () => {
-    const withStale: OrdinaryCountCard = {
-      ...generic,
-      countShiftTypes: ["D"],
-      countShiftTypeCoefficients: [
-        ["D", 3],
-        ["N", 4],
+  it("sets coefficients from the shift durations, never from the generic weights (C2)", () => {
+    const timed = scenario({
+      ...BASE,
+      shifts: [
+        { id: "D", durationMinutes: 480 },
+        { id: "N", durationMinutes: 600 },
       ],
-    };
-    const seeded = seedContractedFormFromGeneric(withStale, BASE);
-    // Only D is selected, so N is not in the concrete domain and is dropped.
-    expect(seeded.countShiftTypeCoefficients).toEqual([["D", 3]]);
-  });
-
-  it("adds a blank slot for a newly-eligible concrete id (group expansion)", () => {
+    });
     const grouped: OrdinaryCountCard = {
       ...generic,
-      countShiftTypes: ["Both"],
-      countShiftTypeCoefficients: [["D", 3]],
+      countShiftTypes: ["Both", "LEAVE"],
+      countShiftTypeCoefficients: [["D", 2]],
     };
-    const seeded = seedContractedFormFromGeneric(grouped, BASE);
-    // Both expands to D + N over the concrete leaf domain: D keeps its override, N is blank.
+    const seeded = seedContractedFormFromGeneric(grouped, timed);
+    // D=2 ("counts double") would be 1h; the Refresh value is 8h = 16 half-hours.
     expect(seeded.countShiftTypeCoefficients).toEqual([
-      ["D", 3],
-      ["N", ""],
+      ["D", 16],
+      ["N", 20],
+      ["LEAVE", 16],
     ]);
+  });
+
+  it("leaves a shift with no working time blank, dropping its generic weight", () => {
+    const seeded = seedContractedFormFromGeneric(generic, BASE);
+    expect(seeded.countShiftTypeCoefficients).toEqual([["D", ""]]);
   });
 });
