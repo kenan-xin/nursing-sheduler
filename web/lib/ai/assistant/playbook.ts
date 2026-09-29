@@ -37,8 +37,10 @@
 
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
+import type { SuccessionCard } from "@/lib/scenario";
+import { parseWeightInput } from "@/components/card-editor/weight-value";
 
-export const PLAYBOOK_VERSION = "2026-09-29.1";
+export const PLAYBOOK_VERSION = "2026-09-29.2";
 
 /**
  * How every `offer_choices` option must read (bead tpt2). The card is a pick, not a prompt:
@@ -81,14 +83,23 @@ export const MAX_DAILY_WORKING_MINUTES = 12 * 60;
 
 /**
  * True when a change turns off, deletes or softens a shift sequence (rest) rule.
- * ponytail: reads the commands only, so an edit that narrows a rule but keeps it hard
- * carries no warning; pass the before-state if that ever matters.
+ * `successions` are the rules before the change: an edit softens one only when it lowers
+ * a must or a penalty (a negative weight moved up); a bonus changed or a penalty raised
+ * relaxes nothing (bead 8g1f S2).
+ * ponytail: an edit that narrows a rule but keeps its weight carries no warning.
  */
-export function relaxesRestRule(commands: readonly AssistantCommandV1[]): boolean {
+export function relaxesRestRule(
+  commands: readonly AssistantCommandV1[],
+  successions: readonly Pick<SuccessionCard, "uid" | "weight">[],
+): boolean {
   return commands.some((c) => {
     if (c.type === "set_rule_enabled") return c.ruleKind === "successions" && !c.enabled;
     if (c.type === "remove_rule") return c.ruleKind === "successions";
-    if (c.type === "edit_shift_sequence_rule") return !/infinity/i.test(c.weight);
+    if (c.type === "edit_shift_sequence_rule") {
+      const was = successions.find((card) => card.uid === c.ruleId)?.weight;
+      const now = parseWeightInput(c.weight);
+      return was !== undefined && was < 0 && typeof now === "number" && now > was;
+    }
     return false;
   });
 }
