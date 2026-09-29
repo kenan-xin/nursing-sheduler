@@ -37,6 +37,9 @@ import { create } from "zustand";
 export interface DraftRegistration {
   id: string;
   label: string;
+  /** What leaving actually loses, when it is not unsaved edits (e.g. a live
+   *  optimisation run). The shell's confirm shows it in place of its default copy. */
+  leaveWarning?: string;
 }
 
 export type NavIntentKind = "push" | "replace" | "back" | "mode-transition";

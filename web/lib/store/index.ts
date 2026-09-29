@@ -121,6 +121,7 @@ export {
 export { commitPaintGesture } from "./paint";
 
 export {
+  applyScenarioEdit,
   BRING_UP_STALL_MS,
   initializeScenarioAuthority,
   loadScenario,
