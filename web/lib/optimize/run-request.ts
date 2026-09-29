@@ -86,6 +86,18 @@ export function noteOptimizeRunStarted(documentRevision: number): void {
 }
 
 /**
+ * The run in view was built from an older schedule than the one now in the editor
+ * (C-12). One rule for the Optimise screen's marker and the assistant's summary.
+ */
+export function isRunStale(
+  lifecycle: string,
+  runRevision: number | null,
+  documentRevision: number,
+): boolean {
+  return lifecycle !== "idle" && runRevision !== null && runRevision !== documentRevision;
+}
+
+/**
  * Publish the solver timeout the Optimize screen would submit.
  *
  * Called by the screen whenever its effective timeout changes, and with `null` on
