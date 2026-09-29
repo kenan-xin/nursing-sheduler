@@ -127,7 +127,7 @@ export function prepareScenarioLoad(
   //     rename hint unless the caller opted into (a blocker-free) conversion.
   const v1LeaveShift = planV1LeaveShiftConversion(parsed) ?? undefined;
   if (v1LeaveShift) {
-    if (!options.convertV1LeaveShift || v1LeaveShift.blockers.length > 0) {
+    if (!options.convertV1LeaveShift || !v1LeaveShift.convertible) {
       return {
         target: null,
         doc: null,

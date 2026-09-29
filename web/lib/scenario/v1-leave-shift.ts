@@ -30,7 +30,13 @@ export interface V1LeaveShiftPlan {
   historyEntries: number;
   /** References that need it to stay a worked shift; non-empty => refuse conversion. */
   blockers: string[];
-  /** The converted raw document (only meaningful when `blockers` is empty). */
+  /** Every leave-like shift type id in the file; more than one cannot be converted. */
+  leaveLikeIds: string[];
+  /** Rules / requests / export counts whose `ALL` selector stops covering leave days. */
+  allShiftRules: number;
+  /** No blockers and exactly one leave-like id: the conversion may run. */
+  convertible: boolean;
+  /** The converted raw document (only meaningful when `convertible`). */
   doc: unknown;
 }
 
@@ -67,14 +73,18 @@ function label(entry: Rec, kind: string, index: number): string {
 export function planV1LeaveShiftConversion(raw: unknown): V1LeaveShiftPlan | null {
   if (!isRec(raw) || !isRec(raw.shiftTypes) || !Array.isArray(raw.shiftTypes.items)) return null;
   const items = raw.shiftTypes.items;
-  const shiftIndex = items.findIndex(
-    (item) => isRec(item) && String(item.id).toUpperCase() === RESERVED_SHIFT_TYPE.leave,
-  );
+  const isLeaveLike = (item: unknown) =>
+    isRec(item) && String(item.id).toUpperCase() === RESERVED_SHIFT_TYPE.leave;
+  const shiftIndex = items.findIndex(isLeaveLike);
   if (shiftIndex < 0) return null;
   const shiftId = String((items[shiftIndex] as Rec).id);
-  const refers = (entry: Rec) => SHIFT_FIELDS.some((field) => mentions(entry[field], shiftId));
+  const leaveLikeIds = items.filter(isLeaveLike).map((item) => String((item as Rec).id));
+  const uses = (entry: Rec, id: string) => SHIFT_FIELDS.some((field) => mentions(entry[field], id));
+  const refers = (entry: Rec) => uses(entry, shiftId);
 
   const blockers: string[] = [];
+  // In v1, ALL expanded to every shift type, the Leave shift included.
+  let allShiftRules = 0;
   let convertedRequests = 0;
   let droppedRequests = 0;
   let historyEntries = 0;
@@ -88,6 +98,7 @@ export function planV1LeaveShiftConversion(raw: unknown): V1LeaveShiftPlan | nul
   const preferences: unknown[] = [];
   (Array.isArray(raw.preferences) ? raw.preferences : []).forEach((pref, i) => {
     if (!isRec(pref)) return void preferences.push(pref);
+    if (uses(pref, RESERVED_SHIFT_TYPE.all)) allShiftRules++;
     const type = inferPreferenceType(pref);
     if (type !== PREFERENCE_TYPE.shiftRequest) {
       if (refers(pref)) blockers.push(label(pref, type, i));
@@ -116,6 +127,9 @@ export function planV1LeaveShiftConversion(raw: unknown): V1LeaveShiftPlan | nul
     );
     if (exportEntries.some((entry) => isRec(entry) && refers(entry)))
       blockers.push("export layout");
+    allShiftRules += exportEntries.filter(
+      (entry) => isRec(entry) && uses(entry, RESERVED_SHIFT_TYPE.all),
+    ).length;
   }
 
   const people = isRec(raw.people) ? raw.people : undefined;
@@ -143,12 +157,25 @@ export function planV1LeaveShiftConversion(raw: unknown): V1LeaveShiftPlan | nul
     droppedRequests,
     historyEntries,
     blockers,
+    leaveLikeIds,
+    allShiftRules,
+    convertible: blockers.length === 0 && leaveLikeIds.length === 1,
     doc,
   };
 }
 
 /** The blocking load issue for a v1 Leave shift that is not (or cannot be) converted. */
 export function v1LeaveShiftIssue(plan: V1LeaveShiftPlan): { path: string; message: string } {
+  if (plan.leaveLikeIds.length > 1) {
+    const names = plan.leaveLikeIds.map((id) => `"${id}"`).join(" and ");
+    return {
+      path: `shiftTypes.items.${plan.shiftIndex}.id`,
+      message:
+        `Shift types ${names} both clash with the built-in LEAVE (paid leave), so the file cannot load, ` +
+        `and only one of them could become paid leave. Rename them: open Edit YAML, paste the file, ` +
+        `replace each name everywhere with a distinct new name (for example "AL" and "SL"), then Apply.`,
+    };
+  }
   const usedBy =
     plan.blockers.length > 0
       ? ` It cannot become paid leave because it is used as a worked shift by: ${plan.blockers.join(", ")}.`

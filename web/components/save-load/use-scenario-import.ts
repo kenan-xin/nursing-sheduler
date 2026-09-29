@@ -211,7 +211,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
   const stage = (text: string, edit: boolean, convertV1LeaveShift = false) => {
     const result = prepareScenarioLoad(text, { convertV1LeaveShift });
     const plan = result.v1LeaveShift;
-    if (plan && !convertV1LeaveShift && plan.blockers.length === 0) {
+    if (plan && !convertV1LeaveShift && plan.convertible) {
       // The dialog closes through `onCancel` after Continue too, so only a real
       // decline may publish the rename error.
       let accepted = false;

@@ -88,6 +88,42 @@ describe("planV1LeaveShiftConversion", () => {
     ]);
   });
 
+  it("counts rules, requests and export counts that use the ALL shift selector", () => {
+    const doc = v1Doc();
+    const before = planV1LeaveShiftConversion(doc)!.allShiftRules;
+    doc.preferences.push(
+      {
+        type: "shift count",
+        person: "ALL",
+        countDates: "ALL",
+        countShiftTypes: "ALL",
+        expression: "x",
+        target: 5,
+      },
+      { type: "shift request", person: "Bob", date: "2026-05-14", shiftType: "ALL" },
+      { type: "shift type successions", person: "ALL", pattern: ["N", "D"] },
+    );
+    doc.export = {
+      extraRows: [
+        { type: "count", header: "Worked", countShiftTypes: ["ALL"], countPeople: ["ALL"] },
+      ],
+    };
+    expect(planV1LeaveShiftConversion(doc)!.allShiftRules).toBe(before + 3);
+  });
+
+  it("refuses two leave-like ids and names both in the error", () => {
+    const doc = v1Doc();
+    doc.shiftTypes.items.push({ id: "LEAVE" });
+    const plan = planV1LeaveShiftConversion(doc)!;
+    expect(plan.leaveLikeIds).toEqual(["Leave", "LEAVE"]);
+    expect(plan.convertible).toBe(false);
+    const result = prepareScenarioLoad(stringify(doc), { convertV1LeaveShift: true });
+    expect(result.target).toBeNull();
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0].message).toMatch(/Shift types "Leave" and "LEAVE" both clash/);
+    expect(result.issues[0].message).not.toMatch(/reserved value/);
+  });
+
   it("ignores a person or date that happens to be named Leave", () => {
     const doc = v1Doc();
     doc.preferences.push({

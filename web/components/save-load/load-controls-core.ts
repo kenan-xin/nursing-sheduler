@@ -28,6 +28,12 @@ export function v1LeaveShiftOfferCopy(plan: V1LeaveShiftPlan): {
   ];
   if (plan.droppedRequests > 0)
     lines.push(`Requests dropped (zero or negative weight): ${plan.droppedRequests}`);
+  if (plan.allShiftRules > 0)
+    lines.push(
+      plan.allShiftRules === 1
+        ? "1 rule that counts ALL shifts will no longer count leave days after conversion."
+        : `${plan.allShiftRules} rules that count ALL shifts will no longer count leave days after conversion.`,
+    );
   return {
     title: `Convert "${plan.shiftId}" to paid leave?`,
     description:

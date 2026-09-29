@@ -2,7 +2,7 @@
 import "fake-indexeddb/auto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import {
   currentAppVersion,
   prepareWorkspaceExport,
@@ -320,6 +320,38 @@ describe("SaveLoadWorkspace — v1 Leave shift (objg)", () => {
       /become paid leave: 1[^]*become LEAVE: 1[^]*negative weight\): 1/,
     );
     expect(screen.getByTestId("confirm-dialog-confirm")).toHaveTextContent("Convert to paid leave");
+    // The fixture's requirement counts ALL qualified people but names shift D, so no ALL line.
+    expect(screen.getByTestId("confirm-dialog-detail")).not.toHaveTextContent(/count ALL shifts/);
+  });
+
+  it("names how many rules count ALL shifts", async () => {
+    const doc = parse(v1LeaveShiftYaml());
+    doc.preferences.push(
+      {
+        type: "shift count",
+        person: "ALL",
+        countDates: "ALL",
+        countShiftTypes: "ALL",
+        expression: "x",
+        target: 5,
+      },
+      {
+        type: "shift count",
+        person: "Bob",
+        countDates: "ALL",
+        countShiftTypes: ["ALL"],
+        expression: "x",
+        target: 3,
+      },
+    );
+    render(<SaveLoadWorkspace />);
+    fireEvent.click(screen.getByTestId("scenario-upload-button"));
+    await screen.findByTestId("upload-modal");
+    uploadTextFile(stringify(doc, YAML_OPTIONS));
+    await screen.findByText('Convert "Leave" to paid leave?');
+    expect(screen.getByTestId("confirm-dialog-detail")).toHaveTextContent(
+      "2 rules that count ALL shifts will no longer count leave days after conversion.",
+    );
   });
 
   it("accept converts the shift to leave pins and loads", async () => {
