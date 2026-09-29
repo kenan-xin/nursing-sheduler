@@ -36,6 +36,7 @@ import {
   loadScenario,
   useScenarioStore,
 } from "@/lib/store";
+import { clearRosterDataAndNotify } from "@/lib/roster";
 import { loadConfirmCopy } from "./load-controls-core";
 
 /** Ready-to-render props for the combined load confirmation dialog. */
@@ -53,6 +54,10 @@ export interface PendingImportConfirm {
   onCancel: () => void;
 }
 
+export const LOAD_ROSTER_CLEAR_FAILED =
+  "The file could not be loaded: the current roster could not be cleared from this browser. " +
+  "Your current schedule has been kept. Try loading again.";
+
 export interface UseScenarioImportOptions {
   /** Runs after a successful `loadScenario` replace -- direct version match, or Continue on the version-confirm gate. */
   onCommitted?: () => void;
@@ -60,6 +65,8 @@ export interface UseScenarioImportOptions {
 
 export interface UseScenarioImportResult {
   issues: ScenarioValidationIssue[] | null;
+  /** Issues a loaded file still has (C-22). Not blocking the load; they block Optimize. */
+  loadIssues: ScenarioValidationIssue[] | null;
   clearIssues: () => void;
   clearImportState: () => void;
   confirm: PendingImportConfirm | null;
@@ -91,6 +98,8 @@ interface StagedTarget {
    * same list; `commit` never re-runs guard resolution after mutation.
    */
   warnings: string[];
+  /** The file's producer-preflight issues, shown after the load (C-22). */
+  loadIssues: ScenarioValidationIssue[];
 }
 
 /**
@@ -148,6 +157,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
   const [issues, setIssues] = useState<ScenarioValidationIssue[] | null>(null);
   const [staged, setStaged] = useState<StagedTarget | null>(null);
   const [warnings, setWarnings] = useState<string[] | null>(null);
+  const [loadIssues, setLoadIssues] = useState<ScenarioValidationIssue[] | null>(null);
 
   // Commit performs EXACTLY ONE state replacement, then publishes the warning list
   // that was already computed from the unchanged target before this call. It never
@@ -156,6 +166,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     target: ImportNormalizationTarget,
     stagedWarnings: string[],
     edit: boolean,
+    stagedIssues: ScenarioValidationIssue[] = [],
   ) => {
     if (edit) {
       // An Edit-YAML apply is an ordinary tracked edit on THIS identity (C-06).
@@ -188,6 +199,14 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     // The returned promise is what the confirm dialog holds its busy state on: it must
     // not settle before the IndexedDB switch has committed, or a hard reload in that
     // window aborts the write and silently drops the import (nursing-sheduler-iks).
+    //
+    // C-23: the saved roster belongs to the schedule being replaced, so it is cleared
+    // first, as New schedule does (`resetToNewSchedule`), and fails closed the same way.
+    const cleared = await clearRosterDataAndNotify().catch(() => null);
+    if (cleared?.status !== "cleared") {
+      toast.error(LOAD_ROSTER_CLEAR_FAILED);
+      return;
+    }
     const outcome = await loadScenario(target);
     if (!outcome.ok) {
       toast.error(
@@ -198,6 +217,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
       return;
     }
     setWarnings(stagedWarnings.length > 0 ? stagedWarnings : null);
+    setLoadIssues(stagedIssues.length > 0 ? stagedIssues : null);
     setStaged(null);
     onCommitted?.();
     toast.success("Scenario loaded — this replaces your current setup.");
@@ -205,11 +225,15 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
 
   const stage = (text: string, edit: boolean) => {
     const result = prepareScenarioLoad(text);
-    if (result.issues.length > 0 || !result.target) {
-      setIssues(result.issues);
+    // An Edit-YAML draft stays strict: its issues show in the editor, where they
+    // are fixed. Only a loaded FILE may carry them in (C-22).
+    const optimizeIssues = result.optimizeIssues ?? [];
+    if (result.issues.length > 0 || !result.target || (edit && optimizeIssues.length > 0)) {
+      setIssues(result.issues.length > 0 ? result.issues : optimizeIssues);
       return;
     }
     setIssues(null);
+    setLoadIssues(null);
     // Compute the full merged warning list from the unchanged target NOW, before
     // any `loadScenario` call. Both the direct and version-confirmed paths publish
     // this exact list, so the guard is evaluated once against the pre-load target.
@@ -222,7 +246,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     // DL12: only a genuinely empty workspace on a matching version commits
     // directly; every other load stages one combined confirmation.
     if (versionStatus === null && !replacement) {
-      void commit(result.target, mergedWarnings, edit);
+      void commit(result.target, mergedWarnings, edit, optimizeIssues);
       return;
     }
     setStaged({
@@ -232,6 +256,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
       target: result.target,
       edit,
       warnings: mergedWarnings,
+      loadIssues: optimizeIssues,
     });
   };
 
@@ -243,18 +268,20 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
           staged.fileVersion,
           currentAppVersion(),
         ),
-        onContinue: () => commit(staged.target, staged.warnings, staged.edit),
+        onContinue: () => commit(staged.target, staged.warnings, staged.edit, staged.loadIssues),
         onCancel: () => setStaged(null),
       }
     : null;
 
   return {
     issues,
+    loadIssues,
     clearIssues: () => setIssues(null),
     clearImportState: () => {
       setIssues(null);
       setStaged(null);
       setWarnings(null);
+      setLoadIssues(null);
     },
     confirm,
     warnings,

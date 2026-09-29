@@ -10,9 +10,9 @@
 //   projectImportTarget → validateScenario (producer preflight, which runs
 //   validateContractedHoursContract) → { target, doc, issues, warnings }
 //
-// It mutates nothing and never throws into its caller: a YAML syntax error, an
-// import/schema failure, and a producer/contracted V-message all come back
-// through `issues`; non-blocking advanced-syntax survivors come back through
+// It mutates nothing and never throws into its caller: a YAML syntax error and an
+// import/schema failure come back through `issues`; a producer/contracted V-message
+// comes back through `optimizeIssues` (non-blocking, C-22); non-blocking advanced-syntax survivors come back through
 // `warnings`. The returned `target` is the keyless import target, byte-identical
 // to what `importScenarioValue` produced, so the later `loadScenario(target)` can
 // allocate its own fresh card identity without collision.
@@ -46,7 +46,7 @@ export interface PrepareScenarioLoadResult {
   doc: CanonicalScenarioDocument | null;
   /**
    * Blocking problems, in one channel: a YAML syntax error (path `""`) OR the
-   * import-schema / producer / contracted-hours V-messages. Empty ⇒ load may proceed.
+   * import-schema V-messages. Empty ⇒ load may proceed.
    */
   issues: ScenarioValidationIssue[];
   /**
@@ -54,6 +54,11 @@ export interface PrepareScenarioLoadResult {
    * shapes preserved on import but outside the web UI editing subset. Never blocks.
    */
   warnings: string[];
+  /**
+   * Producer-preflight V-messages on a file that otherwise loads (C-22, v1 parity).
+   * They do not block the load; Optimize stays blocked until they are fixed.
+   */
+  optimizeIssues?: ScenarioValidationIssue[];
 }
 
 /**
@@ -130,10 +135,12 @@ export function prepareScenarioLoad(raw: string): PrepareScenarioLoadResult {
   }
 
   // 4. Producer preflight (runs `validateContractedHoursContract` transitively).
+  //    A file that fails it still loads, as in v1 (C-22): its issues come back as
+  //    `optimizeIssues`, and Optimize's own strict gate blocks until they are fixed.
   const validation = validateScenario(doc);
   const warnings = collectImportWarnings(target);
   if (!validation.ok) {
-    return { target, doc, issues: validation.issues, warnings };
+    return { target, doc, issues: [], warnings, optimizeIssues: validation.issues };
   }
   return { target, doc: validation.document, issues: [], warnings };
 }

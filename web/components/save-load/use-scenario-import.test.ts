@@ -37,10 +37,19 @@ vi.mock("@/lib/store", async (orig) => {
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+// C-23: a Load clears the saved roster first. A spy, so order and failure are provable.
+vi.mock("@/lib/roster", async (orig) => {
+  const actual = await orig<typeof import("@/lib/roster")>();
+  return { ...actual, clearRosterDataAndNotify: vi.fn() };
+});
+
 import { prepareScenarioLoad } from "@/lib/scenario";
 import { loadScenario, isScenarioSliceEmpty } from "@/lib/store";
+import { clearRosterDataAndNotify } from "@/lib/roster";
 import { toast } from "sonner";
-import { useScenarioImport } from "./use-scenario-import";
+import { LOAD_ROSTER_CLEAR_FAILED, useScenarioImport } from "./use-scenario-import";
+
+const clearRosterMock = clearRosterDataAndNotify as unknown as Mock;
 
 const prepareMock = prepareScenarioLoad as unknown as Mock;
 const loadScenarioMock = loadScenario as unknown as Mock;
@@ -92,6 +101,7 @@ beforeEach(() => {
   // reported as a successful load (see the refusal test at the end).
   loadScenarioMock.mockReset().mockResolvedValue(LOADED);
   isEmptyMock.mockReset().mockReturnValue(true);
+  clearRosterMock.mockReset().mockResolvedValue({ status: "cleared" });
   (toast.success as unknown as Mock).mockReset();
   (toast.error as unknown as Mock).mockReset();
 });
@@ -231,6 +241,66 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     expect(result.current.warnings).toBeNull();
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalled();
+  });
+});
+
+describe("useScenarioImport — Load clears the saved roster (C-23)", () => {
+  it("clears the roster before the switch", async () => {
+    stageResult(targetWithCounts([]));
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleFile("<yaml>"));
+    expect(clearRosterMock).toHaveBeenCalledOnce();
+    expect(clearRosterMock.mock.invocationCallOrder[0]).toBeLessThan(
+      loadScenarioMock.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("an unverified clear loads nothing and says so", async () => {
+    clearRosterMock.mockResolvedValue({ status: "failed" });
+    stageResult(targetWithCounts([]));
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleFile("<yaml>"));
+    expect(loadScenarioMock).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(LOAD_ROSTER_CLEAR_FAILED);
+  });
+
+  it("an Edit-YAML apply keeps the roster", async () => {
+    stageResult(targetWithCounts([]));
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleEdit("<yaml>"));
+    expect(clearRosterMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useScenarioImport — an older file with issues still loads (C-22)", () => {
+  const ISSUE = { path: "preferences[3]", message: "weight must be '.inf'" };
+
+  function stageWithIssues() {
+    prepareMock.mockReturnValue({
+      issues: [],
+      warnings: [],
+      target: targetWithCounts([]),
+      doc: null,
+      optimizeIssues: [ISSUE],
+    } satisfies PrepareScenarioLoadResult);
+  }
+
+  it("loads and keeps the issues to show as warnings", async () => {
+    stageWithIssues();
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleFile("<yaml>"));
+    expect(loadScenarioMock).toHaveBeenCalledOnce();
+    expect(result.current.issues).toBeNull();
+    expect(result.current.loadIssues).toEqual([ISSUE]);
+  });
+
+  it("an Edit-YAML draft with the same issues is still refused", async () => {
+    stageWithIssues();
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleEdit("<yaml>"));
+    expect(loadScenarioMock).not.toHaveBeenCalled();
+    expect(result.current.issues).toEqual([ISSUE]);
+    expect(result.current.loadIssues).toBeNull();
   });
 });
 

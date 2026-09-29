@@ -21,6 +21,7 @@ import { AnonymiseCard } from "./anonymise-card";
 import { ImportWarningsBanner } from "./import-warnings-banner";
 import { buildSampleScenarioYaml } from "./load-controls-core";
 import { ScenarioFileCard } from "./scenario-file-card";
+import { ScenarioIssuesList } from "./scenario-issues-list";
 import { ScenarioYamlPreview } from "./scenario-yaml-preview";
 import { UploadModal } from "./upload-modal";
 import { useScenarioImport } from "./use-scenario-import";
@@ -42,6 +43,7 @@ export function SaveLoadWorkspace() {
   useLosableDraft("save-load:edit-yaml", editing, "Edit YAML");
   const {
     issues,
+    loadIssues,
     clearIssues,
     clearImportState,
     confirm,
@@ -94,6 +96,14 @@ export function SaveLoadWorkspace() {
   return (
     <>
       {warnings ? <ImportWarningsBanner warnings={warnings} onDismiss={dismissWarnings} /> : null}
+      {/* C-22: an older file with issues still loads; they block Optimize only. */}
+      {loadIssues ? (
+        <ScenarioIssuesList
+          issues={loadIssues}
+          action="Optimize can run"
+          hint="The file has loaded. Fix these on the screens they name, or in Edit YAML."
+        />
+      ) : null}
 
       {/* `.ns-grid2` — two-up at 900px with a `--space-4` gap (ScreenSaveLoad.dc.html:37).
           `lg` (1024px) held this at one column for 124px more than the design does, and
