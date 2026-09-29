@@ -625,6 +625,7 @@ function requirementFields() {
     dates: ruleDatesSchema(),
     requiredNumPeople: z
       .number()
+      .int()
       .describe(
         "The exact number of people on that shift on each date, e.g. 2 (a hard rule), " +
           "unless the requirement has a preferred count, which makes it the lowest " +
@@ -633,6 +634,7 @@ function requirementFields() {
       ),
     preferredNumPeople: z
       .number()
+      .int()
       .optional()
       .describe(
         "The Preferred number of people: 'at least requiredNumPeople, ideally this many'. " +
@@ -791,6 +793,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     ruleId: z.string().min(1).describe("The staffing requirement's stable id."),
     requiredNumPeople: z
       .number()
+      .int()
       .describe(
         "How many people that shift must have: exactly this many, or at least this many " +
           "when the requirement has a preferred count.",
@@ -962,6 +965,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     date: isoDateSchema.describe("One roster date the requirement covers, YYYY-MM-DD."),
     requiredNumPeople: z
       .number()
+      .int()
       .describe(
         "A different number of people for this one requirement on this one date only, for " +
           "example fewer on a public holiday: exactly this many, or at least this many when " +

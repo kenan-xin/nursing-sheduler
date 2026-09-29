@@ -29,7 +29,7 @@ import {
   type ProposalDiffEntry,
 } from "@/lib/proposal";
 import { REST_PRACTICE_WARNING, relaxesRestRule } from "@/lib/ai/assistant/playbook";
-import type { AssistantProposalV1 } from "@/lib/store";
+import { useScenarioStore, type AssistantProposalV1 } from "@/lib/store";
 import type { ProposalReadiness } from "@/lib/proposal";
 import type { AssistantProposalController } from "./use-assistant-proposals";
 import { screenNamesFor } from "./capability-context";
@@ -188,6 +188,8 @@ const PREPARE_AGAIN_BLOCKS: ReadonlySet<string> = new Set([
 /** The Preview. Renders nothing at all when there is no live proposal. */
 export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPreviewCardProps) {
   const [details, setDetails] = useState(false);
+  // Unapplied, so the live rules are the ones the change starts from.
+  const successions = useScenarioStore((state) => state.cardsByKind.successions);
   const { proposal, readiness } = controller;
   if (!proposal || !readiness) return null;
 
@@ -298,7 +300,7 @@ export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPr
           testId="proposal-cascade"
         />
 
-        {relaxesRestRule(proposal.commands) ? (
+        {relaxesRestRule(proposal.commands, successions) ? (
           <p className="text-meta text-warnink" data-testid="proposal-rest-guidance" role="note">
             {REST_PRACTICE_WARNING}
           </p>

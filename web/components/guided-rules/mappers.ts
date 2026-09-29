@@ -16,8 +16,7 @@ import {
 import { formatShortDate } from "@/lib/dates/date-id";
 import { isValidWeightValue } from "@/components/card-editor/weight-field";
 import {
-  REQUIREMENT_MESSAGES,
-  skillMixFloor,
+  requiredCountError,
   summarizeRefs as summarizeRequirementRefs,
 } from "@/components/requirements/requirements-model";
 import {
@@ -104,12 +103,7 @@ export const requirementsMapper: GuidedRuleMapper<RequirementCard> = {
         label: "Required people",
         value: card.requiredNumPeople,
         min: 0,
-        validate: (value) =>
-          !(Number.isFinite(value) && value >= 0)
-            ? REQUIREMENT_MESSAGES.requiredMin
-            : value < skillMixFloor(card)
-              ? REQUIREMENT_MESSAGES.skillMixAboveRequired
-              : undefined,
+        validate: (value) => requiredCountError(card, value),
       },
     ];
   },
