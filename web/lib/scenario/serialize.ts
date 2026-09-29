@@ -67,13 +67,13 @@ function toIssues(error: z.ZodError): ScenarioValidationIssue[] {
  *      makes a load→save round-trip preserve "all dates" instead of silently
  *      flipping it to "no dates".
  *   4. span-id date refs → canonical full ISO — the exact inverse of the import
- *      boundary's `buildDateRefNormalizer`. See `deSpanDateRefs`.
+ *      boundary's `buildDateRefNormalizer`. See `rekeySpanDateRefs`.
  */
 export function canonicalizeScenarioDocument(
   doc: CanonicalScenarioDocument,
 ): CanonicalScenarioDocument {
   const clone = structuredClone(doc);
-  deSpanDateRefs(clone);
+  rekeySpanDateRefs(clone, "iso");
   for (const shiftType of clone.shiftTypes.items) {
     if (shiftType.restMinutes === 0) delete shiftType.restMinutes;
   }
@@ -116,16 +116,20 @@ export function canonicalizeScenarioDocument(
  *
  * Preference CARDS are deliberately untouched: they store full ISO by design and
  * are not re-keyed on import either.
+ *
+ * `to: "span"` is the inverse (ISO → span id), for a transform that needs ISO
+ * dates on a document that must keep span ids (the Workspace backup's scatter).
+ * Mutates `doc`.
  */
-function deSpanDateRefs(doc: CanonicalScenarioDocument): void {
-  const isoBySpanId = new Map(
+export function rekeySpanDateRefs(doc: CanonicalScenarioDocument, to: "iso" | "span"): void {
+  const lookup = new Map(
     generateDateItems({ start: doc.dates.range.startDate, end: doc.dates.range.endDate }).map(
-      (item) => [item.id, item.iso],
+      (item): [string, string] => (to === "iso" ? [item.id, item.iso] : [item.iso, item.id]),
     ),
   );
-  if (isoBySpanId.size === 0) return;
+  if (lookup.size === 0) return;
   const expand = (ref: DateRef): DateRef =>
-    typeof ref === "string" ? (isoBySpanId.get(ref) ?? ref) : ref;
+    typeof ref === "string" ? (lookup.get(ref) ?? ref) : ref;
 
   for (const group of doc.dates.groups ?? []) {
     group.members = group.members.map(expand);

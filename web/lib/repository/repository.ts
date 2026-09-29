@@ -218,6 +218,8 @@ export interface ScenarioRepository {
   read(scenarioId: string): Promise<ScenarioEnvelopeV3>;
   /** Reread everything a tab must not trust process memory for. */
   readTabContext(tabId: string): Promise<TabContext>;
+  /** The most recently active scenario (last created, loaded, acquired or edited). */
+  latestScenarioId(): Promise<string | null>;
   /**
    * Start a fresh Undo session for a scenario this owner already holds. Prior
    * reversal payloads are invalidated; commits, links, and receipts are kept.
@@ -363,7 +365,7 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
     tabId: string,
     mode: "acquire" | "takeover",
     at: Date,
-  ): Promise<{ lease: WriterLeaseV2; tookOver: boolean }> {
+  ): Promise<{ lease: WriterLeaseV2; tookOver: boolean; wasOwnLease: boolean }> {
     const scenarioId = envelope.scenarioId;
     const existing = await db.writerLeases.get(scenarioId);
     const live = isLeaseLive(existing, at);
@@ -395,7 +397,11 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
     const epoch = renewInPlace ? existing.epoch : highWater + 1;
     const lease = renewedLease({ scenarioId, ownerTabId: tabId, epoch }, at, leaseTtlMs);
     await db.writerLeases.put(lease);
-    return { lease, tookOver: !renewInPlace && existing !== undefined };
+    return {
+      lease,
+      tookOver: !renewInPlace && existing !== undefined,
+      wasOwnLease: existing?.ownerTabId === tabId,
+    };
   }
 
   /**
@@ -493,7 +499,9 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
       topCommitId: commit.commitId,
       historyCursor: isContent ? content.length + 1 : envelope.historyCursor,
       scenario: next.scenario,
-      backupFingerprint: next.backupFingerprint,
+      // Undo/Redo restore content only. The backup record is a fact about the
+      // file on disk, so a download made after the edit must survive navigation.
+      backupFingerprint: isContent ? next.backupFingerprint : envelope.backupFingerprint,
       updatedAt: iso,
     };
     await db.scenarioEnvelopes.put(nextEnvelope);
@@ -550,6 +558,11 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
   return {
     async read(scenarioId) {
       return db.transaction("r", db.scenarioEnvelopes, () => requireEnvelope(scenarioId));
+    },
+
+    async latestScenarioId() {
+      const latest = await db.scenarioEnvelopes.orderBy("updatedAt").last();
+      return latest?.scenarioId ?? null;
     },
 
     async readTabContext(tabId) {
@@ -737,7 +750,12 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
         async (): Promise<LeaseResult> => {
           const at = now();
           const envelope = await requireEnvelope(scenarioId);
-          const { lease, tookOver } = await acquireLeaseInTx(envelope, tabId, mode, at);
+          const { lease, tookOver, wasOwnLease } = await acquireLeaseInTx(
+            envelope,
+            tabId,
+            mode,
+            at,
+          );
           let accepted = await acceptLeaseEpoch(envelope, lease.epoch, at);
           // History-session rollover happens HERE, inside the fenced acquisition, not
           // in a second transaction afterwards. Split across two transactions it was
@@ -745,7 +763,10 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
           // B-rollover let a stale B expire C's reversal material and replace C's
           // session. Folded in, the rollover either lands with the acquisition that
           // earned it or does not happen at all.
-          if (rollHistorySession) {
+          // A lease row (live or lapsed) still naming this tab means no other tab
+          // has owned, so none has written: the history is this tab's own and
+          // survives a lapse (sleep, a throttled hidden tab).
+          if (rollHistorySession && !wasOwnLease) {
             accepted = await rollHistorySessionInTx(accepted, at);
           }
           return {

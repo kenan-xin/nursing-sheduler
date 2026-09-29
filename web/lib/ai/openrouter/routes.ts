@@ -14,6 +14,7 @@ import {
   AI_MODEL_HEADER,
   MAX_SUMMARY_INPUT_CHARS,
 } from "@/lib/ai/protocol";
+import { readCapped } from "../read-capped";
 import { fetchModelCatalog, type ModelCatalog } from "./catalog";
 import { probeCredentials } from "./probe";
 import { summarizeConversation } from "./summarize";
@@ -112,6 +113,13 @@ const summaryBody = z.object({
   transcript: z.string().min(1).max(MAX_SUMMARY_INPUT_CHARS),
 });
 
+/**
+ * The byte ceiling on a summary request, applied BEFORE the body is parsed: the zod
+ * `max` above only runs after the whole body is in memory. Every allowed character
+ * costs at most 6 JSON bytes (a `\uXXXX` escape), so 1 MiB covers both fields.
+ */
+const MAX_SUMMARY_REQUEST_BYTES = 1024 * 1024;
+
 /** `POST /api/ai/openrouter/summarize` (bead ypo). The key is a transient header, as for the probe. */
 export async function handleSummaryRequest(
   request: Request,
@@ -122,7 +130,19 @@ export async function handleSummaryRequest(
   if (!apiKey || !model) {
     return contained({ ok: false, code: AI_SETUP_CODES.credentialsRequired }, 400);
   }
-  const parsed = summaryBody.safeParse(await request.json().catch(() => null));
+  const tooLarge = () => contained({ ok: false, code: AI_SETUP_CODES.summaryInvalid }, 413);
+  if (Number(request.headers.get("content-length")) > MAX_SUMMARY_REQUEST_BYTES) return tooLarge();
+  const bytes = await readCapped(request.body, MAX_SUMMARY_REQUEST_BYTES).catch(
+    () => new Uint8Array(),
+  );
+  if (bytes === null) return tooLarge();
+  let json: unknown = null;
+  try {
+    json = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    // Not JSON: rejected below as an invalid summary request.
+  }
+  const parsed = summaryBody.safeParse(json);
   if (!parsed.success) return contained({ ok: false, code: AI_SETUP_CODES.summaryInvalid });
   return contained(
     await summarizeConversation({
