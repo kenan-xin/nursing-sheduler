@@ -376,8 +376,17 @@ beforeEach(async () => {
   });
   threadId = (await selectActiveThread(SCENARIO_ID)).threadId;
 
+  // The session's mount-time hydration calls `readThreadMessages` and `readThread`
+  // too. A pause is consumed by the FIRST arrival, so a hydration read still in flight
+  // when a test arms one would take the send's suspension: the send then runs on
+  // unpaused and is refused at its gate before any turn exists. Wait for both reads
+  // to pass their checkpoints so only the send can reach a pause.
+  h.state.seen = [];
   render(<Host />);
-  await waitFor(() => expect(session.current).not.toBeNull());
+  await waitFor(() => {
+    expect(session.current).not.toBeNull();
+    expect(h.state.seen).toEqual(expect.arrayContaining(["readThreadMessages", "readThread"]));
+  });
 });
 
 afterEach(() => {
