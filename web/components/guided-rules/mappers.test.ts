@@ -278,6 +278,15 @@ describe("coveringsMapper", () => {
     expect(coveringsMapper.unsupportedReason(advanced)).toBeDefined();
   });
 
+  it("says the preceptor works the same shift, and states a grouped card's real meaning", () => {
+    expect(coveringsMapper.summary(supported)).toBe(
+      "P1 supervise P2 on the same shift on the same day (D), every date.",
+    );
+    const grouped = { ...supported, shiftTypes: [["D", "N"]] };
+    expect(coveringsMapper.unsupportedReason(grouped)).toBeDefined();
+    expect(coveringsMapper.summary(grouped)).toContain("even on a different shift");
+  });
+
   it("applyQuickField is always a no-op", () => {
     expect(coveringsMapper.applyQuickField(supported, "weight", 5)).toBe(supported);
   });

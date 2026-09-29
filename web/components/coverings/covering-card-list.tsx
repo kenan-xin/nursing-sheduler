@@ -19,7 +19,7 @@ import {
   CardListItem,
   CardMoveActions,
 } from "@/components/card-editor/card-editor-shell";
-import { isAdvancedCoveringCard, summarizeRefs } from "./coverings-model";
+import { coveringShiftMeaning, isAdvancedCoveringCard, summarizeRefs } from "./coverings-model";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 
 interface CoveringCardListProps {
@@ -73,7 +73,7 @@ export function CoveringCardList({
             badges={
               <>
                 {card.disabled && <Badge variant="neutral">Disabled</Badge>}
-                {advanced && <Badge variant="neutral">Advanced (multi-term)</Badge>}
+                {advanced && <Badge variant="neutral">Advanced (grouped)</Badge>}
                 <Badge variant="error">Always enforced</Badge>
               </>
             }
@@ -85,6 +85,7 @@ export function CoveringCardList({
                 label: "Dates",
                 value: card.date === undefined ? "(all)" : summarizeRefs(card.date),
               },
+              { label: "Supervision means", value: coveringShiftMeaning(card) },
             ]}
             actions={
               <>

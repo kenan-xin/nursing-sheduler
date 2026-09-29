@@ -40,7 +40,10 @@ import {
   AFFINITY_SAME_SHIFT,
   isEditableAffinityCard,
 } from "@/components/affinities/affinities-model";
-import { isEditableCoveringCard } from "@/components/coverings/coverings-model";
+import {
+  COVERING_SAME_SHIFT,
+  isEditableCoveringCard,
+} from "@/components/coverings/coverings-model";
 import { isContractedHoursCard } from "@/components/counts/counts-model";
 import { formatHalfHours } from "@/components/counts/half-hour-codec";
 import { calendarSpan } from "./assumptions";
@@ -368,7 +371,7 @@ function describePairing(card: AffinityCard): string | null {
 function describeSupervision(card: CoveringCard): string | null {
   if (!isEditableCoveringCard(card)) return null;
   const shifts = flattenRefs(card.shiftTypes).map(String).join(" or ");
-  return `Whenever ${renderPeople(card.preceptees, "everyone")} works ${shifts}, at least one of ${renderPeople(card.preceptors, "everyone")} works it too, ${renderDates(card.date)}`;
+  return `Whenever ${renderPeople(card.preceptees, "everyone")} works ${shifts}, at least one of ${renderPeople(card.preceptors, "everyone")} works ${COVERING_SAME_SHIFT}, ${renderDates(card.date)}`;
 }
 
 /** The plain sentence for the families the assistant authors; `null` keeps the opaque form. */

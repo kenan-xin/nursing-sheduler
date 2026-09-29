@@ -39,14 +39,14 @@ const NIGHTS = withCardDisabled(
   true,
 );
 
-// `buildCoveringCard` always emits ONE term per selector, so an advanced card
-// (two top-level terms) is hand-built to exercise the read-only branch.
+// `buildCoveringCard` never groups shifts, so an advanced card (the pre-yzty
+// grouped-shift shape) is hand-built to exercise the read-only branch.
 const ADVANCED: CoveringCard = {
   uid: "c3",
-  description: "Advanced (multi-term) covering",
-  preceptors: [["Alice"], ["Bob"]],
-  preceptees: ["Bob"],
-  shiftTypes: ["D"],
+  description: "Advanced (grouped) covering",
+  preceptors: [["Alice"]],
+  preceptees: [["Bob"]],
+  shiftTypes: [["D", "N"]],
   weight: 1,
 };
 
