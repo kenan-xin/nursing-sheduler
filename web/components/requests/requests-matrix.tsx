@@ -26,6 +26,7 @@ import {
 } from "@/components/requests/requests-model";
 import { FaBriefcase, FaCalendar, FaLayerGroup, FaMugHot, type IconType } from "@/components/icons";
 import { isSingaporePublicHoliday, utcDayOfWeek } from "@/lib/dates";
+import { useSingaporeHolidayList } from "@/lib/query/singapore-holidays";
 import { changeKeys } from "@/lib/change-highlight/keys";
 import { changeTargetProps, useChangeHighlightKeys } from "@/lib/change-highlight/store";
 import { cn } from "@/lib/utils";
@@ -251,6 +252,7 @@ export function RequestsMatrix({
   onHistoryPointerEnter,
   groupSources,
 }: RequestsMatrixProps) {
+  useSingaporeHolidayList(); // re-render when the live holiday list arrives
   const scrollRef = useRef<HTMLDivElement>(null);
   // Pointer-aware geometry: dense 40px rows / 40px history columns on a precise
   // pointer (the prototype's metrics), growing to the 44px coarse minimum on

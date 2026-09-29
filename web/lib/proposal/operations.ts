@@ -39,6 +39,7 @@ import {
   applyRangeChange,
   generateDateItems,
   hasCompleteRange,
+  holidayCoverageWarning,
   isValidIso,
   type DateRange,
 } from "@/lib/dates";
@@ -1449,6 +1450,16 @@ function applySetRosterRange(
   }
   if (!hasCompleteRange(range)) {
     return reject(index, "invalid_value", "The end date must be on or after the start date.");
+  }
+  // The Dates card disables its import switch for such a range; refusing here keeps the
+  // assistant from reporting an import that marks nothing (bead si4j).
+  const coverageWarning = command.importPublicHolidays ? holidayCoverageWarning(range) : null;
+  if (coverageWarning) {
+    return reject(
+      index,
+      "invalid_value",
+      `${coverageWarning} Set this period without importing public holidays, or keep it within the years that have data.`,
+    );
   }
   if (state.rangeStart === command.start && state.rangeEnd === command.end) {
     // The holiday re-import alone is still a change, so it is not folded in here.

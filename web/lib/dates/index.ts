@@ -29,6 +29,8 @@ export {
   getSupportLabel,
   isRangeSupported,
   getHolidaysInRange,
+  holidayCoverageWarning,
+  missingHolidayYears,
 } from "./holidays-sg";
 
 export {

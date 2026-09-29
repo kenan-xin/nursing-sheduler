@@ -1,6 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   getHolidaysInRange,
+  getSingaporeHolidays,
+  holidayCoverageWarning,
+  mergeSingaporeHolidays,
+  missingHolidayYears,
+  parseHolidayName,
+  setSingaporeHolidays,
+  subscribeSingaporeHolidays,
   getSupportedRange,
   getSupportLabel,
   isRangeSupported,
@@ -74,7 +81,7 @@ describe("supported window (FR-DC-29/30/31)", () => {
       end: `${lastYear}-12-31`,
     });
     expect(getSupportLabel()).toBe(`${supported!.start} to ${supported!.end}`);
-    expect(getSupportLabel()).toBe("2024-01-01 to 2027-12-31");
+    expect(getSupportLabel()).toBe("2020-01-01 to 2027-12-31");
   });
 
   it("supports the days after the last holiday of the final year", () => {
@@ -84,7 +91,7 @@ describe("supported window (FR-DC-29/30/31)", () => {
 
   it("range support uses lexicographic ISO comparison and requires both endpoints", () => {
     expect(isRangeSupported({ start: "2026-07-01", end: "2026-07-31" })).toBe(true);
-    expect(isRangeSupported({ start: "2023-01-01", end: "2026-07-31" })).toBe(false); // before window
+    expect(isRangeSupported({ start: "2019-01-01", end: "2026-07-31" })).toBe(false); // before window
     expect(isRangeSupported({ start: "2026-07-01", end: "2028-01-01" })).toBe(false); // after window
     expect(isRangeSupported({ start: "2026-07-01", end: "" })).toBe(false);
   });
@@ -98,5 +105,89 @@ describe("supported window (FR-DC-29/30/31)", () => {
       "2026-06-01",
     ]);
     expect(getHolidaysInRange({ start: "2026-07-06", end: "2026-07-10" })).toEqual([]);
+  });
+});
+
+describe("active list, merge and coverage (bead si4j)", () => {
+  afterEach(() => setSingaporeHolidays(SINGAPORE_HOLIDAYS));
+
+  const row = (date: string, name: string): SingaporeHolidayEntry => ({
+    date,
+    name,
+    isObserved: false,
+  });
+
+  it("parses the upstream (Observed) suffix into isObserved, name verbatim", () => {
+    expect(parseHolidayName("Vesak Day (Observed)")).toEqual({
+      name: "Vesak Day",
+      isObserved: true,
+    });
+    expect(parseHolidayName("New Year’s Day")).toEqual({
+      name: "New Year’s Day",
+      isObserved: false,
+    });
+  });
+
+  it("merges by year: live years win whole, bundled rows fill only missing years", () => {
+    const live = [row("2027-03-11", "Hari Raya Puasa"), row("2028-01-01", "New Year's Day")];
+    const bundled = [row("2026-01-01", "New Year's Day"), row("2027-03-10", "Hari Raya Puasa")];
+    // 2027's moved holiday does not survive as a stale bundled date.
+    expect(mergeSingaporeHolidays(live, bundled).map((e) => e.date)).toEqual([
+      "2026-01-01",
+      "2027-03-11",
+      "2028-01-01",
+    ]);
+  });
+
+  it("the helpers read the installed list and notify subscribers", () => {
+    let calls = 0;
+    const unsubscribe = subscribeSingaporeHolidays(() => calls++);
+    const extended = mergeSingaporeHolidays(
+      [row("2028-08-09", "National Day")],
+      SINGAPORE_HOLIDAYS,
+    );
+    setSingaporeHolidays(extended);
+    expect(calls).toBe(1);
+    expect(getSingaporeHolidays()).toBe(extended);
+    expect(isSingaporePublicHoliday("2028-08-09")).toBe(true);
+    expect(isRangeSupported({ start: "2027-12-01", end: "2028-01-31" })).toBe(true);
+    expect(getSupportedRange()?.end).toBe("2028-12-31");
+    unsubscribe();
+  });
+
+  it("reports the uncovered years and the shared warning", () => {
+    expect(missingHolidayYears({ start: "2027-12-01", end: "2028-01-31" })).toEqual(["2028"]);
+    expect(holidayCoverageWarning({ start: "2027-12-01", end: "2028-01-31" })).toBe(
+      "No public-holiday data for 2028 yet. Holidays in those dates are not marked.",
+    );
+    expect(holidayCoverageWarning({ start: "2028-01-01", end: "2029-01-01" })).toContain(
+      "for 2028 and 2029 yet",
+    );
+    expect(holidayCoverageWarning({ start: "2028-01-01", end: "2030-01-01" })).toContain(
+      "for 2028–2030 yet",
+    );
+    expect(holidayCoverageWarning({ start: "2026-01-01", end: "2027-12-31" })).toBeNull();
+  });
+
+  it("a gap year inside the window is not supported", () => {
+    setSingaporeHolidays([row("2026-01-01", "a"), row("2028-01-01", "b")]);
+    expect(isRangeSupported({ start: "2026-06-01", end: "2028-06-01" })).toBe(false);
+    expect(missingHolidayYears({ start: "2026-06-01", end: "2028-06-01" })).toEqual(["2027"]);
+  });
+});
+
+describe("bundled snapshot staleness guard (bead si4j)", () => {
+  it("the bundled list covers at least the next 12 months", () => {
+    const lastYear = SINGAPORE_HOLIDAYS[SINGAPORE_HOLIDAYS.length - 1].date.slice(0, 4);
+    const coveredUntil = `${lastYear}-12-31`;
+    const horizon = new Date();
+    horizon.setUTCFullYear(horizon.getUTCFullYear() + 1);
+    const horizonIso = horizon.toISOString().slice(0, 10);
+    expect(
+      coveredUntil >= horizonIso,
+      `The bundled Singapore holidays end ${coveredUntil}, less than 12 months from today. ` +
+        "Refresh the offline fallback: `cd web && pnpm refresh:sg-holidays`, then commit " +
+        "lib/dates/holidays-sg.ts (MOM usually publishes the next year's holidays mid-year).",
+    ).toBe(true);
   });
 });

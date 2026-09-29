@@ -71,6 +71,33 @@ describe("set_roster_range", () => {
   });
 });
 
+describe("set_roster_range holiday coverage (bead si4j)", () => {
+  it("refuses a holiday import it cannot mark, with the Dates card's warning", () => {
+    const result = applyAssistantCommand(proposalScenario(), {
+      type: "set_roster_range",
+      start: "2027-12-01",
+      end: "2028-01-31",
+      importPublicHolidays: true,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain(
+      "No public-holiday data for 2028 yet. Holidays in those dates are not marked.",
+    );
+  });
+
+  it("still sets that period without the import", () => {
+    const result = applyAssistantCommand(proposalScenario(), {
+      type: "set_roster_range",
+      start: "2027-12-01",
+      end: "2028-01-31",
+      importPublicHolidays: false,
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+
 describe("set_rule_enabled", () => {
   it("sets and clears the marker, and refuses a rule that is already in that state", () => {
     const state = proposalScenario();
