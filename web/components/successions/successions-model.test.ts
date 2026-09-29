@@ -127,7 +127,9 @@ describe("validateSuccessionForm (spec 05 'Shift Type Successions' validation ta
       date: ["2026-01-01"],
       weight: "abc",
     });
-    expect(validateSuccessionForm(invalid).weight).toBe(SUCCESSION_MESSAGES.weightInvalid);
+    expect(validateSuccessionForm(invalid).weight).toBe(
+      `Not a number. ${SUCCESSION_MESSAGES.weightInvalid}`,
+    );
 
     const infinite = form({
       person: ["Anna"],

@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { expect, screen, waitFor, within } from "storybook/test";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
-import { pickScenario, scenarioCommands, useAuthorityStore } from "@/lib/store";
+import { pickScenario, scenarioCommands, useAuthorityStore, useScenarioStore } from "@/lib/store";
+import type { OwnershipHint } from "@/lib/store/authority";
 import { installTestAuthority } from "@/lib/store/test-authority";
 import { withToaster, type ScenarioSeed } from "../../.storybook/harness";
 import { OwnershipBanner } from "./ownership-banner";
@@ -16,6 +17,27 @@ const TAKEN_OVER: ScenarioSeed = async (harness) => {
   await peer.authority.initialize();
   await peer.authority.takeover();
   await harness.authority.heartbeat();
+  return () => peer.authority.release();
+};
+
+// A real second tab takes this schedule over, then Loads a file; its hint reaches this
+// now non-owning tab (bug hunt A-02).
+const PEER_LOADED: ScenarioSeed = async (harness) => {
+  const hints: OwnershipHint[] = [];
+  const peer = await installTestAuthority({
+    databaseName: harness.databaseName,
+    install: false,
+    broadcast: (hint) => hints.push(hint),
+  });
+  await peer.authority.initialize();
+  await peer.authority.takeover();
+  await harness.authority.heartbeat();
+  hints.length = 0;
+  await peer.authority.loadScenario({
+    ...pickScenario(makeValidUiState()),
+    rangeStart: "2026-05-01",
+  });
+  for (const hint of hints) await harness.authority.onHint(hint);
   return () => peer.authority.release();
 };
 
@@ -81,6 +103,23 @@ export const TakenOverByPeer: Story = {
     const banner = await canvas.findByTestId("ownership-banner");
     await expect(banner).toHaveAttribute("data-ownership", "taken-over");
     await expect(banner).toHaveTextContent("Editing moved to another tab");
+  },
+};
+
+export const PeerLoaded: Story = {
+  parameters: { scenario: PEER_LOADED },
+  play: async ({ canvas, userEvent }) => {
+    const banner = await canvas.findByTestId("ownership-banner");
+    await expect(banner).toHaveAttribute("data-ownership", "peer-loaded");
+    await expect(banner).toHaveTextContent("Another tab loaded a different schedule.");
+    await expect(useAuthorityStore.getState().ownership).not.toBe("owner");
+    await userEvent.click(canvas.getByTestId("ownership-switch"));
+    // Now on the loaded schedule, read-only behind the tab that loaded it.
+    await waitFor(() => expect(useScenarioStore.getState().rangeStart).toBe("2026-05-01"));
+    await expect(canvas.getByTestId("ownership-banner")).toHaveAttribute(
+      "data-ownership",
+      "read-only",
+    );
   },
 };
 

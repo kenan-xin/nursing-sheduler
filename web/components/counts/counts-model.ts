@@ -47,6 +47,7 @@ import {
   type ExpressionTargetValue,
 } from "@/components/card-editor/expression-model";
 import {
+  invalidWeightMessage,
   isValidWeightValue,
   isWeightNonPositive,
   type WeightFieldValue,
@@ -326,7 +327,7 @@ export function validateCountForm(form: CountFormState, domain: CoefficientDomai
   }
 
   if (!isValidWeightValue(form.weight)) {
-    errors.weight = COUNT_MESSAGES.weightInvalid;
+    errors.weight = invalidWeightMessage(form.weight, COUNT_MESSAGES.weightInvalid);
   } else if (isSquaredExpression(form.expression) && !isWeightNonPositive(form.weight)) {
     errors.weight = COUNT_MESSAGES.weightSquaredPositive;
   }
