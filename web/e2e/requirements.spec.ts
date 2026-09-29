@@ -213,7 +213,7 @@ test.describe.serial("T12 staffing requirements editor (M1 clone)", () => {
     // A positive weight is rejected with the verbatim message.
     await page.getByTestId("weight-field-input").fill("10");
     await page.getByTestId("card-editor-submit").click();
-    await expect(page.getByText("Weight must be 0 or less (including -Infinity)")).toBeVisible();
+    await expect(page.getByText("Weight must be 0 or less")).toBeVisible();
     expect(await readRequirements(page)).toHaveLength(0);
 
     // A non-positive weight saves cleanly, along with the distinct preferred.

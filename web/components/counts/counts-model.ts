@@ -40,6 +40,7 @@ import {
   type CoefficientPair,
 } from "@/components/card-editor/coefficient-model";
 import {
+  defaultCountWeight,
   isSquaredExpression,
   isSupportedExpression,
   substituteTarget,
@@ -114,7 +115,7 @@ export function emptyCountForm(): CountFormState {
     countShiftTypeCoefficients: [],
     expression: "x >= T",
     target: 0,
-    weight: -1,
+    weight: defaultCountWeight("x >= T"),
   };
 }
 

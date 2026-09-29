@@ -31,7 +31,11 @@ import type {
   UiShiftType,
   UiTemporaryCover,
 } from "@/lib/scenario";
-import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
+import {
+  describeCountStrength,
+  EXPRESSION_OPS,
+  substituteTarget,
+} from "@/components/card-editor/expression-model";
 import { isEditableAffinityCard } from "@/components/affinities/affinities-model";
 import { isEditableCoveringCard } from "@/components/coverings/coverings-model";
 import { isContractedHoursCard } from "@/components/counts/counts-model";
@@ -311,25 +315,6 @@ function describeSuccession(card: SuccessionCard): string {
   return `${pattern} on consecutive days for ${renderPeople(card.person, "everyone")}, ${renderDates(card.date)}: ${renderStrength(card.weight)}`;
 }
 
-/**
- * A count's strength, per `shift_count` in core (the objective is maximised): a linear
- * expression is a yes/no the weight is added for, so a positive weight rewards it
- * holding and a negative one penalises it (the solver avoids it); `|x - T|^2` is a
- * squared gap, so a negative weight pulls toward T.
- */
-function renderCountStrength(squared: boolean, weight: number, target: number): string {
-  if (weight === 0) return "no effect (weight 0)";
-  if (squared) {
-    if (weight === -Infinity) return `must be exactly ${target}`;
-    if (weight < 0) return `pulled toward ${target} (weight ${weight})`;
-    return `refused by the solver (a positive weight is not allowed here)`;
-  }
-  if (weight === Infinity) return "must always hold";
-  if (weight === -Infinity) return "must never hold, the solver forces the opposite";
-  if (weight > 0) return `kept to where possible (weight ${weight})`;
-  return `avoided where possible (weight ${weight})`;
-}
-
 /** A contracted-hours card (4h5a): the hours, what each shift and leave day counts, a must. */
 function describeContract(card: ContractedHoursCountCard): string | null {
   const { target } = card;
@@ -357,7 +342,7 @@ function describeCount(card: CountCard): string | null {
   const amount = squared ? `Close to ${card.target}` : substituteTarget(op.title, card.target);
   const shifts = flattenRefs(card.countShiftTypes).map(String).join(" + ");
   const people = renderPeople(card.person, "");
-  return `${amount} ${shifts} shifts for ${people ? `each of ${people}` : "everyone"}, across ${renderDates(card.countDates)}: ${renderCountStrength(squared, card.weight, card.target)}`;
+  return `${amount} ${shifts} shifts for ${people ? `each of ${people}` : "everyone"}, across ${renderDates(card.countDates)}: ${describeCountStrength(squared, card.weight, card.target)}`;
 }
 
 /** A pairing's strength, per `shift_affinity` in core: the weight is gained on each date both sides work. */

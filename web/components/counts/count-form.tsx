@@ -25,6 +25,14 @@ import {
 import { ExpressionField } from "@/components/card-editor/expression-field";
 import { WeightField } from "@/components/card-editor/weight-field";
 import {
+  defaultCountWeight,
+  describeCountStrength,
+  EXPRESSION_OPS,
+  isSquaredExpression,
+  substituteTarget,
+} from "@/components/card-editor/expression-model";
+import { FaTriangleExclamation } from "@/components/icons";
+import {
   buildCountShiftTypeDomain,
   buildCountShiftTypeTransferOptions,
   buildDateScopeAutoScopes,
@@ -44,6 +52,36 @@ interface CountFormProps {
   initialForm: CountFormState;
   onSave: (form: CountFormState) => void;
   onCancel: () => void;
+}
+
+/** What the weight does, in the assistant Preview's words, plus a non-blocking
+ *  warning when a negative weight works against a linear rule (core adds
+ *  `weight × [x op T]`, so a negative weight rewards breaking it). */
+function CountStrength({
+  expression,
+  target,
+  weight,
+}: Pick<CountFormState, "expression" | "target" | "weight">) {
+  const op = EXPRESSION_OPS.find((candidate) => candidate.value === expression);
+  if (!op || typeof weight !== "number" || typeof target !== "number") return null;
+  const squared = isSquaredExpression(expression);
+  const amount = squared ? `Close to ${target}` : substituteTarget(op.title, target);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="text-meta text-ink2" data-testid="count-strength">
+        {amount}: {describeCountStrength(squared, weight, target)}.
+      </p>
+      {!squared && weight < 0 && (
+        <p
+          className="flex items-center gap-1.5 text-meta font-semibold text-warnink"
+          data-testid="count-negative-weight-warning"
+        >
+          <FaTriangleExclamation className="size-3 flex-none" /> A negative weight works against
+          this rule: the solver is rewarded for breaking it. Use a positive weight to keep to it.
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function CountForm({ state, mode, initialForm, onSave, onCancel }: CountFormProps) {
@@ -245,7 +283,16 @@ export function CountForm({ state, mode, initialForm, onSave, onCancel }: CountF
         target={form.target}
         error={errors.expression ?? errors.target}
         onChange={({ expression, target }) => {
-          setForm((prev) => ({ ...prev, expression, target }));
+          // An untouched default weight follows the expression (+1 linear, -1 squared).
+          setForm((prev) => ({
+            ...prev,
+            expression,
+            target,
+            weight:
+              prev.weight === defaultCountWeight(prev.expression)
+                ? defaultCountWeight(expression)
+                : prev.weight,
+          }));
           setErrors((prev) =>
             prev.expression || prev.target || prev.weight
               ? { ...prev, expression: undefined, target: undefined, weight: undefined }
@@ -262,6 +309,7 @@ export function CountForm({ state, mode, initialForm, onSave, onCancel }: CountF
           setErrors((prev) => (prev.weight ? { ...prev, weight: undefined } : prev));
         }}
       />
+      <CountStrength expression={form.expression} target={form.target} weight={form.weight} />
     </CardEditorForm>
   );
 }

@@ -83,7 +83,10 @@ export const REQUIREMENT_MESSAGES = {
   qualifiedEmpty: "At least one person must be selected",
   dateEmpty: "At least one date must be selected",
   weightInvalid: "Weight must be a valid number, Infinity, or -Infinity",
-  weightPositive: "Weight must be 0 or less (including -Infinity)",
+  weightPositive: "Weight must be 0 or less",
+  // Core refuses ±inf beside `preferredNumPeople` (models.py, shift type requirement).
+  weightInfinite:
+    "A preferred number cannot have an infinite weight. For a hard count, leave Preferred empty",
   // OFF/LEAVE are structurally EXCLUDED from the single-select's options (never
   // merely disabled) — see `buildRequirementShiftTypeOptions` — so this message
   // is defensive documentation, not a reachable per-option tooltip.
@@ -485,6 +488,8 @@ export function validateRequirementForm(
   if (preferredDiffersFromRequired(form)) {
     if (!isValidWeightValue(form.weight)) {
       errors.weight = REQUIREMENT_MESSAGES.weightInvalid;
+    } else if (!Number.isFinite(form.weight)) {
+      errors.weight = REQUIREMENT_MESSAGES.weightInfinite;
     } else if (!isWeightNonPositive(form.weight)) {
       errors.weight = REQUIREMENT_MESSAGES.weightPositive;
     }

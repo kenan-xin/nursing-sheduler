@@ -72,6 +72,32 @@ export function isSquaredExpression(expression: string): boolean {
   return expression === "|x - T|^2";
 }
 
+/** A new count's weight: `+1` rewards a linear expression holding; the squared
+ *  form only accepts a weight of 0 or less, so it pulls toward T with `-1`. */
+export function defaultCountWeight(expression: string): number {
+  return isSquaredExpression(expression) ? -1 : 1;
+}
+
+/**
+ * A count's strength, per `shift_count` in core (the objective is maximised): a linear
+ * expression is a yes/no the weight is added for, so a positive weight rewards it
+ * holding and a negative one penalises it (the solver avoids it); `|x - T|^2` is a
+ * squared gap, so a negative weight pulls toward T. Shared by the editor and the
+ * assistant Preview so the two never disagree.
+ */
+export function describeCountStrength(squared: boolean, weight: number, target: number): string {
+  if (weight === 0) return "no effect (weight 0)";
+  if (squared) {
+    if (weight === -Infinity) return `must be exactly ${target}`;
+    if (weight < 0) return `pulled toward ${target} (weight ${weight})`;
+    return `refused by the solver (a positive weight is not allowed here)`;
+  }
+  if (weight === Infinity) return "must always hold";
+  if (weight === -Infinity) return "must never hold, the solver forces the opposite";
+  if (weight > 0) return `kept to where possible (weight ${weight})`;
+  return `avoided where possible (weight ${weight})`;
+}
+
 /** Substitute the target value into an expression string for display (FR-PR-55,
  *  the historical `describeExpressionTarget`). `target` may be a raw draft string
  *  (e.g. the field's blank placeholder `"T"`), so the substitution is `String`-based. */
