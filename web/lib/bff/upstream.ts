@@ -121,7 +121,12 @@ export async function guardUnsupportedRoute(
   );
 }
 
-// Proxy a simple JSON request (no request body) to the backend and relay it.
+// How long a proxied job call (poll, cancel, finish-now, roster) may take before the
+// BFF gives up with `backend_unreachable`, instead of undici's ~300 s default.
+export const PROXY_REQUEST_TIMEOUT_MS = 30_000;
+
+// Proxy a simple JSON request (no request body) to the backend and relay it. The
+// browser's abort ends the upstream call too, so a closed tab does not hold it open.
 export async function proxyJsonRequest(
   request: Request,
   init: { method: string; path: string },
@@ -133,6 +138,7 @@ export async function proxyJsonRequest(
       headers: buildUpstreamHeaders(request),
       cache: "no-store",
       redirect: "manual",
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(PROXY_REQUEST_TIMEOUT_MS)]),
     });
   } catch (error) {
     return backendUnreachable(error, init.path);
