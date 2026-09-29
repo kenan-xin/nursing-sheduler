@@ -164,6 +164,9 @@ describe("the send gate refuses before it prepares", () => {
       expect(text).not.toContain(SENTINEL_KEY);
     }
   });
+  it("names the ownership banner's real button (C-35)", () => {
+    expect(describeRefusal("not_writer")).toMatch(/Press Edit here/);
+  });
 });
 
 describe("a prepared send", () => {

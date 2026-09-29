@@ -57,6 +57,7 @@ function controllerWith(receipts: ReceiptStanding[]): AssistantProposalControlle
     readiness: null,
     applying: false,
     outcome: null,
+    undone: null,
     receipts,
     confirm: vi.fn(),
     withdraw: vi.fn(),
