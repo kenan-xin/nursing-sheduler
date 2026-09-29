@@ -1,0 +1,31 @@
+# 3c91 patch for core/nurse_scheduling/solver_ortools_cp_sat.py and its test against genie 1bf4b85.
+# hunk: extra_subsolvers max_lp_sym so 2-core servers prove optimality (bead 3c91)
+
+diff --git a/core/nurse_scheduling/solver_ortools_cp_sat.py b/core/nurse_scheduling/solver_ortools_cp_sat.py
+index 346f334..2b2c9c6 100644
+--- a/core/nurse_scheduling/solver_ortools_cp_sat.py
++++ b/core/nurse_scheduling/solver_ortools_cp_sat.py
+@@ -39,6 +39,8 @@ class ORToolsSolver(SolverInterface):
+         super().__init__()
+         self.model = cp_model.CpModel()
+         self.solver: cp_model.CpSolver = cp_model.CpSolver()
++        # 2-core servers otherwise run only default_lp and never prove optimality (benchmark: bead 3c91); ignored at num_workers=1.
++        self.solver.parameters.extra_subsolvers.append("max_lp_sym")
+         self.status = None
+         self.solver_status = SolverStatus.UNKNOWN
+         self._active_solution_callback = None
+diff --git a/core/tests/test_solver_ortools_cp_sat.py b/core/tests/test_solver_ortools_cp_sat.py
+index 794aad1..5bcc6a5 100644
+--- a/core/tests/test_solver_ortools_cp_sat.py
++++ b/core/tests/test_solver_ortools_cp_sat.py
+@@ -184,6 +184,10 @@ def test_set_objective_minimize_branch():
+     assert solver.maximize is False
+ 
+ 
++def test_solver_adds_max_lp_sym_subsolver():
++    assert list(ORToolsSolver().solver.parameters.extra_subsolvers) == ["max_lp_sym"]
++
++
+ @pytest.mark.parametrize(
+     ("native_status", "expected"),
+     [
