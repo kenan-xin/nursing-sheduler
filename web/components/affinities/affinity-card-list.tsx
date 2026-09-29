@@ -17,7 +17,12 @@ import {
   CardMoveActions,
   type DropPosition,
 } from "@/components/card-editor/card-editor-shell";
-import { isAdvancedAffinityCard, summarizeRefs } from "./affinities-model";
+import {
+  AFFINITY_GROUPED_MEANING,
+  AFFINITY_SAME_SHIFT,
+  isAdvancedAffinityCard,
+  summarizeRefs,
+} from "./affinities-model";
 
 interface AffinityCardListProps {
   affinities: AffinityCard[];
@@ -45,8 +50,8 @@ export function AffinityCardList({
   return (
     <ul className="flex flex-col gap-3" data-testid="affinities-list">
       {affinities.map((card, index) => {
-        // An advanced (multi-term) affinity cannot enter the single-term form —
-        // it renders read-only and is preserved byte-for-byte (FR-PR-55a-style).
+        // A grouped (advanced) affinity cannot enter the flat form without
+        // changing its meaning — it renders read-only and is preserved byte-for-byte.
         const advanced = isAdvancedAffinityCard(card);
         return (
           <CardListItem
@@ -75,7 +80,7 @@ export function AffinityCardList({
                 {card.disabled && <Badge variant="neutral">Disabled</Badge>}
                 {advanced && (
                   <Badge variant="neutral" data-testid={`affinity-advanced-badge-${index}`}>
-                    Advanced (multi-term)
+                    Advanced (grouped)
                   </Badge>
                 )}
                 <WeightPill value={card.weight} />
@@ -86,6 +91,10 @@ export function AffinityCardList({
               { label: "People 2", value: summarizeRefs(card.people2) },
               { label: "Shift types", value: summarizeRefs(card.shiftTypes) },
               { label: "Dates", value: summarizeRefs(card.date) },
+              {
+                label: "Together means",
+                value: advanced ? AFFINITY_GROUPED_MEANING : AFFINITY_SAME_SHIFT,
+              },
             ]}
             actions={
               <>
@@ -101,7 +110,7 @@ export function AffinityCardList({
                   <span
                     className="text-meta italic text-ink3"
                     data-testid={`affinity-readonly-note-${index}`}
-                    title="Edit via Save & Load (YAML) — this rule's multi-term shape isn't authored by this form"
+                    title="Edit via Save & Load (YAML) — this rule's grouped shape isn't authored by this form"
                   >
                     Read-only here — edit via Save &amp; Load (YAML)
                   </span>

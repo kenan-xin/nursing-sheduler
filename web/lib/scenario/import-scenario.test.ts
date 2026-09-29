@@ -4,6 +4,11 @@ import type { RequirementCard } from "@/lib/scenario";
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
 import { serializeScenario } from "./serialize";
 import { importScenarioYaml, importScenarioValue } from "./import-scenario";
+import {
+  affinityToForm,
+  buildAffinityCard,
+  isEditableAffinityCard,
+} from "@/components/affinities/affinities-model";
 
 const BACKEND_YAML = `apiVersion: alpha
 description: imported
@@ -58,6 +63,27 @@ preferences:
 `;
 
 describe("importScenarioYaml (lenient Load path)", () => {
+  it("loads a v1 flat-list pairing as an editable card that saves back unchanged (rqfx)", () => {
+    const yaml = BACKEND_YAML.replace(
+      "preferences:\n",
+      "preferences:\n  - type: shift affinity\n    date: ALL\n    people1: [Alice]\n    people2: [Bob, Seniors]\n    shiftTypes: [D, E]\n    weight: 3\n",
+    );
+    const result = importScenarioYaml(yaml);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const card = { ...result.target.cardsByKind.affinities[0], uid: "v1-pairing" };
+    expect(card).toMatchObject({
+      people1: ["Alice"],
+      people2: ["Bob", "Seniors"],
+      shiftTypes: ["D", "E"],
+    });
+    expect(isEditableAffinityCard(card)).toBe(true);
+    const saved = buildAffinityCard(affinityToForm(card), card.uid);
+    expect(saved.people1).toEqual(card.people1);
+    expect(saved.people2).toEqual(card.people2);
+    expect(saved.shiftTypes).toEqual(card.shiftTypes);
+  });
+
   it("imports date objects as ISO", () => {
     // `yaml` 1.2 keeps ISO dates as strings. A loader that makes Date objects must not leak them.
     const yaml = `apiVersion: alpha

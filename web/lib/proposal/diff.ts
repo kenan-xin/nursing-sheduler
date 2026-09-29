@@ -32,7 +32,10 @@ import type {
   UiTemporaryCover,
 } from "@/lib/scenario";
 import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
-import { isEditableAffinityCard } from "@/components/affinities/affinities-model";
+import {
+  AFFINITY_SAME_SHIFT,
+  isEditableAffinityCard,
+} from "@/components/affinities/affinities-model";
 import { isEditableCoveringCard } from "@/components/coverings/coverings-model";
 import { isContractedHoursCard } from "@/components/counts/counts-model";
 import { formatHalfHours } from "@/components/counts/half-hour-codec";
@@ -369,11 +372,11 @@ function renderPairingStrength(weight: number): string {
   return "no effect (weight 0)";
 }
 
-/** `null` for a multi-term card: flattening its groups would state a different rule. */
+/** `null` for a grouped card: flattening its groups would state a different rule. */
 function describePairing(card: AffinityCard): string | null {
   if (!isEditableAffinityCard(card)) return null;
   const shifts = flattenRefs(card.shiftTypes).map(String).join(" or ");
-  return `${renderPeople(card.people1, "everyone")} with ${renderPeople(card.people2, "everyone")} on ${shifts}, ${renderDates(card.date)}: ${renderPairingStrength(card.weight)}`;
+  return `${renderPeople(card.people1, "everyone")} with ${renderPeople(card.people2, "everyone")} ${AFFINITY_SAME_SHIFT} (${shifts}), ${renderDates(card.date)}: ${renderPairingStrength(card.weight)}`;
 }
 
 /** Restates `shift_type_covering` in core: a hard implication, so no strength. */
