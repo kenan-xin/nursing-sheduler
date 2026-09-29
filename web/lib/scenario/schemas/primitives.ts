@@ -20,8 +20,23 @@ export const zShiftTypeSelector = z.string();
  * `Infinity` / `-Infinity` (hard constraints). Mirrors `models.validate_weight`
  * (a float weight may only be `.inf` / `-.inf`). zod 4's `z.number()` rejects
  * non-finite values, so the infinities are matched by explicit literals.
+ *
+ * Finite weights are capped at 1t (1e12, the weight field's largest suffix and what the
+ * shipped large-ward example uses): a bigger weight can overflow CP-SAT's int64 objective
+ * and the solve fails as MODEL_INVALID (bug hunt B3).
  */
-export const zWeight = z.union([z.number().int(), z.literal(Infinity), z.literal(-Infinity)]);
+export const MAX_FINITE_WEIGHT = 1e12;
+export const WEIGHT_RANGE_MESSAGE =
+  "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity";
+export const zWeight = z.union([
+  z
+    .number()
+    .int()
+    .min(-MAX_FINITE_WEIGHT, { error: WEIGHT_RANGE_MESSAGE })
+    .max(MAX_FINITE_WEIGHT, { error: WEIGHT_RANGE_MESSAGE }),
+  z.literal(Infinity),
+  z.literal(-Infinity),
+]);
 
 /** A number that also tolerates `±Infinity` (backend `int | float`, e.g. export
  *  `weightRange`, which — unlike a preference weight — is unrestricted). */

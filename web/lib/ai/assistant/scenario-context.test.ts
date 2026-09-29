@@ -51,6 +51,24 @@ describe("scenario serialization for the model", () => {
     expect(json).toContain("Alice Tan");
     expect(json).toContain("2026-09-15");
   });
+
+  it("lists switched-off rules, which the backend document leaves out (bead 8g1f C8)", () => {
+    const scenario = wardScenario();
+    expect(JSON.parse(stringifyScenario(scenario))).not.toHaveProperty("switchedOffRules");
+    scenario.cardsByKind.successions = [
+      {
+        uid: "nd",
+        description: "No day after night",
+        person: "ALL",
+        pattern: ["N", "D"],
+        weight: -Infinity,
+        disabled: true,
+      },
+    ];
+    expect(JSON.parse(stringifyScenario(scenario)).switchedOffRules).toEqual([
+      { ruleKind: "successions", ruleId: "nd", description: "No day after night" },
+    ]);
+  });
 });
 
 describe("the attached turn context", () => {

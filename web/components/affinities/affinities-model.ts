@@ -40,7 +40,8 @@ export const AFFINITY_MESSAGES = {
   people2: "At least one person must be selected for People 2",
   shiftTypes: "At least one shift type must be selected",
   date: "At least one date must be selected",
-  weightInvalid: "Weight must be a valid number, Infinity, or -Infinity",
+  weightInvalid:
+    "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
   // A numeric shift-type entity id has no valid `ShiftTypeRef` (selectors are
   // string-only — see `lib/scenario/types.ts`); the Python shift map keys the raw
   // numeric id, so a stringified "7" would not resolve it. Mirrors the same
@@ -48,6 +49,7 @@ export const AFFINITY_MESSAGES = {
   // selectors.
   numericShiftId:
     "A numeric shift type ID cannot be used as an affinity selector; reference it by a string ID instead",
+  plusInf: "At +∞, both sides must then work every day in these dates. This is usually impossible.",
 } as const;
 
 /** The flat draft the form edits. */
@@ -303,6 +305,37 @@ export function describePairingStrength(weight: number): string {
   if (weight > 0) return `together where possible (weight ${weight})`;
   if (weight < 0) return `apart where possible (weight ${weight})`;
   return "no effect (weight 0)";
+}
+
+/** v1: ALL or a shift group is one term, so any of its shifts that day counts. */
+export const AFFINITY_ANY_SHIFT =
+  "on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together";
+
+/** v1: ALL or a staff group is one term, so any one member counts for it. */
+export const AFFINITY_ANY_MEMBER =
+  "ALL or a staff group counts as one person, so any one of its members counts";
+
+/** The groups a flat card may name; absent = none known (only ALL is recognised). */
+export type AffinityGroups = Partial<Pick<ScenarioUiState, "staffGroups" | "shiftGroups">>;
+
+/**
+ * What "together" means for `card`, as core scores it (bug hunt B2): one term per
+ * selector element, so a concrete shift means the same shift, but ALL or a shift group
+ * means any of its shifts that day, and ALL or a staff group means any of its members.
+ */
+export function affinityTogetherMeaning(card: AffinityCard, groups: AffinityGroups = {}): string {
+  if (isAdvancedAffinityCard(card)) return AFFINITY_GROUPED_MEANING;
+  const isOneTerm = (list: readonly { id: unknown }[] = []) => {
+    const ids = new Set(list.map((group) => String(group.id)));
+    return (ref: unknown) =>
+      String(ref).toUpperCase() === RESERVED_SHIFT_TYPE.all || ids.has(String(ref));
+  };
+  const anyShift = flattenRefs(card.shiftTypes).some(isOneTerm(groups.shiftGroups));
+  const anyMember = [...flattenRefs(card.people1), ...flattenRefs(card.people2)].some(
+    isOneTerm(groups.staffGroups),
+  );
+  const shift = anyShift ? AFFINITY_ANY_SHIFT : AFFINITY_SAME_SHIFT;
+  return anyMember ? `${shift}; ${AFFINITY_ANY_MEMBER}` : shift;
 }
 
 /** What a grouped (pre-rqfx v2) card actually scores, stated honestly. */

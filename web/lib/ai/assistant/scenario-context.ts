@@ -50,8 +50,21 @@ export function stringifyScenario(scenario: ScenarioUiState): string {
     shiftType,
     groups,
   }));
+  // The backend document also drops switched-off rules, yet they are still on the user's
+  // screens (off) and can be turned back on: name them, so the model never says there is
+  // no such rule or adds a duplicate. Omitted when none, like the covers.
+  const cards = scenario.cardsByKind;
+  const switchedOffRules = (Object.keys(cards) as (keyof typeof cards)[]).flatMap((ruleKind) =>
+    cards[ruleKind]
+      .filter((card) => card.disabled)
+      .map((card) => ({ ruleKind, ruleId: card.uid, description: card.description })),
+  );
   return JSON.stringify(
-    covers.length === 0 ? document : { ...document, temporaryCover: covers },
+    {
+      ...document,
+      ...(covers.length === 0 ? {} : { temporaryCover: covers }),
+      ...(switchedOffRules.length === 0 ? {} : { switchedOffRules }),
+    },
     (_key, value: unknown) => {
       if (typeof value === "number" && !Number.isFinite(value)) {
         return Number.isNaN(value) ? "nan" : value > 0 ? ".inf" : "-.inf";
@@ -299,7 +312,9 @@ export function buildAssistantContext(input: BuildContextInput): AssistantContex
         "Weights of `.inf` / `-.inf` are HARD constraints; numeric weights are soft preferences. " +
         "`temporaryCover` lists the temporary covers booked on the Staff screen: each is a nurse " +
         "from another ward covering ONE shift on ONE date, and each lowers that date's need for " +
-        "that shift by one. They are not staff: no rule, request or roster row names them.",
+        "that shift by one. They are not staff: no rule, request or roster row names them. " +
+        "`switchedOffRules` lists the rules the user switched off: they exist but are left out " +
+        "of the document above and the optimiser ignores them; set_rule_enabled turns one back on.",
       value: stringifyScenario(input.scenario),
     },
     {

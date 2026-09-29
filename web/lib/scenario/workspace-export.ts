@@ -16,6 +16,7 @@ import {
   type AnonymizationIdMap,
 } from "./anonymize";
 import { type PrepareAnonymizedExportOptions, type PrepareExportResult } from "./prepare-export";
+import { rekeySpanDateRefs } from "./serialize";
 import {
   buildWorkspaceDocument,
   serializeWorkspace,
@@ -113,7 +114,13 @@ export function prepareAnonymizedWorkspaceExport(
     // The Workspace document is a people-domain superset of the canonical document,
     // so the shared canonical transforms operate on it directly by structural shape.
     let doc = workspaceDoc as unknown as CanonicalScenarioDocument;
-    if (opts.scatter) doc = scatterShiftRequests(doc, opts.rng ?? Math.random);
+    if (opts.scatter) {
+      // The Workspace keeps span ids; scatter works on ISO dates. Expand, scatter,
+      // then collapse back so the backup still reloads onto the same columns.
+      rekeySpanDateRefs(doc, "iso");
+      doc = scatterShiftRequests(doc, opts.rng ?? Math.random);
+      rekeySpanDateRefs(doc, "span");
+    }
     const idMap = selectIdMapDomains(buildIdMap(doc), opts);
     doc = anonymizeDocument(doc, idMap);
     return { ok: true, yaml: serializeWorkspaceDocument(doc as unknown as WorkspaceDocumentV1) };

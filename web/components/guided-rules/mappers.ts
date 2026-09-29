@@ -16,8 +16,7 @@ import {
 import { formatShortDate } from "@/lib/dates/date-id";
 import { isValidWeightValue } from "@/components/card-editor/weight-field";
 import {
-  REQUIREMENT_MESSAGES,
-  skillMixFloor,
+  requiredCountError,
   summarizeRefs as summarizeRequirementRefs,
 } from "@/components/requirements/requirements-model";
 import {
@@ -35,7 +34,7 @@ import {
 import {
   AFFINITY_MESSAGES,
   AFFINITY_GROUPED_MEANING,
-  AFFINITY_SAME_SHIFT,
+  affinityTogetherMeaning,
   describePairingStrength,
   isAdvancedAffinityCard,
   summarizeRefs as summarizeAffinityRefs,
@@ -105,12 +104,7 @@ export const requirementsMapper: GuidedRuleMapper<RequirementCard> = {
         label: "Required people",
         value: card.requiredNumPeople,
         min: 0,
-        validate: (value) =>
-          !(Number.isFinite(value) && value >= 0)
-            ? REQUIREMENT_MESSAGES.requiredMin
-            : value < skillMixFloor(card)
-              ? REQUIREMENT_MESSAGES.skillMixAboveRequired
-              : undefined,
+        validate: (value) => requiredCountError(card, value),
       },
     ];
   },
@@ -221,14 +215,14 @@ export const affinitiesMapper: GuidedRuleMapper<AffinityCard> = {
     if (trimmed) return trimmed;
     return `${summarizeAffinityRefs(card.people1)} × ${summarizeAffinityRefs(card.people2)} pairing`;
   },
-  summary(card) {
+  summary(card, groups) {
     const shiftLabel = summarizeAffinityRefs(card.shiftTypes);
     const dateLabel = summarizeAffinityRefs(card.date);
     const strength = describePairingStrength(card.weight);
     if (isAdvancedAffinityCard(card)) {
       return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} on ${shiftLabel}, ${dateLabel}: ${strength}. ${AFFINITY_GROUPED_MEANING}`;
     }
-    return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} ${AFFINITY_SAME_SHIFT} (${shiftLabel}), ${dateLabel}: ${strength}.`;
+    return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} ${affinityTogetherMeaning(card, groups)} (${shiftLabel}), ${dateLabel}: ${strength}.`;
   },
   quickFields(card): GuidedQuickField[] {
     if (isAdvancedAffinityCard(card)) return [];

@@ -20,6 +20,7 @@ import { entityKey, sameEntityId } from "@/components/entity-editor/core";
 import { DateScopeField } from "@/components/card-editor/date-scope-field";
 import { WeightField } from "@/components/card-editor/weight-field";
 import {
+  AFFINITY_MESSAGES,
   buildAffinityShiftTypeTransferOptions,
   buildDateScopeAutoScopes,
   buildDateScopeDateGroups,
@@ -215,6 +216,8 @@ export function AffinityForm({ state, mode, initialForm, onSave, onCancel }: Aff
         error={errors.weight}
         // FR-PR-18: Affinities uses positive examples (the default encourages).
         placeholder="e.g. 1, 10, ∞"
+        // P2: core forces a match on every date at +∞ (`utils.add_objective`).
+        plusInfWarning={AFFINITY_MESSAGES.plusInf}
         onChange={(next) => {
           setForm((prev) => ({ ...prev, weight: next }));
           setErrors((prev) => (prev.weight ? { ...prev, weight: undefined } : prev));

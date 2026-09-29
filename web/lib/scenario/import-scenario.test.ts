@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { sanitizePersistedScenario } from "@/lib/store/persistence";
 import type { RequirementCard } from "@/lib/scenario";
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
+import { WEIGHT_RANGE_MESSAGE } from "./schemas/primitives";
 import { serializeScenario } from "./serialize";
 import { importScenarioYaml, importScenarioValue } from "./import-scenario";
 import {
@@ -547,5 +548,43 @@ preferences:
       );
       expect(r.ok).toBe(false);
     });
+  });
+});
+
+// Bug hunt BH2 (6ysj): loaded files core would solve as a silent INFEASIBLE or MODEL_INVALID.
+describe("importScenarioYaml — counts and weights core cannot solve", () => {
+  const requirementYaml = (fields: string) => `apiVersion: alpha
+dates: {range: {startDate: 2026-11-01, endDate: 2026-11-03}}
+people: {items: [{id: a}, {id: b}]}
+shiftTypes: {items: [{id: D}]}
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    shiftType: D
+${fields}
+`;
+  const messages = (fields: string) => {
+    const r = importScenarioYaml(requirementYaml(fields));
+    return r.ok ? [] : r.issues.map((i) => i.message);
+  };
+
+  it("refuses a negative requiredNumPeople", () => {
+    expect(messages("    requiredNumPeople: -1\n    weight: -1")).toContain(
+      "requiredNumPeople must be 0 or more.",
+    );
+  });
+
+  it("refuses preferredNumPeople below requiredNumPeople", () => {
+    expect(
+      messages("    requiredNumPeople: 2\n    preferredNumPeople: 1\n    weight: -1"),
+    ).toContain("preferredNumPeople (1) must be at least requiredNumPeople (2).");
+  });
+
+  it("refuses a weight past 1t and names it", () => {
+    expect(messages("    requiredNumPeople: 1\n    weight: 9000000000000000")).toContain(
+      WEIGHT_RANGE_MESSAGE,
+    );
+    expect(messages("    requiredNumPeople: 1\n    weight: -1000000000000")).toEqual([]);
+    expect(messages("    requiredNumPeople: 1\n    weight: -.inf")).toEqual([]);
   });
 });

@@ -240,6 +240,10 @@ describe("affinitiesMapper", () => {
       "P1 with P2 on the same shift on the same day (D), ALL: together where possible (weight 1).",
     );
     expect(affinitiesMapper.summary(advanced)).toContain("even on different shifts");
+    // Bug hunt B2: ALL is one term in core, any shift that day (v1).
+    expect(affinitiesMapper.summary({ ...supported, shiftTypes: ["ALL"] })).toBe(
+      "P1 with P2 on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together (ALL), ALL: together where possible (weight 1).",
+    );
   });
 
   it("states the pairing strength in the Preview's words, so keep-apart never reads as together", () => {
