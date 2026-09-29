@@ -2,7 +2,7 @@
 import "fake-indexeddb/auto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import {
   currentAppVersion,
   prepareWorkspaceExport,
@@ -289,6 +289,98 @@ describe("SaveLoadWorkspace — Upload flow", () => {
 
     await waitFor(async () => expect((await currentState()).rangeStart).toBe("2026-05-01"));
     expect((await currentState()).staff.some((p) => p.id === "Kevin Ong")).toBe(true);
+  });
+});
+
+/** A v1-style file with its own worked shift type "Leave" (clashes with v2 LEAVE). */
+function v1LeaveShiftYaml(): string {
+  const doc = toCanonicalScenarioDocument(makeValidUiState());
+  doc.appVersion = currentAppVersion();
+  doc.shiftTypes.items.push({ id: "Leave" });
+  doc.people.items[1].history = ["Leave"];
+  doc.preferences.push(
+    { type: "shift request", person: "Bob", date: "2026-05-17", shiftType: "Leave", weight: 1 },
+    { type: "shift request", person: "Bob", date: "2026-05-18", shiftType: "Leave", weight: -1 },
+  );
+  return stringify(doc, YAML_OPTIONS);
+}
+
+describe("SaveLoadWorkspace — v1 Leave shift (objg)", () => {
+  async function uploadV1LeaveFile() {
+    render(<SaveLoadWorkspace />);
+    fireEvent.click(screen.getByTestId("scenario-upload-button"));
+    await screen.findByTestId("upload-modal");
+    uploadTextFile(v1LeaveShiftYaml());
+    await screen.findByText('Convert "Leave" to paid leave?');
+  }
+
+  it("offers the conversion, naming the requests, history and dropped counts", async () => {
+    await uploadV1LeaveFile();
+    expect(screen.getByTestId("confirm-dialog-detail")).toHaveTextContent(
+      /become paid leave: 1[^]*become LEAVE: 1[^]*negative weight\): 1/,
+    );
+    expect(screen.getByTestId("confirm-dialog-confirm")).toHaveTextContent("Convert to paid leave");
+    // The fixture's requirement counts ALL qualified people but names shift D, so no ALL line.
+    expect(screen.getByTestId("confirm-dialog-detail")).not.toHaveTextContent(/count ALL shifts/);
+  });
+
+  it("names how many rules count ALL shifts", async () => {
+    const doc = parse(v1LeaveShiftYaml());
+    doc.preferences.push(
+      {
+        type: "shift count",
+        person: "ALL",
+        countDates: "ALL",
+        countShiftTypes: "ALL",
+        expression: "x",
+        target: 5,
+      },
+      {
+        type: "shift count",
+        person: "Bob",
+        countDates: "ALL",
+        countShiftTypes: ["ALL"],
+        expression: "x",
+        target: 3,
+      },
+    );
+    render(<SaveLoadWorkspace />);
+    fireEvent.click(screen.getByTestId("scenario-upload-button"));
+    await screen.findByTestId("upload-modal");
+    uploadTextFile(stringify(doc, YAML_OPTIONS));
+    await screen.findByText('Convert "Leave" to paid leave?');
+    expect(screen.getByTestId("confirm-dialog-detail")).toHaveTextContent(
+      "2 rules that count ALL shifts will no longer count leave days after conversion.",
+    );
+  });
+
+  it("accept converts the shift to leave pins and loads", async () => {
+    await uploadV1LeaveFile();
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+
+    await waitFor(async () => expect((await currentState()).rangeStart).toBe("2026-05-14"));
+    const state = await currentState();
+    expect(state.shifts.map((s) => s.id)).toEqual(["D", "E", "N"]);
+    expect(state.reqData.filter((c) => c.kind === "leave").map((c) => c.date)).toEqual([
+      "14",
+      "17",
+    ]);
+    expect(state.staff[1].history).toEqual(["LEAVE"]);
+    expect(screen.queryByTestId("scenario-export-issues")).not.toBeInTheDocument();
+  });
+
+  it("decline leaves the store untouched and shows the rename error", async () => {
+    const before = await stateSnapshot();
+    await uploadV1LeaveFile();
+    fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+
+    const issues = await within(screen.getByTestId("scenario-file-card")).findByTestId(
+      "scenario-export-issues",
+    );
+    expect(issues).toHaveTextContent(/Shift type "Leave" clashes with the built-in LEAVE/);
+    expect(issues).toHaveTextContent(/open Edit YAML/);
+    expect(screen.queryByTestId("confirm-dialog")).not.toBeInTheDocument();
+    expect(await stateSnapshot()).toBe(before);
   });
 });
 

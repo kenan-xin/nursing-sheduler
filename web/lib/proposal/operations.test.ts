@@ -2462,7 +2462,7 @@ describe("add_supervision_rule / edit_supervision_rule", () => {
       description: "A senior on every shift Ana works",
       preceptors: [["Senior"]],
       preceptees: [["ana"]],
-      shiftTypes: [["Day", "Night"]],
+      shiftTypes: ["Day", "Night"],
       weight: 1,
     });
   });
@@ -2509,7 +2509,7 @@ describe("add_supervision_rule / edit_supervision_rule", () => {
           description: "Ben needs a senior on Day",
           preceptors: [["Senior"]],
           preceptees: [["ben"]],
-          shiftTypes: [["Day"]],
+          shiftTypes: ["Day"],
           date: ["WEEKEND"],
           weight: 1,
         },

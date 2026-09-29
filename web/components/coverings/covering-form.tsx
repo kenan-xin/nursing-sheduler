@@ -205,8 +205,9 @@ export function CoveringForm({ state, mode, initialForm, onSave, onCancel }: Cov
           weight (spec 11 EDGE-CV-04), so there is no soft/hard dial in the form. */}
       <CardEditorHardRuleNote>
         This covering is <b>always enforced as a hard rule</b> — whenever a preceptee works a
-        covered shift, a preceptor must too. The solver ignores weight for coverings, so there is no
-        soft/hard dial here.
+        covered shift, a preceptor must work that same shift on the same day. Each shift is checked
+        on its own (a shift group counts as one shift). The solver ignores weight for coverings, so
+        there is no soft/hard dial here.
       </CardEditorHardRuleNote>
     </CardEditorForm>
   );
