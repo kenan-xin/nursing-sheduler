@@ -176,9 +176,9 @@ export function pairingWardScenario(): ScenarioUiState {
         {
           uid: "aff-apart",
           description: "Ana and Ben apart on nights",
-          people1: [["ana"]],
-          people2: [["ben"]],
-          shiftTypes: [["Night"]],
+          people1: ["ana"],
+          people2: ["ben"],
+          shiftTypes: ["Night"],
           date: ["ALL"],
           weight: -10,
         },

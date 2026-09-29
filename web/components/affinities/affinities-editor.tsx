@@ -39,7 +39,7 @@ type Draft =
 const EYEBROW = "CONSTRAINT · AFFINITIES";
 const TITLE = "Affinities";
 const SUBTITLE =
-  "Encourage or discourage groups of people working the same shift together. For enforced preceptor supervision, use Shift type coverings instead.";
+  "Encourage or discourage people working together — on the same shift on the same day. Each person and each shift is scored on its own. For enforced preceptor supervision, use Shift type coverings instead.";
 const ADD_LABEL = "Add Affinity";
 const LIST_TITLE = "Current Affinities";
 const EMPTY_MESSAGE = 'No affinities defined yet. Click "Add Affinity" to get started.';
@@ -104,9 +104,9 @@ export function AffinitiesEditor() {
 
   function openEdit(uid: string) {
     const card = affinities.find((c) => c.uid === uid);
-    // A multi-term "advanced" affinity (FR-PR-55a-style fallback) is never
+    // A grouped "advanced" affinity (FR-PR-55a-style fallback) is never
     // openable here — the list omits its Edit button, so this is a defensive
-    // guard against ever flattening+collapsing its selectors.
+    // guard against ever flattening (and so changing) its selectors.
     if (!card || !isEditableAffinityCard(card)) return;
     // Record the pre-edit offset ONCE (an edit→edit switch keeps the original), then
     // scroll to the top so the form is in view. Restore happens on close.

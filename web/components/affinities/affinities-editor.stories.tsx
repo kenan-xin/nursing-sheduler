@@ -46,11 +46,11 @@ const DISABLED = withCardDisabled(
   true,
 );
 
-// `buildAffinityCard` always emits ONE term, so a two-term (advanced) card is hand-built.
+// `buildAffinityCard` always emits flat lists, so a grouped (advanced) card is hand-built.
 const ADVANCED: AffinityCard = {
   uid: "a4",
-  description: "Advanced (multi-term) affinity",
-  people1: [["Alice"], ["Bob"]],
+  description: "Advanced (grouped) affinity",
+  people1: [["Alice", "Bob"]],
   people2: ["Bob"],
   shiftTypes: ["D"],
   date: ["ALL"],

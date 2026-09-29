@@ -329,7 +329,7 @@ export type AssistantCommandV1 =
   | { type: "remove_temporary_cover"; name: string; date: string; shiftType: string }
   /**
    * Add one pairing rule -- the Affinities screen's Add form: `people` and `withPeople` on
-   * the same shifts on the same date, encouraged (positive weight) or kept apart
+   * the same shift on the same day (each id and shift scored on its own), encouraged (positive weight) or kept apart
    * (negative). `weight` is the text the Weight box would hold.
    */
   | {
@@ -658,8 +658,8 @@ function pairingFields() {
     z
       .array(refSchema)
       .describe(
-        `${which}: person ids and staff group ids exactly as in the schedule. A group means ` +
-          'any one of its members. "ALL" is not accepted.',
+        `${which}: person ids and staff group ids exactly as in the schedule. Each id is ` +
+          'scored on its own; a group id means any one of its members. "ALL" is not accepted.',
       );
   return {
     description: ruleDescriptionSchema(),
@@ -668,16 +668,18 @@ function pairingFields() {
     shiftTypes: z
       .array(z.string())
       .describe(
-        "The shifts it is about: shift codes, shift group ids, OFF, LEAVE or ALL. Someone " +
-          "from each side on any of these shifts on the same date counts as together.",
+        "The shifts it is about: shift codes, shift group ids, OFF, LEAVE or ALL. Each is " +
+          "scored on its own: together means on the same shift on the same day (a shift " +
+          "group id counts as one shift, any of its members).",
       ),
     dates: ruleDatesSchema(),
     weight: z
       .string()
       .describe(
-        "How strongly, written as you would type it in the Weight box. On each date where " +
-          "someone from people and someone from withPeople both work one of these shifts, the " +
-          'solver gains the weight: a positive number such as "5" = together where possible, ' +
+        "How strongly, written as you would type it in the Weight box. On each date, for " +
+          "each id in people, each id in withPeople and each listed shift where both work " +
+          'that same shift, the solver gains the weight: a positive number such as "5" = ' +
+          "together where possible, " +
           'a negative number such as "-10" = apart where possible, "-infinity" = keep apart ' +
           'always (hard rule). Soft weights are finite numbers; "+infinity" is refused, ' +
           "because it forces both sides onto those shifts on every date. The schedule shows " +
