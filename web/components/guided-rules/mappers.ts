@@ -35,6 +35,7 @@ import {
   AFFINITY_MESSAGES,
   AFFINITY_GROUPED_MEANING,
   affinityTogetherMeaning,
+  describePairingStrength,
   isAdvancedAffinityCard,
   summarizeRefs as summarizeAffinityRefs,
 } from "@/components/affinities/affinities-model";
@@ -171,7 +172,7 @@ export const countsMapper: GuidedRuleMapper<CountCard> = {
   summary(card) {
     const who = summarizeCountRefs(card.person);
     if (isRestDaysRuleCard(card)) {
-      return `${who === RESERVED_SHIFT_TYPE.all ? "Everyone" : who}: at most 5 worked days in any 7 days in a row, counting the days before the roster from each nurse's history.`;
+      return `${who === RESERVED_SHIFT_TYPE.all ? "Everyone" : who}: at most 5 worked days in any 7 days in a row, counting the days before the roster from each nurse's history. Strong preference. Short staffing can break it.`;
     }
     const expr = describeCountExpressionTarget(card.expression, card.target);
     return `${who}: ${expr} across ${summarizeCountRefs(card.countDates)}.`;
@@ -217,10 +218,11 @@ export const affinitiesMapper: GuidedRuleMapper<AffinityCard> = {
   summary(card, groups) {
     const shiftLabel = summarizeAffinityRefs(card.shiftTypes);
     const dateLabel = summarizeAffinityRefs(card.date);
+    const strength = describePairingStrength(card.weight);
     if (isAdvancedAffinityCard(card)) {
-      return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} on ${shiftLabel}, ${dateLabel}. ${AFFINITY_GROUPED_MEANING}`;
+      return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} on ${shiftLabel}, ${dateLabel}: ${strength}. ${AFFINITY_GROUPED_MEANING}`;
     }
-    return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} ${affinityTogetherMeaning(card, groups)} (${shiftLabel}), ${dateLabel}.`;
+    return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} ${affinityTogetherMeaning(card, groups)} (${shiftLabel}), ${dateLabel}: ${strength}.`;
   },
   quickFields(card): GuidedQuickField[] {
     if (isAdvancedAffinityCard(card)) return [];

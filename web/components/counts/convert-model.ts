@@ -10,9 +10,10 @@
 //     — no special-casing here beyond dropping the marker.
 //
 //   • generic → contracted: seed a guided `ContractedFormState` from a scalar
-//     generic card — carry description/person/countDates/countShiftTypes and the
-//     existing coefficients (re-synced to the CONCRETE contracted domain, preserved
-//     as manual overrides), default policy "exact", and leave the target BLANK (the
+//     generic card — carry description/person/countDates/countShiftTypes, derive
+//     the coefficients from the Shift Type lengths (the Refresh values; a generic
+//     weight like D=2 is a shift multiplier, not hours, so it is never carried),
+//     default policy "exact", and leave the target BLANK (the
 //     generic `target` is a shift COUNT, not hours, so the author must re-enter the
 //     contracted hours). Building the marked card and replacing in place is the
 //     editor's job (through the guided form's coverage gate) — this only seeds.
@@ -24,15 +25,8 @@ import type {
   ScenarioUiState,
   ShiftTypeRef,
 } from "@/lib/scenario";
-import {
-  syncCoefficientPairs,
-  type CoefficientPair,
-} from "@/components/card-editor/coefficient-fields";
-import {
-  buildContractedCoefficientDomain,
-  contractedCoefficientIds,
-  type ContractedFormState,
-} from "./contracted-model";
+import { type ContractedFormState } from "./contracted-model";
+import { applyContractedRefresh, deriveContractedRefresh } from "./refresh-model";
 
 /**
  * Strip the contracted-hours marker from a card, keeping everything else. Removes
@@ -52,11 +46,12 @@ export function convertContractedToGeneric(card: ContractedHoursCountCard): Coun
 
 /**
  * Seed a guided contracted-hours draft from a scalar generic count. Carries the
- * description/person/countDates/countShiftTypes and re-syncs the existing
- * coefficients against the CONCRETE contracted domain (a stale id from a
- * since-changed group is dropped; a newly-eligible id gets a blank slot) so the
- * author's manual overrides survive. Policy defaults to "exact" and the target is
- * left BLANK — the generic `target` was a shift COUNT, not contracted hours, so it
+ * description/person/countDates/countShiftTypes; the coefficients come from the
+ * same Refresh preview/apply pair `defaultContractedForm` uses, run over a blank
+ * slate, so every concrete id holds its Shift-Type-derived half-hours and a
+ * non-derivable one is left blank for the commit gate. The generic coefficients
+ * are dropped: they are shift multipliers, not hours. Policy defaults to "exact"
+ * and the target is left BLANK — the generic `target` was a shift COUNT, not contracted hours, so it
  * must be (re-)authored in the guided form. Callers guard with
  * `isEditableCountCard` first; a non-scalar card is not a valid input here.
  */
@@ -67,20 +62,16 @@ export function seedContractedFormFromGeneric(
   const countShiftTypes = Array.isArray(card.countShiftTypes)
     ? [...card.countShiftTypes]
     : [card.countShiftTypes];
-  const domain = buildContractedCoefficientDomain(state, countShiftTypes);
-  return {
+  const seeded: ContractedFormState = {
     description: card.description ?? "",
     person: Array.isArray(card.person) ? [...card.person] : [card.person],
     countDates: Array.isArray(card.countDates) ? [...card.countDates] : [card.countDates],
     countShiftTypes: countShiftTypes as ShiftTypeRef[],
-    countShiftTypeCoefficients: syncCoefficientPairs(
-      contractedCoefficientIds(domain),
-      (card.countShiftTypeCoefficients ?? []) as CoefficientPair[],
-      domain,
-    ),
+    countShiftTypeCoefficients: [],
     policy: "exact",
     targetExact: "",
     targetRangeMin: "",
     targetRangeMax: "",
   };
+  return applyContractedRefresh(seeded, deriveContractedRefresh(seeded, state));
 }
