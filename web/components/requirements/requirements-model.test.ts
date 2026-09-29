@@ -351,6 +351,22 @@ describe("validateRequirementForm (spec 05 Shift Type Requirements validation ta
     );
   });
 
+  it("refuses an infinite weight beside a preferred number (core rejects it)", () => {
+    for (const weight of [-Infinity, Infinity]) {
+      const draft = form({
+        shiftType: ["D"],
+        qualifiedPeople: ["ALL"],
+        date: ["ALL"],
+        requiredNumPeople: 3,
+        preferredNumPeople: 5,
+        weight,
+      });
+      expect(validateRequirementForm(draft, domain).weight).toBe(
+        REQUIREMENT_MESSAGES.weightInfinite,
+      );
+    }
+  });
+
   it("weight invalid (raw string) message when preferred differs", () => {
     const invalid = form({
       shiftType: ["D"],

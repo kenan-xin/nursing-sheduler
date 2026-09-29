@@ -31,6 +31,7 @@ import {
 import type { TransferOption } from "@/components/entity-editor/transfer-list";
 import type { DateScopeOption, DateScopeItem } from "@/components/card-editor/date-scope-field";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
+import { expandPersonRefs } from "@/lib/rules/expansion";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 
 /**
@@ -62,6 +63,12 @@ export const COVERING_MESSAGES = {
   // unselectable here, not silently stringified.
   numericShiftId:
     "A numeric shift type ID cannot be used as a covering selector; reference it by a string ID instead",
+  // Core sums preceptors and preceptees per day, so a preceptee who is also a
+  // preceptor covers themselves: when every preceptee is one, the rule never binds.
+  selfSupervised:
+    "Every preceptee is also a preceptor, so this rule never applies. Pick preceptees who are not preceptors",
+  partialOverlap: (names: readonly string[]) =>
+    `Both preceptor and preceptee: ${names.join(", ")}. They count as supervising themselves.`,
 } as const;
 
 /** The flat draft the form edits. Note: NO weight — a covering is always enforced. */
@@ -252,17 +259,36 @@ export type CoveringErrors = Partial<Record<CoveringSelectField, string>>;
  */
 export function validateCoveringForm(
   form: CoveringFormState,
-  state: Pick<ScenarioUiState, "shiftGroups">,
+  state: Pick<ScenarioUiState, "shiftGroups" | "staff" | "staffGroups">,
 ): CoveringErrors {
   const errors: CoveringErrors = {};
   if (form.preceptors.length === 0) errors.preceptors = COVERING_MESSAGES.preceptors;
-  if (form.preceptees.length === 0) errors.preceptees = COVERING_MESSAGES.preceptees;
+  if (form.preceptees.length === 0) {
+    errors.preceptees = COVERING_MESSAGES.preceptees;
+  } else if (form.preceptors.length > 0) {
+    const preceptees = expandPersonRefs(form.preceptees as PersonRef[], state);
+    if (supervisorOverlap(form, state).length === preceptees.size) {
+      errors.preceptees = COVERING_MESSAGES.selfSupervised;
+    }
+  }
   if (form.shiftTypes.length === 0) {
     errors.shiftTypes = COVERING_MESSAGES.shiftTypes;
   } else if (selectionReachesDayState(form.shiftTypes, state)) {
     errors.shiftTypes = COVERING_MESSAGES.offLeave;
   }
   return errors;
+}
+
+/** The people (ids, preceptee order) named as both preceptor and preceptee, with
+ *  groups and `ALL` expanded. Full overlap blocks Save; a partial one only warns. */
+export function supervisorOverlap(
+  form: Pick<CoveringFormState, "preceptors" | "preceptees">,
+  state: Pick<ScenarioUiState, "staff" | "staffGroups">,
+): string[] {
+  const preceptors = expandPersonRefs(form.preceptors as PersonRef[], state);
+  return [...expandPersonRefs(form.preceptees as PersonRef[], state)].filter((id) =>
+    preceptors.has(id),
+  );
 }
 
 /** Whether any selected shift-type ref is (or expands to) an OFF/LEAVE day-state. */

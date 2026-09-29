@@ -248,6 +248,8 @@ export interface GroupsSectionProps<TItem extends EditorItemBase> {
   /** The change-highlight key for a group row (lib/change-highlight). The Staff and
    *  Shift screens name their groups differently, so each passes its own. */
   groupChangeKey?: (groupId: string) => string;
+  /** Replaces the immediate delete (e.g. with a confirm). Default: delete at once. */
+  onDeleteGroup?: (groupId: string) => void;
 }
 
 export function GroupsSection<TItem extends EditorItemBase>({
@@ -264,6 +266,7 @@ export function GroupsSection<TItem extends EditorItemBase>({
   onCloseForm,
   config,
   groupChangeKey,
+  onDeleteGroup,
 }: GroupsSectionProps<TItem>) {
   const cfg = React.useMemo(() => resolveConfig(config), [config]);
   const [dragId, setDragId] = React.useState<string | null>(null);
@@ -393,6 +396,7 @@ export function GroupsSection<TItem extends EditorItemBase>({
             isEditing={editingGroupId === group.id}
             onEdit={() => onEditGroup(group.id)}
             onCloseForm={onCloseForm}
+            onDelete={onDeleteGroup && (() => onDeleteGroup(group.id))}
             isStale={isStale}
             changeKey={groupChangeKey?.(group.id)}
             cfg={cfg}
@@ -465,6 +469,7 @@ function GroupRow<TItem extends EditorItemBase>({
   isEditing,
   onEdit,
   onCloseForm,
+  onDelete,
   isStale,
   changeKey,
   cfg,
@@ -489,6 +494,7 @@ function GroupRow<TItem extends EditorItemBase>({
   isEditing: boolean;
   onEdit: () => void;
   onCloseForm: () => void;
+  onDelete?: () => void;
   isStale: () => boolean;
   changeKey: string | undefined;
   cfg: ResolvedConfig;
@@ -659,6 +665,7 @@ function GroupRow<TItem extends EditorItemBase>({
             aria-label="Delete group"
             data-testid={`group-delete-${group.id}`}
             onClick={() => {
+              if (onDelete) return onDelete();
               onCloseForm();
               commit((live) => deleteGroup(live, descriptor, group.id));
             }}

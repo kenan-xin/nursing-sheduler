@@ -9,10 +9,13 @@ import {
   buildContractedCard,
   buildContractedCoefficientDomain,
   contractedCoefficientIds,
+  contractsStaleFor,
   defaultContractedForm,
   emptyContractedForm,
   findContractedDraftLeaveAdvisory,
   hasContractedErrors,
+  refreshContracts,
+  staleContractShifts,
   toContractedForm,
   validateContractedCommit,
   validateContractedForm,
@@ -761,5 +764,59 @@ describe("validateContractedCommit — coverage-gated commit via the shared vali
   it("still surfaces an unparsable target field error", () => {
     const errors = validateContractedCommit(complete({ targetExact: "8h 15m" }), GROUPED);
     expect(errors.targetExact).toBeDefined();
+  });
+});
+
+describe("stale contracted hours (T2)", () => {
+  const state = scenario({
+    shifts: [
+      { id: "D", durationMinutes: 480 },
+      { id: "N", durationMinutes: 720 },
+    ],
+  });
+  const card: ContractedHoursCountCard = {
+    uid: "c1",
+    description: "",
+    person: ["ALL"],
+    countDates: ["ALL"],
+    countShiftTypes: ["D", "N", "LEAVE"],
+    // D matches 8h; N was saved at 10h before the shift became 12h; LEAVE is a
+    // manual credit, never "stale".
+    countShiftTypeCoefficients: [
+      ["D", 16],
+      ["N", 20],
+      ["LEAVE", 10],
+    ],
+    expression: "x = T",
+    target: 320,
+    weight: Infinity,
+    tag: "contracted_hours",
+    policy: "exact",
+    unit: "half-hour",
+  };
+
+  it("names only the worked shifts whose length moved", () => {
+    expect(staleContractShifts(card, state)).toEqual(["N"]);
+    expect(
+      contractsStaleFor({ ...state, cardsByKind: { ...state.cardsByKind, counts: [card] } }, "N"),
+    ).toEqual(["c1"]);
+    expect(
+      contractsStaleFor({ ...state, cardsByKind: { ...state.cardsByKind, counts: [card] } }, "D"),
+    ).toEqual([]);
+  });
+
+  it("refreshes the stale hours and keeps every other field", () => {
+    const { cardsByKind } = refreshContracts(
+      { ...state, cardsByKind: { ...state.cardsByKind, counts: [card] } },
+      ["c1"],
+    );
+    expect(cardsByKind.counts[0]).toEqual({
+      ...card,
+      countShiftTypeCoefficients: [
+        ["D", 16],
+        ["N", 24],
+        ["LEAVE", 10],
+      ],
+    });
   });
 });
