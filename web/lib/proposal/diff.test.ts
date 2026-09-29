@@ -1297,7 +1297,7 @@ describe("pairing and supervision rules in the Preview", () => {
     expect(supervision).toMatchObject({
       scope: "shift-type-coverings",
       after:
-        "On · “A senior whenever Ana works” · Whenever ana works Day or Night, at least one of Senior works it too, every date",
+        "On · “A senior whenever Ana works” · Whenever ana works Day or Night, at least one of Senior works on the same shift on the same day, every date",
     });
     expect(edited).toMatchObject({
       kind: "changed",

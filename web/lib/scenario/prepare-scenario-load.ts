@@ -23,6 +23,11 @@ import { projectScenarioDocument } from "./canonical";
 import { importScenarioValue, parseScenarioYaml } from "./import-scenario";
 import { validateScenario, type ScenarioValidationIssue } from "./serialize";
 import {
+  planV1LeaveShiftConversion,
+  v1LeaveShiftIssue,
+  type V1LeaveShiftPlan,
+} from "./v1-leave-shift";
+import {
   checkWorkspaceIdentityIntegrity,
   classifyWorkspaceSource,
   normalizeWorkspaceToImportTarget,
@@ -59,6 +64,17 @@ export interface PrepareScenarioLoadResult {
    * They do not block the load; Optimize stays blocked until they are fixed.
    */
   optimizeIssues?: ScenarioValidationIssue[];
+  /**
+   * Set when the file defines its own shift type named "Leave" (a v1 file; v2
+   * reserves LEAVE). Unless the caller asked to convert it (and it has no
+   * blockers), the load is blocked with an issue naming the shift.
+   */
+  v1LeaveShift?: V1LeaveShiftPlan;
+}
+
+export interface PrepareScenarioLoadOptions {
+  /** Convert a v1 "Leave" shift type into LEAVE pins (the user accepted the offer). */
+  convertV1LeaveShift?: boolean;
 }
 
 /**
@@ -78,7 +94,10 @@ export function projectImportTarget(target: ImportNormalizationTarget): Canonica
  * See the module header for the pipeline; the store is untouched by construction
  * (this function has no store handle).
  */
-export function prepareScenarioLoad(raw: string): PrepareScenarioLoadResult {
+export function prepareScenarioLoad(
+  raw: string,
+  options: PrepareScenarioLoadOptions = {},
+): PrepareScenarioLoadResult {
   // 0. Dual-format dispatch (DL12 §4). A `workspaceVersion` scalar routes to the
   //    Workspace V1 loader; its absence keeps the legacy strict/import path below,
   //    which is unchanged. Only the discriminator picks the path — a Workspace file
@@ -107,6 +126,22 @@ export function prepareScenarioLoad(raw: string): PrepareScenarioLoadResult {
       issues: [{ path: "", message: `YAML parse error: ${(error as Error).message}` }],
       warnings: [],
     };
+  }
+
+  // 1b. A v1 shift type named "Leave" clashes with the reserved LEAVE. Block with a
+  //     rename hint unless the caller opted into (a blocker-free) conversion.
+  const v1LeaveShift = planV1LeaveShiftConversion(parsed) ?? undefined;
+  if (v1LeaveShift) {
+    if (!options.convertV1LeaveShift || !v1LeaveShift.convertible) {
+      return {
+        target: null,
+        doc: null,
+        issues: [v1LeaveShiftIssue(v1LeaveShift)],
+        warnings: [],
+        v1LeaveShift,
+      };
+    }
+    parsed = v1LeaveShift.doc;
   }
 
   // 2. Lenient import — accepts every backend-valid form; LEAVE/OFF selectors are

@@ -9,6 +9,8 @@ import {
   emptyCoveringForm,
   expandDateRange,
   flattenRefs,
+  COVERING_GROUPED_MEANING,
+  coveringShiftMeaning,
   isAdvancedCoveringCard,
   isEditableCoveringCard,
   reorderByDrop,
@@ -166,14 +168,16 @@ describe("validation (FR-CV-13..15)", () => {
 });
 
 describe("buildCoveringCard save shape (FR-CV-07, EDGE-CV-01, EDGE-CV-04)", () => {
-  it("wraps each flat selection in the single-equation outer array", () => {
+  it("wraps people in one group per side and keeps shifts flat (one check per shift, yzty)", () => {
     const card = buildCoveringCard(
       form({ preceptors: ["Anna", "Seniors"], preceptees: ["Lil"], shiftTypes: ["D", "N"] }),
       "uid-1",
     );
     expect(card.preceptors).toEqual([["Anna", "Seniors"]]);
     expect(card.preceptees).toEqual([["Lil"]]);
-    expect(card.shiftTypes).toEqual([["D", "N"]]);
+    expect(card.shiftTypes).toEqual(["D", "N"]);
+    expect(isEditableCoveringCard(card)).toBe(true);
+    expect(coveringShiftMeaning(card)).toBe("A preceptor on the same shift on the same day");
     expect(card.uid).toBe("uid-1");
   });
 
@@ -235,6 +239,28 @@ describe("coveringToForm load round-trip (FR-CV-08)", () => {
     expect(isAdvancedCoveringCard(advanced)).toBe(true);
     expect(isEditableCoveringCard(advanced)).toBe(false);
     expect(advanced.preceptors).toEqual([["Anna"], ["Lil"]]);
+  });
+
+  it("keeps a pre-yzty grouped-shift card read-only with its honest meaning", () => {
+    const grouped = {
+      ...buildCoveringCard(form({ preceptors: ["Anna"], preceptees: ["Lil"] }), "grouped"),
+      shiftTypes: [["D", "N"]],
+    };
+    expect(isEditableCoveringCard(grouped)).toBe(false);
+    expect(coveringShiftMeaning(grouped)).toBe(COVERING_GROUPED_MEANING);
+  });
+
+  it("loads a one-member-group or flat shift list as editable, saving it flat", () => {
+    for (const shiftTypes of [[["D"]], ["D", "N"], [["D"], "N"]]) {
+      const card = {
+        ...buildCoveringCard(form({ preceptors: ["Anna"], preceptees: ["Lil"] }), "v1"),
+        shiftTypes,
+      };
+      expect(isEditableCoveringCard(card)).toBe(true);
+      expect(buildCoveringCard(coveringToForm(card), "v1").shiftTypes).toEqual(
+        flattenRefs(shiftTypes),
+      );
+    }
   });
 
   it("flattenRefs and summarizeRefs handle nested trees and empties", () => {

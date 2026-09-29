@@ -647,7 +647,8 @@ export function requirementToForm(
         : Array.isArray(card.date)
           ? [...card.date]
           : [card.date],
-    weight: card.weight,
+    // Without a preferred number the stored weight is the inert -1: the dial opens at the default.
+    weight: card.preferredNumPeople == null ? emptyRequirementForm().weight : card.weight,
     skillMix: (card.skillMix ?? []).map((e) => ({ ...e })),
     requiredNumPeopleOverrides: (card.requiredNumPeopleOverrides ?? []).map(([date, n]) => ({
       date,

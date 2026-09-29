@@ -294,6 +294,45 @@ describe("useScenarioImport — an older file with issues still loads (C-22)", (
     expect(result.current.loadIssues).toEqual([ISSUE]);
   });
 
+  it("a v1 Leave file is offered conversion first, then loads with its issues (objg + C-22)", async () => {
+    const plan = {
+      shiftId: "Leave",
+      shiftIndex: 2,
+      convertedRequests: 1,
+      droppedRequests: 0,
+      historyEntries: 0,
+      blockers: [],
+      leaveLikeIds: ["Leave"],
+      allShiftRules: 0,
+      convertible: true,
+      doc: null,
+    };
+    prepareMock.mockImplementation((_raw: string, opts?: { convertV1LeaveShift?: boolean }) =>
+      opts?.convertV1LeaveShift
+        ? {
+            issues: [],
+            warnings: [],
+            target: targetWithCounts([]),
+            doc: null,
+            optimizeIssues: [ISSUE],
+          }
+        : {
+            issues: [{ path: "shiftTypes.items[2]", message: "rename" }],
+            warnings: [],
+            target: null,
+            doc: null,
+            v1LeaveShift: plan,
+          },
+    );
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleFile("<yaml>"));
+    expect(loadScenarioMock).not.toHaveBeenCalled();
+    await act(async () => result.current.confirm!.onContinue());
+    expect(clearRosterMock).toHaveBeenCalledOnce();
+    expect(loadScenarioMock).toHaveBeenCalledOnce();
+    expect(result.current.loadIssues).toEqual([ISSUE]);
+  });
+
   it("an Edit-YAML draft with the same issues is still refused", async () => {
     stageWithIssues();
     const { result } = renderHook(() => useScenarioImport());

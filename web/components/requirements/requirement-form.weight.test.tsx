@@ -31,5 +31,27 @@ describe("Requirement weight with a preferred number", () => {
     expect(screen.queryByTestId("weight-field-plus-inf")).toBeNull();
     expect(screen.queryByTestId("weight-field-minus-inf")).toBeNull();
     expect(screen.getByText(/For a hard count, leave Preferred empty\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Preferred is only a maximum/)).toBeNull();
+  });
+
+  it("says Preferred is only a maximum at weight 0", () => {
+    render(
+      <RequirementForm
+        state={state}
+        mode="add"
+        initialForm={{
+          ...emptyRequirementForm(),
+          shiftType: ["N"],
+          requiredNumPeople: 2,
+          preferredNumPeople: 3,
+          qualifiedPeople: ["ALL"],
+          date: ["ALL"],
+          weight: 0,
+        }}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/At 0, Preferred is only a maximum\./)).toBeInTheDocument();
   });
 });

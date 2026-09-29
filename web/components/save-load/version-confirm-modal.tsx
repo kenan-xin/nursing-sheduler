@@ -26,6 +26,8 @@ export interface VersionConfirmModalProps {
   destructive?: boolean;
   /** Settles once the load has committed (or been refused); the dialog stays busy until then. */
   onContinue: () => Promise<void>;
+  confirmLabel?: string;
+  cancelLabel?: string;
 }
 
 export function VersionConfirmModal({
@@ -36,6 +38,8 @@ export function VersionConfirmModal({
   detail,
   destructive,
   onContinue,
+  confirmLabel = "Continue",
+  cancelLabel = "Cancel",
 }: VersionConfirmModalProps) {
   return (
     <ConfirmDialog
@@ -44,8 +48,8 @@ export function VersionConfirmModal({
       title={title}
       description={description}
       detail={detail}
-      confirmLabel="Continue"
-      cancelLabel="Cancel"
+      confirmLabel={confirmLabel}
+      cancelLabel={cancelLabel}
       busyLabel="Loading scenario…"
       variant={destructive ? "destructive" : "default"}
       onConfirm={onContinue}

@@ -400,7 +400,7 @@ test.describe.serial("DR-3 Shifts card-grid", () => {
     await page.getByTestId(`shift-edit-${sk("DAY")}-required`).fill("4");
     await page.getByTestId(`shift-edit-${sk("DAY")}-preferred`).fill("4");
     await expect(page.getByTestId(`shift-edit-${sk("DAY")}-preferred-collapse`)).toContainText(
-      "weight reset from -50 to -1",
+      "Preferred will be cleared when you save.",
     );
     await page.getByTestId(`shift-edit-${sk("DAY")}-save`).click();
 

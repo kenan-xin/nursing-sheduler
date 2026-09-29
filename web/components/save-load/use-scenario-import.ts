@@ -37,7 +37,7 @@ import {
   useScenarioStore,
 } from "@/lib/store";
 import { clearRosterDataAndNotify } from "@/lib/roster";
-import { loadConfirmCopy } from "./load-controls-core";
+import { loadConfirmCopy, v1LeaveShiftOfferCopy } from "./load-controls-core";
 
 /** Ready-to-render props for the combined load confirmation dialog. */
 export interface PendingImportConfirm {
@@ -49,6 +49,9 @@ export interface PendingImportConfirm {
   detail?: string;
   /** Destructive style: the load overwrites a non-empty workspace and cannot be undone. */
   destructive?: boolean;
+  /** Button labels when not the default Continue / Cancel. */
+  confirmLabel?: string;
+  cancelLabel?: string;
   /** Resolves only after the load has committed or been refused -- hold the confirm busy until then. */
   onContinue: () => Promise<void>;
   onCancel: () => void;
@@ -158,6 +161,8 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
   const [staged, setStaged] = useState<StagedTarget | null>(null);
   const [warnings, setWarnings] = useState<string[] | null>(null);
   const [loadIssues, setLoadIssues] = useState<ScenarioValidationIssue[] | null>(null);
+  // The offer to convert a v1 "Leave" shift (objg), shown before any load confirm.
+  const [leaveOffer, setLeaveOffer] = useState<PendingImportConfirm | null>(null);
 
   // Commit performs EXACTLY ONE state replacement, then publishes the warning list
   // that was already computed from the unchanged target before this call. It never
@@ -223,10 +228,33 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     toast.success("Scenario loaded — this replaces your current setup.");
   };
 
-  const stage = (text: string, edit: boolean) => {
-    const result = prepareScenarioLoad(text);
+  const stage = (text: string, edit: boolean, convertV1LeaveShift = false) => {
+    const result = prepareScenarioLoad(text, { convertV1LeaveShift });
+    const plan = result.v1LeaveShift;
+    if (plan && !convertV1LeaveShift && plan.convertible) {
+      // The dialog closes through `onCancel` after Continue too, so only a real
+      // decline may publish the rename error.
+      let accepted = false;
+      setIssues(null);
+      setLeaveOffer({
+        ...v1LeaveShiftOfferCopy(plan),
+        confirmLabel: "Convert to paid leave",
+        cancelLabel: "Don't convert",
+        onContinue: async () => {
+          accepted = true;
+          setLeaveOffer(null);
+          stage(text, edit, true);
+        },
+        onCancel: () => {
+          setLeaveOffer(null);
+          if (!accepted) setIssues(result.issues);
+        },
+      });
+      return;
+    }
     // An Edit-YAML draft stays strict: its issues show in the editor, where they
-    // are fixed. Only a loaded FILE may carry them in (C-22).
+    // are fixed. Only a loaded FILE may carry them in (C-22). A converted v1 file
+    // reaches this point like any other.
     const optimizeIssues = result.optimizeIssues ?? [];
     if (result.issues.length > 0 || !result.target || (edit && optimizeIssues.length > 0)) {
       setIssues(result.issues.length > 0 ? result.issues : optimizeIssues);
@@ -260,18 +288,20 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     });
   };
 
-  const confirm: PendingImportConfirm | null = staged
-    ? {
-        ...loadConfirmCopy(
-          staged.versionStatus,
-          staged.replacement,
-          staged.fileVersion,
-          currentAppVersion(),
-        ),
-        onContinue: () => commit(staged.target, staged.warnings, staged.edit, staged.loadIssues),
-        onCancel: () => setStaged(null),
-      }
-    : null;
+  const confirm: PendingImportConfirm | null = leaveOffer
+    ? leaveOffer
+    : staged
+      ? {
+          ...loadConfirmCopy(
+            staged.versionStatus,
+            staged.replacement,
+            staged.fileVersion,
+            currentAppVersion(),
+          ),
+          onContinue: () => commit(staged.target, staged.warnings, staged.edit, staged.loadIssues),
+          onCancel: () => setStaged(null),
+        }
+      : null;
 
   return {
     issues,
@@ -280,6 +310,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     clearImportState: () => {
       setIssues(null);
       setStaged(null);
+      setLeaveOffer(null);
       setWarnings(null);
       setLoadIssues(null);
     },
