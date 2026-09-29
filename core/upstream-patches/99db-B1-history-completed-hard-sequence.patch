@@ -1,0 +1,53 @@
+# 99db patch for preference_types.py and tests/test_scheduler.py against genie 1bf4b85.
+# hunk: a -inf succession pattern that history alone already completes is skipped instead of making the roster INFEASIBLE; soft and +inf unchanged (bug hunt B1, bead 99db)
+
+diff --git a/core/nurse_scheduling/preference_types.py b/core/nurse_scheduling/preference_types.py
+index 3bba995..96bd6d8 100644
+--- a/core/nurse_scheduling/preference_types.py
++++ b/core/nurse_scheduling/preference_types.py
+@@ -277,6 +277,10 @@ def shift_type_successions(
+                 )
+                 if target_n_matched == 0:
+                     # History already completes this pattern before the first schedulable day.
++                    if preference.weight == -math.inf:
++                        # Nothing this month can undo history, so a forbidden pattern it completed
++                        # binds nothing here (bug hunt B1, bead 99db). Soft and +inf keep v1 scores.
++                        continue
+                     is_match_var_name = f"{unique_var_prefix}_is_match"
+                     ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
+                     ctx.solver.add_constraint(is_match == 1)
+diff --git a/core/tests/test_scheduler.py b/core/tests/test_scheduler.py
+index d82103a..d3c5717 100644
+--- a/core/tests/test_scheduler.py
++++ b/core/tests/test_scheduler.py
+@@ -40,6 +40,30 @@ def _load_valid_yaml_bytes() -> bytes:
+     return VALID_YAML_PATH.read_bytes()
+ 
+ 
++def test_hard_forbidden_sequence_already_completed_by_history_is_not_infeasible():
++    # B1: last month's history cannot change, so a -inf pattern it already completes binds nothing.
++    content = textwrap.dedent(
++        """
++        apiVersion: alpha
++        dates:
++          range: {startDate: 2026-10-01, endDate: 2026-10-03}
++        people:
++          items:
++            - {id: 0, history: [N, D]}
++            - {id: 1}
++        shiftTypes:
++          items: [{id: D}, {id: N}]
++        preferences:
++          - type: at most one shift per day
++          - type: shift type successions
++            person: ALL
++            pattern: [N, D]
++            weight: -.inf
++        """
++    ).encode()
++    assert scheduler.schedule(content).solver_status == "OPTIMAL"
++
++
+ def test_scheduler_rejects_unsupported_api_version():
+     content = _load_valid_yaml_bytes().replace(b"apiVersion: alpha", b"apiVersion: beta")
+ 

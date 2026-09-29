@@ -76,6 +76,16 @@ ADMISSION_PENDING_EXHAUSTED = "pending_exhausted"
 """Total pending capacity is exhausted for any purpose."""
 ADMISSION_ORDINARY_RESERVED = "ordinary_reserved"
 """Only the reserved ordinary slots remain, so a diagnostic cannot be admitted."""
+ADMISSION_CLIENT_EXHAUSTED = "client_exhausted"
+"""The submitting client already holds its share of pending jobs (bead 99db D-07)."""
+
+
+def client_capacity_message(max_pending_per_client: int) -> str:
+    """Refusal text for a client at its pending cap; names only the configured cap."""
+    return (
+        f"This client already has {max_pending_per_client} optimizations queued or running. "
+        "Wait for one to finish or cancel one, then try again."
+    )
 
 
 @dataclass(frozen=True)
@@ -171,6 +181,8 @@ def admission_decision(
     pending_count: int,
     max_pending: int,
     ordinary_reserved_slots: int,
+    client_pending_count: int = 0,
+    max_pending_per_client: int = 0,
 ) -> str:
     """Return whether a purpose may be admitted at the current pending count.
 
@@ -179,7 +191,13 @@ def admission_decision(
     accepted while diagnostics are saturating the queue. The reserve is a floor on
     ORDINARY ADMISSION, not a set of slots held empty: an ordinary job admitted
     into the reserve is an ordinary pending job like any other.
+
+    The per-client cap (0 = none) keys on `client_id`, which the client controls (a
+    cookie; a request without one gets a fresh ID). It stops one browser flooding the
+    queue by accident, not deliberate abuse: that needs a per-IP limit at the ingress.
     """
+    if max_pending_per_client and client_pending_count >= max_pending_per_client:
+        return ADMISSION_CLIENT_EXHAUSTED
     if pending_count >= max_pending:
         return ADMISSION_PENDING_EXHAUSTED
     if purpose != JobPurpose.ORDINARY and pending_count >= max_pending - ordinary_reserved_slots:
