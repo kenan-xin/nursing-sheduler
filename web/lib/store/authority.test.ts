@@ -119,6 +119,25 @@ describe("one mutation class, one durable commit", () => {
     expect(scenario.getState().backupFingerprint).toBeNull();
   });
 
+  it("a fresh tab opens the most recently loaded scenario, not the first one (A-01)", async () => {
+    let millis = Date.parse("2026-09-29T09:00:00.000Z");
+    const now = () => new Date((millis += 1_000));
+    harness = await installTestAuthority({ now });
+    await scenarioCommands.mutate({ rangeStart: "2026-01-01" });
+    await loadScenario({
+      ...createEmptyScenarioUiState(),
+      rangeStart: "2026-05-01",
+      rangeEnd: "2026-05-31",
+    });
+    const loadedId = useAuthorityStore.getState().scenarioId;
+    await harness.authority.release();
+
+    // A new tab: fresh tab id, no selection of its own, same database.
+    harness = await installTestAuthority({ databaseName: harness.databaseName, now });
+    expect(useAuthorityStore.getState().scenarioId).toBe(loadedId);
+    expect(scenario.getState().rangeStart).toBe("2026-05-01");
+  });
+
   it("releases the previous scenario's lease when the switch commits", async () => {
     const original = useAuthorityStore.getState().scenarioId!;
     await newScenario();
@@ -510,6 +529,24 @@ describe("a FREE lease is re-acquired without a click (bead d854)", () => {
     expect(useAuthorityStore.getState().ownership).toBe("owner");
     expect((await expiring.db.writerLeases.get(scenarioId))!.epoch).toBeGreaterThan(before);
     expect((await scenarioCommands.mutate({ rangeStart: "2026-04-03" })).ok).toBe(true);
+  });
+
+  it("a lone owner whose lease lapsed keeps its Undo history on re-acquire (A-05)", async () => {
+    let millis = Date.parse("2026-09-28T00:00:00.000Z");
+    harness = await installTestAuthority({ now: () => new Date(millis) });
+    await scenarioCommands.mutate({ rangeStart: "2026-04-01" });
+    await scenarioCommands.mutate({ rangeEnd: "2026-04-30" });
+
+    setVisibility("hidden");
+    millis += LEASE_TTL_MS + 1_000;
+    await harness.authority.keepAlive();
+    setVisibility("visible");
+    await harness.authority.reconcile();
+
+    expect(useAuthorityStore.getState().ownership).toBe("owner");
+    expect(useAuthorityStore.getState().canUndo).toBe(true);
+    expect((await scenarioCommands.undo()).ok).toBe(true);
+    expect(scenario.getState().rangeEnd).toBe("");
   });
 
   it("a lapsed owner that another tab took over meanwhile stays taken-over", async () => {

@@ -662,7 +662,13 @@ export class ScenarioAuthority {
 
     const era = this.beginEra();
     const context = await this.repository.readTabContext(this.tabId);
-    const scenarioId = context.selection?.scenarioId ?? migrated.scenarioId;
+    // A fresh tab (no selection of its own) opens the most recently active
+    // scenario, not the first one ever migrated: after a Load or New the user
+    // expects that work, and nothing else in the UI can reopen it.
+    const scenarioId =
+      context.selection?.scenarioId ??
+      (await this.repository.latestScenarioId()) ??
+      migrated.scenarioId;
 
     let envelope: ScenarioEnvelopeV3;
     try {
