@@ -21,12 +21,8 @@
 
 import { useMemo } from "react";
 import { GuardedLink } from "@/components/shell/guarded-link";
-import {
-  addGroup,
-  deleteGroup,
-  renameGroup,
-  setGroupMembers,
-} from "@/components/entity-editor/core";
+import { addGroup, renameGroup, setGroupMembers } from "@/components/entity-editor/core";
+import { deleteWithSummary } from "@/components/entity-editor/delete-with-summary";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import {
   applyRangeChange,
@@ -111,7 +107,12 @@ export function DatesScreen() {
 
   const handleDeleteGroup = (id: string) => {
     if (isDerivedDateGroupId(id)) return; // reserved ids are never deletable
-    scenarioCommands.mutate((state) => deleteGroup(state, datesDescriptor, id));
+    void deleteWithSummary(
+      (transform) => scenarioCommands.mutate(transform),
+      `date group “${id}”`,
+      datesDescriptor.domain,
+      id,
+    );
   };
 
   return (

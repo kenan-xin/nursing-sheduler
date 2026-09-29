@@ -10,11 +10,12 @@
 // missing-data reasons early.
 
 import { hasUnsupportedExpression } from "@/components/card-editor/expression-model";
+import { cardsReferencing } from "@/lib/cascade";
 import type { ScenarioUiState } from "@/lib/scenario/types";
 
 /** One required-data gap, rendered as "<before><link><after>" with a tab link. */
 export interface OptimizeReadinessIssue {
-  kind: "dates" | "people" | "shift-types" | "shift-counts";
+  kind: "dates" | "people" | "shift-types" | "empty-shift-groups" | "shift-counts";
   before: string;
   linkLabel: string;
   href: string;
@@ -30,7 +31,7 @@ export interface OptimizeReadiness {
 /** The scenario fields the readiness gate reads (kept narrow for testability). */
 export type OptimizeReadinessSource = Pick<
   ScenarioUiState,
-  "staff" | "shifts" | "shiftGroups" | "rangeStart" | "rangeEnd"
+  "staff" | "shifts" | "shiftGroups" | "rangeStart" | "rangeEnd" | "cardsByKind"
 > & { counts: readonly ReadinessCount[] };
 
 /** The count-card fields the unsupported-expression gate reads. */
@@ -97,6 +98,24 @@ export function deriveOptimizeReadiness(source: OptimizeReadinessSource): Optimi
   if (source.staff.length === 0) issues.push(PEOPLE_ISSUE);
   if (source.shifts.length === 0 && source.shiftGroups.length === 0) {
     issues.push(SHIFT_TYPES_ISSUE);
+  }
+  // Core rejects a rule whose shift group resolves to nothing (T3), so an enabled
+  // rule naming an empty shift group would fail the run with a raw backend message.
+  const emptyUsed = source.shiftGroups
+    .filter(
+      (group) =>
+        group.members.length === 0 &&
+        cardsReferencing(source.cardsByKind, "shift", group.id).some((card) => !card.disabled),
+    )
+    .map((group) => `“${group.id}”`);
+  if (emptyUsed.length > 0) {
+    issues.push({
+      kind: "empty-shift-groups",
+      before: `A rule uses an empty shift group (${emptyUsed.join(", ")}). Add shifts to it on the `,
+      linkLabel: "Shifts",
+      href: "/shift-types",
+      after: " page, or take it out of the rule.",
+    });
   }
   if (hasBlockingUnsupportedExpression(source.counts)) issues.push(UNSUPPORTED_EXPRESSION_ISSUE);
 

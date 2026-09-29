@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { deriveOptimizeReadiness } from "@/lib/optimize";
+import { createEmptyScenarioUiState } from "@/lib/scenario";
 import { ReadinessBanner } from "./readiness-banner";
 
 // GuardedLink reads the router; a lightweight stub keeps this a focused render test.
@@ -25,6 +26,7 @@ describe("ReadinessBanner", () => {
       staff: [],
       shifts: [],
       shiftGroups: [],
+      cardsByKind: createEmptyScenarioUiState().cardsByKind,
       counts: [],
     });
     render(<ReadinessBanner issues={issues} />);

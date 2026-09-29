@@ -25,6 +25,22 @@ export const CARD_REF_FIELDS: Record<CardKind, Record<EntityDomain, readonly str
   coverings: { person: ["preceptors", "preceptees"], date: ["date"], shift: ["shiftTypes"] },
 };
 
+/** The rule cards that name `id` in one of their `domain` reference fields, at any
+ *  nesting depth (used for the empty-group marker and the Optimize readiness gate). */
+export function cardsReferencing(
+  cardsByKind: CardsByKind,
+  domain: EntityDomain,
+  id: string | number,
+): { disabled?: boolean }[] {
+  return (Object.keys(CARD_REF_FIELDS) as CardKind[]).flatMap((kind) =>
+    (cardsByKind[kind] as { disabled?: boolean }[]).filter((card) =>
+      CARD_REF_FIELDS[kind][domain].some((field) =>
+        [(card as Record<string, unknown>)[field]].flat(Infinity).includes(id),
+      ),
+    ),
+  );
+}
+
 /**
  * The coefficient list on each card kind whose tuple ids follow shift-type renames
  * / deletions (spec 06 FR-RI-06/10). Only the SHIFT domain touches these; a person

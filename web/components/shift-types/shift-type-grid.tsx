@@ -42,7 +42,12 @@ import { useShallow } from "zustand/react/shallow";
 import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
 import { SHIFT_TYPES_ADD_ANCHOR } from "./capability-anchors";
 import { toast } from "sonner";
-import { useScenarioStore, scenarioCommands, type ScenarioStoreState } from "@/lib/store";
+import {
+  useScenarioStore,
+  scenarioCommands,
+  type CommandOutcome,
+  type ScenarioStoreState,
+} from "@/lib/store";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import type { RequirementOverride, ScenarioUiState, UiShiftType } from "@/lib/scenario";
 import { deleteImpact, describeDeleteImpact, RenameCollisionError } from "@/lib/cascade";
@@ -107,7 +112,9 @@ import {
  * against the state the previous command committed — so rapid actions compose
  * instead of overwriting each other. Returning `null` withdraws the write.
  */
-type Commit = (transform: (live: ScenarioUiState) => ScenarioUiState | null) => void;
+type Commit = (
+  transform: (live: ScenarioUiState) => ScenarioUiState | null,
+) => Promise<CommandOutcome>;
 type CurrentState = () => ScenarioUiState;
 
 /**
@@ -242,7 +249,7 @@ export function ShiftTypeGrid() {
       // queue head so rapid actions compose, and the form-open token is snapshotted
       // at the click rather than read after a newer commit has already cleared it.
       const token = openToken.current;
-      void scenarioCommands.mutate((live) => {
+      return scenarioCommands.mutate((live) => {
         if (
           token !== null &&
           (descriptor.readItems(live) !== token.items ||
