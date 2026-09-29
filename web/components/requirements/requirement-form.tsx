@@ -64,7 +64,9 @@ const WEIGHT_HELP =
 const SKILL_MIX_HELP =
   "At least this many of the shift's nurses must come from the group. Anyone can fill the other places.";
 const PREFERRED_NOTE =
-  "Defaults to Required if left empty. Set higher to make extra staffing a soft goal (a weight then applies).";
+  "Defaults to Required if left empty. Set higher to make extra staffing a soft goal (a weight then applies). Never more than Preferred.";
+// At weight 0 the objective term is 0: only the ceiling stays.
+const WEIGHT_ZERO_NOTE = "At 0, Preferred is only a maximum.";
 const OVERRIDES_NOTE =
   "Use this for a single day that needs a different number, such as one fewer on a quiet public holiday. Everything else about the rule still applies on that day.";
 
@@ -474,7 +476,7 @@ export function RequirementForm({
         <WeightField
           value={form.weight}
           error={errors.weight}
-          help={WEIGHT_HELP}
+          help={form.weight === 0 ? `${WEIGHT_HELP} ${WEIGHT_ZERO_NOTE}` : WEIGHT_HELP}
           placeholder="e.g. −50"
           allowInfinity={false}
           onChange={(next) => {
