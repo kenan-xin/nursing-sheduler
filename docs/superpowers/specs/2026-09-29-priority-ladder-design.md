@@ -60,12 +60,35 @@ From highest to lowest. A higher tier must win over any realistic amount of a lo
 
 | Tier | Name | Examples | Weight |
 |---|---|---|---|
-| H | Hard musts | staffing minimums, leave, legal rest (no 7 days in a row), contracted hours, supervision, forbidden orders such as a day straight after a night | `.inf` / `-.inf` |
-| 1 | Strong ward rules | 2 rest days in any 7 days | 1000 |
-| 2 | Ward preferences | a day off after nights, avoid a named pattern, keep two nurses apart where possible | 100 to 300 |
+| H | Hard musts | staffing minimums, leave, contracted hours, supervision, and the hard rest rules in section 4.1 (no 7 days in a row, sleep day after nights, no day shift after a night, at most 4 nights in a row) | `.inf` / `-.inf` |
+| 1 | Strong ward rules | 2 rest days in any 7 days, and the strong rest rules in section 4.1 (a full day off after the sleep day, at most 3 nights in a row, no PM then AM) | 1000 |
+| 2 | Ward preferences | avoid a named pattern, keep two nurses apart where possible | 100 to 300 |
 | 3 | Nurse wishes | soft day off, shift wish, "never nights" wish | 20 to 40 (default 20) |
 | 4 | Fairness and balance | balance nights or weekends, `\|x - T\|^2` counts, soft caps | 4 per unit (squared: 4 per squared shift) |
 | 5 | Spare-slot bonuses | optional senior lead, 3rd morning, 3rd afternoon | +1 to +3 per filled shift |
+
+### 4.1 Rest and fatigue rules (user ruling and research, 2026-09-29)
+
+User ruling: rest after nights is a safety rule, so nurses stay sharp and avoid incidents. It is not a ward preference. The research is in `docs/research/2026-09-29-sg-nurse-rest/` (01 Singapore law and guidance, 02 international fatigue evidence, 03 Singapore ward practice).
+
+Findings in short:
+
+- Singapore law is silent on rest after nights, rest between shifts and consecutive nights. The WSH Act s.12 duty and the WSH Council fatigue guidelines fill the gap (01). So these rules are a safety policy, not a legal duty.
+- Union agreements give 1 rest day per week and 40 hours per week on average. MOM counts a shift worker's rest day as 30 continuous hours (01, 03).
+- Singapore wards roster the day after the last night as a sleep day ("SD"), separate from a day off ("DO"). Nurses complain when the sleep day takes the place of a real day off (03, forum evidence only).
+- International rules and guidance: 46 to 48 hours off after a night block, at most 4 nights in a row (3 preferred), 11 hours between shifts (02).
+
+| Rule | Tier | Weight | How the app states it |
+|---|---|---|---|
+| At most 6 work days in a row | H | `-.inf` | existing legal rest rule |
+| Sleep day: the day after the last night has no day shift | H | `-.inf` | sequence N then AM or PM |
+| At most 4 nights in a row | H | `-.inf` | sequence of 5 N |
+| A full day off after the sleep day (N, SD, DO, about 46 hours) | 1 | -1000 | sequence N, OFF, work |
+| At most 3 nights in a row | 1 | -1000 | sequence of 4 N |
+| No PM then AM next day (a gap of about 9 hours) | 1 | -1000 | sequence PM then AM |
+| Forward rotation (AM, PM, N) | 2 | -100 | sequence of a backward pair |
+
+Every rule in the table is a shift sequence card, so no core change is needed. The "2 rest days in any 7 days" count (1v5k) counts the sleep day as a rest day. The "full day off after the sleep day" rule makes sure that the nurse also gets a real day off. The shift names are the ward's own. The assistant maps "night", "morning" and "afternoon" to the ward's shift types and asks if the mapping is unclear.
 
 Leave stays hard. The assistant never turns leave into a weight. Leave changes only through a move or a cancel that the nurse agrees to (msnp).
 
@@ -151,7 +174,7 @@ Proposed display: the score, then points lost per tier. Example: "Score 1078. Lo
 | Cell editor off wish | 3 | 0 | 20 | yes |
 | `SOFT_REQUEST_WEIGHT` (repair softening) | 3 | 10 | 20 | yes, small |
 | Assistant nurse wishes (set_off_request, shift wish) | 3 | 10 | 20 | yes, small |
-| Day off after nights (assistant example) | 2 | +10 | +100 | yes: now above nurse wishes |
+| Day off after nights (assistant example) | H | +10 | sleep day `-.inf`, plus a full day off at -1000 (section 4.1) | yes: now a safety rule |
 | Shift sequences form | 2 | -1 | -100 | yes |
 | Shift counts form | 4 | -1 | -4 | yes |
 | Pairings form, apart where possible | 2 | 1 | -100 | yes |
@@ -176,4 +199,7 @@ Proposed display: the score, then points lost per tier. Example: "Score 1078. Lo
 3. Should the bonus rule get a points-only editor? Today Edit then Save is refused, because the form needs 2 or more steps (AC-PR-11). The weight quick field already works.
 4. Should the assistant send tier names instead of numbers (section 6, item 1)?
 5. Should the score show points lost per tier (section 8)?
-6. Is a day off after nights a ward preference (100, above nurse wishes) or a wish-level preference (20)?
+6. Resolved 2026-09-29: rest after nights is a safety rule (section 4.1).
+7. Should the rest rules in section 4.1 be on by default for every new ward, or should the assistant propose them during setup?
+8. Is "no PM then AM" a hard rule or strong (1000)? The Singapore guidance says avoid it, and wards still use it when short of staff.
+9. Is the hard cap 4 nights in a row, or 3?
