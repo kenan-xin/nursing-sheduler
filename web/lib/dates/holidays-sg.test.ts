@@ -177,15 +177,18 @@ describe("active list, merge and coverage (bead si4j)", () => {
 });
 
 describe("bundled snapshot staleness guard (bead si4j)", () => {
-  it("the bundled list covers at least the next 12 months", () => {
+  // Six months, not twelve: MOM publishes next year's holidays around mid-year, so a
+  // 12-month guard would sit red from late December with nothing to refresh. This one
+  // goes red from ~1 July of the bundle's last year, once the data usually exists.
+  it("the bundled list covers at least the next 6 months", () => {
     const lastYear = SINGAPORE_HOLIDAYS[SINGAPORE_HOLIDAYS.length - 1].date.slice(0, 4);
     const coveredUntil = `${lastYear}-12-31`;
     const horizon = new Date();
-    horizon.setUTCFullYear(horizon.getUTCFullYear() + 1);
+    horizon.setUTCMonth(horizon.getUTCMonth() + 6);
     const horizonIso = horizon.toISOString().slice(0, 10);
     expect(
       coveredUntil >= horizonIso,
-      `The bundled Singapore holidays end ${coveredUntil}, less than 12 months from today. ` +
+      `The bundled Singapore holidays end ${coveredUntil}, less than 6 months from today. ` +
         "Refresh the offline fallback: `cd web && pnpm refresh:sg-holidays`, then commit " +
         "lib/dates/holidays-sg.ts (MOM usually publishes the next year's holidays mid-year).",
     ).toBe(true);
