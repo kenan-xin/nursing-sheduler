@@ -588,3 +588,38 @@ ${fields}
     expect(messages("    requiredNumPeople: 1\n    weight: -.inf")).toEqual([]);
   });
 });
+
+// Bug hunt A-09: core reads `date: []` as "no dates", the UI as "all dates", so a load
+// would silently turn a no-op rule into one that holds every day.
+describe("importScenarioYaml — a rule with no dates", () => {
+  const yaml = (rule: string) => `apiVersion: alpha
+dates: {range: {startDate: 2026-11-01, endDate: 2026-11-03}}
+people: {items: [{id: a}]}
+shiftTypes: {items: [{id: N}, {id: D}]}
+preferences:
+${rule}
+`;
+  const messages = (rule: string) => {
+    const r = importScenarioYaml(yaml(rule));
+    return r.ok ? [] : r.issues.map((i) => i.message);
+  };
+
+  it("refuses date: [] and names the rule", () => {
+    expect(
+      messages(
+        "  - {type: shift type successions, description: No day after night, person: a, pattern: [N, D], date: [], weight: -.inf}",
+      ),
+    ).toEqual(["Rule 'No day after night': This rule has no dates. Remove it or add dates."]);
+    expect(
+      messages(
+        "  - {type: shift count, person: a, countDates: [], countShiftTypes: N, expression: x, target: 1}",
+      ),
+    ).toEqual(["Rule 1: This rule has no dates. Remove it or add dates."]);
+  });
+
+  it("still loads an omitted date", () => {
+    expect(
+      messages("  - {type: shift type successions, person: a, pattern: [N, D], weight: -.inf}"),
+    ).toEqual([]);
+  });
+});

@@ -109,7 +109,7 @@ describe("validateAffinityForm (spec 05 Shift Affinities validation table)", () 
   it("rejects an invalid (unparsed string) weight with the verbatim message", () => {
     const base = form({ people1: ["Chloe"], people2: ["Aisha"], shiftTypes: ["D"], date: ["ALL"] });
     expect(validateAffinityForm({ ...base, weight: "abc" }).weight).toBe(
-      AFFINITY_MESSAGES.weightInvalid,
+      `Not a number. ${AFFINITY_MESSAGES.weightInvalid}`,
     );
   });
 

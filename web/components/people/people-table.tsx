@@ -40,7 +40,7 @@ import * as React from "react";
 import { toast } from "sonner";
 import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
 import { PEOPLE_ADD_PERSON_ANCHOR } from "./capability-anchors";
-import { useScenarioStore, scenarioCommands } from "@/lib/store";
+import { useScenarioStore, scenarioCommands, type CommandOutcome } from "@/lib/store";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import type { ScenarioUiState, UiPerson } from "@/lib/scenario";
@@ -66,7 +66,6 @@ import {
 } from "@/components/icons";
 import {
   addItem,
-  deleteItem,
   duplicateItem,
   reorderItems,
   renameItem,
@@ -79,6 +78,7 @@ import {
   type EditorGroup,
 } from "@/components/entity-editor/core";
 import { GroupsSection, type GroupsSectionConfig } from "@/components/entity-editor/groups-section";
+import { deleteWithSummary } from "@/components/entity-editor/delete-with-summary";
 import { TemporaryCoverSection } from "./temporary-cover-section";
 import { changeKeys } from "@/lib/change-highlight/keys";
 import { useChangeTarget } from "@/lib/change-highlight/store";
@@ -90,7 +90,9 @@ import { UploadDialog } from "./upload-dialog";
  * against the state the previous command committed — so rapid actions compose
  * instead of overwriting each other. Returning `null` withdraws the write.
  */
-type Commit = (transform: (live: ScenarioUiState) => ScenarioUiState | null) => void;
+type Commit = (
+  transform: (live: ScenarioUiState) => ScenarioUiState | null,
+) => Promise<CommandOutcome>;
 type CurrentState = () => ScenarioUiState;
 
 const descriptor: EntityDescriptor<UiPerson> = peopleDescriptor;
@@ -158,7 +160,7 @@ export function PeopleTable() {
     // the token, so by the time the updater ran there would be nothing left to
     // compare against and a stale Save would sail through.
     const token = openToken.current;
-    void scenarioCommands.mutate((live) => {
+    return scenarioCommands.mutate((live) => {
       if (
         token !== null &&
         (descriptor.readItems(live) !== token.items || descriptor.readGroups(live) !== token.groups)
@@ -421,7 +423,12 @@ export function PeopleTable() {
                   }
                   onDelete={() => {
                     setSel(null);
-                    commit((live) => deleteItem(live, descriptor, item.id));
+                    void deleteWithSummary(
+                      commit,
+                      `“${String(item.id)}”`,
+                      descriptor.domain,
+                      item.id,
+                    );
                   }}
                   isOver={overIndex === index}
                   isDragging={dragIndex === index}
@@ -607,8 +614,17 @@ function ReadRow({
           >
             {initialsOf(item.id)}
           </span>
-          <span data-testid={`people-name-${itemKey}`} className="font-semibold">
-            {String(item.id)}
+          {/* F11: the description is shown as a subtitle, because the search filter
+              reads it too and a hit on it must be visible on the row. */}
+          <span className="flex min-w-0 flex-col">
+            <span data-testid={`people-name-${itemKey}`} className="font-semibold">
+              {String(item.id)}
+            </span>
+            {item.description && (
+              <span data-testid={`people-desc-${itemKey}`} className="text-meta text-ink3">
+                {item.description}
+              </span>
+            )}
           </span>
         </div>
       </td>

@@ -33,6 +33,7 @@ function isOwnershipHint(value: unknown): value is OwnershipHint {
   return (
     (hint.kind === "acquired" || hint.kind === "released" || hint.kind === "committed") &&
     typeof hint.scenarioId === "string" &&
+    (hint.fromScenarioId === undefined || typeof hint.fromScenarioId === "string") &&
     typeof hint.tabId === "string" &&
     typeof hint.epoch === "number"
   );

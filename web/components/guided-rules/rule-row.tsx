@@ -36,7 +36,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { parseWeightInput } from "@/components/card-editor/weight-field";
+import { invalidWeightMessage, parseWeightInput } from "@/components/card-editor/weight-field";
 import {
   FaArrowRight,
   FaCheck,
@@ -267,8 +267,13 @@ function evaluateDraft(
 ): { value: number; message: string | undefined } {
   if (field.allowsInfinity) {
     const parsed = parseWeightInput(raw);
-    const value = typeof parsed === "number" ? parsed : Number.NaN;
-    return { value, message: field.validate(value) };
+    if (typeof parsed === "string") {
+      return {
+        value: Number.NaN,
+        message: invalidWeightMessage(parsed, field.validate(Number.NaN) ?? ""),
+      };
+    }
+    return { value: parsed, message: field.validate(parsed) };
   }
   if (raw.trim() === "") return { value: Number.NaN, message: "Enter a number" };
   const value = Number(raw);

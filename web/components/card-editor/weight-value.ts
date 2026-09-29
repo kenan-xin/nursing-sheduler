@@ -13,24 +13,32 @@ const NEG_INFINITY_TOKENS = ["-∞", "-inf", "-infinity"];
 const SUFFIX_MULTIPLIERS: Record<string, number> = { k: 1e3, m: 1e6, b: 1e9, t: 1e12 };
 
 /**
- * Parse raw weight text exactly like the historical `parseWeightValue`:
- * case-insensitive infinity spellings; a numeric string with a k/m/b/t suffix is
- * multiplied and, when the result is an integer, rounded to that integer
- * (otherwise the raw text is kept); otherwise `parseInt` is applied and, on `NaN`,
- * the raw text is kept (EDGE-PR-09).
+ * Parse raw weight text: case-insensitive infinity spellings; a numeric string with a
+ * k/m/b/t suffix is multiplied and, when the result is an integer, rounded to that
+ * integer (otherwise the raw text is kept, EDGE-PR-09); a whole number, optionally with
+ * `,` thousands separators as `formatWeight` writes them. Any other text (`10abc`,
+ * `1e3`, `10.5`) is kept verbatim so validation refuses it rather than a cut value being
+ * saved (bug hunt C6).
  */
 export function parseWeightInput(raw: string): WeightFieldValue {
-  const lower = raw.toLowerCase();
+  const text = raw.trim();
+  const lower = text.toLowerCase();
   if (INFINITY_TOKENS.includes(lower)) return Infinity;
   if (NEG_INFINITY_TOKENS.includes(lower)) return -Infinity;
-  const suffix = raw.match(/^([+-]?\d+(?:\.\d+)?)([kmbt])$/i);
+  const suffix = text.match(/^([+-]?\d+(?:\.\d+)?)([kmbt])$/i);
   if (suffix) {
     const multiplier = SUFFIX_MULTIPLIERS[suffix[2].toLowerCase()];
     const result = Number.parseFloat(suffix[1]) * multiplier;
     return Number.isInteger(result) ? Math.round(result) : raw;
   }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isNaN(parsed) ? raw : parsed;
+  if (/^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(text)) return Number(text.replaceAll(",", ""));
+  return raw;
+}
+
+/** The message for an invalid weight: text the parser refused is "Not a number"; a
+ *  number outside the range gets the caller's `rangeMessage` alone. */
+export function invalidWeightMessage(value: WeightFieldValue, rangeMessage: string): string {
+  return typeof value === "string" ? `Not a number. ${rangeMessage}` : rangeMessage;
 }
 
 /** Whether a weight value is valid: a finite number within `zWeight`'s ±1t cap or exactly

@@ -10,6 +10,7 @@
 
 import { Surface, surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
+import { createEmptyScenarioUiState } from "@/lib/scenario";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { ReadinessBanner } from "@/components/optimize/readiness-banner";
 import { RunEventLog } from "@/components/optimize/run-event-log";
@@ -145,6 +146,7 @@ const readiness = deriveOptimizeReadiness({
   staff: [],
   shifts: [],
   shiftGroups: [],
+  cardsByKind: createEmptyScenarioUiState().cardsByKind,
   counts: [],
 });
 

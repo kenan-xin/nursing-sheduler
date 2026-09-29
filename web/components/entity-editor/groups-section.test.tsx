@@ -2,9 +2,10 @@
 import "fake-indexeddb/auto";
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import type { ScenarioUiState } from "@/lib/scenario";
-import { useScenarioStore, scenarioCommands } from "@/lib/store";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { toast } from "sonner";
+import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
+import { useScenarioStore, scenarioCommands, type CommandOutcome } from "@/lib/store";
 import { peopleDescriptor } from "@/components/people/people-descriptor";
 import type { EntityId } from "./core";
 import { GroupsSection, type GroupsSectionConfig } from "./groups-section";
@@ -17,11 +18,20 @@ import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/st
 // contract is tested against the real scenario store. The suite runs in BOTH configs
 // (member-search on/off, both count nouns, both pane labels).
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({
+  toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }),
+}));
 
 type GroupSel = null | { t: "add-group" } | { t: "edit-group"; id: string };
 
-function GroupsHarness({ config }: { config?: GroupsSectionConfig }) {
+function GroupsHarness({
+  config,
+  refuse,
+}: {
+  config?: GroupsSectionConfig;
+  /** Resolve every write as a refusal instead of committing it. */
+  refuse?: CommandOutcome;
+}) {
   const descriptor = peopleDescriptor;
   const items = useScenarioStore(descriptor.readItems);
   const groups = useScenarioStore(descriptor.readGroups);
@@ -29,9 +39,10 @@ function GroupsHarness({ config }: { config?: GroupsSectionConfig }) {
   // against the state the previous command committed.
   const commit = React.useCallback(
     (transform: (live: ScenarioUiState) => ScenarioUiState | null) => {
-      void scenarioCommands.mutate((live) => transform(live as ScenarioUiState));
+      if (refuse) return Promise.resolve(refuse);
+      return scenarioCommands.mutate((live) => transform(live as ScenarioUiState));
     },
-    [],
+    [refuse],
   );
   const [sel, setSel] = React.useState<GroupSel>(null);
   const editing = sel !== null;
@@ -239,6 +250,65 @@ describe.each([
       await scenarioCommands.undo();
     });
     expect(await groupOrder()).toEqual(["A", "B", "C"]);
+  });
+});
+
+describe("GroupsSection — audit batch A2", () => {
+  const onlyGroupRule = {
+    ...createEmptyScenarioUiState().cardsByKind,
+    successions: [{ uid: "s1", person: ["G"], pattern: ["D", "N"], weight: -1 }],
+  } as ScenarioUiState["cardsByKind"];
+  const seedEmptyUsed = () =>
+    seed({
+      staff: [{ id: "Aisha", history: [] }],
+      shifts: [{ id: "D" }, { id: "N" }],
+      staffGroups: [{ id: "G", members: [] }],
+      cardsByKind: onlyGroupRule,
+    });
+
+  it("T6: says 'saved' only once the write lands; a refusal toasts instead", async () => {
+    await seed({ staff: [{ id: "Aisha", history: [] }], staffGroups: [] });
+    render(<GroupsHarness refuse={{ ok: false, reason: "not-owner", code: "not_owner" }} />);
+    fireEvent.click(screen.getByTestId("add-group-toggle"));
+    fireEvent.change(screen.getByTestId("add-group-id"), { target: { value: "Nurses" } });
+    fireEvent.click(screen.getByTestId("group-save-__new__"));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "This schedule is being edited in another tab. Take over editing, then save again.",
+      ),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    // The draft stays open so nothing typed is lost.
+    expect(screen.getByTestId("add-group-form")).toBeInTheDocument();
+  });
+
+  it("T8: the name field says 'name' in both its label and placeholder", async () => {
+    await seed({ staff: [], staffGroups: [] });
+    render(<GroupsHarness />);
+    fireEvent.click(screen.getByTestId("add-group-toggle"));
+    const input = screen.getByLabelText("Group name");
+    expect(input).toHaveAttribute("placeholder", "Enter group name");
+  });
+
+  it("T3: marks an empty group a rule still uses", async () => {
+    await seedEmptyUsed();
+    render(<GroupsHarness />);
+    expect(screen.getByTestId("group-empty-used-G")).toHaveTextContent("Empty, used by 1 rule");
+  });
+
+  it("F10: a group delete toasts what the cascade took, with Undo", async () => {
+    await seedEmptyUsed();
+    render(<GroupsHarness />);
+    fireEvent.click(screen.getByTestId("group-delete-G"));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        "Deleted group “G”: 1 rule.",
+        expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }),
+      ),
+    );
+    expect(await groupOrder()).toEqual([]);
   });
 });
 

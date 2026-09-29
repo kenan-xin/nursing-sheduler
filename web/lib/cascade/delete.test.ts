@@ -27,6 +27,36 @@ describe("deleting a shift type a sequence rule uses (A-03)", () => {
   });
 });
 
+describe("deleting the date group that scopes a rule (bug hunt A-06)", () => {
+  it("removes the rule and names it in the summary", () => {
+    const empty = createEmptyScenarioUiState();
+    const state = {
+      ...empty,
+      staff: [{ id: "P1" }, { id: "P2" }],
+      shifts: [{ id: "D" }],
+      dateGroups: [{ id: "WKND", members: ["05"] }],
+      cardsByKind: {
+        ...empty.cardsByKind,
+        coverings: [
+          {
+            uid: "c1",
+            description: "P1 supervises P2",
+            preceptors: ["P1"],
+            preceptees: ["P2"],
+            shiftTypes: ["D"],
+            date: ["WKND"],
+            weight: -Infinity,
+          },
+        ],
+      },
+    } as ScenarioUiState;
+    expect(deleteEntity(state, "date", "WKND").cardsByKind.coverings).toEqual([]);
+    expect(describeDeleteImpact(deleteImpact(state, "date", "WKND"))).toEqual([
+      "1 rule (“P1 supervises P2”)",
+    ]);
+  });
+});
+
 describe("deleteImpact (T1 confirm counts)", () => {
   it("counts the rules, requests and history entries the cascade drops", () => {
     const empty = createEmptyScenarioUiState();
@@ -53,11 +83,69 @@ describe("deleteImpact (T1 confirm counts)", () => {
       },
     };
     const impact = deleteImpact(state, "shift", "N");
-    expect(impact).toEqual({ rules: 1, requests: 1, history: 1 });
+    expect(impact).toEqual({
+      rules: 1,
+      ruleNames: [],
+      requests: 1,
+      leave: 0,
+      history: 1,
+      overrides: 0,
+    });
     expect(describeDeleteImpact(impact)).toEqual(["1 rule", "1 request", "1 history entry"]);
-    expect(describeDeleteImpact({ rules: 3, requests: 0, history: 4 })).toEqual([
-      "3 rules",
-      "4 history entries",
+    expect(
+      describeDeleteImpact({
+        rules: 3,
+        ruleNames: [],
+        requests: 0,
+        leave: 2,
+        history: 4,
+        overrides: 1,
+      }),
+    ).toEqual(["3 rules", "2 leave pins", "4 history entries", "1 date exception"]);
+  });
+
+  it("counts a nurse's leave pins apart from requests (F10)", () => {
+    const empty = createEmptyScenarioUiState();
+    const state: ScenarioUiState = {
+      ...empty,
+      staff: [{ id: "Kevin" }, { id: "Ann" }],
+      reqData: [
+        { kind: "leave", person: "Kevin", date: "2026-01-01" },
+        { kind: "off", person: "Kevin", date: "2026-01-02", weight: 1 },
+        { kind: "leave", person: "Ann", date: "2026-01-01" },
+      ] as ScenarioUiState["reqData"],
+    };
+    expect(describeDeleteImpact(deleteImpact(state, "person", "Kevin"))).toEqual([
+      "1 request",
+      "1 leave pin",
     ]);
+  });
+
+  it("counts the date exceptions a date-group delete drops from a surviving rule (R9)", () => {
+    const empty = createEmptyScenarioUiState();
+    const state: ScenarioUiState = {
+      ...empty,
+      rangeStart: "2026-01-01",
+      rangeEnd: "2026-01-03",
+      shifts: [{ id: "D" }],
+      dateGroups: [{ id: "PH", members: ["2026-01-02"] }],
+      cardsByKind: {
+        ...empty.cardsByKind,
+        requirements: [
+          {
+            uid: "r1",
+            shiftType: ["D"],
+            requiredNumPeople: 3,
+            qualifiedPeople: ["ALL"],
+            date: ["2026-01-01", "PH"],
+            requiredNumPeopleOverrides: [["2026-01-02", 1]],
+            weight: -1,
+          },
+        ],
+      },
+    } as ScenarioUiState;
+    const impact = deleteImpact(state, "date", "PH");
+    expect(impact).toMatchObject({ rules: 0, overrides: 1 });
+    expect(describeDeleteImpact(impact)).toEqual(["1 date exception"]);
   });
 });

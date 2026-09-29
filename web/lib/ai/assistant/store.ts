@@ -1151,6 +1151,12 @@ export const assistantActions = {
     });
   },
 
+  /** Make the Preview reread its durable row (a refused revision set it aside, bug hunt S1). */
+  rereadProposal(): void {
+    const active = useAssistantStore.getState().activeProposal;
+    if (active) useAssistantStore.setState({ activeProposal: { ...active } });
+  },
+
   /** Dismiss the live Preview — Cancel, or a change that has been applied. */
   clearProposal(): void {
     useAssistantStore.setState({ activeProposal: null });
