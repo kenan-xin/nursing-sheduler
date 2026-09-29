@@ -42,7 +42,7 @@ type Draft =
 const EYEBROW = "CONSTRAINT · REQUIREMENTS";
 const TITLE = "Staffing Requirements";
 const SUBTITLE =
-  "How many qualified people each shift type needs, per date. Set a preferred headcount above the required minimum to make extra staffing a soft goal.";
+  "How many qualified people each shift type needs, per date. Required is exact. With a preferred number, Required is the floor.";
 const ADD_LABEL = "Add Requirement";
 const LIST_TITLE = "Current Requirements";
 const EMPTY_MESSAGE = 'No requirements defined yet. Click "Add Requirement" to get started.';
@@ -50,9 +50,9 @@ const INSTRUCTIONS = [
   'Define requirements for specific shift types (e.g., "Night shifts need 3 senior nurses")',
   "Select one shift type or group that this requirement applies to",
   "Set the required number of people for each instance of the shift type",
-  "Optionally specify which people or groups are qualified for this requirement",
+  "Specify which people or groups are qualified for this requirement",
   "Optionally set a preferred number of people when extra staffing is useful",
-  "Optionally specify specific dates this requirement applies to",
+  "Specify the dates this requirement applies to",
   "Set weight only when the preferred number of people differs from the required number",
   "Navigate using the tabs or keyboard shortcuts (1, 2, etc.) to continue setup",
 ] as const;
