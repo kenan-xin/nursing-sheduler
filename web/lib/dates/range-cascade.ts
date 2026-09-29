@@ -96,6 +96,21 @@ export function applyRangeChange(
   return next;
 }
 
+/**
+ * How many request-matrix cells {@link applyRangeChange} would drop for
+ * `newRange`, split into leave pins and every other request (OFF included).
+ * Counted by running the real cascade, so the warning can never disagree with it.
+ */
+export function countRangeRemovals(
+  state: ScenarioUiState,
+  newRange: DateRange,
+): { requests: number; leaveDays: number } {
+  const after = applyRangeChange(state, newRange).reqData;
+  const leave = (cells: typeof after) => cells.filter((c) => c.kind === "leave").length;
+  const leaveDays = leave(state.reqData) - leave(after);
+  return { requests: state.reqData.length - after.length - leaveDays, leaveDays };
+}
+
 /** New-range date items as `[iso, id]` entries for the ISO→new-id lookup. */
 function newItemsByIso(range: DateRange): [IsoDate, string][] {
   return generateDateItems(range).map((item) => [item.iso, item.id]);
