@@ -472,7 +472,7 @@ describe("SaveLoadWorkspace — Edit YAML flow", async () => {
 
     await screen.findByRole("button", { name: "Continue" });
     fireEvent.click(screen.getByTestId("new-schedule-button"));
-    fireEvent.click(screen.getByRole("button", { name: "Start over" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start new schedule" }));
 
     await waitFor(async () => expect((await currentState()).rangeStart).toBe(""));
     // The editor closes one render *after* the store commit: StartOverCard awaits

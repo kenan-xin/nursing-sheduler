@@ -702,6 +702,11 @@ function validateScenarioField(key: string, value: unknown): void {
       }
       requireOptionalString(value.description, "maxOneShiftPerDay.description");
       break;
+    case "importPublicHolidays":
+      if (value !== undefined && typeof value !== "boolean") {
+        throw new Error(`Persisted "importPublicHolidays" must be a boolean.`);
+      }
+      break;
     default:
       break;
   }

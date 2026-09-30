@@ -55,6 +55,16 @@ export interface ScenarioEnvelopeV3 extends ScenarioSnapshot {
   historyCursor: number;
   createdAt: string;
   updatedAt: string;
+  // Recent schedules (plq5). Optional, unindexed metadata: rows written before them
+  // read back without them, so no Dexie version bump. Written by metadata-only
+  // commits (`recordRevision` moves, `documentRevision` does not), never exported,
+  // never undoable.
+  /** The user's name for the schedule. Absent ⇒ the list shows the auto-name. */
+  title?: string;
+  /** A pinned schedule is never removed by the Recent schedules limit. */
+  pinned?: boolean;
+  /** Set by "new period from a past schedule" (P3). Declared now so the row shape is settled. */
+  derivedFrom?: { scenarioId: string; title: string };
 }
 
 // ---------------------------------------------------------------------------

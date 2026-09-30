@@ -64,6 +64,8 @@ export function stringifyScenario(scenario: ScenarioUiState): string {
       ...document,
       ...(covers.length === 0 ? {} : { temporaryCover: covers }),
       ...(switchedOffRules.length === 0 ? {} : { switchedOffRules }),
+      // The holiday-import switch (bead 6975), sent only when the user turned it off.
+      ...(scenario.importPublicHolidays === false ? { importPublicHolidays: false } : {}),
     },
     (_key, value: unknown) => {
       if (typeof value === "number" && !Number.isFinite(value)) {

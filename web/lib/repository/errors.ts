@@ -17,6 +17,8 @@ export type RepositoryErrorCode =
   | "lease_epoch_stale"
   /** A switch target is already owned by a live writer in another tab. */
   | "target_owned"
+  /** A delete targets the schedule this tab has open. Open another one first. */
+  | "schedule_open"
   /** Nothing reversible remains at the history cursor. */
   | "nothing_to_undo"
   /** Nothing reapplyable remains above the history cursor. */

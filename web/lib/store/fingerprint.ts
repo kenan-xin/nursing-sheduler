@@ -30,6 +30,7 @@ export const SCENARIO_KEYS = [
   "temporaryCover",
   "cardsByKind",
   "maxOneShiftPerDay",
+  "importPublicHolidays",
 ] as const satisfies readonly (keyof ScenarioUiState)[];
 
 /** Extract just the durable scenario slice from a wider store state. */
@@ -48,6 +49,7 @@ export function pickScenario(state: ScenarioUiState): ScenarioUiState {
     temporaryCover: state.temporaryCover,
     cardsByKind: state.cardsByKind,
     maxOneShiftPerDay: state.maxOneShiftPerDay,
+    importPublicHolidays: state.importPublicHolidays,
   };
 }
 
