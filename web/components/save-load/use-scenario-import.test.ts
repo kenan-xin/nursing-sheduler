@@ -181,7 +181,11 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     stageResult(targetWithCounts([MARKED_CONTRACT]));
     const { result } = renderHook(() => useScenarioImport());
 
-    await act(async () => result.current.handleFile("<yaml>"));
+    // Not awaited: a staged load settles only once its confirm does.
+    let loaded!: Promise<void>;
+    await act(async () => {
+      loaded = result.current.handleFile("<yaml>");
+    });
     // Warnings are staged, not yet published; nothing has loaded.
     expect(result.current.warnings).toBeNull();
     expect(result.current.confirm).not.toBeNull();
@@ -190,6 +194,7 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     await act(async () => result.current.confirm!.onContinue());
     expect(result.current.warnings).toEqual([IMPORT_ALICE_WARNING]);
     expect(loadScenarioMock).toHaveBeenCalledTimes(1);
+    await loaded; // settles once the confirmed load has (7vtc)
   });
 
   it("onContinue settles only after the load has committed (nursing-sheduler-iks)", async () => {
@@ -200,7 +205,9 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     loadScenarioMock.mockReturnValue(new Promise((resolve) => (commitLoad = resolve)));
     stageResult(targetWithCounts([MARKED_CONTRACT]));
     const { result } = renderHook(() => useScenarioImport());
-    await act(async () => result.current.handleFile("<yaml>"));
+    await act(async () => {
+      void result.current.handleFile("<yaml>");
+    });
 
     let settled = false;
     let continued!: Promise<void>;
@@ -231,7 +238,9 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     stageResult(targetWithCounts([MARKED_CONTRACT]));
     const { result } = renderHook(() => useScenarioImport());
 
-    await act(async () => result.current.handleFile("<yaml>"));
+    await act(async () => {
+      void result.current.handleFile("<yaml>");
+    });
     expect(result.current.confirm).not.toBeNull();
 
     await act(async () => result.current.confirm!.onContinue());
@@ -325,7 +334,9 @@ describe("useScenarioImport — an older file with issues still loads (C-22)", (
           },
     );
     const { result } = renderHook(() => useScenarioImport());
-    await act(async () => result.current.handleFile("<yaml>"));
+    await act(async () => {
+      void result.current.handleFile("<yaml>");
+    });
     expect(loadScenarioMock).not.toHaveBeenCalled();
     await act(async () => result.current.confirm!.onContinue());
     expect(clearRosterMock).toHaveBeenCalledOnce();
