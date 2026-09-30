@@ -39,9 +39,10 @@ SHIFT_COUNT = "shift count"
 SHIFT_AFFINITY = "shift affinity"
 SHIFT_TYPE_COVERING = "shift type covering"
 SUPPORTED_SHIFT_COUNT_EXPRESSIONS = frozenset({"|x - T|^2", "x >= T", "x <= T", "x > T", "x < T", "x = T"})
-# Head counts past this crash OR-Tools with an int64 overflow (bug hunt D-05, bead 99db).
+# Head counts past this crash OR-Tools with an int64 overflow, and negative ones crash the
+# solver too (bug hunt D-05, beads 99db and x2gy).
 MAX_HEAD_COUNT = 10_000
-HeadCount = Annotated[int, Field(le=MAX_HEAD_COUNT)]
+HeadCount = Annotated[int, Field(ge=0, le=MAX_HEAD_COUNT)]
 
 
 def validate_weight(weight: float) -> int | float:

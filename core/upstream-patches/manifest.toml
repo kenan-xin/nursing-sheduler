@@ -39,6 +39,7 @@ patch_order = [
   "99db-B1-history-completed-hard-sequence.patch",
   "99db-B5-leave-satisfies-hard-off.patch",
   "99db-D07-per-client-queue-cap.patch",
+  "x2gy-cpsat-worker-memory-cap.patch",
 ]
 
 file = [
@@ -68,7 +69,7 @@ file = [
   { path = "nurse_scheduling/server/auth.py", class = "verbatim", upstream_blob = "f292e5c6cae46bb4c866a9178c6559cd0dd02854" },
   { path = "nurse_scheduling/server/basis_admission.py", class = "v2-only", note = "P8 basis admission: checks a basis claim before a job is created" },
   { path = "nurse_scheduling/server/canonical.py", class = "v2-only", note = "P5 canonical strict YAML dumper" },
-  { path = "nurse_scheduling/server/config.py", class = "patched", upstream_blob = "8f517ab71b5a2a9f86f5331f99a79c9f1c7ae59e", patches = ["W2-server-config.patch", "99db-D01-child-memory-cap.patch", "99db-D07-per-client-queue-cap.patch"] },
+  { path = "nurse_scheduling/server/config.py", class = "patched", upstream_blob = "8f517ab71b5a2a9f86f5331f99a79c9f1c7ae59e", patches = ["W2-server-config.patch", "99db-D01-child-memory-cap.patch", "99db-D07-per-client-queue-cap.patch", "x2gy-cpsat-worker-memory-cap.patch"] },
   { path = "nurse_scheduling/server/diagnostic.py", class = "patched", upstream_blob = "e09e2002eead50f3c4e46807a613063b0e4f191e", patches = ["W2-server-diagnostic.patch"] },
   { path = "nurse_scheduling/server/errors.py", class = "patched", upstream_blob = "a1c4eb810f1a66e8ad091decdd279a3b637136a7", patches = ["W2-server-errors.patch"] },
   { path = "nurse_scheduling/server/event_cursor.py", class = "v2-only", note = "P6 opaque job-bound event cursors" },
@@ -180,7 +181,7 @@ file = [
   { path = "tests/test_performance_benchmark.py", class = "excluded", note = "Docker performance benchmark not adopted (lane 05 D5)" },
   { path = "tests/test_person_temporary.py", class = "v2-only", note = "temporary staff in Workspace input (P1 retired, bead pknr)" },
   { path = "tests/test_preference_validation.py", class = "verbatim", upstream_blob = "8ab8e8de5fc81612b566c41c252ec3b203e30151" },
-  { path = "tests/test_process_executor.py", class = "patched", upstream_blob = "2fe233743b2b59e5a074c887da5341bec757f526", patches = ["W2-tests-test_process_executor.patch", "99db-D01-child-memory-cap.patch"] },
+  { path = "tests/test_process_executor.py", class = "patched", upstream_blob = "2fe233743b2b59e5a074c887da5341bec757f526", patches = ["W2-tests-test_process_executor.patch", "99db-D01-child-memory-cap.patch", "x2gy-cpsat-worker-memory-cap.patch"] },
   { path = "tests/test_public_diagnostic.py", class = "patched", upstream_blob = "b45cadd611877b5dcc530e861baae9536bb8d507", patches = ["W2-tests-test_public_diagnostic.patch"] },
   { path = "tests/test_real_run_schedule.py", class = "verbatim", upstream_blob = "2c3b74aa224632f02974999b87360f9ff51454af" },
   { path = "tests/test_real_schedule_helper.py", class = "verbatim", upstream_blob = "86f0202bb4c9c50000558031eaa5e99d45375d13" },
@@ -581,6 +582,7 @@ file = [
   { path = "upstream-patches/99db-D03-xlsx-text-cells.patch", class = "v2-only", note = "sync patch or manifest" },
   { path = "upstream-patches/99db-D05-head-count-bound.patch", class = "v2-only", note = "sync patch or manifest" },
   { path = "upstream-patches/99db-D07-per-client-queue-cap.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/x2gy-cpsat-worker-memory-cap.patch", class = "v2-only", note = "sync patch or manifest" },
   { path = "upstream-patches/P0-fixture-restamp.patch", class = "v2-only", note = "sync patch or manifest" },
   { path = "upstream-patches/P2-P3-skillmix-overrides.patch", class = "v2-only", note = "sync patch or manifest" },
   { path = "upstream-patches/P4-on-roster.patch", class = "v2-only", note = "sync patch or manifest" },

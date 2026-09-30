@@ -213,7 +213,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `nurse_scheduling/server/auth.py` | verbatim | `f292e5c6cae4` |  |
 | `nurse_scheduling/server/basis_admission.py` | v2-only |  | P8 basis admission: checks a basis claim before a job is created |
 | `nurse_scheduling/server/canonical.py` | v2-only |  | P5 canonical strict YAML dumper |
-| `nurse_scheduling/server/config.py` | patched | `8f517ab71b5a` | `W2-server-config.patch` (P9, P13). `99db-D01-child-memory-cap.patch`. `99db-D07-per-client-queue-cap.patch` |
+| `nurse_scheduling/server/config.py` | patched | `8f517ab71b5a` | `W2-server-config.patch` (P9, P13). `99db-D01-child-memory-cap.patch`. `99db-D07-per-client-queue-cap.patch`. `x2gy-cpsat-worker-memory-cap.patch` |
 | `nurse_scheduling/server/diagnostic.py` | patched | `e09e2002eead` | `W2-server-diagnostic.patch` (P14) |
 | `nurse_scheduling/server/errors.py` | patched | `a1c4eb810f1a` | `W2-server-errors.patch` (P9) |
 | `nurse_scheduling/server/event_cursor.py` | v2-only |  | P6 opaque job-bound event cursors |
@@ -325,7 +325,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `tests/test_performance_benchmark.py` | excluded |  | Docker performance benchmark not adopted (lane 05 D5) |
 | `tests/test_person_temporary.py` | v2-only |  | temporary staff in Workspace input (P1 retired, bead pknr) |
 | `tests/test_preference_validation.py` | verbatim | `8ab8e8de5fc8` |  |
-| `tests/test_process_executor.py` | patched | `2fe233743b2b` | `W2-tests-test_process_executor.patch` (X4). `99db-D01-child-memory-cap.patch` |
+| `tests/test_process_executor.py` | patched | `2fe233743b2b` | `W2-tests-test_process_executor.patch` (X4). `99db-D01-child-memory-cap.patch`. `x2gy-cpsat-worker-memory-cap.patch` |
 | `tests/test_public_diagnostic.py` | patched | `b45cadd61187` | `W2-tests-test_public_diagnostic.patch` (P14) |
 | `tests/test_real_run_schedule.py` | verbatim | `2c3b74aa2246` |  |
 | `tests/test_real_schedule_helper.py` | verbatim | `86f0202bb4c9` |  |
@@ -751,6 +751,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `upstream-patches/W6-server-stores-redis.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/W6-tests-test_serve.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/manifest.toml` | v2-only |  | sync patch or manifest |
+| `upstream-patches/x2gy-cpsat-worker-memory-cap.patch` | v2-only |  | sync patch or manifest |
 <!-- origin-table:end -->
 
 ## Ported files (upstream → rebuild)
