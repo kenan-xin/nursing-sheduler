@@ -171,3 +171,12 @@ There is nothing to rewrite. Existing envelopes show up in the list with auto-na
 4. Is **7 days** of history enough? The alternative is the longest shift-sequence rule length minus 1 (whichever is larger).
 5. Does pinning also call `navigator.storage.persist()`? Today the app never asks for persistent storage (no search hits). Under storage pressure, the browser can evict the whole site.
 6. Does Duplicate copy the roster as well?
+
+## User decisions (2026-09-30)
+
+1. Roster per schedule (P2) is approved. Load and New stop clearing the roster once P2 ships. This replaces the C-23 ruling.
+2. Keep up to 30 unpinned schedules. At the limit, the oldest unpinned schedule is removed, and the list says so first. Pinned schedules are never removed.
+3. After "create November from September", the conversation moves to November, with a short note that links back to September's conversation.
+4. History carried into a new period covers the longest look-back that any rule needs, with a minimum of 7 days.
+5. Pinning a schedule also asks the browser for persistent storage.
+6. Duplicate copies the roster too.
