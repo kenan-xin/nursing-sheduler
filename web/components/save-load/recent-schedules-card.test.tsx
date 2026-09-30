@@ -3,7 +3,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createEmptyScenarioUiState, RECENT_SCHEDULES_LIMIT } from "@/lib/scenario";
-import { loadScenario, useAuthorityStore, useScenarioStore } from "@/lib/store";
+import { loadScenario, scenarioCommands, useAuthorityStore, useScenarioStore } from "@/lib/store";
 import { drainScenarioCommands, resetScenarioForTest } from "@/lib/store/test-authority";
 import { lastEditedLabel, RecentSchedulesCard } from "./recent-schedules-card";
 
@@ -160,6 +160,35 @@ describe("RecentSchedulesCard", () => {
         `Removed "Oldest ward · January 2025" to stay within ${RECENT_SCHEDULES_LIMIT} unpinned schedules.`,
       ),
     );
+  });
+});
+
+describe("RecentSchedulesCard — a reread outliving the card", () => {
+  it("drops a list that settles after unmount instead of setting state on a dead tree", async () => {
+    // The CI failure this pins (7vtc): a mount-time reread was still in flight when
+    // the test file's jsdom was torn down, and its late `setSummaries` hit React's
+    // `window.event` read. Here `window` is removed after unmount to stand in for
+    // that teardown; a late setState would throw inside the voided refresh.
+    let fail!: (error: Error) => void;
+    const listSpy = vi
+      .spyOn(scenarioCommands, "listSchedules")
+      .mockReturnValue(new Promise((_resolve, reject) => (fail = reject)));
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", onRejection);
+    try {
+      const { unmount } = render(<RecentSchedulesCard />);
+      await waitFor(() => expect(listSpy).toHaveBeenCalled());
+      unmount();
+      vi.stubGlobal("window", undefined);
+      fail(new Error("storage gone"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      vi.unstubAllGlobals();
+      process.off("unhandledRejection", onRejection);
+      listSpy.mockRestore();
+    }
+    expect(rejections).toEqual([]);
   });
 });
 
