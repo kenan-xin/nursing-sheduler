@@ -3,7 +3,7 @@
 // calls these helpers, so the classification/mapping decisions are unit-testable in
 // isolation.
 
-import { OptimizeApiError, type OptimizeErrorInfo } from "@/lib/bff/errors";
+import { OptimizeApiError, submitRejectionMessage, type OptimizeErrorInfo } from "@/lib/bff/errors";
 import type { JobResponse } from "@/lib/bff/types";
 import type { SseFrame } from "@/lib/query/sse";
 import { isIsoDateTime } from "@/lib/time/iso-date-time";
@@ -52,7 +52,10 @@ export function classifySubmitError(error: unknown): SubmitResult {
 /** A short, code-first message for a submit error (never an English detail match). */
 function submitErrorFields(error: unknown): { code: string | null; message: string } {
   if (error instanceof OptimizeApiError) {
-    return { code: error.info.code ?? error.info.kind, message: error.message };
+    return {
+      code: error.info.code ?? error.info.kind,
+      message: submitRejectionMessage(error.info.code, error.message),
+    };
   }
   if (error instanceof Error) return { code: null, message: error.message };
   return { code: null, message: "Optimise submission failed." };

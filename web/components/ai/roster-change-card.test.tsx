@@ -145,6 +145,12 @@ describe("RosterChangeCard", () => {
     );
   });
 
+  it("promises only a one-step Roster undo (C-19)", () => {
+    assistantActions.showRosterChange(CHANGE, TURN);
+    renderCard();
+    expect(screen.getByText(/You can undo the last change there\./)).toBeInTheDocument();
+  });
+
   it("says each half is undone in its own place", () => {
     assistantActions.showRosterChange(
       { ...CHANGE, linked: { proposalId: "p-1", assumptionIds: [], record: "leave" as const } },

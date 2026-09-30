@@ -47,6 +47,7 @@ import {
   summariseRequirements,
   writeViewPreference,
 } from "@/lib/roster-viewer";
+import { checkRosterChange, deriveRuleModel } from "@/lib/roster-viewer/rule-check";
 import { RosterGrid } from "./roster-grid";
 import { RosterCoverage } from "./roster-coverage";
 import { RosterDay } from "./roster-day";
@@ -122,6 +123,15 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
   const model = useMemo(
     () =>
       deriveRequirementModel(document.submission, {
+        decrements: document.cover.decrements,
+        live: liveCover,
+      }),
+    [document.submission, document.cover.decrements, liveCover],
+  );
+  // C-19: the rule check the assistant runs on a swap, run on hand edits too.
+  const ruleModel = useMemo(
+    () =>
+      deriveRuleModel(document.submission, {
         decrements: document.cover.decrements,
         live: liveCover,
       }),
@@ -214,9 +224,25 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
         : recordable.edits.filter((e) => currentDays[e.personIdx]?.[e.dateIdx]?.kind === e.kind),
     [recordable, document.solvedDays, currentDays],
   );
+  // Rules the last hand edit broke, shown on the edit bar while that same selection
+  // is open. A warning only: the edit is kept.
+  const [editIssues, setEditIssues] = useState<{
+    at: EditCoordinate;
+    messages: readonly string[];
+  } | null>(null);
   const setCell = useCallback(
     (coordinate: EditCoordinate, day: RosterDayState) => {
       editing?.setCell(coordinate, day);
+      if (ruleModel !== null) {
+        const after = currentDays.map((row) => [...row]);
+        after[coordinate.personIdx][coordinate.dateIdx] = day;
+        const check = checkRosterChange(ruleModel, document.context, currentDays, after, {
+          people: [coordinate.personIdx],
+          dates: [coordinate.dateIdx],
+        });
+        const messages = [...check.hard, ...check.soft].map((issue) => issue.message);
+        setEditIssues(messages.length > 0 ? { at: coordinate, messages } : null);
+      }
       setRecordable((prev) => {
         const kept =
           prev.solved === document.solvedDays
@@ -230,7 +256,7 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
         };
       });
     },
-    [editing, document.solvedDays],
+    [editing, document.solvedDays, document.context, ruleModel, currentDays],
   );
   const clearRecordable = useCallback(
     () => setRecordable({ solved: document.solvedDays, edits: [] }),
@@ -279,7 +305,10 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
               variant="ghost"
               size="sm"
               className="h-auto border border-line"
-              onClick={editing.undo}
+              onClick={() => {
+                setEditIssues(null);
+                editing.undo();
+              }}
               disabled={!editing.canUndo}
               title={editing.canUndo ? "Undo last edit" : "Nothing to undo"}
               data-testid="roster-undo"
@@ -298,6 +327,7 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
           selected={editing.selectedCell}
           current={currentDays[editing.selectedCell.personIdx]?.[editing.selectedCell.dateIdx]}
           onSetCell={setCell}
+          warnings={editIssues?.at === editing.selectedCell ? editIssues.messages : undefined}
           onCancel={() => editing.selectCell(null)}
         />
       ) : null}
