@@ -143,3 +143,11 @@ export {
   formatUncreditedLeaveWarning,
   formatUncreditedLeaveWarnings,
 } from "./leave-guard/warning-format";
+// Recent schedules naming (plq5), shared by the repository and the Save & Load card.
+export {
+  disambiguateScheduleNames,
+  RECENT_SCHEDULES_LIMIT,
+  scheduleAutoName,
+  schedulePeriod,
+  scheduleWard,
+} from "./schedule-name";
