@@ -18,7 +18,9 @@
 // committed range and re-seeded whenever the committed range changes underneath it
 // (undo/redo, external cascade). Nothing commits while the user types (v1 parity):
 // Apply commits the draft as ONE tracked mutation (the range cascade + optional
-// holiday overwrite), Cancel restores the committed values. Before Apply the card
+// holiday overwrite), Cancel restores the committed values. The switch position is
+// stored on the scenario (bead 6975): off leaves WORKDAY / NON-WORKDAY / PH as they
+// are on every later range change, and the switch still reads off on the next visit. Before Apply the card
 // warns how many requests and leave days the cascade will remove. The switch is gated by
 // holiday-data coverage (spec 02 FR-DC-29/30; bead si4j): a draft touching a year the
 // loaded list does not cover disables it and says which year has no data.
@@ -51,13 +53,11 @@ export interface RosterPeriodCardProps {
   /** The committed roster range (`""` endpoints when unset). */
   range: DateRange;
   /**
-   * Whether the loaded scenario ACTUALLY carries the imported Singapore holiday
-   * groups (WORKDAY / NON-WORKDAY / PH). Seeds the import switch's initial state so
-   * a loaded scenario without those groups never shows the switch ON / a false
-   * "N marked" (spec 02 FR-DC-40).
+   * The committed import switch (see `holidayImportApplied`). Seeds the draft switch
+   * and re-seeds it when the committed value changes (undo/redo, assistant Apply).
    */
-  importedHolidaysPresent: boolean;
-  /** Commit a confirmed range + the effective import flag (one tracked mutation). */
+  importApplied: boolean;
+  /** Commit a confirmed range + the switch position (one tracked mutation). */
   onCommit: (range: DateRange, importHolidays: boolean) => void;
   /** Requests and leave days the cascade would remove for a draft range. */
   countRemovals?: (range: DateRange) => { requests: number; leaveDays: number };
@@ -114,19 +114,12 @@ function dateIdInfo(range: DateRange): { format: string; example: string; note: 
 
 export function RosterPeriodCard({
   range,
-  importedHolidaysPresent,
+  importApplied: appliedImport,
   onCommit,
   countRemovals,
 }: RosterPeriodCardProps) {
   const changeTarget = useChangeTarget(changeKeys.rosterRange());
   const [draft, setDraft] = useState<DateRange>(range);
-  // Honest initial state. A LOADED scenario (complete committed range at mount)
-  // reflects whether the SG holiday groups are actually present, so it never shows
-  // a false "N marked". A FRESH roster (no committed range yet) keeps auto-import
-  // ON so a brand-new scenario imports SG holidays on its first commit.
-  const [appliedImport, setAppliedImport] = useState(
-    hasCompleteRange(range) ? importedHolidaysPresent : true,
-  );
   const [importHolidays, setImportHolidays] = useState(appliedImport);
   const startId = useId();
   const endId = useId();
@@ -136,6 +129,9 @@ export function RosterPeriodCard({
   useEffect(() => {
     setDraft({ start: range.start, end: range.end });
   }, [range.start, range.end]);
+  useEffect(() => {
+    setImportHolidays(appliedImport);
+  }, [appliedImport]);
 
   const complete = hasCompleteRange(draft);
   // A no-commit draft is INVALID (not merely incomplete) when both endpoints are
@@ -163,10 +159,9 @@ export function RosterPeriodCard({
   const editEndpoint = (side: "start" | "end", value: string) =>
     setDraft({ ...draft, [side]: value });
 
-  const apply = () => {
-    onCommit(draft, effectiveImport);
-    setAppliedImport(importHolidays);
-  };
+  // The switch position is what the scenario remembers; the cascade itself skips the
+  // import for a range the holiday list does not cover.
+  const apply = () => onCommit(draft, importHolidays);
 
   const cancel = () => {
     setDraft({ start: range.start, end: range.end });

@@ -232,6 +232,7 @@ file = [
   { path = "tests/test_utils.py", class = "verbatim", upstream_blob = "0850cbb2d6aa03bb69c4cf41b285be2eb6e83e1c" },
   { path = "tests/test_version.py", class = "v2-only", note = "v2 version stamping" },
   { path = "tests/test_ward_shift_patterns_roster.py", class = "v2-only", note = "8-shift-pattern ward case" },
+  { path = "tests/test_workspace_holiday_import_switch.py", class = "v2-only", note = "P5 holiday-import switch in Workspace input (6975)" },
   { path = "tests/test_workspace_temporary_cover.py", class = "v2-only", note = "P5 temporary cover in Workspace input" },
   { path = "tests/test_yaml_bound.py", class = "v2-only", note = "coded 400 for the YAML expansion bound" },
   { path = "tests/testcases/artificial/ortools/README.md", class = "verbatim", upstream_blob = "8e5bfb197203764acfcddd2376851b6aae86ea75" },
