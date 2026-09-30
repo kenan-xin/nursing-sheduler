@@ -5,8 +5,8 @@
 // (`./derived-groups`), these are ordinary `UiDateGroup`s — once written the user
 // may edit or delete them; they are only (re)built at import time.
 
-import type { GroupId, UiDateGroup } from "@/lib/scenario";
-import type { DateItem } from "./date-id";
+import type { GroupId, ScenarioUiState, UiDateGroup } from "@/lib/scenario";
+import { hasCompleteRange, type DateItem } from "./date-id";
 import { isSingaporeNonWorkDay, isSingaporePublicHoliday } from "./holidays-sg";
 
 /** Group id + fixed description for the three importable Singapore groups. */
@@ -20,6 +20,27 @@ const NONWORKDAY_DESCRIPTION =
   "Singapore non-work days (public holidays and weekends) imported from the data.gov.sg public holidays dataset";
 const PH_DESCRIPTION =
   "Singapore public holidays imported from the data.gov.sg public holidays dataset";
+
+/**
+ * Whether the "Import Singapore public holidays" switch reads ON. A stored position
+ * wins (bead 6975: off stays off although the groups are kept). Unset, a scenario
+ * with a range reads from whether the groups actually exist, so it never shows a
+ * false "N marked" (spec 02 FR-DC-40), and a fresh roster (no range yet) reads ON
+ * so its first commit imports.
+ */
+export function holidayImportApplied(
+  state: Pick<ScenarioUiState, "importPublicHolidays" | "rangeStart" | "rangeEnd" | "dateGroups">,
+): boolean {
+  if (state.importPublicHolidays !== undefined) return state.importPublicHolidays;
+  if (!hasCompleteRange({ start: state.rangeStart, end: state.rangeEnd })) return true;
+  return state.dateGroups.some((group) => SINGAPORE_GROUP_IDS.has(group.id));
+}
+
+const SINGAPORE_GROUP_IDS: ReadonlySet<GroupId> = new Set([
+  SINGAPORE_WORKDAY_GROUP_ID,
+  SINGAPORE_NONWORKDAY_GROUP_ID,
+  SINGAPORE_PH_GROUP_ID,
+]);
 
 /**
  * Build the three imported groups from the generated date items. Each item is

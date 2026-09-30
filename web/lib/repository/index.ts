@@ -42,6 +42,8 @@ export {
   type CommittedAssistantApply,
   type ReceiptStanding,
   type ReceiptUndoState,
+  type RemovedSchedule,
+  type ScheduleSummary,
   type ScenarioRepository,
   type ScenarioRepositoryConfig,
   type ScenarioSelection,

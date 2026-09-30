@@ -26,6 +26,8 @@ import type {
   PrepareAssistantProposalInput,
   PrepareAssistantProposalOutcome,
   ReceiptStanding,
+  ScheduleActionOutcome,
+  ScheduleSummary,
 } from "./authority";
 import { getScenarioAuthority } from "./spine";
 
@@ -95,6 +97,29 @@ export const scenarioCommands = {
   /** Reread persisted selection/envelope/lease and reconcile ownership. */
   reconcile(): Promise<void> {
     return getScenarioAuthority().reconcile();
+  },
+
+  /** Recent schedules (plq5), newest first. */
+  listSchedules(): Promise<ScheduleSummary[]> {
+    return getScenarioAuthority().listSchedules();
+  },
+
+  /** Switch this tab to a past schedule — read-only when another tab is editing it. */
+  openSchedule(scenarioId: string): Promise<CommandOutcome> {
+    return getScenarioAuthority().openSchedule(scenarioId);
+  },
+
+  /** Name a schedule; an empty name brings back the auto-name. */
+  renameSchedule(scenarioId: string, title: string): Promise<ScheduleActionOutcome> {
+    return getScenarioAuthority().renameSchedule(scenarioId, title);
+  },
+
+  setSchedulePinned(scenarioId: string, pinned: boolean): Promise<ScheduleActionOutcome> {
+    return getScenarioAuthority().setSchedulePinned(scenarioId, pinned);
+  },
+
+  deleteSchedule(scenarioId: string): Promise<ScheduleActionOutcome> {
+    return getScenarioAuthority().deleteSchedule(scenarioId);
   },
 } as const;
 

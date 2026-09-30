@@ -141,6 +141,8 @@ export interface WorkspaceDocumentV1 {
   dates: {
     range: { startDate: IsoDate | null; endDate: IsoDate | null };
     groups?: CanonicalDateGroup[];
+    /** Emitted only as `false`: the user turned the holiday import off (bead 6975). */
+    importPublicHolidays?: boolean;
   };
   people: CanonicalPeopleContainer;
   shiftTypes: CanonicalShiftTypesContainer;
@@ -187,6 +189,9 @@ const zWorkspaceDates = z.strictObject({
   }),
   items: z.array(zIsoDate).optional(),
   groups: z.array(producerDateGroup).optional(),
+  // The Dates screen's holiday-import switch (bead 6975); authoring state only, so
+  // the strict projection drops it.
+  importPublicHolidays: z.boolean().optional(),
 });
 
 // A temporary cover (d582) is a Workspace-only authoring record the web app applies
@@ -677,6 +682,7 @@ export function buildWorkspaceDocument(state: ScenarioUiState): WorkspaceDocumen
         endDate: state.rangeEnd ? state.rangeEnd : null,
       },
       ...(canonical.dates.groups ? { groups: canonical.dates.groups } : {}),
+      ...(state.importPublicHolidays === false ? { importPublicHolidays: false } : {}),
     },
     people: canonical.people,
     shiftTypes: canonical.shiftTypes,
@@ -883,6 +889,7 @@ export function normalizeWorkspaceToImportTarget(
     temporaryCover: (workspace.temporaryCover ?? []).map(normalizeWorkspaceCover),
   };
   if (maxOneShiftPerDay !== undefined) target.maxOneShiftPerDay = maxOneShiftPerDay;
+  if (workspace.dates.importPublicHolidays === false) target.importPublicHolidays = false;
   return target;
 }
 

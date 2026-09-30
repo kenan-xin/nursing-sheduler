@@ -2,7 +2,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { toast } from "sonner";
 import { createEmptyScenarioUiState, serializeScenario } from "@/lib/scenario";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 // INTEGRATION: `drainScenarioPersist` and the direct `resetToNewScenario` import are
@@ -80,6 +79,7 @@ describe("StartOverCard — the confirmation gate", () => {
     });
     await waitFor(async () => expect(onResetComplete).toHaveBeenCalledOnce());
 
+    const { toast } = await import("sonner");
     expect(toast.success).toHaveBeenCalledWith("New schedule created");
   });
 
@@ -106,6 +106,7 @@ describe("StartOverCard — the confirmation gate", () => {
     fireEvent.click(screen.getByTestId("new-schedule-button"));
     fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
 
+    const { toast } = await import("sonner");
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("New schedule created"));
     expect(await rosterStorage.readWorking<RosterDocument>()).toBeNull();
     expect(await rosterStorage.readCandidate<RosterDocument>("job-stale")).toBeNull();
@@ -131,6 +132,7 @@ describe("StartOverCard — the confirmation gate", () => {
     fireEvent.click(screen.getByTestId("new-schedule-button"));
     fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
 
+    const { toast } = await import("sonner");
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(NEW_SCHEDULE_FAILED_MESSAGE));
     expect(toast.success).not.toHaveBeenCalled();
     expect(onResetComplete).not.toHaveBeenCalled();
@@ -166,6 +168,7 @@ describe("StartOverCard — the confirmation gate", () => {
     fireEvent.click(screen.getByTestId("new-schedule-button"));
     fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
 
+    const { toast } = await import("sonner");
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
         "This schedule is being edited in another tab. Take over editing, then start over.",
@@ -176,15 +179,16 @@ describe("StartOverCard — the confirmation gate", () => {
     expect(onResetComplete).not.toHaveBeenCalled();
   });
 
-  it("names the consequences in the confirmation rather than only the verb", async () => {
+  it("names only what is really cleared: the schedule itself stays in Recent schedules (plq5)", async () => {
     render(<StartOverCard />);
     fireEvent.click(screen.getByTestId("new-schedule-button"));
+    const dialog = await screen.findByRole("alertdialog", { name: "Start a new schedule?" });
+    expect(dialog).toHaveTextContent("Your current schedule stays in Recent schedules");
+    expect(dialog).not.toHaveTextContent("cannot be undone");
     const consequences = await screen.findByTestId("confirm-dialog-consequences");
-    expect(consequences).toHaveTextContent("All people, shift types and dates");
-    expect(consequences).toHaveTextContent("Every rule and request");
-    // The reset now removes the previous run's roster too, so the confirmation has
-    // to say so — the consequence list is the only place the user is told.
     expect(consequences).toHaveTextContent("The saved roster and the last run's result");
+    expect(consequences).not.toHaveTextContent("All people, shift types and dates");
+    expect(screen.getByTestId("start-over-card")).not.toHaveTextContent("removes everything");
   });
 });
 
@@ -225,8 +229,6 @@ describe("StartOverCard — v2 surface reading", async () => {
 
 /** A backend-valid YAML the example seam returns in place of the bundled file. */
 const EXAMPLE_YAML = serializeScenario(makeValidUiState());
-
-/** The shared import path's success toast, published after the clear and the switch. */
 const SCENARIO_LOADED = "Scenario loaded — this replaces your current setup.";
 
 async function snapshot() {
@@ -302,13 +304,13 @@ describe("StartOverCard — the 87-person example", () => {
     // the scenario switch) is still running. Wait for it, or it lands in the NEXT
     // test: its Alice/Bob switch turns that test's example load into a staged
     // replacement confirm, so its roster is never cleared.
+    const { toast } = await import("sonner");
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith(SCENARIO_LOADED));
   });
 
-  it("rides the normal import path — the previous run's roster is cleared, as on Upload", async () => {
-    // The example does whatever a normal import does. Since ymmp (audit C-23) every
-    // Load clears the saved roster first, so the previous run's roster does not
-    // survive into the example.
+  it("rides the normal import path — like every Load it clears the previous roster (C-23)", async () => {
+    // The example does whatever a normal import does, and since ymmp (C-23) a Load
+    // clears the saved roster of the schedule it replaces.
     const document = await fixtureRosterDocument();
     const epoch = await rosterStorage.getClearEpoch();
     await rosterStorage.commitCandidate<RosterDocument>({
@@ -322,6 +324,7 @@ describe("StartOverCard — the 87-person example", () => {
     fireEvent.click(screen.getByTestId("new-schedule-example"));
 
     // THIS click's load completing (clear, then switch), not merely Alice/Bob in the store.
+    const { toast } = await import("sonner");
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith(SCENARIO_LOADED));
     expect((await snapshot()).staff.map((person) => person.id)).toEqual(["Alice", "Bob"]);
     expect(await rosterStorage.readWorking<RosterDocument>()).toBeNull();

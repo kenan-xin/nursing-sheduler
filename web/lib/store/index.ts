@@ -47,6 +47,8 @@ export {
   type ReceiptStanding,
   type ScenarioAuthorityConfig,
   type ScenarioOwnership,
+  type ScheduleActionOutcome,
+  type ScheduleSummary,
   type WriteStatus,
 } from "./authority";
 

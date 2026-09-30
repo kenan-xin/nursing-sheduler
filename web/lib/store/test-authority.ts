@@ -165,6 +165,7 @@ export function resetProjection(): void {
     ownership: "unknown",
     heldByTabId: null,
     peerLoadedScenarioId: null,
+    removedSchedules: [],
     canUndo: false,
     canRedo: false,
     writeStatus: "idle",

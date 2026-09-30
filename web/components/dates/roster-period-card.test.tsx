@@ -20,7 +20,7 @@ const VALID_RANGE: DateRange = { start: "2026-08-01", end: "2026-08-31" };
 describe("RosterPeriodCard — change highlight", () => {
   afterEach(() => clearChangeHighlight());
   it("outlines the card when an Apply changed the roster period", () => {
-    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={vi.fn()} />);
+    render(<RosterPeriodCard range={VALID_RANGE} importApplied onCommit={vi.fn()} />);
     const card = screen.getByTestId("roster-period-card");
     expect(card).toHaveAttribute("data-change-key", changeKeys.rosterRange());
     expect(card).not.toHaveAttribute("data-change-highlight");
@@ -31,7 +31,7 @@ describe("RosterPeriodCard — change highlight", () => {
 
 describe("RosterPeriodCard — invalid/incomplete range feedback (VR-DC-03)", () => {
   it("says what the holiday import really does (F7)", () => {
-    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={vi.fn()} />);
+    render(<RosterPeriodCard range={VALID_RANGE} importApplied onCommit={vi.fn()} />);
     expect(
       screen.getByText(
         "Adds WORKDAY, NON-WORKDAY and PH date groups. They change nothing until a staffing rule uses them.",
@@ -42,7 +42,7 @@ describe("RosterPeriodCard — invalid/incomplete range feedback (VR-DC-03)", ()
 
   it("shows an error and does not commit when start > end", () => {
     const onCommit = vi.fn();
-    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={onCommit} />);
+    render(<RosterPeriodCard range={VALID_RANGE} importApplied onCommit={onCommit} />);
 
     const start = screen.getByTestId("range-start") as HTMLInputElement;
     const end = screen.getByTestId("range-end") as HTMLInputElement;
@@ -64,7 +64,7 @@ describe("RosterPeriodCard — invalid/incomplete range feedback (VR-DC-03)", ()
 
   it("clears the error and commits once on Apply when the range is corrected", () => {
     const onCommit = vi.fn();
-    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={onCommit} />);
+    render(<RosterPeriodCard range={VALID_RANGE} importApplied onCommit={onCommit} />);
 
     const start = screen.getByTestId("range-start") as HTMLInputElement;
     const end = screen.getByTestId("range-end") as HTMLInputElement;
@@ -86,7 +86,7 @@ describe("RosterPeriodCard — invalid/incomplete range feedback (VR-DC-03)", ()
 
   it("shows no error and does not commit when an endpoint is cleared (incomplete)", () => {
     const onCommit = vi.fn();
-    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={onCommit} />);
+    render(<RosterPeriodCard range={VALID_RANGE} importApplied onCommit={onCommit} />);
 
     const end = screen.getByTestId("range-end") as HTMLInputElement;
     fireEvent.change(end, { target: { value: "" } });
@@ -99,7 +99,7 @@ describe("RosterPeriodCard — invalid/incomplete range feedback (VR-DC-03)", ()
 describe("RosterPeriodCard — draft with Apply and Cancel (v1 parity)", () => {
   it("never commits per keystroke, even when an intermediate value is a valid shorter range", () => {
     const onCommit = vi.fn();
-    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={onCommit} />);
+    render(<RosterPeriodCard range={VALID_RANGE} importApplied onCommit={onCommit} />);
     const end = screen.getByTestId("range-end");
     // Segment typing can emit a shorter valid range on the way to the real one.
     fireEvent.change(end, { target: { value: "2026-08-03" } });
@@ -113,7 +113,7 @@ describe("RosterPeriodCard — draft with Apply and Cancel (v1 parity)", () => {
 
   it("Cancel restores the committed range and switch without committing", () => {
     const onCommit = vi.fn();
-    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={onCommit} />);
+    render(<RosterPeriodCard range={VALID_RANGE} importApplied onCommit={onCommit} />);
     expect(screen.getByTestId("range-apply")).toBeDisabled();
     expect(screen.getByTestId("range-cancel")).toBeDisabled();
 
@@ -130,12 +130,15 @@ describe("RosterPeriodCard — draft with Apply and Cancel (v1 parity)", () => {
 
   it("the import switch is part of the draft: toggling alone commits only on Apply", () => {
     const onCommit = vi.fn();
-    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={onCommit} />);
+    const { rerender } = render(
+      <RosterPeriodCard range={VALID_RANGE} importApplied onCommit={onCommit} />,
+    );
     fireEvent.click(screen.getByTestId("import-toggle"));
     expect(onCommit).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("range-apply"));
     expect(onCommit).toHaveBeenCalledWith(VALID_RANGE, false);
-    // Applied: the draft is clean again.
+    // Applied: the committed switch comes back as the prop, and the draft is clean.
+    rerender(<RosterPeriodCard range={VALID_RANGE} importApplied={false} onCommit={onCommit} />);
     expect(screen.getByTestId("range-apply")).toBeDisabled();
   });
 
@@ -144,7 +147,7 @@ describe("RosterPeriodCard — draft with Apply and Cancel (v1 parity)", () => {
     render(
       <RosterPeriodCard
         range={VALID_RANGE}
-        importedHolidaysPresent
+        importApplied
         onCommit={vi.fn()}
         countRemovals={countRemovals}
       />,
@@ -162,7 +165,7 @@ describe("RosterPeriodCard — draft with Apply and Cancel (v1 parity)", () => {
     render(
       <RosterPeriodCard
         range={VALID_RANGE}
-        importedHolidaysPresent
+        importApplied
         onCommit={vi.fn()}
         countRemovals={() => ({ requests: 0, leaveDays: 0 })}
       />,
@@ -176,13 +179,7 @@ describe("RosterPeriodCard — import switch honest initial state (FR-DC-40)", (
   it("keeps auto-import ON for a FRESH roster (no committed range) so the first commit imports", () => {
     const onCommit = vi.fn();
     // Fresh scenario: empty committed range and no SG groups present yet.
-    render(
-      <RosterPeriodCard
-        range={{ start: "", end: "" }}
-        importedHolidaysPresent={false}
-        onCommit={onCommit}
-      />,
-    );
+    render(<RosterPeriodCard range={{ start: "", end: "" }} importApplied onCommit={onCommit} />);
 
     // With an empty range the switch is support-gated (disabled), but the seed is ON.
     // Entering a valid range surfaces it and the first commit carries importHolidays=true.
@@ -201,7 +198,7 @@ describe("RosterPeriodCard — import switch honest initial state (FR-DC-40)", (
   });
 
   it("defaults the switch ON with a committed range and imported SG groups present", () => {
-    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={vi.fn()} />);
+    render(<RosterPeriodCard range={VALID_RANGE} importApplied onCommit={vi.fn()} />);
 
     const toggle = screen.getByTestId("import-toggle");
     expect(toggle.getAttribute("aria-checked")).toBe("true");
@@ -211,9 +208,7 @@ describe("RosterPeriodCard — import switch honest initial state (FR-DC-40)", (
   });
 
   it("defaults the switch OFF for a loaded range WITHOUT the SG groups (no false 'N marked')", () => {
-    render(
-      <RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent={false} onCommit={vi.fn()} />,
-    );
+    render(<RosterPeriodCard range={VALID_RANGE} importApplied={false} onCommit={vi.fn()} />);
 
     const toggle = screen.getByTestId("import-toggle");
     expect(toggle.getAttribute("aria-checked")).toBe("false");
@@ -223,6 +218,26 @@ describe("RosterPeriodCard — import switch honest initial state (FR-DC-40)", (
     expect(screen.queryByTestId("import-changes")).toBeNull();
     expect(screen.queryByTestId("import-count")).toBeNull();
   });
+
+  it("commits the switch turned off, and re-seeds from the committed value (6975)", () => {
+    const onCommit = vi.fn();
+    const { rerender } = render(
+      <RosterPeriodCard range={VALID_RANGE} importApplied onCommit={onCommit} />,
+    );
+    fireEvent.click(screen.getByTestId("import-toggle"));
+    fireEvent.click(screen.getByTestId("range-apply"));
+    expect(onCommit).toHaveBeenLastCalledWith(VALID_RANGE, false);
+
+    // The store now remembers off; the card shows off and is not dirty.
+    rerender(<RosterPeriodCard range={VALID_RANGE} importApplied={false} onCommit={onCommit} />);
+    expect(screen.getByTestId("import-toggle").getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByTestId("range-apply")).toBeDisabled();
+
+    // A range change with the switch off commits off again.
+    fireEvent.change(screen.getByTestId("range-end"), { target: { value: "2026-08-20" } });
+    fireEvent.click(screen.getByTestId("range-apply"));
+    expect(onCommit).toHaveBeenLastCalledWith({ ...VALID_RANGE, end: "2026-08-20" }, false);
+  });
 });
 
 describe("RosterPeriodCard — holiday data coverage (bead si4j)", () => {
@@ -230,7 +245,7 @@ describe("RosterPeriodCard — holiday data coverage (bead si4j)", () => {
   const INTO_2028: DateRange = { start: "2027-12-01", end: "2028-01-31" };
 
   it("warns which year has no holiday data and disables the switch", () => {
-    render(<RosterPeriodCard range={INTO_2028} importedHolidaysPresent onCommit={vi.fn()} />);
+    render(<RosterPeriodCard range={INTO_2028} importApplied onCommit={vi.fn()} />);
     expect(screen.getByTestId("import-unsupported").textContent).toBe(
       "No public-holiday data for 2028 yet. Holidays in those dates are not marked.",
     );
@@ -238,7 +253,7 @@ describe("RosterPeriodCard — holiday data coverage (bead si4j)", () => {
   });
 
   it("clears the warning when the live list covering 2028 arrives", () => {
-    render(<RosterPeriodCard range={INTO_2028} importedHolidaysPresent onCommit={vi.fn()} />);
+    render(<RosterPeriodCard range={INTO_2028} importApplied onCommit={vi.fn()} />);
     act(() =>
       setSingaporeHolidays(
         mergeSingaporeHolidays(
@@ -252,7 +267,7 @@ describe("RosterPeriodCard — holiday data coverage (bead si4j)", () => {
   });
 
   it("shows no warning for a covered range", () => {
-    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={vi.fn()} />);
+    render(<RosterPeriodCard range={VALID_RANGE} importApplied onCommit={vi.fn()} />);
     expect(screen.queryByTestId("import-unsupported")).toBeNull();
   });
 });

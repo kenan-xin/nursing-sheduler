@@ -53,7 +53,7 @@ import { calendarSpan } from "./assumptions";
 import { CAPABILITY_ENTRIES } from "@/lib/capability/help-content";
 import type { CapabilityEntryV1 } from "@/lib/capability/types";
 import { findNavItemById } from "@/components/shell/nav-config";
-import { generateDateItems } from "@/lib/dates";
+import { generateDateItems, holidayImportApplied } from "@/lib/dates";
 import { formatShortDate } from "@/lib/dates/date-id";
 import { cardNeedOn, coverStatuses } from "@/lib/scenario/temporary-cover";
 import { requiredOn } from "@/lib/rules/shortfalls";
@@ -727,6 +727,19 @@ export function diffScenarioDocuments(
     });
   }
 
+  // The switch as the Dates screen shows it (bead 6975).
+  const holidayImport = (state: ScenarioUiState) => (holidayImportApplied(state) ? "On" : "Off");
+  if (holidayImport(before) !== holidayImport(after)) {
+    entries.push({
+      key: "dates:holiday-import",
+      scope: "roster-period",
+      label: "Import Singapore public holidays",
+      before: holidayImport(before),
+      after: holidayImport(after),
+      kind: "changed",
+    });
+  }
+
   entries.push(
     ...compareKeyed(before.dateGroups, after.dateGroups, {
       scope: "roster-period",
@@ -1090,6 +1103,7 @@ function directKeys(
     switch (command.type) {
       case "set_roster_range":
         keys.add("dates:range");
+        keys.add("dates:holiday-import");
         break;
       case "set_rule_enabled":
         keys.add(`rule:${command.ruleKind}:${command.ruleId}`);
