@@ -70,9 +70,13 @@ export const scenarioCommands = {
     return getScenarioAuthority().recordBackup(backupFingerprint);
   },
 
-  /** Undo/Redo as monotonic repository commits (the former zundo `temporal`). */
-  undo(): Promise<CommandOutcome> {
-    return getScenarioAuthority().undo();
+  /**
+   * Undo/Redo as monotonic repository commits (the former zundo `temporal`). Given the
+   * revision a commit produced, Undo reverses only that commit: once a later edit has
+   * landed it withdraws as `superseded` rather than undo the wrong one.
+   */
+  undo(expectedDocumentRevision?: number): Promise<CommandOutcome> {
+    return getScenarioAuthority().undo(expectedDocumentRevision);
   },
 
   redo(): Promise<CommandOutcome> {
