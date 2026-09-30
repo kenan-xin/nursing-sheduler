@@ -1295,6 +1295,7 @@ describe("scope identities", () => {
     // a screen the app does not have -- the exact failure the registry exists to stop.
     const ids = new Set(getCapabilityRegistry().entries.map((entry) => entry.id));
     for (const scope of Object.keys(SCOPE_LABEL) as DiffScope[]) {
+      if (scope === "export-layout") continue;
       expect(ids.has(scope), `${scope} is not a shipped capability id`).toBe(true);
     }
   });
@@ -1305,13 +1306,28 @@ describe("scope identities", () => {
     expect(SCOPE_LABEL["leave-and-requests"]).toBe("Requests & Leave");
   });
 
-  it("lists no export-layout change: that screen does not ship (C-26)", () => {
-    const before = ruleWardScenario();
-    const after = {
-      ...before,
-      exportLayout: { ...before.exportLayout, extraRows: [...before.exportLayout.extraRows, {}] },
-    } as unknown as ScenarioUiState;
-    expect(diffScenarioDocuments(before, after)).toEqual([]);
+  it("a cascade that prunes the export layout shows one line, with no screen (C-26)", () => {
+    const base = peopleScenario();
+    const before: ScenarioUiState = {
+      ...base,
+      exportLayout: { ...base.exportLayout, formatting: [{ type: "row", people: ["bo"] }] },
+    };
+    const commands = [{ type: "remove_person" as const, personId: "bo" }];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+    const diff = deriveProposalDiff(before, applied.next, commands);
+
+    expect(diff.cascade.find((entry) => entry.key === "export:layout")).toMatchObject({
+      label: "Export layout rules",
+      before: "1",
+      after: "0",
+    });
+    expect(diff.capabilityIds).not.toContain("export-layout");
+    expect(diff.needsReview).toEqual(["rules", "requests"]);
+    const plan = planChangeHighlight(diff, "advanced");
+    expect([plan.primary, ...plan.others].map((screen) => screen?.capabilityId)).not.toContain(
+      "export-layout",
+    );
   });
 });
 

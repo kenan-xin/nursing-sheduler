@@ -16,8 +16,9 @@
 // states what its author believed the arm does. The range cascade alone reaches date
 // groups, every preference card and the request matrix, through two different
 // mechanisms (purge and re-key). The export layout it also reaches has no screen
-// (deferred route), so its changes are not listed. Comparing documents cannot forget a
-// surface, and it keeps working when an arm's transform is improved underneath it.
+// (deferred route), so it gets one summary line and no capability id. Comparing
+// documents cannot forget a surface, and it keeps working when an arm's transform is
+// improved underneath it.
 
 import type {
   AffinityCard,
@@ -70,9 +71,9 @@ import { rosterDatesBetween, withStoredShiftCodes } from "./operations";
 /**
  * Where a change lands, named as the capability the user would go to see it.
  *
- * These are capability-registry ids, so "which screens does this affect?" needs no
- * second mapping table and cannot drift from the deployed registry -- `diff.test.ts`
- * pins that.
+ * These are capability-registry ids (except `export-layout`, whose route is
+ * deferred), so "which screens does this affect?" needs no second mapping table and
+ * cannot drift from the deployed registry -- `diff.test.ts` pins that.
  */
 export type DiffScope =
   | "roster-period"
@@ -83,13 +84,17 @@ export type DiffScope =
   | "shift-counts"
   | "shift-affinities"
   | "shift-type-coverings"
-  | "leave-and-requests";
+  | "leave-and-requests"
+  | "export-layout";
+
+/** The one scope with no capability entry: the Export Layout route is deferred (C-26). */
+export const SCOPE_WITHOUT_CAPABILITY: DiffScope = "export-layout";
 
 /** The progressive setup domains, in dependency order (guided-setup flow). */
 export const SETUP_DOMAINS = ["dates", "people", "shifts", "rules", "requests"] as const;
 export type SetupDomain = (typeof SETUP_DOMAINS)[number];
 
-const SCOPE_DOMAIN: Record<DiffScope, SetupDomain> = {
+const SCOPE_DOMAIN: Record<DiffScope, SetupDomain | null> = {
   "roster-period": "dates",
   "staff-list": "people",
   "shift-types": "shifts",
@@ -99,6 +104,7 @@ const SCOPE_DOMAIN: Record<DiffScope, SetupDomain> = {
   "shift-affinities": "rules",
   "shift-type-coverings": "rules",
   "leave-and-requests": "requests",
+  "export-layout": null,
 };
 
 const RULE_SCOPE: Record<keyof CardsByKind, DiffScope> = {
@@ -828,6 +834,20 @@ export function diffScenarioDocuments(
 
   entries.push(...compareRequestMatrix(before, after));
 
+  // A cascade (delete, rename) can prune the layout, and it is still sent to the solver.
+  if (stableStringify(before.exportLayout) !== stableStringify(after.exportLayout)) {
+    const count = ({ exportLayout: l }: ScenarioUiState) =>
+      l.formatting.length + l.extraColumns.length + l.extraRows.length;
+    entries.push({
+      key: "export:layout",
+      scope: SCOPE_WITHOUT_CAPABILITY,
+      label: "Export layout rules",
+      before: `${count(before)}`,
+      after: `${count(after)}`,
+      kind: "changed",
+    });
+  }
+
   return entries;
 }
 
@@ -1257,7 +1277,9 @@ export function deriveProposalDiff(
       !directDomains.has(domain) && cascade.some((entry) => SCOPE_DOMAIN[entry.scope] === domain),
   );
 
-  const capabilityIds = [...new Set(all.map((entry) => entry.scope))].sort();
+  const capabilityIds = [...new Set(all.map((entry) => entry.scope))]
+    .filter((scope) => scope !== SCOPE_WITHOUT_CAPABILITY)
+    .sort();
 
   return { direct, cascade, capabilityIds, needsReview };
 }
@@ -1268,6 +1290,7 @@ export function deriveProposalDiff(
  */
 export const SCOPE_LABEL = Object.fromEntries(
   (Object.keys(SCOPE_DOMAIN) as DiffScope[]).map((scope) => {
+    if (scope === SCOPE_WITHOUT_CAPABILITY) return [scope, "Export layout"];
     const entry: CapabilityEntryV1 | undefined = CAPABILITY_ENTRIES.find(
       (candidate) => candidate.id === scope,
     );
