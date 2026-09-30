@@ -143,6 +143,7 @@ export function proposalBasisBlock(
 /** Why Apply is not available. Each one is a comparison that failed. */
 export type ProposalBlock =
   | { code: "settled"; message: string }
+  | { code: "replaced"; message: string }
   | { code: "not_owner"; message: string }
   | { code: "scenario_changed"; message: string }
   | { code: "document_changed"; message: string }
@@ -186,6 +187,12 @@ export function describeProposalReadiness(
         proposal.status === "applied"
           ? "This change has already been applied."
           : "This change was cancelled.",
+    });
+  }
+  if (proposal.status === "stale") {
+    blocks.push({
+      code: "replaced",
+      message: "This change was replaced by a revised one, so it can no longer be applied.",
     });
   }
   if (live.invalidated) {

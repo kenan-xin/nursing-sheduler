@@ -143,7 +143,7 @@ describe("deriveProposalDiff", () => {
       {
         type: "add_shift_group" as const,
         groupId: "Night shifts",
-        members: ["N", "Night"],
+        members: ["N", "Night", "am1"],
       },
     ];
     const applied = applyAssistantCommands(before, commands);
@@ -151,10 +151,12 @@ describe("deriveProposalDiff", () => {
 
     const diff = deriveProposalDiff(before, applied.next, commands);
     expect(diff.direct.map((entry) => entry.key).sort()).toEqual([
+      'shift:"AM1"',
       'shift:"N"',
-      'shift:"am1"',
       "shiftgroup:Night shifts",
     ]);
+    // The added "am1" is stored as AM1 (Shifts page rule, bead tz3y); its highlight key
+    // must name that row, or it would fall into the cascade.
     expect(diff.cascade).toEqual([]);
 
     const night = diff.direct.find((entry) => entry.key === 'shift:"N"');
@@ -164,12 +166,12 @@ describe("deriveProposalDiff", () => {
       "Night shift · 20:00–08:30 (ends next day) · 60 min break (11h 30m paid)",
     );
     // Rest 0 is stored as absent, exactly as the Shifts page stores it -- no break text.
-    expect(diff.direct.find((entry) => entry.key === 'shift:"am1"')?.after).toBe(
-      "am1 · 08:00–15:00",
+    expect(diff.direct.find((entry) => entry.key === 'shift:"AM1"')?.after).toBe(
+      "AM1 · 08:00–15:00",
     );
-    // Members follow shift order: Night (existing) before N (new).
+    // Members follow shift order: Night (existing) before N and AM1 (new).
     expect(diff.direct.find((entry) => entry.key === "shiftgroup:Night shifts")?.after).toBe(
-      "Night, N",
+      "Night, N, AM1",
     );
     expect(diff.capabilityIds).toContain("shift-types");
     expect(diff.needsReview).toEqual([]);

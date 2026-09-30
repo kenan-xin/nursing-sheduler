@@ -1614,9 +1614,11 @@ function applyAddShiftType(
   index: number,
 ): OperationResult {
   const d = shiftTypesDescriptor;
-  const idCheck = validateFullEditId(d, d.readItems(state), d.readGroups(state), command.code);
+  // Stored uppercase, as the Shifts page stores a code (`withStoredShiftCodes`).
+  const code = command.code.toUpperCase();
+  const idCheck = validateFullEditId(d, d.readItems(state), d.readGroups(state), code);
   if (!idCheck.ok) {
-    return reject(index, "invalid_value", `Shift "${command.code.trim()}": ${idCheck.message}.`);
+    return reject(index, "invalid_value", `Shift "${code.trim()}": ${idCheck.message}.`);
   }
   // The Shifts page forbids a numbers-only code (`shift-type-grid.tsx`, `codeNumericOnly`).
   if (/^\d+$/.test(idCheck.id)) {
@@ -2296,6 +2298,53 @@ export function applyAssistantCommand(
 }
 
 /**
+ * The batch with shift codes as the Shifts page stores them: a code is saved uppercase
+ * (`shift-type-grid.tsx`), so `add_shift_type` "am1" adds AM1, and every LATER reference
+ * to a code this batch adds, in any case, names AM1 too (bead tz3y). A reference to a
+ * code the document already holds is left exactly as written, so a scenario whose ids
+ * are lowercase keeps working.
+ *
+ * Idempotent. `applyAssistantCommands`, `deriveProposalDiff` and `deriveAssumptions`
+ * each run it, so the stored document, the Preview and its highlight agree.
+ */
+export function withStoredShiftCodes(
+  commands: readonly AssistantCommandV1[],
+): AssistantCommandV1[] {
+  const added = new Set<string>();
+  const code = (ref: string) => (added.has(ref.toUpperCase()) ? ref.toUpperCase() : ref);
+  const codes = (refs: readonly string[]) => refs.map(code);
+  return commands.map((command): AssistantCommandV1 => {
+    switch (command.type) {
+      case "add_shift_type": {
+        const stored = command.code.trim().toUpperCase();
+        added.add(stored);
+        return { ...command, code: stored };
+      }
+      case "add_shift_group":
+        return { ...command, members: codes(command.members) };
+      case "set_shift_request":
+      case "add_staffing_requirement":
+      case "edit_staffing_requirement":
+      case "add_temporary_cover":
+      case "remove_temporary_cover":
+        return { ...command, shiftType: code(command.shiftType) };
+      case "add_shift_sequence_rule":
+      case "edit_shift_sequence_rule":
+        return { ...command, pattern: codes(command.pattern) };
+      case "add_count_rule":
+      case "edit_count_rule":
+      case "add_pairing_rule":
+      case "edit_pairing_rule":
+      case "add_supervision_rule":
+      case "edit_supervision_rule":
+        return { ...command, shiftTypes: codes(command.shiftTypes) };
+      default:
+        return command;
+    }
+  });
+}
+
+/**
  * Fold a whole batch, each command validated against the document the PREVIOUS one
  * produced -- the same queue-head discipline the manual command bus uses, so a batch
  * that moves leave onto a date an earlier command just vacated is checked against
@@ -2309,7 +2358,7 @@ export function applyAssistantCommands(
   commands: readonly AssistantCommandV1[],
 ): OperationResult {
   let next = state;
-  for (const [index, command] of commands.entries()) {
+  for (const [index, command] of withStoredShiftCodes(commands).entries()) {
     const result = applyAssistantCommand(next, command, index);
     if (!result.ok) return result;
     next = result.next;
