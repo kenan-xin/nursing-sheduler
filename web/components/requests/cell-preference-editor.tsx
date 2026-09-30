@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 import type { UiRequestCell } from "@/lib/scenario";
 import {
   formatWeight,
+  invalidWeightMessage,
   isValidWeightValue,
   parseWeightInput,
   type WeightFieldValue,
@@ -131,7 +132,7 @@ export function CellPreferenceEditor({
     }
     if (draft.dayState === "off") {
       if (!isValidWeightValue(draft.offWeight)) {
-        setError(WEIGHT_INVALID_MESSAGE);
+        setError(invalidWeightMessage(draft.offWeight, WEIGHT_INVALID_MESSAGE));
         return;
       }
       // Weight 0 removes the OFF, as in the old app — never store a no-effect OFF.
@@ -141,7 +142,7 @@ export function CellPreferenceEditor({
     }
     const invalidTarget = targets.find((t) => !isValidWeightValue(draft.weights[t.id]));
     if (invalidTarget) {
-      setError(WEIGHT_INVALID_MESSAGE);
+      setError(invalidWeightMessage(draft.weights[invalidTarget.id], WEIGHT_INVALID_MESSAGE));
       return;
     }
     const prefs = targets

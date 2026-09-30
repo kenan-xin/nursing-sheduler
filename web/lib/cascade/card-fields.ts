@@ -55,13 +55,13 @@ export const CARD_COEFFICIENT_FIELD: Partial<Record<CardKind, string>> = {
  * Fields that must stay non-empty for a card to survive a delete (spec 06
  * FR-RI-11). A card is dropped when any listed field is *present but empty* after
  * pruning (an omitted optional field does not count — see `isEmptyRefField`).
- * Covering `date` is intentionally absent: it is optional (omitted = all dates,
- * DL08 / finding #18), so an emptied covering `date` is omitted, not a drop.
+ * Covering `date` is optional (omitted = all dates, DL08), but one a delete emptied
+ * drops the card like every other date scope, never widening it (bug hunt A-06).
  */
 export const CARD_REQUIRED_FIELDS: Record<CardKind, readonly string[]> = {
   requirements: ["shiftType", "date", "qualifiedPeople"],
   successions: ["person", "date", "pattern"],
   counts: ["person", "countDates", "countShiftTypes"],
   affinities: ["date", "people1", "people2", "shiftTypes"],
-  coverings: ["preceptors", "preceptees", "shiftTypes"],
+  coverings: ["preceptors", "preceptees", "shiftTypes", "date"],
 };
