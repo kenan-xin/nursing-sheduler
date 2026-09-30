@@ -9,10 +9,11 @@
 // had been told was a brand-new schedule.
 //
 // So the assertions are about STORED STATE, read back from a real IndexedDB
-// (fake-indexeddb) and a real sessionStorage through the PRODUCTION Clear
-// orchestrator — not about whether a notice was hidden. `clearStoredData` is bound
-// to a per-tab database, exactly as the F5 proof matrix does it, so a regression in
-// `clearRosterDataAndNotify` turns these red.
+// (fake-indexeddb) and a real sessionStorage through the PRODUCTION run-residue cut
+// (`clearRunResidue`) — not about whether a notice was hidden.
+//
+// plq5 P2: the saved roster, candidate and snapshot are KEPT. Each schedule keeps its
+// own, so they stay with the schedule being left; only the session residue goes.
 //
 // `resetScenario` is the one injected half: the real scenario reset against the
 // live stores is proved at the component level (`new-schedule-button.test.tsx`),
@@ -30,7 +31,7 @@ import {
   type SessionTransactionStorage,
 } from "@/lib/optimize";
 import type { CommandFailureReason, CommandOutcome } from "@/lib/store";
-import { clearRosterDataAndNotify } from "./roster-clear";
+import { clearRunResidue } from "./roster-clear";
 import { resetToNewSchedule } from "./new-schedule-reset";
 import { fixtureRosterDocument } from "./test-fixtures";
 import type { RosterDocument } from "./types";
@@ -93,14 +94,10 @@ async function seedPreviousRun(storage: RosterStorage) {
   return { jobId: "job-1", ownerId: "owner-1" };
 }
 
-/** The production Clear orchestrator, bound to this test's storage and session. */
-function boundClear(storage: RosterStorage, session: SessionTransactionStorage) {
+/** The production run-residue cut, bound to this test's session and database. */
+function boundClear(session: SessionTransactionStorage, snapshotStore?: RosterStorage) {
   return () =>
-    clearRosterDataAndNotify({
-      rosterStorage: storage,
-      sessionStorage: session,
-      clearViewMetadata: () => true,
-    });
+    clearRunResidue({ sessionStorage: session, snapshotStore, clearViewMetadata: () => true });
 }
 
 /**
@@ -132,7 +129,7 @@ beforeEach(() => {
 });
 
 describe("New schedule — a confirmed reset leaves the previous run behind", () => {
-  it("clears the roster, candidate, snapshot and session residue, then resets the scenario", async () => {
+  it("clears the session residue, keeps the saved roster (plq5 P2), then resets the scenario", async () => {
     const storage = openTab();
     const session = seededSession();
     const seeded = await seedPreviousRun(storage);
@@ -146,7 +143,7 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
     expect(session.getItem(OPTIMIZE_SESSION_STORAGE_KEY)).not.toBeNull();
 
     const order: string[] = [];
-    const clearStoredData = boundClear(storage, session);
+    const clearStoredData = boundClear(session, storage);
     const outcome = await resetToNewSchedule({
       clearStoredData: async () => {
         order.push("stored-data");
@@ -160,13 +157,16 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
 
     expect(outcome.status).toBe("reset");
 
-    // The state the stale capture notice is a projection of is genuinely gone.
-    expect(await storage.readWorking<RosterDocument>()).toBeNull();
-    expect(await storage.readCandidate<RosterDocument>(seeded.jobId)).toBeNull();
-    expect(await storage.readCurrentCandidate()).toBeNull();
-    expect(await storage.readSubmissionSnapshot(seeded.ownerId)).toBeNull();
+    // The state the stale capture notice is a projection of is genuinely gone...
     expect(session.getItem(OPTIMIZE_SESSION_STORAGE_KEY)).toBeNull();
     expect(session.getItem(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY)).toBeNull();
+    // ...and the saved roster is not: it belongs to the schedule being left.
+    expect(await storage.readWorking<RosterDocument>()).not.toBeNull();
+    expect(await storage.readCandidate<RosterDocument>(seeded.jobId)).not.toBeNull();
+    expect(await storage.readCurrentCandidate()).toMatchObject({ jobId: seeded.jobId });
+    // The snapshot the dropped retirement marker named is purged first, so dropping
+    // the marker strands nothing.
+    expect(await storage.readSubmissionSnapshot(seeded.ownerId)).toBeNull();
 
     // ORDER: the verified cut runs FIRST, so a failure can still be retried from an
     // intact workspace. The reverse order would destroy the scenario and only then
@@ -189,7 +189,7 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
     const resetScenario = vi.fn(async () => committed());
 
     const outcome = await resetToNewSchedule({
-      clearStoredData: boundClear(storage, poisoned),
+      clearStoredData: boundClear(poisoned),
       resetScenario,
     });
 
@@ -197,6 +197,29 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
     if (outcome.status !== "failed") throw new Error("unreachable");
     expect(outcome.storedData?.sessionResidue.sessionCleared).toBe(false);
     // The scenario is untouched, so the retry starts from the same place.
+    expect(resetScenario).not.toHaveBeenCalled();
+  });
+
+  it("keeps the retirement marker, and fails closed, when its snapshot cannot be purged", async () => {
+    const storage = openTab();
+    await seedPreviousRun(storage);
+    const session = seededSession();
+    const broken: RosterStorage = {
+      ...storage,
+      deleteSubmissionSnapshot: async () => {
+        throw new Error("IndexedDB refused");
+      },
+    };
+    const resetScenario = vi.fn(async () => committed());
+
+    const outcome = await resetToNewSchedule({
+      clearStoredData: boundClear(session, broken),
+      resetScenario,
+    });
+
+    expect(outcome).toMatchObject({ status: "failed", failure: "stored-data" });
+    expect(session.getItem(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY)).not.toBeNull();
+    expect(await storage.readSubmissionSnapshot("owner-1")).not.toBeNull();
     expect(resetScenario).not.toHaveBeenCalled();
   });
 
@@ -219,7 +242,7 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
     await seedPreviousRun(storage);
 
     const outcome = await resetToNewSchedule({
-      clearStoredData: boundClear(storage, seededSession()),
+      clearStoredData: boundClear(seededSession()),
       resetScenario: async () => {
         throw new Error("the persisted record could not be dropped");
       },
@@ -243,7 +266,7 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
     await seedPreviousRun(storage);
 
     const outcome = await resetToNewSchedule({
-      clearStoredData: boundClear(storage, seededSession()),
+      clearStoredData: boundClear(seededSession()),
       resetScenario: async () => refused("not-owner"),
     });
 
@@ -259,11 +282,10 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
   it("ACCEPTING CONTROL: with nothing seeded the reset still completes", async () => {
     // Without this, the fail-closed cases above could be passing because the
     // orchestrator refuses everything.
-    const storage = openTab();
     const resetScenario = vi.fn(async () => committed());
 
     const outcome = await resetToNewSchedule({
-      clearStoredData: boundClear(storage, fakeSessionStorage()),
+      clearStoredData: boundClear(fakeSessionStorage()),
       resetScenario,
     });
 

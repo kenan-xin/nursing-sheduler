@@ -41,7 +41,7 @@ import { cn } from "@/lib/utils";
 import { formatShortDate } from "@/lib/dates/date-id";
 import { isDayStateSelector, type ScenarioUiState, type UiTemporaryCover } from "@/lib/scenario";
 import type { RosterDocument } from "@/lib/roster";
-import { rosterStorage, scenarioCommands, useScenarioStore } from "@/lib/store";
+import { currentRosterStorage, scenarioCommands, useScenarioStore } from "@/lib/store";
 import { changeKeys } from "@/lib/change-highlight/keys";
 import { showChangeHighlight, useChangeTarget } from "@/lib/change-highlight/store";
 import {
@@ -164,7 +164,7 @@ function shiftLabelOf(state: Pick<ScenarioUiState, "shifts">, shiftType: string)
 /** Whether a working roster exists (a plain DB read; failure degrades to "no"). */
 async function workingRosterPresent(): Promise<boolean> {
   try {
-    return (await rosterStorage.readWorking<RosterDocument>()) !== null;
+    return (await currentRosterStorage().readWorking<RosterDocument>()) !== null;
   } catch {
     return false;
   }

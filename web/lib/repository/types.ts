@@ -483,6 +483,20 @@ export interface KeyValueRow {
 // their original specifier.
 
 /**
+ * Roster row and pointer keys (plq5 P2). With a `scenarioId` they are that
+ * schedule's own; without one they are the single pre-P2 origin-wide slot, which
+ * only the boot migration and unscoped test storage still name.
+ */
+export const rosterKeys = {
+  working: (scenarioId?: string) =>
+    scenarioId === undefined ? "working" : `working:${scenarioId}`,
+  candidate: (jobId: string, scenarioId?: string) =>
+    scenarioId === undefined ? `candidate:${jobId}` : `candidate:${scenarioId}:${jobId}`,
+  currentCandidate: (scenarioId?: string) =>
+    scenarioId === undefined ? "currentCandidate" : `currentCandidate:${scenarioId}`,
+};
+
+/**
  * A stored roster document. F1 owns durability, not shape: the payload is an
  * opaque structured-cloneable value (it may embed a `Blob` such as `frozenXlsx`)
  * whose schema and validation belong to F3. `TDocument` defaults to `unknown` so
@@ -490,7 +504,7 @@ export interface KeyValueRow {
  * one.
  */
 export interface RosterRow<TDocument = unknown> {
-  /** `working` or `candidate:<jobId>`. */
+  /** `working[:<scenarioId>]` or `candidate:[<scenarioId>:]<jobId>` (see {@link rosterKeys}). */
   key: string;
   document: TDocument;
   /**
@@ -517,6 +531,11 @@ export interface RosterRow<TDocument = unknown> {
    * store, so rows written before it existed read back with it simply absent.
    */
   candidateSource?: { jobId: string; candidateVersion: number };
+  /**
+   * Set by the plq5 P2 migration when the pre-P2 roster matched no schedule's dates
+   * and people and was given to the most recent one instead. The next write drops it.
+   */
+  possiblyOtherSchedule?: true;
 }
 
 /** An immutable submission snapshot row, keyed and authorized by `ownerId`. */
@@ -526,6 +545,8 @@ export interface SnapshotRow<TPayload = unknown> {
   ownerId: string;
   submissionOrdinal: number;
   payload: TPayload;
+  /** The schedule the run was submitted from; its capture lands there (plq5 P2). */
+  scenarioId?: string;
 }
 
 /** One typed metadata row (origin-wide counters and pointers). */

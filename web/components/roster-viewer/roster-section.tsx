@@ -26,7 +26,7 @@ import { useCallback, useRef, useState } from "react";
 import { FaDownload } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { rosterStorage } from "@/lib/store";
+import { currentRosterStorage, useAuthorityStore } from "@/lib/store";
 import type { RosterDocument } from "@/lib/roster";
 import {
   clearRosterDataAndNotify,
@@ -126,9 +126,10 @@ export function RosterSection({ capture }: RosterSectionProps) {
       setLoadPending(true);
       setLoadError(null);
       try {
-        const epoch = await rosterStorage.getClearEpoch();
+        const storage = currentRosterStorage();
+        const epoch = await storage.getClearEpoch();
         const outcome = await promoteCandidateRosterToWorking(pointer, {
-          storage: rosterStorage,
+          storage,
           expectedWorkingRevision: null,
           expectedClearEpoch: epoch,
         });
@@ -167,9 +168,10 @@ export function RosterSection({ capture }: RosterSectionProps) {
       setActionError(null);
       setClearFailed(false);
       try {
-        const epoch = await rosterStorage.getClearEpoch();
+        const storage = currentRosterStorage();
+        const epoch = await storage.getClearEpoch();
         const outcome = await importRosterFileToWorking(file, {
-          storage: rosterStorage,
+          storage,
           expectedWorkingRevision: null,
           expectedClearEpoch: epoch,
         });
@@ -278,6 +280,7 @@ export function RosterSection({ capture }: RosterSectionProps) {
       const outcome = await capture.gate.dismissDurableCandidate({
         jobId: loadable.pointer.jobId,
         candidateVersion: loadable.pointer.candidateVersion,
+        scenarioId: useAuthorityStore.getState().scenarioId,
       });
       if (outcome.status === "failed") {
         setLoadError(outcome.message);
@@ -405,8 +408,8 @@ export function RosterSection({ capture }: RosterSectionProps) {
       open={confirmClear}
       onOpenChange={setConfirmClear}
       title="Clear roster & stored data?"
-      description="This permanently removes every saved result and all roster data stored in this browser. This cannot be undone."
-      confirmLabel="Clear all roster data"
+      description="This permanently removes this schedule's roster, its saved results and its stored run data from this browser. Other schedules keep theirs. This cannot be undone."
+      confirmLabel="Clear this schedule's roster"
       variant="destructive"
       onConfirm={() => void onConfirmClear()}
     />
@@ -436,6 +439,12 @@ export function RosterSection({ capture }: RosterSectionProps) {
       <section className="flex min-w-0 flex-col gap-3" data-testid="roster-section">
         {candidateCallout}
         {loadErrorCallout}
+        {roster.possiblyOtherSchedule ? (
+          <Callout tone="warn" placement="page" data-testid="roster-possibly-other-schedule">
+            This roster was saved before each schedule kept its own, and its dates or people do not
+            match this schedule. It may belong to a different schedule.
+          </Callout>
+        ) : null}
         <WorkingRosterPanel
           ref={panelRef}
           document={roster.document}

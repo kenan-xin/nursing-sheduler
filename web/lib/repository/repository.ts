@@ -66,6 +66,7 @@ import {
   GLOBAL_GENERATION_SCOPE,
   type GenerationScopeKey,
   LEGACY_MIGRATION_KEY,
+  rosterKeys,
   type LeaseOwner,
   type LeaseResult,
   type OptimizeBasisRecordV2,
@@ -93,6 +94,10 @@ import {
  */
 const SCHEDULE_DELETE_TABLES = [
   ...new Set([...SCENARIO_WRITE_TABLES, ...ASSISTANT_WRITE_TABLES]),
+  // Each schedule's own roster rows (plq5 P2).
+  "roster",
+  "snapshot",
+  "meta",
 ] as const;
 
 /** One row of the Recent schedules list. */
@@ -108,6 +113,8 @@ export interface ScheduleSummary {
   heldByOtherTab: boolean;
   /** Empty and never edited (what New leaves behind). Only listed while open here. */
   blank: boolean;
+  /** It has a saved roster of its own (plq5 P2). */
+  hasRoster: boolean;
 }
 
 /** A schedule the limit removed while creating another. */
@@ -116,10 +123,11 @@ export interface RemovedSchedule {
   name: string;
 }
 
-/** Empty, never edited, never named or pinned — nothing a user could miss. */
-function isBlankSchedule(envelope: ScenarioEnvelopeV3): boolean {
+/** Empty, never edited, never named or pinned, no roster — nothing a user could miss. */
+function isBlankSchedule(envelope: ScenarioEnvelopeV3, withRoster: Set<string>): boolean {
   const { scenario } = envelope;
   return (
+    !withRoster.has(envelope.scenarioId) &&
     envelope.documentRevision === 1 &&
     !envelope.title &&
     !envelope.pinned &&
@@ -644,6 +652,10 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
     await db.assistantMessages.where("threadId").anyOf(threadIds).delete();
     await db.tabSelections.where("scenarioId").equals(scenarioId).delete();
     await db.writerLeases.delete(scenarioId);
+    await db.roster.delete(rosterKeys.working(scenarioId));
+    await db.roster.where("key").startsWith(rosterKeys.candidate("", scenarioId)).delete();
+    await db.meta.delete(rosterKeys.currentCandidate(scenarioId));
+    await db.snapshot.filter((row) => row.scenarioId === scenarioId).delete();
     // The migration marker names the schedule the legacy record became. Left pointing
     // at a deleted one, the next boot would read that as an interrupted migration and
     // mint the legacy content (or an empty schedule) again as the newest schedule. So
@@ -669,6 +681,7 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
    */
   async function removeOverLimitInTx(createdId: string, at: Date): Promise<RemovedSchedule[]> {
     const envelopes = await db.scenarioEnvelopes.toArray();
+    const withRoster = await schedulesWithRoster();
     const leases = await db.writerLeases.toArray();
     const held = new Set(
       leases.filter((lease) => isLeaseLive(lease, at)).map((lease) => lease.scenarioId),
@@ -678,7 +691,7 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
 
     const kept: ScenarioEnvelopeV3[] = [];
     for (const envelope of envelopes) {
-      if (removable(envelope) && isBlankSchedule(envelope)) {
+      if (removable(envelope) && isBlankSchedule(envelope, withRoster)) {
         await deleteScheduleInTx(envelope.scenarioId, at);
       } else {
         kept.push(envelope);
@@ -698,6 +711,22 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
       excess -= 1;
     }
     return removed;
+  }
+
+  /**
+   * The schedules holding a roster of their own, working or candidate (plq5 P2). Keys
+   * are `working:<id>` and `candidate:<id>:<jobId>`; the pre-P2 unscoped ones have
+   * no id and are skipped. Caller holds a transaction over `roster`.
+   */
+  async function schedulesWithRoster(): Promise<Set<string>> {
+    const keys = await db.roster.toCollection().primaryKeys();
+    return new Set(
+      keys.flatMap((key) => {
+        const [kind, scenarioId, jobId] = key.split(":");
+        const scoped = kind === "working" ? jobId === undefined : jobId !== undefined;
+        return scoped && scenarioId ? [scenarioId] : [];
+      }),
+    );
   }
 
   /** A metadata-only envelope write: `recordRevision` moves, nothing else does. */
@@ -732,7 +761,7 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
     async listSchedules({ tabId }) {
       return db.transaction(
         "r",
-        [db.scenarioEnvelopes, db.writerLeases, db.tabSelections],
+        [db.scenarioEnvelopes, db.writerLeases, db.tabSelections, db.roster],
         async (): Promise<ScheduleSummary[]> => {
           const at = now();
           const selected = (await db.tabSelections.get(tabId))?.scenarioId ?? null;
@@ -741,9 +770,10 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
               .filter((lease) => isLeaseLive(lease, at) && lease.ownerTabId !== tabId)
               .map((lease) => lease.scenarioId),
           );
+          const withRoster = await schedulesWithRoster();
           const envelopes = await db.scenarioEnvelopes.orderBy("updatedAt").reverse().toArray();
           return envelopes
-            .map((envelope) => ({ envelope, blank: isBlankSchedule(envelope) }))
+            .map((envelope) => ({ envelope, blank: isBlankSchedule(envelope, withRoster) }))
             .filter(({ envelope, blank }) => !blank || envelope.scenarioId === selected)
             .map(({ envelope, blank }) => ({
               scenarioId: envelope.scenarioId,
@@ -753,6 +783,7 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
               createdAt: envelope.createdAt,
               updatedAt: envelope.updatedAt,
               heldByOtherTab: heldElsewhere.has(envelope.scenarioId),
+              hasRoster: withRoster.has(envelope.scenarioId),
               blank,
             }));
         },

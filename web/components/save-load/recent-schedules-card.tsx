@@ -5,13 +5,11 @@
 // the Save & Load head band; the list itself is a square data surface with hairline
 // rows (DESIGN.md: data surfaces stay square).
 //
-// Opening is the same atomic switch as Load, so it keeps Load's P1 roster rule: the
-// one saved roster belongs to the schedule being left and is cleared first (C-23).
-// P2 gives each schedule its own roster and drops that step.
+// Opening is the same atomic switch as Load. Each schedule keeps its own roster
+// (plq5 P2), so nothing is cleared: the one being left keeps its roster too.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { clearRosterDataAndNotify } from "@/lib/roster";
 import { disambiguateScheduleNames, RECENT_SCHEDULES_LIMIT } from "@/lib/scenario";
 import {
   scenarioCommands,
@@ -26,10 +24,6 @@ import { Input } from "@/components/ui/input";
 import { surfaceVariants } from "@/components/ui/surface";
 import { FaPen, FaThumbtack, FaTrash } from "@/components/icons";
 import { cn } from "@/lib/utils";
-
-export const OPEN_ROSTER_CLEAR_FAILED =
-  "The schedule could not be opened: the current roster could not be cleared from this browser. " +
-  "Your current schedule has been kept. Try again.";
 
 const FAILURE_COPY: Record<Extract<ScheduleActionOutcome, { ok: false }>["reason"], string> = {
   "open-here": "This schedule is open here. Open another schedule first, then delete this one.",
@@ -173,11 +167,6 @@ export function RecentSchedulesCard({
 
   const open = (row: Row) =>
     run(async () => {
-      const cleared = await clearRosterDataAndNotify().catch(() => null);
-      if (cleared?.status !== "cleared") {
-        toast.error(OPEN_ROSTER_CLEAR_FAILED);
-        return;
-      }
       const outcome = await scenarioCommands.openSchedule(row.scenarioId);
       if (!outcome.ok) {
         toast.error("Could not open that schedule. Your current schedule has been kept.");
@@ -292,6 +281,7 @@ export function RecentSchedulesCard({
                         <Badge variant="warn">Open in another tab</Badge>
                       ) : null}
                       {row.pinned ? <Badge>Pinned</Badge> : null}
+                      {row.hasRoster ? <Badge>Has roster</Badge> : null}
                     </div>
                     <span className="text-meta text-ink2">
                       {row.title ? `${row.autoName} · ` : ""}
@@ -353,7 +343,7 @@ export function RecentSchedulesCard({
         )}
         <p className="max-w-[60ch] text-meta text-ink3">
           Schedules are stored only in this browser, with real names. Delete a schedule to remove
-          it. Opening another schedule clears the saved roster, as loading a file does.
+          it. Each schedule keeps its own roster.
         </p>
       </div>
       <ConfirmDialog
@@ -362,7 +352,7 @@ export function RecentSchedulesCard({
           if (!next) setDeleting(null);
         }}
         title={`Delete "${deleting?.name ?? ""}"?`}
-        description="Its assistant conversation is deleted too. This cannot be undone. To keep a copy, open it and download it first."
+        description="Its roster and assistant conversation are deleted too. This cannot be undone. To keep a copy, open it and download it first."
         confirmLabel="Delete schedule"
         busyLabel="Deleting…"
         variant="destructive"

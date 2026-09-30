@@ -27,6 +27,7 @@ import { NurseSchedulerDb, NURSE_SCHEDULER_DB_NAME } from "@/lib/repository";
 // out is declared there: defining them here as well would make the import cycle real
 // rather than type-only.
 export type { MetaRow, RosterRow, SnapshotRow } from "@/lib/repository";
+export { rosterKeys } from "@/lib/repository";
 
 /**
  * The persistence database, under the name F1 knows it by.

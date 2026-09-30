@@ -1316,7 +1316,7 @@ test.describe("F5 roster editing — editing + actions + layout", () => {
 
     // Clear (confirmed). The working roster must be gone.
     await page.getByTestId("roster-clear").click();
-    await page.getByRole("button", { name: "Clear all roster data" }).click();
+    await page.getByRole("button", { name: "Clear this schedule's roster" }).click();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
   });
 
@@ -1705,7 +1705,7 @@ test.describe("G3 empty roster — Import and the privacy Clear", () => {
     });
 
     await page.getByTestId("roster-clear").click();
-    await page.getByRole("button", { name: "Clear all roster data" }).click();
+    await page.getByRole("button", { name: "Clear this schedule's roster" }).click();
 
     // The candidate offer goes with it, and no partial-failure notice appears.
     await expect(page.getByTestId("roster-candidate-available")).toBeHidden();
@@ -1897,7 +1897,7 @@ test.describe("F5 Clear — verified purge with no residue", () => {
     });
 
     await page.getByTestId("roster-clear").click();
-    await page.getByRole("button", { name: "Clear all roster data" }).click();
+    await page.getByRole("button", { name: "Clear this schedule's roster" }).click();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
 
     // Both sensitive session keys are provably gone, and Clear did not report a
@@ -1926,7 +1926,7 @@ test.describe("F5 Clear — verified purge with no residue", () => {
     await expect(page.getByTestId("roster-save-saving")).toBeVisible();
 
     await page.getByTestId("roster-clear").click();
-    await page.getByRole("button", { name: "Clear all roster data" }).click();
+    await page.getByRole("button", { name: "Clear this schedule's roster" }).click();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
 
     // Now let the parked write land. The epoch fence must reject it.
@@ -2059,7 +2059,7 @@ test.describe("roster documents — save, clear, import round trip without Optim
     // CLEAR — the confirmed privacy purge. Nothing local survives it, so the
     // import below can only be restoring the file itself.
     await page.getByTestId("roster-clear").click();
-    await page.getByRole("button", { name: "Clear all roster data" }).click();
+    await page.getByRole("button", { name: "Clear this schedule's roster" }).click();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
     await page.reload();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();

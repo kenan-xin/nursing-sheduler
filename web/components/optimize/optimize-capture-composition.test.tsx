@@ -21,7 +21,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { JobResponse } from "@/lib/bff/types";
 import { scenarioCommands, useHotStore, useScenarioStore } from "@/lib/store";
-import { resetScenarioForTest } from "@/lib/store/test-authority";
+import { mirrorOpenScheduleForRoster, resetScenarioForTest } from "@/lib/store/test-authority";
 import {
   toCanonicalScenarioDocument,
   type CanonicalScenarioDocument,
@@ -213,6 +213,7 @@ async function readyStore() {
     rangeStart: "2026-07-01",
     rangeEnd: "2026-07-14",
   });
+  await mirrorOpenScheduleForRoster();
 }
 
 function onlineInfo() {

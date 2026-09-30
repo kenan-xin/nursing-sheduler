@@ -19,7 +19,7 @@
 // revision never cross roster boundaries.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { rosterStorage } from "@/lib/store";
+import { currentRosterStorage } from "@/lib/store";
 import {
   applyCellBatchToSession,
   applyCellEditToSession,
@@ -164,10 +164,13 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
       // Read the clear epoch for this document's lifetime. The queue is created
       // once per working roster; a Clear bumps the epoch and the hook is reset by
       // the caller (reload → new document → this effect re-runs).
-      const epoch = await rosterStorage.getClearEpoch();
+      // The queue keeps THIS schedule's storage for its life (plq5 P2): an edit made
+      // before a switch is saved to the schedule it was made on.
+      const storage = currentRosterStorage();
+      const epoch = await storage.getClearEpoch();
       if (cancelled) return;
       const queue = createAutosaveQueue({
-        storage: rosterStorage,
+        storage,
         clearEpoch: epoch,
         initialRevision: revision,
       });

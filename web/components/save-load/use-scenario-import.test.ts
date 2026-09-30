@@ -37,7 +37,7 @@ vi.mock("@/lib/store", async (orig) => {
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-// C-23: a Load clears the saved roster first. A spy, so order and failure are provable.
+// plq5 P2 (replaces C-23): a Load clears no roster. A spy, so its absence is provable.
 vi.mock("@/lib/roster", async (orig) => {
   const actual = await orig<typeof import("@/lib/roster")>();
   return { ...actual, clearRosterDataAndNotify: vi.fn() };
@@ -47,7 +47,7 @@ import { prepareScenarioLoad } from "@/lib/scenario";
 import { loadScenario, isScenarioSliceEmpty } from "@/lib/store";
 import { clearRosterDataAndNotify } from "@/lib/roster";
 import { toast } from "sonner";
-import { LOAD_ROSTER_CLEAR_FAILED, useScenarioImport } from "./use-scenario-import";
+import { useScenarioImport } from "./use-scenario-import";
 
 const clearRosterMock = clearRosterDataAndNotify as unknown as Mock;
 
@@ -253,24 +253,13 @@ describe("useScenarioImport — guard warnings computed before load", () => {
   });
 });
 
-describe("useScenarioImport — Load clears the saved roster (C-23)", () => {
-  it("clears the roster before the switch", async () => {
+describe("useScenarioImport — Load keeps every saved roster (plq5 P2)", () => {
+  it("switches without clearing: the roster stays with the schedule being left", async () => {
     stageResult(targetWithCounts([]));
     const { result } = renderHook(() => useScenarioImport());
     await act(async () => result.current.handleFile("<yaml>"));
-    expect(clearRosterMock).toHaveBeenCalledOnce();
-    expect(clearRosterMock.mock.invocationCallOrder[0]).toBeLessThan(
-      loadScenarioMock.mock.invocationCallOrder[0]!,
-    );
-  });
-
-  it("an unverified clear loads nothing and says so", async () => {
-    clearRosterMock.mockResolvedValue({ status: "failed" });
-    stageResult(targetWithCounts([]));
-    const { result } = renderHook(() => useScenarioImport());
-    await act(async () => result.current.handleFile("<yaml>"));
-    expect(loadScenarioMock).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith(LOAD_ROSTER_CLEAR_FAILED);
+    expect(loadScenarioMock).toHaveBeenCalledOnce();
+    expect(clearRosterMock).not.toHaveBeenCalled();
   });
 
   it("an Edit-YAML apply keeps the roster", async () => {
@@ -339,7 +328,7 @@ describe("useScenarioImport — an older file with issues still loads (C-22)", (
     });
     expect(loadScenarioMock).not.toHaveBeenCalled();
     await act(async () => result.current.confirm!.onContinue());
-    expect(clearRosterMock).toHaveBeenCalledOnce();
+    expect(clearRosterMock).not.toHaveBeenCalled();
     expect(loadScenarioMock).toHaveBeenCalledOnce();
     expect(result.current.loadIssues).toEqual([ISSUE]);
   });

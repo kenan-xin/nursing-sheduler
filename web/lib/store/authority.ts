@@ -43,6 +43,7 @@ import {
   GLOBAL_GENERATION_SCOPE,
   isLeaseLive,
   isRepositoryError,
+  migrateLegacyRosterSlot,
   migrateLegacyScenarioRecord,
   NurseSchedulerDb,
   RepositoryError,
@@ -700,6 +701,11 @@ export class ScenarioAuthority {
         { reason: migrated.reason },
       );
     }
+
+    // plq5 P2: hand the pre-P2 single roster slot to its schedule before anything
+    // reads a schedule's roster. A failure keeps the rows where they are, for the
+    // next boot; it never blocks bring-up.
+    await migrateLegacyRosterSlot(this.db).catch(() => undefined);
 
     const era = this.beginEra();
     const context = await this.repository.readTabContext(this.tabId);

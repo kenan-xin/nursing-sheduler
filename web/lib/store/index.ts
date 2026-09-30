@@ -119,6 +119,7 @@ export {
   type WorkingEditOutcome,
   type WorkingPromotionOutcome,
 } from "./roster-storage";
+export { currentRosterStorage, rosterStorageFor } from "./roster-scope";
 
 export { commitPaintGesture } from "./paint";
 

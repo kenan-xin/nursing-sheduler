@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ScenarioPersistenceDb } from "@/lib/store/dexie-storage";
 import { createRosterStorageForDb, type RosterStorage } from "@/lib/store/roster-storage";
 import { rosterStorage as defaultStorage } from "@/lib/store/roster-storage";
+import { useAuthorityStore } from "@/lib/store";
 import {
   buildStagedSubmission,
   getRosterCaptureGate,
@@ -827,5 +828,34 @@ describe("F5 proof · clearRosterDataAndNotify orchestrator (default storage)", 
 
     // The working roster is gone.
     expect(await defaultStorage.readWorking<RosterDocument>()).toBeNull();
+  });
+});
+
+describe("plq5 P2 — the Roster screen's Clear is the OPEN schedule's", () => {
+  afterEach(() => useAuthorityStore.setState({ scenarioId: null }));
+
+  it("clearing June keeps April's and May's rosters", async () => {
+    const promote = async (id: string) => {
+      const scoped = defaultStorage.forScenario(id);
+      await scoped.promoteDocumentToWorking({
+        document: { tag: id },
+        validate: (document) => ({ ok: true as const, document }),
+        expectedWorkingRevision: null,
+        expectedClearEpoch: await scoped.getClearEpoch(),
+      });
+    };
+    for (const id of ["april", "may", "june"]) await promote(id);
+    useAuthorityStore.setState({ scenarioId: "june" });
+
+    const outcome = await clearRosterDataAndNotify({
+      sessionStorage: fakeSessionStorage(),
+      clearViewMetadata: () => true,
+    });
+
+    expect(outcome.status).toBe("cleared");
+    expect(await defaultStorage.forScenario("june").readWorking()).toBeNull();
+    expect(await defaultStorage.forScenario("april").readWorking()).not.toBeNull();
+    expect(await defaultStorage.forScenario("may").readWorking()).not.toBeNull();
+    await defaultStorage.clearRosterData();
   });
 });

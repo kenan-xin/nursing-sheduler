@@ -761,6 +761,8 @@ describe("RosterSection — keyed dismissal", () => {
     expect(recording.refs[0]).toEqual({
       jobId: JOB_A,
       candidateVersion: pointer.candidateVersion,
+      // No schedule is open in this suite, so the unscoped slot (plq5 P2).
+      scenarioId: null,
     });
   });
 
@@ -1042,7 +1044,7 @@ describe("RosterSection — empty-state Clear", () => {
     await waitFor(() => expect(screen.getByTestId("roster-clear")).toBeDefined());
     fireEvent.click(screen.getByTestId("roster-clear"));
     await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: /clear all roster data/i }));
+    fireEvent.click(screen.getByRole("button", { name: /clear this schedule's roster/i }));
 
     await waitFor(() => expect(screen.queryByTestId("roster-candidate-available")).toBeNull());
     const residue = await readResidue();
@@ -1067,7 +1069,7 @@ describe("RosterSection — empty-state Clear", () => {
     await waitFor(() => expect(screen.getByTestId("roster-clear")).toBeDefined());
     fireEvent.click(screen.getByTestId("roster-clear"));
     await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: /clear all roster data/i }));
+    fireEvent.click(screen.getByRole("button", { name: /clear this schedule's roster/i }));
 
     // Never a silent privacy success: the failure is stated, and the control is
     // still mounted so the user can try again.

@@ -20,6 +20,7 @@ import {
   useAuthorityStore,
   type OwnershipHint,
 } from "./authority";
+import { getRosterDb } from "./dexie-storage";
 import { createHotStore, type HotStore } from "./hot-store";
 import { createScenarioProjection, type ScenarioProjection } from "./scenario-store";
 import {
@@ -181,6 +182,16 @@ export function resetProjection(): void {
  */
 export async function resetScenarioForTest(): Promise<TestAuthority> {
   return installTestAuthority();
+}
+
+/**
+ * Mirror the open schedule's envelope into the database the app's roster storage
+ * opens (plq5 P2). Production shares one database; this harness gives the authority
+ * a fresh one per test, so without this a scoped candidate commit finds no schedule.
+ */
+export async function mirrorOpenScheduleForRoster(): Promise<void> {
+  const scenarioId = useAuthorityStore.getState().scenarioId;
+  if (scenarioId !== null) await getRosterDb().scenarioEnvelopes.put({ scenarioId } as never);
 }
 
 /** Drop the singleton binding so the next `getScenarioAuthority()` rebuilds it. */
