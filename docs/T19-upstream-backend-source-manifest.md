@@ -318,6 +318,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `tests/test_leave_daystate.py` | patched | `c2367ad6ecfd` | `99db-B5-leave-satisfies-hard-off.patch` |
 | `tests/test_loader.py` | verbatim | `52e8a5289bd2` |  |
 | `tests/test_models_validation.py` | verbatim | `7a3bc9fb4c3f` |  |
+| `tests/test_negative_succession_score.py` | v2-only |  | negative soft succession score equals hand count (bead 304s) |
 | `tests/test_optimize_basis.py` | v2-only |  | P8 basis |
 | `tests/test_optimize_basis_admission.py` | v2-only |  | P8 basis admission |
 | `tests/test_optimize_job_backends.py` | verbatim | `c6586bafd54a` |  |
