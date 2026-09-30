@@ -115,10 +115,11 @@ export function versionMismatchCopy(
 /** Title/lead for the replacement half of the combined load confirmation. */
 export const REPLACEMENT_CONFIRM_TITLE = "Replace your current workspace?";
 // A Load mints a new scenario identity, so Undo cannot reach back across it
-// (`lib/store/lifecycle.ts`). The copy must not promise otherwise (C-05).
+// (`lib/store/lifecycle.ts`). The copy must not promise otherwise (C-05). Since
+// plq5 P2 the schedule being replaced, roster included, stays in Recent schedules.
 export const REPLACEMENT_CONFIRM_BODY =
-  "This replaces your current schedule and cannot be undone. Download a copy first. " +
-  "The current roster will also be cleared.";
+  "This opens the file as a new schedule. Your current schedule stays in Recent schedules, " +
+  "with its roster, where you can open it again.";
 
 export interface LoadConfirmCopy {
   title: string;

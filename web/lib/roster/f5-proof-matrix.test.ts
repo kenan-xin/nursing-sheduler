@@ -14,6 +14,7 @@ import { rosterStorage as defaultStorage } from "@/lib/store/roster-storage";
 import { useAuthorityStore } from "@/lib/store";
 import {
   buildStagedSubmission,
+  createRosterCapture,
   getRosterCaptureGate,
   OPTIMIZE_RETIRE_PENDING_STORAGE_KEY,
   OPTIMIZE_SESSION_STORAGE_KEY,
@@ -857,5 +858,69 @@ describe("plq5 P2 — the Roster screen's Clear is the OPEN schedule's", () => {
     expect(await defaultStorage.forScenario("april").readWorking()).not.toBeNull();
     expect(await defaultStorage.forScenario("may").readWorking()).not.toBeNull();
     await defaultStorage.clearRosterData();
+  });
+});
+
+describe("plq5 P2 — clearing one schedule does not fence another's writes", () => {
+  /** Two schedules in one database, each with its own roster storage. */
+  async function twoSchedules() {
+    const db = new ScenarioPersistenceDb(freshDbName());
+    await db.scenarioEnvelopes.bulkPut([{ scenarioId: "a" }, { scenarioId: "b" }] as never);
+    const root = createRosterStorageForDb(() => db);
+    return { root, a: root.forScenario("a"), b: root.forScenario("b") };
+  }
+
+  it("after a Clear of A, B's autosave still saves and B's in-flight capture still commits", async () => {
+    const { root, a, b } = await twoSchedules();
+    const { document, revision } = await promoteFixture(b);
+    await promoteFixture(a);
+    // Both B flows start BEFORE the Clear of A, under the epoch they read then.
+    const epoch = await b.getClearEpoch();
+    const queue = createAutosaveQueue({ storage: b, clearEpoch: epoch, initialRevision: revision });
+    const staged = await stageSubmissionSnapshot({
+      ownerId: "owner-b",
+      payload: buildStagedSubmission({
+        canonicalYaml: "people: [P1]",
+        reverseMap: [["P1", "Alice"]],
+        schemaVersion: ROSTER_SUBMISSION_VERSION,
+      }),
+      store: b,
+    });
+    const fetched = Promise.withResolvers<unknown>();
+    const asked = Promise.withResolvers<void>();
+    const gate = createRosterCapture({
+      store: root,
+      fetchRoster: () => {
+        asked.resolve();
+        return fetched.promise;
+      },
+      buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
+    });
+    const capture = gate.capture({ jobId: "job-b", capture: staged, frozenXlsx: new Blob(["x"]) });
+    // The capture has read its epoch and is waiting on /roster when A is cleared.
+    await asked.promise;
+
+    expect(await a.clearRosterData()).toMatchObject({ status: "cleared" });
+    fetched.resolve({ solvedDays: [["N"]] });
+
+    const edited: RosterDocument = { ...document, edits: [] };
+    expect((await queue.enqueue(edited)).status).toBe("written");
+    expect((await capture).state.status).toBe("committed");
+    expect((await b.readCurrentCandidate())?.jobId).toBe("job-b");
+    // A itself IS fenced: a write begun before its own Clear cannot repopulate it.
+    expect(
+      await a.writeWorkingEdit({ document, expectedRevision: null, expectedClearEpoch: epoch }),
+    ).toMatchObject({ status: "stale-epoch" });
+    queue.dispose();
+  });
+
+  it("an unscoped Clear still fences every schedule", async () => {
+    const { root, b } = await twoSchedules();
+    const { document, revision } = await promoteFixture(b);
+    const epoch = await b.getClearEpoch();
+    expect(await root.clearRosterData()).toMatchObject({ status: "cleared" });
+    expect(
+      await b.writeWorkingEdit({ document, expectedRevision: revision, expectedClearEpoch: epoch }),
+    ).toMatchObject({ status: "stale-epoch" });
   });
 });

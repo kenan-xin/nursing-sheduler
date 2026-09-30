@@ -92,6 +92,14 @@ const META_NEXT_ORDINAL = "nextSubmissionOrdinal";
 const META_NEXT_CANDIDATE_VERSION = "nextCandidateVersion";
 const META_CURRENT_CANDIDATE = "currentCandidate";
 const META_CLEAR_EPOCH = "clearEpoch";
+/**
+ * The epoch value at the last UNSCOPED (every-schedule) Clear. Absent on a
+ * database no Clear has written since plq5, where the last Clear was global, so
+ * it reads as the current epoch.
+ */
+const META_GLOBAL_CLEAR_AT = "clearEpoch:global";
+/** The epoch value at the last Clear of one schedule (plq5 P2). */
+const scheduleClearAtKey = (scenarioId: string) => `clearEpoch:${scenarioId}`;
 
 /** The first ordinal handed out by a fresh database. */
 const FIRST_SUBMISSION_ORDINAL = 1;
@@ -290,17 +298,31 @@ async function writeMeta<TValue>(
 }
 
 /**
- * The epoch fence. Returns a `stale-epoch` outcome when Clear has advanced the
- * epoch since the caller started, and `null` when the operation may proceed.
+ * The epoch fence. Returns a `stale-epoch` outcome when a Clear that REACHES this
+ * write has happened since the caller started, and `null` when it may proceed.
  * Always evaluated inside the mutating transaction, so no purge can interleave
  * between the check and the write.
+ *
+ * plq5 P2: every Clear advances the one origin-wide epoch (so a token is still a
+ * single number, and `getClearEpoch` answers the same in every scope), but only
+ * the Clears that purge this write's rows fence it: an unscoped Clear fences
+ * everything, a Clear of one schedule fences only that schedule's writes. Without
+ * the distinction, clearing schedule A silently discarded another tab's autosaves
+ * and in-flight capture for schedule B.
  */
 async function fenceEpoch(
   db: ScenarioPersistenceDb,
   expectedClearEpoch: number,
+  scenarioId?: string,
 ): Promise<StaleEpochOutcome | null> {
   const currentEpoch = await readMeta(db, META_CLEAR_EPOCH, 0);
-  return currentEpoch === expectedClearEpoch ? null : { status: "stale-epoch", currentEpoch };
+  const globalAt = await readMeta(db, META_GLOBAL_CLEAR_AT, currentEpoch);
+  const scheduleAt =
+    scenarioId === undefined ? 0 : await readMeta(db, scheduleClearAtKey(scenarioId), 0);
+  const reached = Math.max(globalAt, scheduleAt) > expectedClearEpoch;
+  return reached || expectedClearEpoch > currentEpoch
+    ? { status: "stale-epoch", currentEpoch }
+    : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -524,7 +546,7 @@ export function createRosterStorageForDb(
 
     const handle = db();
     return handle.transaction("rw", handle.roster, handle.meta, async () => {
-      const stale = await fenceEpoch(handle, input.expectedClearEpoch);
+      const stale = await fenceEpoch(handle, input.expectedClearEpoch, scenarioId);
       if (stale) return stale;
 
       if (input.source) {
@@ -578,7 +600,7 @@ export function createRosterStorageForDb(
       const handle = db();
       const key = submissionSnapshotKey(input.ownerId);
       return handle.transaction("rw", handle.snapshot, handle.meta, async () => {
-        const stale = await fenceEpoch(handle, input.expectedClearEpoch);
+        const stale = await fenceEpoch(handle, input.expectedClearEpoch, scenarioId);
         if (stale) return stale;
 
         // Immutability first: an existing snapshot wins and no ordinal is spent.
@@ -618,7 +640,7 @@ export function createRosterStorageForDb(
       const handle = db();
       const key = submissionSnapshotKey(input.ownerId);
       return handle.transaction("rw", handle.snapshot, handle.meta, async () => {
-        const stale = await fenceEpoch(handle, input.expectedClearEpoch);
+        const stale = await fenceEpoch(handle, input.expectedClearEpoch, scenarioId);
         if (stale) return stale;
         const existing = await handle.snapshot.get(key);
         if (!existing) return { status: "already-absent" as const };
@@ -647,7 +669,7 @@ export function createRosterStorageForDb(
           ? [handle.roster, handle.meta]
           : [handle.roster, handle.meta, handle.scenarioEnvelopes];
       return handle.transaction("rw", tables, async () => {
-        const stale = await fenceEpoch(handle, input.expectedClearEpoch);
+        const stale = await fenceEpoch(handle, input.expectedClearEpoch, scenarioId);
         if (stale) return stale;
         if (scenarioId !== undefined && !(await handle.scenarioEnvelopes.get(scenarioId))) {
           // Nothing written: the audience (the schedule itself) is gone.
@@ -788,7 +810,7 @@ export function createRosterStorageForDb(
       const handle = db();
       const key = candidateKey(input.jobId);
       return handle.transaction("rw", handle.roster, handle.meta, async () => {
-        const stale = await fenceEpoch(handle, input.expectedClearEpoch);
+        const stale = await fenceEpoch(handle, input.expectedClearEpoch, scenarioId);
         if (stale) return stale;
 
         const existing = await handle.roster.get(key);
@@ -820,7 +842,7 @@ export function createRosterStorageForDb(
     }): Promise<WorkingEditOutcome> {
       const handle = db();
       return handle.transaction("rw", handle.roster, handle.meta, async () => {
-        const stale = await fenceEpoch(handle, input.expectedClearEpoch);
+        const stale = await fenceEpoch(handle, input.expectedClearEpoch, scenarioId);
         if (stale) return stale;
 
         const existing = await handle.roster.get(workingKey);
@@ -921,7 +943,8 @@ export function createRosterStorageForDb(
       //
       // plq5 P2: a SCOPED instance purges only its own schedule's rows (working,
       // candidates, pointer, the snapshots staged from it); the unscoped one purges
-      // every schedule's. The epoch bump stays origin-wide either way.
+      // every schedule's. Each records the epoch it reached, so the fence rejects
+      // exactly the writes whose rows it purged (see `fenceEpoch`).
       const rosterRows = () =>
         handle.roster.filter(
           (row) =>
@@ -932,7 +955,8 @@ export function createRosterStorageForDb(
       const snapshotRows = () =>
         handle.snapshot.filter((row) => scenarioId === undefined || row.scenarioId === scenarioId);
       return handle.transaction("rw", handle.roster, handle.snapshot, handle.meta, async () => {
-        const epoch = (await readMeta(handle, META_CLEAR_EPOCH, 0)) + 1;
+        const previous = await readMeta(handle, META_CLEAR_EPOCH, 0);
+        const epoch = previous + 1;
 
         // The ordinal and candidate-version counters survive: they hold no
         // personal data, and resetting them would let a pre-Clear submission look
@@ -947,6 +971,18 @@ export function createRosterStorageForDb(
           await handle.meta.delete(pointerKey);
         }
         await writeMeta(handle, META_CLEAR_EPOCH, epoch);
+        if (scenarioId === undefined) {
+          await writeMeta(handle, META_GLOBAL_CLEAR_AT, epoch);
+        } else {
+          // Pin the last global Clear before the epoch moves past it, so an absent
+          // marker can no longer read as "the current epoch" for other schedules.
+          await writeMeta(
+            handle,
+            META_GLOBAL_CLEAR_AT,
+            await readMeta(handle, META_GLOBAL_CLEAR_AT, previous),
+          );
+          await writeMeta(handle, scheduleClearAtKey(scenarioId), epoch);
+        }
 
         // Verified inside the transaction, so the counts describe exactly the
         // state this commit makes durable. Clear reports failure if anything
