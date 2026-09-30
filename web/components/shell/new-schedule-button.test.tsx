@@ -300,10 +300,10 @@ describe("StartOverCard — the 87-person example", () => {
     await waitFor(() => expect(screen.getByTestId("new-schedule-example")).not.toBeDisabled());
   });
 
-  it("rides the normal import path, not the empty reset — the previous run's roster residue survives", async () => {
-    // The coordinator's constraint: the example does whatever a normal import does
-    // (replace the SCENARIO) and no invented residue cut. So a committed roster from
-    // the previous run is left exactly as the Upload path would leave it.
+  it("rides the normal import path — the previous run's roster is cleared, as on Upload", async () => {
+    // The example does whatever a normal import does. Since ymmp (audit C-23) every
+    // Load clears the saved roster first, so the previous run's roster does not
+    // survive into the example.
     const document = await fixtureRosterDocument();
     const epoch = await rosterStorage.getClearEpoch();
     await rosterStorage.commitCandidate<RosterDocument>({
@@ -319,7 +319,7 @@ describe("StartOverCard — the 87-person example", () => {
     await waitFor(async () => {
       expect((await snapshot()).staff.map((person) => person.id)).toEqual(["Alice", "Bob"]);
     });
-    expect(await rosterStorage.readWorking<RosterDocument>()).not.toBeNull();
-    expect(await rosterStorage.readCandidate<RosterDocument>("job-example")).not.toBeNull();
+    expect(await rosterStorage.readWorking<RosterDocument>()).toBeNull();
+    expect(await rosterStorage.readCandidate<RosterDocument>("job-example")).toBeNull();
   });
 });
