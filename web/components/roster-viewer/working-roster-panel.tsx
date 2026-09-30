@@ -18,7 +18,7 @@
 // quota-failed replacement preserves both.
 
 import { forwardRef, useCallback, useImperativeHandle, useState } from "react";
-import { rosterStorage } from "@/lib/store";
+import { currentRosterStorage } from "@/lib/store";
 import {
   clearRosterDataAndNotify,
   importRosterFileToWorking,
@@ -31,6 +31,7 @@ import type { RosterImportOutcome, WorkingPromotionOutcome } from "@/lib/roster"
 import { useRosterChangeRequest } from "./use-roster-change-request";
 import { Callout } from "@/components/optimize/callout";
 import { ConfirmDialog } from "@/components/shell/confirm-dialog";
+import { ReplaceRosterDialog } from "./replace-roster-dialog";
 import { RosterActions } from "./roster-actions";
 import { RosterContentWidthProvider } from "./roster-content-width";
 import { describeReplacementFailure, ROSTER_CLEAR_PARTIAL_MESSAGE } from "./replacement-outcome";
@@ -49,6 +50,8 @@ type PendingReplacement =
 export interface WorkingRosterPanelHandle {
   /** Coordinate a candidate Load through the save authority and promote it. */
   requestLoadCandidate(pointer: CurrentCandidatePointer): Promise<void>;
+  /** The roster on screen, including edits not yet autosaved. */
+  viewedDocument(): RosterDocument;
 }
 
 export interface WorkingRosterPanelProps {
@@ -79,17 +82,18 @@ export const WorkingRosterPanel = forwardRef<WorkingRosterPanelHandle, WorkingRo
     const performPromotion = useCallback(
       async (pending: PendingReplacement): Promise<void> => {
         setActionError(null);
-        const epoch = await rosterStorage.getClearEpoch();
-        const workingRow = await rosterStorage.readWorking<RosterDocument>();
+        const storage = currentRosterStorage();
+        const epoch = await storage.getClearEpoch();
+        const workingRow = await storage.readWorking<RosterDocument>();
         const outcome: WorkingPromotionOutcome | RosterImportOutcome =
           pending.kind === "load"
             ? await promoteCandidateRosterToWorking(pending.pointer, {
-                storage: rosterStorage,
+                storage,
                 expectedWorkingRevision: workingRow?.revision ?? null,
                 expectedClearEpoch: epoch,
               })
             : await importRosterFileToWorking(pending.file, {
-                storage: rosterStorage,
+                storage,
                 expectedWorkingRevision: workingRow?.revision ?? null,
                 expectedClearEpoch: epoch,
               });
@@ -137,8 +141,9 @@ export const WorkingRosterPanel = forwardRef<WorkingRosterPanelHandle, WorkingRo
         async requestLoadCandidate(pointer: CurrentCandidatePointer) {
           await coordinate({ kind: "load", pointer });
         },
+        viewedDocument: () => editing.editedDocument,
       }),
-      [coordinate],
+      [coordinate, editing.editedDocument],
     );
 
     // Import entry — always confirms replacement of an existing roster (the
@@ -230,18 +235,18 @@ export const WorkingRosterPanel = forwardRef<WorkingRosterPanelHandle, WorkingRo
           open={confirmClear}
           onOpenChange={setConfirmClear}
           title="Clear roster & stored data?"
-          description="This permanently removes the roster on screen, every saved result, and all roster data stored in this browser. This cannot be undone."
-          confirmLabel="Clear all roster data"
+          description="This permanently removes this schedule's roster on screen, its saved results and its stored run data from this browser. Other schedules keep theirs. This cannot be undone."
+          confirmLabel="Clear this schedule's roster"
           variant="destructive"
           onConfirm={() => void onConfirmClear()}
         />
-        <ConfirmDialog
+        <ReplaceRosterDialog
           open={confirmReplace !== null}
           onOpenChange={(open) => !open && setConfirmReplace(null)}
-          title="Replace the roster on screen?"
           description={replaceDescription}
-          confirmLabel="Replace roster"
+          viewed={editing.editedDocument}
           onConfirm={() => void onConfirmReplace()}
+          onSaveError={setActionError}
         />
         <ConfirmDialog
           open={confirmDiscard !== null}

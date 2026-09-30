@@ -29,6 +29,8 @@ export {
   getSupportLabel,
   isRangeSupported,
   getHolidaysInRange,
+  holidayCoverageWarning,
+  missingHolidayYears,
 } from "./holidays-sg";
 
 export {
@@ -45,7 +47,8 @@ export {
   SINGAPORE_NONWORKDAY_GROUP_ID,
   SINGAPORE_PH_GROUP_ID,
   buildSingaporeHolidayGroups,
+  holidayImportApplied,
   replaceDateGroups,
 } from "./holiday-groups";
 
-export { type RangeChangeOptions, applyRangeChange } from "./range-cascade";
+export { type RangeChangeOptions, applyRangeChange, countRangeRemovals } from "./range-cascade";

@@ -38,9 +38,9 @@ import {
 } from "./card-fields";
 import { isEmptyRefField, pruneRefTree, type RefLeaf, type RefTree } from "./reference-tree";
 
-/** Prune deleted ids from every domain-referencing field on one card. For a
- *  covering, an emptied `date` is *omitted* (= all dates, DL08 / finding #18),
- *  never left as `date: []`. */
+/** Prune deleted ids from every domain-referencing field on one card. An emptied
+ *  `date` stays empty so FR-RI-11 drops the card: omitting it would widen the rule
+ *  to every date (bug hunt A-06). */
 function pruneCardFields<T extends object>(
   card: T,
   kind: CardKind,
@@ -66,8 +66,14 @@ function pruneCardFields<T extends object>(
       );
     }
   }
-  if (kind === "coverings" && domain === "date" && isEmptyRefField(next.date as RefTree)) {
-    delete next.date;
+  // A sequence that loses a whole step is a different rule ("no N then D" would
+  // become "never N"), so empty the pattern and let FR-RI-11 drop the card.
+  if (
+    kind === "successions" &&
+    Array.isArray(next.pattern) &&
+    next.pattern.length < (card as { pattern: unknown[] }).pattern.length
+  ) {
+    next.pattern = [];
   }
   return next as T;
 }
@@ -245,6 +251,82 @@ export function deleteEntity(
 /** Whether `id` names an authored date group (not a generated in-range date id). */
 function isAuthoredDateGroup(state: ScenarioUiState, id: EntityRef): boolean {
   return state.dateGroups.some((group) => group.id === id);
+}
+
+/** What a delete drops: whole rules, request cells (leave pins apart), history
+ *  entries, and per-date staffing exceptions (requirement overrides). */
+export interface DeleteImpact {
+  rules: number;
+  /** The descriptions of the dropped rules that have one, so the confirm names them. */
+  ruleNames: string[];
+  requests: number;
+  leave: number;
+  history: number;
+  overrides: number;
+}
+
+/** Count what {@link deleteEntity} would drop, by running it and diffing — so the
+ *  confirm can never disagree with the cascade. */
+export function deleteImpact(
+  state: ScenarioUiState,
+  domain: EntityDomain,
+  id: EntityRef,
+): DeleteImpact {
+  const next = deleteEntity(state, domain, id);
+  const rules = (s: ScenarioUiState) =>
+    Object.values(s.cardsByKind).reduce((sum, cards) => sum + cards.length, 0);
+  const history = (s: ScenarioUiState) =>
+    s.staff.reduce((sum, person) => sum + (person.history?.length ?? 0), 0);
+  const leave = (s: ScenarioUiState) => s.reqData.filter((cell) => cell.kind === "leave").length;
+  const overrides = countDateExceptions;
+  const leaveDropped = leave(state) - leave(next);
+  const kept = new Set(
+    Object.values(next.cardsByKind)
+      .flat()
+      .map((card) => card.uid),
+  );
+  return {
+    rules: rules(state) - rules(next),
+    ruleNames: Object.values(state.cardsByKind)
+      .flat()
+      .filter((card) => !kept.has(card.uid) && card.description?.trim())
+      .map((card) => card.description!.trim()),
+    requests: state.reqData.length - next.reqData.length - leaveDropped,
+    leave: leaveDropped,
+    history: history(state) - history(next),
+    // Overrides on a DROPPED rule go with it; count only those on a surviving one.
+    overrides: overrides(state) - overrides(next) - droppedOverrides(state, next),
+  };
+}
+
+/** Per-date staffing exceptions (requirement overrides) across every requirement. */
+export function countDateExceptions(state: ScenarioUiState): number {
+  return state.cardsByKind.requirements.reduce(
+    (sum, card) => sum + (card.requiredNumPeopleOverrides?.length ?? 0),
+    0,
+  );
+}
+
+/** Overrides carried by requirement cards the delete removed entirely. */
+function droppedOverrides(state: ScenarioUiState, next: ScenarioUiState): number {
+  const kept = new Set(next.cardsByKind.requirements.map((card) => card.uid));
+  return state.cardsByKind.requirements
+    .filter((card) => !kept.has(card.uid))
+    .reduce((sum, card) => sum + (card.requiredNumPeopleOverrides?.length ?? 0), 0);
+}
+
+/** The non-zero parts of an impact as confirm lines ("3 rules", "4 history entries"). */
+export function describeDeleteImpact(impact: DeleteImpact): string[] {
+  const part = (count: number, one: string, many: string) =>
+    count > 0 ? [`${count} ${count === 1 ? one : many}`] : [];
+  const names = impact.ruleNames.map((name) => `“${name}”`).join(", ");
+  return [
+    ...part(impact.rules, "rule", "rules").map((line) => (names ? `${line} (${names})` : line)),
+    ...part(impact.requests, "request", "requests"),
+    ...part(impact.leave, "leave pin", "leave pins"),
+    ...part(impact.history, "history entry", "history entries"),
+    ...part(impact.overrides, "date exception", "date exceptions"),
+  ];
 }
 
 /** Acceptance-matrix alias for {@link deleteEntity} (`applyDelete(state, …)`). */

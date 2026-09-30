@@ -73,6 +73,19 @@ afterEach(() => {
   cleanup();
 });
 
+describe("CountCardList — stale hours badge (T2)", () => {
+  it("marks a contract whose hours lag a shift length change", () => {
+    render(
+      <CountCardList
+        counts={[exactContractedCard]}
+        {...NOOP_PROPS}
+        staleHoursUids={new Set(["c-exact"])}
+      />,
+    );
+    expect(screen.getByTestId("count-stale-hours-badge-0")).toHaveTextContent("Hours out of date");
+  });
+});
+
 describe("CountCardList — uncredited-leave saved badge (qq0.23d)", () => {
   // A second marked card, identical body but distinct uid, models a duplicate.
   const exactContractedDup: CountCard = { ...exactContractedCard, uid: "c-exact-dup" };
@@ -182,6 +195,18 @@ describe("CountCardList — contracted-hours human-hours summary (ds1)", () => {
     expect(within(card).getByText("N · 2")).toBeTruthy();
     expect(within(card).queryByText("2h 30m")).toBeNull();
     expect(within(card).queryByText("1h")).toBeNull();
+  });
+});
+
+describe("CountCardList — convert-to-generic confirm (C3)", () => {
+  it("says the values stay in half-hours, for an Exact and a Range contract", () => {
+    for (const card of [exactContractedCard, rangeContractedCard]) {
+      render(<CountCardList counts={[card]} {...NOOP_PROPS} convertToGenericUid={card.uid} />);
+      expect(screen.getByTestId("count-convert-generic-confirm-0").textContent).toContain(
+        "Values stay in half-hours (320 = 160h).",
+      );
+      cleanup();
+    }
   });
 });
 

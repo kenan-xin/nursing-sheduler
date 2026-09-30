@@ -92,6 +92,7 @@ const BANNER_CLASS =
 export function OwnershipBanner() {
   const ownership = useAuthorityStore((s) => s.ownership);
   const reloadRequired = useAuthorityStore((s) => s.reloadRequired);
+  const peerLoaded = useAuthorityStore((s) => s.peerLoadedScenarioId !== null);
   const [confirming, setConfirming] = useState(false);
 
   if (reloadRequired) {
@@ -109,6 +110,42 @@ export function OwnershipBanner() {
         </div>
         <Button type="button" variant="secondary" size="sm" onClick={() => location.reload()}>
           Reload
+        </Button>
+      </div>
+    );
+  }
+
+  if (peerLoaded) {
+    // Another tab moved on to a New or Loaded schedule. Editing here would silently
+    // take the old one back, so changes stay off until the user switches.
+    return (
+      <div
+        data-testid="ownership-banner"
+        data-ownership="peer-loaded"
+        role="status"
+        className={BANNER_CLASS}
+      >
+        <FaTriangleExclamation className="mt-0.5 size-4 shrink-0 text-warn" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 text-meta font-semibold text-warnink">
+            Another tab loaded a different schedule.
+          </div>
+          <p className="text-meta text-warnink">
+            Changes are turned off here, so they cannot land on the schedule that tab left. You can
+            still look through it.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          data-testid="ownership-switch"
+          onClick={async () => {
+            const outcome = await scenarioCommands.followPeerLoad();
+            if (!outcome.ok) toast.error("Could not switch schedules — try again");
+          }}
+        >
+          Switch
         </Button>
       </div>
     );

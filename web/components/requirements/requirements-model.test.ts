@@ -351,6 +351,22 @@ describe("validateRequirementForm (spec 05 Shift Type Requirements validation ta
     );
   });
 
+  it("refuses an infinite weight beside a preferred number (core rejects it)", () => {
+    for (const weight of [-Infinity, Infinity]) {
+      const draft = form({
+        shiftType: ["D"],
+        qualifiedPeople: ["ALL"],
+        date: ["ALL"],
+        requiredNumPeople: 3,
+        preferredNumPeople: 5,
+        weight,
+      });
+      expect(validateRequirementForm(draft, domain).weight).toBe(
+        REQUIREMENT_MESSAGES.weightInfinite,
+      );
+    }
+  });
+
   it("weight invalid (raw string) message when preferred differs", () => {
     const invalid = form({
       shiftType: ["D"],
@@ -361,7 +377,7 @@ describe("validateRequirementForm (spec 05 Shift Type Requirements validation ta
       weight: "abc",
     });
     expect(validateRequirementForm(invalid, domain).weight).toBe(
-      REQUIREMENT_MESSAGES.weightInvalid,
+      `Not a number. ${REQUIREMENT_MESSAGES.weightInvalid}`,
     );
   });
 
@@ -489,6 +505,14 @@ describe("requirementToForm (FR-PR-26 load — null/undefined → [ALL])", () =>
       weight: -1,
     };
     expect(requirementToForm(card, domain).preferredNumPeople).toBe("");
+  });
+
+  it("opens the dial at the default weight, not the inert -1, when preferred is absent", () => {
+    const card: RequirementCard = { uid: "u", shiftType: ["D"], requiredNumPeople: 2, weight: -1 };
+    expect(requirementToForm(card, domain).weight).toBe(emptyRequirementForm().weight);
+    expect(requirementToForm({ ...card, preferredNumPeople: 3, weight: -7 }, domain).weight).toBe(
+      -7,
+    );
   });
 
   it("normalizes an EXPLICIT null qualifiedPeople/date to [ALL] (not [null])", () => {

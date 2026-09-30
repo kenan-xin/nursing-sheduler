@@ -58,11 +58,11 @@ function readOnlyReason(ownership: string): string | null {
     case "owner":
       return null;
     case "read-only":
-      return "This schedule is being edited in another tab, so this conversation is read-only. Take over editing in this tab to continue it.";
+      return "This schedule is being edited in another tab, so this conversation is read-only. Press Edit here on the banner at the top to continue it.";
     case "taken-over":
       return "Another tab took over editing this schedule. This conversation is kept as history.";
     case "expired":
-      return "This tab's editing claim expired. Take over editing again to continue the conversation.";
+      return "This tab's editing claim expired. Press Edit here on the banner at the top to continue the conversation.";
     default:
       return "The schedule is still loading, so this conversation is read-only for the moment.";
   }

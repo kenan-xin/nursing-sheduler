@@ -52,10 +52,10 @@ describe("empty-dates → OMITTED via the T05 serialization boundary (FR-CV-12, 
     expect("date" in covering).toBe(false);
     // Never a no-op empty list.
     expect(yaml).not.toContain("date: []");
-    // The canonical single-equation shape survives the dump.
+    // The save shape survives the dump: one people group per side, flat shifts.
     expect(covering.preceptors).toEqual([["Anna"]]);
     expect(covering.preceptees).toEqual([["Lil"]]);
-    expect(covering.shiftTypes).toEqual([["D"]]);
+    expect(covering.shiftTypes).toEqual(["D"]);
     // The inert weight is stamped and serialized.
     expect(covering.weight).toBe(1);
   });

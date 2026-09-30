@@ -55,6 +55,7 @@ from ..jobs.models import (
     WorkerLease,
 )
 from ..queue_state import (
+    ADMISSION_CLIENT_EXHAUSTED,
     ADMISSION_OK,
     ADMISSION_ORDINARY_RESERVED,
     DIAGNOSTIC_CAPACITY_MESSAGE,
@@ -66,6 +67,7 @@ from ..queue_state import (
     QueueMember,
     QueueStateSnapshot,
     admission_decision,
+    client_capacity_message,
     fifo_sorted,
     validate_transition,
 )
@@ -302,9 +304,17 @@ class RedisJobStore:
                         pending_count=transaction.scard(self._pending_key) - stale_pending,
                         max_pending=limits.max_pending,
                         ordinary_reserved_slots=limits.ordinary_reserved_slots,
+                        client_pending_count=(
+                            self._client_pending_count(transaction, job.request.client_id)
+                            if limits.max_pending_per_client
+                            else 0
+                        ),
+                        max_pending_per_client=limits.max_pending_per_client,
                     )
                     if decision != ADMISSION_OK:
                         transaction.unwatch()
+                        if decision == ADMISSION_CLIENT_EXHAUSTED:
+                            raise JobCapacityError(client_capacity_message(limits.max_pending_per_client))
                         if decision == ADMISSION_ORDINARY_RESERVED:
                             raise DiagnosticCapacityError(DIAGNOSTIC_CAPACITY_MESSAGE)
                         raise JobCapacityError("Too many jobs are queued or running")
@@ -971,6 +981,16 @@ class RedisJobStore:
             if raw is None or self._deserialize_job(raw).state.terminal:
                 repairs.append((INVARIANT_ERROR_STALE_PENDING_MEMBER, job_id, None))
         return repairs
+
+    def _client_pending_count(self, transaction, client_id: str) -> int:
+        """Count one client's live pending jobs; the watched pending index keeps this consistent."""
+        count = 0
+        for raw_id in transaction.smembers(self._pending_key):
+            raw = transaction.get(self._job_key(_decode(raw_id)))
+            if raw is not None:
+                pending = self._deserialize_job(raw)
+                count += not pending.state.terminal and pending.request.client_id == client_id
+        return count
 
     def _stage_repairs(self, transaction, repairs, occurred_at: datetime) -> None:
         """v2 P9: stage residue removals and their bounded repair records."""

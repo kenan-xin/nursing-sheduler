@@ -722,6 +722,14 @@ def export_to_excel(df, output_buffer, cell_export_info=None):
                     horizontal=existing_border.horizontal,
                 )
 
+    # openpyxl stores a string starting with "=" as a formula; an ID such as
+    # =HYPERLINK(...) must stay text (bug hunt D-03, bead 99db).
+    for sheet in wb.worksheets:
+        for row in sheet.iter_rows():
+            for cell in row:
+                if cell.data_type == "f":
+                    cell.data_type = "s"
+
     # Save to the output buffer
     wb.save(output_buffer)
     output_buffer.seek(0)

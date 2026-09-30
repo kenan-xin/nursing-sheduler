@@ -72,6 +72,13 @@ services:
       # to the backend's own 90s (config.py) — override via docker/.env only if
       # needed. Does not change the private one-worker topology.
       OPTIMIZE_TIMEOUT_GRACE_SECONDS: ${OPTIMIZE_TIMEOUT_GRACE_SECONDS:-90}
+      # Unset = the backend defaults (config.py); uncomment to override via docker/.env.
+      # Data-segment cap (RLIMIT_DATA) per solver child in MiB, 0 = none; 1536 fits two workers on tc1,
+      # and a child that hits it fails as scenario_too_large instead of OOM-killing the box.
+      # OPTIMIZE_CHILD_MEMORY_LIMIT_MB: ${OPTIMIZE_CHILD_MEMORY_LIMIT_MB:-1536}
+      # Queued/running jobs one client_id (a cookie) may hold, 0 = none; stops one browser
+      # filling the queue by accident (429 job_capacity_exceeded), not deliberate abuse.
+      # JOB_MAX_PENDING_PER_CLIENT: ${JOB_MAX_PENDING_PER_CLIENT:-2}
     networks:
       - app
       - data

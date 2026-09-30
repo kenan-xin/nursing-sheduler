@@ -39,6 +39,7 @@ import {
   applyRangeChange,
   generateDateItems,
   hasCompleteRange,
+  holidayCoverageWarning,
   isValidIso,
   type DateRange,
 } from "@/lib/dates";
@@ -120,11 +121,10 @@ import {
   buildRequirementShiftTypeOptions,
   emptyRequirementForm,
   preferredDiffersFromRequired,
-  REQUIREMENT_MESSAGES,
+  requiredCountError,
   requirementCoveredIsos,
   requirementToForm,
   savedOverrides,
-  skillMixFloor,
   validateRequirementForm,
   type RequirementFormState,
   type RequirementNumberValue,
@@ -696,6 +696,14 @@ function contractedRejection(
   index: number,
   held?: unknown,
 ): OperationResult | undefined {
+  // First, so the refusal names the real reason: the form only holds half-hour rows.
+  if (command.hoursPerShift !== undefined && !Number.isInteger(command.hoursPerShift * 2)) {
+    return reject(
+      index,
+      "invalid_value",
+      `${name}: hoursPerShift must be on the half-hour grid, such as 7.5 or 8.`,
+    );
+  }
   const people = countPeopleOptions(state);
   const offeredPeople = [...people.items, ...people.groups];
   const person = firstUnofferedPerson(command.people, offeredPeople, held);
@@ -1450,6 +1458,16 @@ function applySetRosterRange(
   if (!hasCompleteRange(range)) {
     return reject(index, "invalid_value", "The end date must be on or after the start date.");
   }
+  // The Dates card disables its import switch for such a range; refusing here keeps the
+  // assistant from reporting an import that marks nothing (bead si4j).
+  const coverageWarning = command.importPublicHolidays ? holidayCoverageWarning(range) : null;
+  if (coverageWarning) {
+    return reject(
+      index,
+      "invalid_value",
+      `${coverageWarning} Set this period without importing public holidays, or keep it within the years that have data.`,
+    );
+  }
   if (state.rangeStart === command.start && state.rangeEnd === command.end) {
     // The holiday re-import alone is still a change, so it is not folded in here.
     if (!command.importPublicHolidays) {
@@ -1510,15 +1528,11 @@ function applySetRequirementPeople(
       "That requirement covers more than one shift type, so it has no single head count to change. It has to be edited on the Staffing requirements screen.",
     );
   }
-  // The Guided quick field's own rule, restated (see the parity test): a finite,
-  // non-negative number. Deliberately NOT stricter -- an assistant that refused what
-  // the manual control accepts would be a second, quieter definition of "valid".
-  if (!(Number.isFinite(command.requiredNumPeople) && command.requiredNumPeople >= 0)) {
-    return reject(index, "invalid_value", "Required people must be zero or more.");
-  }
-  if (command.requiredNumPeople < skillMixFloor(card)) {
-    return reject(index, "invalid_value", `${REQUIREMENT_MESSAGES.skillMixAboveRequired}.`);
-  }
+  // The Guided quick field's own check (see the parity test). Deliberately NOT stricter --
+  // an assistant that refused what the manual control accepts would be a second, quieter
+  // definition of "valid".
+  const error = requiredCountError(card, command.requiredNumPeople);
+  if (error) return reject(index, "invalid_value", `${error}.`);
   if (card.requiredNumPeople === command.requiredNumPeople) {
     return reject(index, "no_effect", "That requirement already asks for that many people.");
   }
@@ -1566,6 +1580,18 @@ function applyMoveLeave(
   if (!source) {
     return reject(index, "unknown_target", "There is no leave on that date to move.");
   }
+  // The move replaces the target cell, so leave already there would be lost unasked.
+  if (
+    cellsAtCoordinate(state.reqData, command.personId, command.toDate).some(
+      (cell) => cell.kind === "leave",
+    )
+  ) {
+    return reject(
+      index,
+      "invalid_value",
+      "They are already on leave that day, so moving leave there would lose a leave day.",
+    );
+  }
 
   // The leave KEEPS ITS IDENTITY across the move: it is the same agreement on a
   // different day, and preserving `uid` is also what makes this operation
@@ -1588,9 +1614,11 @@ function applyAddShiftType(
   index: number,
 ): OperationResult {
   const d = shiftTypesDescriptor;
-  const idCheck = validateFullEditId(d, d.readItems(state), d.readGroups(state), command.code);
+  // Stored uppercase, as the Shifts page stores a code (`withStoredShiftCodes`).
+  const code = command.code.toUpperCase();
+  const idCheck = validateFullEditId(d, d.readItems(state), d.readGroups(state), code);
   if (!idCheck.ok) {
-    return reject(index, "invalid_value", `Shift "${command.code.trim()}": ${idCheck.message}.`);
+    return reject(index, "invalid_value", `Shift "${code.trim()}": ${idCheck.message}.`);
   }
   // The Shifts page forbids a numbers-only code (`shift-type-grid.tsx`, `codeNumericOnly`).
   if (/^\d+$/.test(idCheck.id)) {
@@ -1765,6 +1793,17 @@ function paintIntent(
         intent: { mode: "day-state", dayState: { kind: "leave" } },
       };
     case "set_off_request":
+      // Weight 0 removes an OFF (the paint fold), so it never records a day off.
+      if (command.weight === 0) {
+        return {
+          ok: false,
+          refusal: reject(
+            index,
+            "invalid_value",
+            "A day off at weight 0 has no effect. Use a positive weight, or clear_requests to remove a day off.",
+          ),
+        };
+      }
       return {
         ok: true,
         intent: {
@@ -2259,6 +2298,53 @@ export function applyAssistantCommand(
 }
 
 /**
+ * The batch with shift codes as the Shifts page stores them: a code is saved uppercase
+ * (`shift-type-grid.tsx`), so `add_shift_type` "am1" adds AM1, and every LATER reference
+ * to a code this batch adds, in any case, names AM1 too (bead tz3y). A reference to a
+ * code the document already holds is left exactly as written, so a scenario whose ids
+ * are lowercase keeps working.
+ *
+ * Idempotent. `applyAssistantCommands`, `deriveProposalDiff` and `deriveAssumptions`
+ * each run it, so the stored document, the Preview and its highlight agree.
+ */
+export function withStoredShiftCodes(
+  commands: readonly AssistantCommandV1[],
+): AssistantCommandV1[] {
+  const added = new Set<string>();
+  const code = (ref: string) => (added.has(ref.toUpperCase()) ? ref.toUpperCase() : ref);
+  const codes = (refs: readonly string[]) => refs.map(code);
+  return commands.map((command): AssistantCommandV1 => {
+    switch (command.type) {
+      case "add_shift_type": {
+        const stored = command.code.trim().toUpperCase();
+        added.add(stored);
+        return { ...command, code: stored };
+      }
+      case "add_shift_group":
+        return { ...command, members: codes(command.members) };
+      case "set_shift_request":
+      case "add_staffing_requirement":
+      case "edit_staffing_requirement":
+      case "add_temporary_cover":
+      case "remove_temporary_cover":
+        return { ...command, shiftType: code(command.shiftType) };
+      case "add_shift_sequence_rule":
+      case "edit_shift_sequence_rule":
+        return { ...command, pattern: codes(command.pattern) };
+      case "add_count_rule":
+      case "edit_count_rule":
+      case "add_pairing_rule":
+      case "edit_pairing_rule":
+      case "add_supervision_rule":
+      case "edit_supervision_rule":
+        return { ...command, shiftTypes: codes(command.shiftTypes) };
+      default:
+        return command;
+    }
+  });
+}
+
+/**
  * Fold a whole batch, each command validated against the document the PREVIOUS one
  * produced -- the same queue-head discipline the manual command bus uses, so a batch
  * that moves leave onto a date an earlier command just vacated is checked against
@@ -2272,7 +2358,7 @@ export function applyAssistantCommands(
   commands: readonly AssistantCommandV1[],
 ): OperationResult {
   let next = state;
-  for (const [index, command] of commands.entries()) {
+  for (const [index, command] of withStoredShiftCodes(commands).entries()) {
     const result = applyAssistantCommand(next, command, index);
     if (!result.ok) return result;
     next = result.next;

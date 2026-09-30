@@ -42,6 +42,8 @@ export {
   type CommittedAssistantApply,
   type ReceiptStanding,
   type ReceiptUndoState,
+  type RemovedSchedule,
+  type ScheduleSummary,
   type ScenarioRepository,
   type ScenarioRepositoryConfig,
   type ScenarioSelection,
@@ -51,6 +53,7 @@ export {
 } from "./repository";
 
 export {
+  migrateLegacyRosterSlot,
   migrateLegacyScenarioRecord,
   readLegacyMigrationRecord,
   type LegacyMigrationOutcome,
@@ -61,6 +64,7 @@ export { commandDigest, stableStringify } from "./digest";
 export {
   GLOBAL_GENERATION_SCOPE,
   LEGACY_MIGRATION_KEY,
+  rosterKeys,
   scenarioGenerationScope,
   type AssistantProposalStatus,
   type AssistantProposalV1,

@@ -340,6 +340,7 @@ export function DockCard({
           <button
             type="button"
             aria-label={closeLabel}
+            title={closeLabel}
             onClick={onClose}
             className="grid size-7 shrink-0 place-items-center rounded-pill text-ink3 hover:bg-panel-alt hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand pointer-coarse:size-touch"
           >

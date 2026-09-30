@@ -11,6 +11,8 @@
 //   • erase     → drop every cell at the coordinate.
 //   • day-state → XOR replace with a single leave/off cell (drops requests),
 //                 preserving an existing day-state cell's `uid` for F2 stability.
+//                 OFF at weight 0 instead removes just the OFF cell, as a weight
+//                 of 0 removes every target in the old app (no no-effect OFF).
 //   • requests  → additive per-selector deltas onto existing `request` cells
 //                 (weight 0 removes that selector). PRECEDENCE: if the
 //                 coordinate already holds a day-state, the delta is SKIPPED -- a
@@ -28,6 +30,25 @@ export type MintCellUid = (person: PersonRef, date: DateRef, selector: string) =
 /** True for the day-state (`leave`/`off`) arm of a `UiRequestCell`. */
 function isDayStateCell(cell: UiRequestCell): boolean {
   return cell.kind === "leave" || cell.kind === "off";
+}
+
+/**
+ * How many staged `requests` coordinates the fold will skip because the cell
+ * already holds a leave/off day-state (the PRECEDENCE rule above), so the page can
+ * say why part of a drag did nothing.
+ */
+export function countSkippedRequestPaints(
+  reqData: readonly UiRequestCell[],
+  staged: ReadonlyMap<string, StagedCoordinate>,
+): number {
+  const dayStateKeys = new Set(
+    reqData.filter(isDayStateCell).map((cell) => paintCellKey(cell.person, cell.date)),
+  );
+  let skipped = 0;
+  for (const [key, intent] of staged) {
+    if (intent.mode === "requests" && dayStateKeys.has(key)) skipped++;
+  }
+  return skipped;
 }
 
 /** Reconcile staged per-coordinate intents against a matrix. Untouched coordinates pass through verbatim. */
@@ -56,6 +77,13 @@ export function foldPaintIntents(
     if (intent.mode === "day-state") {
       const priorDayState = existing.find(isDayStateCell);
       const { dayState } = intent;
+      if (dayState.kind === "off" && dayState.weight === 0) {
+        byCoordinate.set(
+          key,
+          existing.filter((cell) => cell.kind !== "off"),
+        );
+        continue;
+      }
       const uid = priorDayState?.uid ?? mintUid(person, date, dayState.kind);
       const cell: UiRequestCell =
         dayState.kind === "leave"

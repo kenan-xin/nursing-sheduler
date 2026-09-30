@@ -37,6 +37,9 @@ import { create } from "zustand";
 export interface DraftRegistration {
   id: string;
   label: string;
+  /** What leaving actually loses, when it is not unsaved edits (e.g. a live
+   *  optimisation run). The shell's confirm shows it in place of its default copy. */
+  leaveWarning?: string;
 }
 
 export type NavIntentKind = "push" | "replace" | "back" | "mode-transition";
@@ -131,6 +134,24 @@ export const useNavGuardStore = create<NavGuardState>((set, get) => {
  *  the navigation guard and the browser-unload guard. */
 export function hasLosableDrafts(): boolean {
   return useNavGuardStore.getState().drafts.size > 0;
+}
+
+/** The label of an open losable draft, or `null`. */
+export function selectConflictingEditorDraft(state: Pick<NavGuardState, "drafts">): string | null {
+  const [first] = state.drafts.values();
+  return first?.label ?? null;
+}
+
+/**
+ * The open editor draft that blocks an assistant Apply or receipt Undo, or `null`.
+ *
+ * An open form over the same document is a change the user has started and not
+ * committed; applying over it would either lose it or produce a document neither
+ * the form nor the Preview describes. Returns the draft's label so the panel can
+ * name it.
+ */
+export function readConflictingEditorDraft(): string | null {
+  return selectConflictingEditorDraft(useNavGuardStore.getState());
 }
 
 /**

@@ -143,6 +143,7 @@ export function proposalBasisBlock(
 /** Why Apply is not available. Each one is a comparison that failed. */
 export type ProposalBlock =
   | { code: "settled"; message: string }
+  | { code: "replaced"; message: string }
   | { code: "not_owner"; message: string }
   | { code: "scenario_changed"; message: string }
   | { code: "document_changed"; message: string }
@@ -158,6 +159,11 @@ export interface ProposalReadiness {
   applyEnabled: boolean;
   blocks: ProposalBlock[];
   outstanding: OperationalAssumption[];
+}
+
+/** Why an open editor form blocks an assistant change (Apply or receipt Undo). */
+export function conflictingDraftMessage(draftLabel: string): string {
+  return `Save or discard the open ${draftLabel} first — it changes the same schedule.`;
 }
 
 /**
@@ -181,6 +187,12 @@ export function describeProposalReadiness(
         proposal.status === "applied"
           ? "This change has already been applied."
           : "This change was cancelled.",
+    });
+  }
+  if (proposal.status === "stale") {
+    blocks.push({
+      code: "replaced",
+      message: "This change was replaced by a revised one, so it can no longer be applied.",
     });
   }
   if (live.invalidated) {
@@ -216,7 +228,7 @@ export function describeProposalReadiness(
   if (live.conflictingDraft) {
     blocks.push({
       code: "conflicting_draft",
-      message: `Save or discard the open ${live.conflictingDraft} first — it changes the same schedule.`,
+      message: conflictingDraftMessage(live.conflictingDraft),
     });
   }
   if (

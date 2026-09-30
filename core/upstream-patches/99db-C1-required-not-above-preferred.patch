@@ -1,0 +1,24 @@
+# 99db patch for models.py against genie 1bf4b85.
+# hunk: a shift type requirement refuses requiredNumPeople above preferredNumPeople instead of a silent INFEASIBLE (bug hunt C1, bead 99db)
+
+diff --git a/core/nurse_scheduling/models.py b/core/nurse_scheduling/models.py
+index 850aaa1..24cf84c 100644
+--- a/core/nurse_scheduling/models.py
++++ b/core/nurse_scheduling/models.py
+@@ -392,6 +392,16 @@ class ShiftTypeRequirementsPreference(BasePreference):
+             seen.add(date)
+         return v
+ 
++    @model_validator(mode="after")
++    def validate_required_not_above_preferred(self) -> Self:
++        # The solver would pin actual >= required and actual <= preferred: a silent INFEASIBLE (bead 99db C1).
++        if self.preferredNumPeople is not None and self.requiredNumPeople > self.preferredNumPeople:
++            raise ValueError(
++                f"requiredNumPeople ({self.requiredNumPeople}) must not exceed "
++                f"preferredNumPeople ({self.preferredNumPeople})."
++            )
++        return self
++
+     @model_validator(mode="after")
+     def validate_skill_mix(self) -> Self:
+         if not self.skillMix:

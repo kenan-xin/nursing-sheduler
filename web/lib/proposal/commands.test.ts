@@ -169,6 +169,26 @@ describe("the rule arms' text states what the solver enforces", () => {
     expect(parse("2026-10-14")).toBe(true);
     expect(parse("14")).toBe(false);
   });
+
+  it("takes whole head counts only (bead 8g1f C2)", () => {
+    const parse = (command: object) => assistantCommandSchema.safeParse(command).success;
+    const people = { type: "set_staffing_requirement_people", ruleId: "r" };
+    expect(parse({ ...people, requiredNumPeople: 2 })).toBe(true);
+    expect(parse({ ...people, requiredNumPeople: 2.5 })).toBe(false);
+    const onDate = { type: "set_staffing_requirement_on_date", ruleId: "r", date: "2026-10-14" };
+    expect(parse({ ...onDate, requiredNumPeople: 1.5 })).toBe(false);
+    const add = {
+      type: "add_staffing_requirement",
+      description: "x",
+      shiftType: "N",
+      qualifiedPeople: ["ALL"],
+      dates: ["ALL"],
+      requiredNumPeople: 1,
+    };
+    expect(parse(add)).toBe(true);
+    expect(parse({ ...add, requiredNumPeople: 1.5 })).toBe(false);
+    expect(parse({ ...add, preferredNumPeople: 2.5 })).toBe(false);
+  });
 });
 
 describe("parseAssistantCommands", () => {

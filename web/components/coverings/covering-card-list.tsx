@@ -2,8 +2,8 @@
 
 // The saved-coverings list (spec 11 FR-CV-18..21), rebuilt onto the shared
 // ScreenCards card frame (audit M4): each rule is a numbered card with its
-// description, a red "Always enforced" hard-rule badge (+ a "Disabled" badge when
-// turned off), a four-cell Preceptors/Preceptees/Shift types/Dates field grid,
+// description, a red "Always enforced" hard-rule badge (swapped for a "Disabled"
+// badge when turned off — the solver never sees a disabled card), a four-cell Preceptors/Preceptees/Shift types/Dates field grid,
 // and the labelled Disable/Enable · Edit · Duplicate · Delete action row. Reorder
 // (FR-CV-21) is preserved as supplementary keyboard move buttons — an accessible,
 // deterministic affordance the audit (M4) explicitly permits alongside the
@@ -19,7 +19,7 @@ import {
   CardListItem,
   CardMoveActions,
 } from "@/components/card-editor/card-editor-shell";
-import { isAdvancedCoveringCard, summarizeRefs } from "./coverings-model";
+import { coveringShiftMeaning, isAdvancedCoveringCard, summarizeRefs } from "./coverings-model";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 
 interface CoveringCardListProps {
@@ -73,8 +73,8 @@ export function CoveringCardList({
             badges={
               <>
                 {card.disabled && <Badge variant="neutral">Disabled</Badge>}
-                {advanced && <Badge variant="neutral">Advanced (multi-term)</Badge>}
-                <Badge variant="error">Always enforced</Badge>
+                {advanced && <Badge variant="neutral">Advanced (grouped)</Badge>}
+                {!card.disabled && <Badge variant="error">Always enforced</Badge>}
               </>
             }
             fields={[
@@ -85,6 +85,7 @@ export function CoveringCardList({
                 label: "Dates",
                 value: card.date === undefined ? "(all)" : summarizeRefs(card.date),
               },
+              { label: "Supervision means", value: coveringShiftMeaning(card) },
             ]}
             actions={
               <>

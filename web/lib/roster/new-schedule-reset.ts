@@ -8,11 +8,14 @@
 // that still announced `The roster for this run could not be saved … Not Found` on
 // the Optimize route, because the notice is a projection of that surviving state.
 //
-// The fix is composition, not suppression: this runs the EXISTING verified roster
-// Clear + capture-invalidation authority (`clearRosterDataAndNotify`) and the
-// EXISTING scenario reset (`resetToNewScenario`). No second purge protocol is
-// introduced, and no notice is special-cased or hidden — the copy disappears
-// because the state behind it is genuinely gone.
+// The fix is composition, not suppression: this runs the EXISTING verified cut of
+// the run's session residue (`clearRunResidue`) and the EXISTING scenario reset
+// (`resetToNewScenario`). No notice is special-cased or hidden — the copy
+// disappears because the state behind it is genuinely gone.
+//
+// plq5 P2: the saved roster, candidates and snapshots are NOT purged any more. Each
+// schedule keeps its own, so they stay with the schedule being left (still in
+// Recent schedules), and the new identity simply has none.
 //
 // ORDER IS THE FAIL-CLOSED GUARANTEE. The browser-data cut runs FIRST and the
 // scenario is reset only once that cut reports every sensitive surface provably
@@ -27,7 +30,7 @@
 // Clear authority it drives.
 
 import { resetToNewScenario, type CommandFailureReason, type CommandOutcome } from "@/lib/store";
-import { clearRosterDataAndNotify, type RosterClearOutcome } from "./roster-clear";
+import { clearRunResidue, type RunResidueOutcome } from "./roster-clear";
 
 /**
  * The one non-technical failure message. Deliberately a constant, not a string
@@ -47,7 +50,7 @@ export const NEW_SCHEDULE_FAILED_MESSAGE =
 
 /** Which half refused, for tests and diagnostics — never shown to the user. */
 export type NewScheduleFailure =
-  /** The verified roster/browser-data cut did not complete. Scenario untouched. */
+  /** The verified run-residue cut did not complete. Scenario untouched. */
   | "stored-data"
   /** The cut succeeded but the scenario reset itself threw. */
   | "scenario";
@@ -56,13 +59,13 @@ export type NewScheduleResetOutcome =
   | {
       status: "reset";
       /** The Clear report behind the reset, for assertions and diagnostics. */
-      storedData: RosterClearOutcome;
+      storedData: RunResidueOutcome;
     }
   | {
       status: "failed";
       failure: NewScheduleFailure;
       /** Present unless the Clear itself threw before producing a report. */
-      storedData: RosterClearOutcome | null;
+      storedData: RunResidueOutcome | null;
       /**
        * INTEGRATION (T03): why the scenario half refused, when it did.
        *
@@ -77,8 +80,8 @@ export type NewScheduleResetOutcome =
 
 /** Injectable seams. Production passes nothing and gets the live authorities. */
 export interface NewScheduleResetDeps {
-  /** The verified roster/browser-data cut. Defaults to the live F5 authority. */
-  readonly clearStoredData?: () => Promise<RosterClearOutcome>;
+  /** The verified run-residue cut. Defaults to the live one. */
+  readonly clearStoredData?: () => Promise<RunResidueOutcome>;
   /**
    * The scenario reset. Defaults to the live T03 repository-authority reset.
    *
@@ -90,18 +93,18 @@ export interface NewScheduleResetDeps {
 }
 
 /**
- * Start over: clear the previous run's stored roster/session data, then reset the
- * scenario. Fails closed — a cut that cannot be verified leaves everything in
+ * Start over: clear the previous run's session residue, then reset the scenario.
+ * Saved rosters are kept, each with its own schedule (plq5 P2). Fails closed — a cut that cannot be verified leaves everything in
  * place and reports `failed`, so the caller must not claim `New schedule created`.
  */
 export async function resetToNewSchedule(
   deps: NewScheduleResetDeps = {},
 ): Promise<NewScheduleResetOutcome> {
-  const clearStoredData = deps.clearStoredData ?? (() => clearRosterDataAndNotify());
+  const clearStoredData = deps.clearStoredData ?? (() => clearRunResidue());
 
   // 1. THE VERIFIED CUT, FIRST. A throw proves nothing was verified, so it is the
   //    same fail-closed answer as a `failed` report with residue.
-  let storedData: RosterClearOutcome;
+  let storedData: RunResidueOutcome;
   try {
     storedData = await clearStoredData();
   } catch {
@@ -111,7 +114,7 @@ export async function resetToNewSchedule(
     return { status: "failed", failure: "stored-data", storedData };
   }
 
-  // 2. THE SCENARIO RESET, only now that the browser data is provably gone.
+  // 2. THE SCENARIO RESET, only now that the run residue is provably gone.
   //
   // INTEGRATION (T03): the reset is now a repository command over the scenario
   // authority, so it takes no stores and REPORTS refusal instead of throwing. Both

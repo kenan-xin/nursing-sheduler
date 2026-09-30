@@ -33,6 +33,7 @@ import { CurrentRequestsTable, type CurrentRequestRow } from "./current-requests
 import { CurrentHistoryTable, type CurrentHistoryPerson } from "./current-history-table";
 import {
   cellPreferenceSet,
+  groupSourceMarkers,
   historyValueAt,
   resolveDayStatePrecedence,
   weightDisplayLabel,
@@ -43,9 +44,9 @@ import {
   validateShiftRequestCsv,
 } from "./requests-csv";
 import { downloadBlob } from "@/lib/utils/download";
-import { useRequests, pickRequestsScenario } from "./use-requests";
+import { useRequests, pickRequestsScenario, type ClearShape } from "./use-requests";
 
-type ConfirmState = { text: string; onConfirm: () => void } | null;
+type ConfirmState = { text: string; confirmLabel?: string; onConfirm: () => void } | null;
 type CsvKind = "requests" | "history" | null;
 // `origin` is the exact matrix element that opened the editor. It is held
 // ALONGSIDE the coordinate, never derived from it: after a commit the matrix
@@ -97,19 +98,21 @@ export function RequestsEditor() {
     clearCell,
     commitHistorySet,
     commitHistoryClear,
+    previewRequestsCsv,
     applyRequestsCsv,
     applyHistoryCsv,
     clearAllRequests,
     clearAllHistory,
     clearRequestsByShape,
+    countClearable,
   } = useRequests({
     quickPaintSelectedIds: quickSelectedIds,
     quickPaintWeightText: quickWeightText,
   });
 
   // FR-SR-34: BOTH CSV uploads are Quick-paint-only — the toolbar renders them
-  // only in quick mode. Within quick mode the Requests CSV applies at the
-  // shared quick-paint weight, so it needs a *parseable* weight — 0 is a valid
+  // only in quick mode. Within quick mode a Requests CSV entry without its own
+  // `:weight` applies at the shared quick-paint weight, so it needs a *parseable* weight — 0 is a valid
   // (removal) weight, so only an unparsed/invalid entry disables it.
   const requestsCsvDisabled = parseQuickPaintWeight(quickWeightText) === null;
   const requestsCsvDisabledReason = "Set a valid weight to import shift requests.";
@@ -170,6 +173,10 @@ export function RequestsEditor() {
   // yields ONE row (the surviving day-state), not a row per raw cell. The
   // resolved list also backs the footer count so the two always agree.
   const resolvedCells = useMemo(() => resolveDayStatePrecedence(reqData), [reqData]);
+
+  // Person cells a group row or date-group column reaches (bb8t). `state` is the
+  // shallow-picked slice, so this recomputes only when one of these slices moves.
+  const groupSources = useMemo(() => groupSourceMarkers(state, reqData), [state, reqData]);
 
   const currentRequestRows: CurrentRequestRow[] = useMemo(() => {
     return resolvedCells.map((cell, index) => {
@@ -262,9 +269,29 @@ export function RequestsEditor() {
       toast.error("No valid shift preferences found in CSV file.");
       return;
     }
-    applyRequestsCsv(result.data, parsedWeight!);
+    const deltas = result.data;
+    const counts = previewRequestsCsv(deltas, parsedWeight!);
     setCsvOpen(null);
-    toast.success(`Successfully processed CSV file with ${result.data.length} shift preferences!`);
+    const run = () => {
+      applyRequestsCsv(deltas, parsedWeight!);
+      const { added, changed, removed } = counts;
+      toast.success(
+        added + changed + removed === 0
+          ? "CSV imported: no changes, the file matches the current requests."
+          : `CSV imported: ${added} added, ${changed} changed, ${removed} removed.`,
+      );
+    };
+    // A bare cell at the quick-paint weight 0, or a day-state over requests,
+    // deletes existing cells: say how many before doing it.
+    if (counts.removed > 0) {
+      setConfirm({
+        text: `This import will remove ${counts.removed} existing request${counts.removed === 1 ? "" : "s"}. Import anyway?`,
+        confirmLabel: "Import",
+        onConfirm: run,
+      });
+    } else {
+      run();
+    }
   }
 
   function handleHistoryCsvFile(text: string) {
@@ -314,6 +341,20 @@ export function RequestsEditor() {
   // Labels + order match the canonical set (ScreenRequests.dc.html:607-614):
   // all-history, all-requests, then the four person/group x individual/group
   // shapes with a right arrow between the two axes.
+  // Every requests clear names what goes, day-states included (F5): "requests"
+  // alone does not suggest that approved leave and OFF days go too.
+  function removesText(shape?: ClearShape): string {
+    const { requests, off, leave } = countClearable(shape);
+    const n = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+    return ` This removes ${n(requests, "shift request")}, ${n(off, "OFF day")} and ${n(leave, "paid-leave pin")}.`;
+  }
+
+  function askClearShape(text: string, shape: ClearShape) {
+    askConfirm(text + removesText(shape), () =>
+      clearRequestsByShape(shape.personScope, shape.dateScope),
+    );
+  }
+
   const clearButtons: ClearButton[] = [
     {
       label: "All people history",
@@ -323,38 +364,41 @@ export function RequestsEditor() {
     {
       label: "All requests",
       onClick: () =>
-        askConfirm("Are you sure you want to clear ALL shift requests?", clearAllRequests),
+        askConfirm(
+          "Are you sure you want to clear all requests?" + removesText(),
+          clearAllRequests,
+        ),
     },
     {
       label: "Person → individual dates",
       onClick: () =>
-        askConfirm(
+        askClearShape(
           "Are you sure you want to clear all requests between individual people and individual dates?",
-          () => clearRequestsByShape("individual", "individual"),
+          { personScope: "individual", dateScope: "individual" },
         ),
     },
     {
       label: "Group → individual dates",
       onClick: () =>
-        askConfirm(
+        askClearShape(
           "Are you sure you want to clear all requests between people groups and individual dates?",
-          () => clearRequestsByShape("group", "individual"),
+          { personScope: "group", dateScope: "individual" },
         ),
     },
     {
       label: "Person → date groups",
       onClick: () =>
-        askConfirm(
+        askClearShape(
           "Are you sure you want to clear all requests between individual people and date groups?",
-          () => clearRequestsByShape("individual", "group"),
+          { personScope: "individual", dateScope: "group" },
         ),
     },
     {
       label: "Group → date groups",
       onClick: () =>
-        askConfirm(
+        askClearShape(
           "Are you sure you want to clear all requests between people groups and date groups?",
-          () => clearRequestsByShape("group", "group"),
+          { personScope: "group", dateScope: "group" },
         ),
     },
   ];
@@ -542,6 +586,10 @@ export function RequestsEditor() {
         <span className="inline-flex items-center gap-1.5">
           <span className="size-3 border border-brand bg-brandtint" /> Date-group column
         </span>
+        <span className="inline-flex items-center gap-1.5">
+          <FaLayerGroup className="size-2.5 text-ink3" aria-hidden /> From a group row or date-group
+          column
+        </span>
       </div>
       {/* Full-bleed note strips are square and flat (DESIGN.md §4 rule 2): the
           shortcut strip is a --panel band with its prototype hairline, and the
@@ -582,6 +630,7 @@ export function RequestsEditor() {
         onCellPointerEnter={onCellPointerEnter}
         onHistoryPointerDown={onHistoryPointerDown}
         onHistoryPointerEnter={onHistoryPointerEnter}
+        groupSources={groupSources}
       />
 
       <div
@@ -645,6 +694,7 @@ export function RequestsEditor() {
       <ClearConfirmDialog
         open={confirm !== null}
         text={confirm?.text ?? ""}
+        confirmLabel={confirm?.confirmLabel}
         onConfirm={() => {
           confirm?.onConfirm();
           setConfirm(null);

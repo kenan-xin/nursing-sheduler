@@ -113,6 +113,29 @@ export const Quick: Story = {
   },
 };
 
+// Alice's ALL off-request reaches both her date cells; a NightOwls request reaches Bob's 07/04.
+export const GroupSources: Story = {
+  args: {
+    groupSources: new Map([
+      [JSON.stringify(["Alice", "2026-07-03"]), { sources: ["From ALL · OFF -3"], short: "OFF" }],
+      [JSON.stringify(["Alice", "2026-07-04"]), { sources: ["From ALL · OFF -3"], short: "OFF" }],
+      [
+        JSON.stringify(["Bob", "2026-07-04"]),
+        { sources: ["From NightOwls · late+ +5"], short: "late+" },
+      ],
+    ]),
+  },
+  play: async ({ canvas }) => {
+    const bob = await canvas.findByTestId("cell-Bob-2026-07-04");
+    await expect(bob).toHaveTextContent("late+");
+    await expect(bob).toHaveAttribute("title", "From NightOwls · late+ +5");
+    await expect(bob).toHaveAccessibleName(/; From NightOwls · late\+ \+5$/);
+    // A direct request keeps its own text; the marker only adds the glyph.
+    await expect(canvas.getByTestId("cell-Alice-2026-07-03")).toHaveTextContent("late+ (+5)");
+    await expect(canvas.getByTestId("group-source-Alice-2026-07-03")).toBeInTheDocument();
+  },
+};
+
 export const WithHistory: Story = {
   play: async ({ canvas }) => {
     await expect(await canvas.findByTestId("hist-head-0")).toHaveTextContent("H-3");
@@ -162,3 +185,46 @@ export const LongText: Story = {
 export const Dark: Story = {
   globals: { theme: "dark" },
 };
+
+// t4tz: low-weight cells sit at the α floor, (+N) counts ride on leave/off tints and
+// Bob's empty history slot shows the "+" affordance. Cells are forced `relative`
+// because axe only resolved (and so only flagged) the old opacity fade on a
+// positioned cell; an unresolved ("incomplete") check fails here too.
+const FADED: Story = {
+  args: {
+    reqData: [
+      { kind: "request", person: "Alice", date: "2026-07-03", shiftType: "late+", weight: 1 },
+      { kind: "request", person: "Alice", date: "2026-07-04", shiftType: "early", weight: -2 },
+      { kind: "request", person: "Alice", date: "ALL", shiftType: "early", weight: 3 },
+      { kind: "request", person: "Alice", date: "ALL", shiftType: "late+", weight: -3 },
+      { kind: "leave", person: "Bob", date: "2026-07-03" },
+      { kind: "request", person: "Bob", date: "2026-07-03", shiftType: "late+", weight: 1 },
+      { kind: "off", person: "Bob", date: "2026-07-04", weight: -1 },
+      { kind: "request", person: "Bob", date: "2026-07-04", shiftType: "early", weight: 1 },
+    ],
+    groupSources: new Map([
+      [
+        JSON.stringify(["Alice", "2026-07-03"]),
+        { sources: ["From NightOwls · late+ +1"], short: "late+" },
+      ],
+    ]),
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await canvas.findByTestId("cell-Alice-2026-07-03");
+    await expect(canvas.getByTestId("cell-Bob-2026-07-03")).toHaveTextContent("Leave (+1)");
+    await expect(canvas.getByTestId(`hist-Bob-${historyCount - 1}`)).toHaveTextContent("+");
+    for (const cell of canvasElement.querySelectorAll<HTMLElement>("[data-testid^='cell-']")) {
+      cell.style.position = "relative";
+    }
+    const { default: axe } = await import("axe-core");
+    const results = await axe.run(canvas.getByTestId("requests-matrix"), {
+      runOnly: ["color-contrast"],
+    });
+    await expect(results.violations.flatMap((v) => v.nodes.map((n) => n.target))).toEqual([]);
+    await expect(results.incomplete.flatMap((v) => v.nodes.map((n) => n.target))).toEqual([]);
+  },
+};
+
+export const FadedContrast: Story = FADED;
+
+export const FadedContrastDark: Story = { ...FADED, globals: { theme: "dark" } };

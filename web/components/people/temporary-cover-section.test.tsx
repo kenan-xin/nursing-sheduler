@@ -10,7 +10,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
-import { rosterStorage, scenarioCommands, useScenarioStore } from "@/lib/store";
+import {
+  currentRosterStorage,
+  rosterStorage,
+  scenarioCommands,
+  useScenarioStore,
+} from "@/lib/store";
 import type { RosterDocument } from "@/lib/roster";
 import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
 import { drainScenarioCommands, resetScenarioForTest, undoDepth } from "@/lib/store/test-authority";
@@ -87,8 +92,10 @@ async function seed(patch: Partial<ScenarioUiState>) {
 
 async function seedWorkingRoster() {
   const document = await fixtureRosterDocument();
-  const epoch = await rosterStorage.getClearEpoch();
-  const outcome = await rosterStorage.promoteDocumentToWorking({
+  // The open schedule's own roster (plq5 P2).
+  const storage = currentRosterStorage();
+  const epoch = await storage.getClearEpoch();
+  const outcome = await storage.promoteDocumentToWorking({
     document,
     validate: (value) => ({ ok: true as const, document: value as RosterDocument }),
     expectedWorkingRevision: null,

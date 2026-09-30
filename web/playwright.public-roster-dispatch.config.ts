@@ -48,6 +48,7 @@ export default defineConfig({
       // Same as the base config: compiles the read-only store bridge in for the
       // browser suite only. An ordinary production build leaves it out entirely.
       NEXT_PUBLIC_NS_TEST_BRIDGE: "1",
+      SG_HOLIDAYS_OFFLINE: "1",
     },
     timeout: 120_000,
     // Never attach to an already-running server, so a stale one (without the

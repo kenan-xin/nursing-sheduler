@@ -39,6 +39,7 @@ describe("computeQuickPaintCellIntent", () => {
       mode: "day-state",
       dayState: { kind: "off", weight: 5 },
     });
+    // At weight 0 the fold removes an existing OFF instead (paint-fold.test.ts).
     expect(computeQuickPaintCellIntent(["OFF"], 0)).toEqual({
       mode: "day-state",
       dayState: { kind: "off", weight: 0 },
@@ -124,8 +125,11 @@ describe("resolveHistoryPaintSelection", () => {
     });
   });
 
-  it("a group (not in validItemIds) is skipped", () => {
-    expect(resolveHistoryPaintSelection(["EARLY"], validItemIds)).toEqual({ kind: "skip" });
+  it("a group (not in validItemIds) is an error", () => {
+    expect(resolveHistoryPaintSelection(["EARLY"], validItemIds)).toEqual({
+      kind: "error",
+      message: "History needs one shift type, not a group.",
+    });
   });
 
   it("multiple selections error verbatim", () => {

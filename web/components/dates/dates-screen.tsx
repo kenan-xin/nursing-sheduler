@@ -21,21 +21,21 @@
 
 import { useMemo } from "react";
 import { GuardedLink } from "@/components/shell/guarded-link";
+import { addGroup, renameGroup, setGroupMembers } from "@/components/entity-editor/core";
 import {
-  addGroup,
-  deleteGroup,
-  renameGroup,
-  setGroupMembers,
-} from "@/components/entity-editor/core";
+  deleteWithSummary,
+  saveRefusalMessage,
+} from "@/components/entity-editor/delete-with-summary";
+import { toast } from "sonner";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
+import { countDateExceptions } from "@/lib/cascade";
 import {
   applyRangeChange,
+  countRangeRemovals,
   hasCompleteRange,
+  holidayImportApplied,
   isDerivedDateGroupId,
   isReservedDateGroupId,
-  SINGAPORE_NONWORKDAY_GROUP_ID,
-  SINGAPORE_PH_GROUP_ID,
-  SINGAPORE_WORKDAY_GROUP_ID,
   type DateRange,
 } from "@/lib/dates";
 import { FaArrowRight } from "@/components/icons";
@@ -47,18 +47,11 @@ import { RosterPeriodCard } from "./roster-period-card";
 import { CalendarView } from "./calendar-view";
 import { DateGroupsCard } from "./date-groups-card";
 
-// The three editable groups the SG holiday import writes; their presence in a
-// loaded scenario is what makes the roster card's import switch honest.
-const SG_HOLIDAY_GROUP_IDS: ReadonlySet<string> = new Set([
-  SINGAPORE_WORKDAY_GROUP_ID,
-  SINGAPORE_NONWORKDAY_GROUP_ID,
-  SINGAPORE_PH_GROUP_ID,
-]);
-
 export function DatesScreen() {
   const rangeStart = useScenarioStore((s) => s.rangeStart);
   const rangeEnd = useScenarioStore((s) => s.rangeEnd);
   const dateGroups = useScenarioStore((s) => s.dateGroups);
+  const importPublicHolidays = useScenarioStore((s) => s.importPublicHolidays);
 
   // Stable identity while the endpoints are unchanged: the calendar/group cards
   // memoize on `range` and re-seed from it, so a fresh object each render would
@@ -74,12 +67,12 @@ export function DatesScreen() {
     [dateGroups],
   );
 
-  // Whether the loaded scenario actually carries the imported SG holiday groups, so
-  // the roster card's import switch shows an honest initial state (no false import).
-  const importedHolidaysPresent = useMemo(
-    () => dateGroups.some((group) => SG_HOLIDAY_GROUP_IDS.has(group.id)),
-    [dateGroups],
-  );
+  const importApplied = holidayImportApplied({
+    importPublicHolidays,
+    rangeStart,
+    rangeEnd,
+    dateGroups,
+  });
 
   const handleCommit = (newRange: DateRange, importHolidays: boolean) => {
     scenarioCommands.mutate((state) =>
@@ -100,17 +93,36 @@ export function DatesScreen() {
     );
   };
 
-  const handleSaveGroup = (oldId: string, name: string, memberIds: string[]) => {
+  const handleSaveGroup = async (oldId: string, name: string, memberIds: string[]) => {
     if (isDerivedDateGroupId(oldId) || isReservedDateGroupId(name)) return;
-    scenarioCommands.mutate((state) => {
+    // A member change drops date exceptions on dates the group no longer covers
+    // (setGroupMembers); count them at the queue head so the toast can say so.
+    let dropped = 0;
+    const outcome = await scenarioCommands.mutate((state) => {
       const renamed = name === oldId ? state : renameGroup(state, datesDescriptor, oldId, name);
-      return setGroupMembers(renamed, datesDescriptor, name, memberIds);
+      const next = setGroupMembers(renamed, datesDescriptor, name, memberIds);
+      dropped = countDateExceptions(state) - countDateExceptions(next);
+      return next;
+    });
+    if (!outcome.ok) {
+      toast.error(saveRefusalMessage(outcome, "date group"));
+      return;
+    }
+    if (!outcome.committed || dropped === 0) return;
+    const lost = `${dropped} date ${dropped === 1 ? "exception" : "exceptions"}`;
+    toast(`Saved date group “${name}”; removed ${lost}.`, {
+      action: { label: "Undo", onClick: () => void scenarioCommands.undo() },
     });
   };
 
   const handleDeleteGroup = (id: string) => {
     if (isDerivedDateGroupId(id)) return; // reserved ids are never deletable
-    scenarioCommands.mutate((state) => deleteGroup(state, datesDescriptor, id));
+    void deleteWithSummary(
+      (transform) => scenarioCommands.mutate(transform),
+      `date group “${id}”`,
+      datesDescriptor.domain,
+      id,
+    );
   };
 
   return (
@@ -158,8 +170,9 @@ export function DatesScreen() {
       <div className="grid grid-cols-1 items-start gap-4 grid2:grid-cols-2">
         <RosterPeriodCard
           range={range}
-          importedHolidaysPresent={importedHolidaysPresent}
+          importApplied={importApplied}
           onCommit={handleCommit}
+          countRemovals={(next) => countRangeRemovals(useScenarioStore.getState(), next)}
         />
         {complete ? (
           <CalendarView range={range} />

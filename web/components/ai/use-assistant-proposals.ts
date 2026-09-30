@@ -15,24 +15,31 @@
 // why "Out of date" appears without anyone having to notice and set it.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   assistantProposalCommands,
-  readConflictingEditorDraft,
   useAuthorityStore,
   type AssistantProposalV1,
   type AssistantScenarioBasis,
   type ReceiptStanding,
 } from "@/lib/store";
 import {
+  conflictingDraftMessage,
   describeProposalReadiness,
   type LiveProposalBasis,
   type ProposalDiff,
+  type ProposalDiffEntry,
   type ProposalReadiness,
 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import { CAPABILITY_UNAVAILABLE } from "@/lib/capability/resolve";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { awaitCoverEditOutcome, requestCoverEdit } from "@/lib/scenario/cover-edit-request";
+import {
+  readConflictingEditorDraft,
+  selectConflictingEditorDraft,
+  useNavGuardStore,
+} from "@/components/shell/nav-guard-store";
 import { applyThroughStaffForm, coverEditsOf } from "./staff-form-apply";
 import { useCapabilityNavigation } from "./use-capability-navigation";
 
@@ -53,12 +60,19 @@ export type ApplyOutcomeView =
     }
   | { kind: "failed"; message: string };
 
+/** The receipt the last successful Undo reverted, for the follow-up that says so. */
+export interface UndoneReceiptView {
+  receiptId: string;
+  summary: readonly ProposalDiffEntry[];
+}
+
 export interface AssistantProposalController {
   proposal: AssistantProposalV1 | null;
   readiness: ProposalReadiness | null;
   /** True while the durable Apply transaction is in flight. */
   applying: boolean;
   outcome: ApplyOutcomeView | null;
+  undone: UndoneReceiptView | null;
   receipts: ReceiptStanding[];
   confirm(assumptionId: string): Promise<void>;
   withdraw(assumptionId: string): Promise<void>;
@@ -101,6 +115,14 @@ export function describeApplyFailure(reason: string): string {
   }
 }
 
+/** Why a receipt Undo failed. Only the lease and the reload have their own words. */
+export function describeUndoFailure(reason: string): string {
+  if (reason === "not-owner") {
+    return "This schedule is being edited in another tab, so nothing was undone.";
+  }
+  return describeApplyFailure(reason === "reload-required" ? reason : "history-unavailable");
+}
+
 export function useAssistantProposals(): AssistantProposalController {
   const active = useAssistantStore((state) => state.activeProposal);
   const liveTurnEpoch = useAssistantStore((state) => state.turnEpoch);
@@ -111,12 +133,14 @@ export function useAssistantProposals(): AssistantProposalController {
   const recordRevision = useAuthorityStore((state) => state.recordRevision);
   const ownership = useAuthorityStore((state) => state.ownership);
   const reloadRequired = useAuthorityStore((state) => state.reloadRequired);
+  const conflictingDraft = useNavGuardStore(selectConflictingEditorDraft);
 
   const [stored, setProposal] = useState<AssistantProposalV1 | null>(null);
   const [basis, setBasis] = useState<AssistantScenarioBasis | null>(null);
   const [receipts, setReceipts] = useState<ReceiptStanding[]>([]);
   const [applying, setApplying] = useState(false);
   const [outcome, setOutcome] = useState<ApplyOutcomeView | null>(null);
+  const [undone, setUndone] = useState<UndoneReceiptView | null>(null);
   const navigate = useCapabilityNavigation();
 
   // ASYNC TAILS ABANDON THEIR WORK ON UNMOUNT. Every continuation below runs behind an
@@ -180,7 +204,8 @@ export function useAssistantProposals(): AssistantProposalController {
     return () => {
       cancelled = true;
     };
-  }, [proposalId, scenarioId, documentRevision, recordRevision, ownership, liveTurnEpoch]);
+    // `active`, not just its id: a revision keeps the id, and each showing must reread it.
+  }, [active, proposalId, scenarioId, documentRevision, recordRevision, ownership, liveTurnEpoch]);
 
   const readiness = useMemo<ProposalReadiness | null>(() => {
     if (!proposal) return null;
@@ -190,7 +215,8 @@ export function useAssistantProposals(): AssistantProposalController {
       topCommitId: basis?.topCommitId ?? null,
       leaseEpoch: basis?.leaseEpoch ?? null,
       isOwner: (basis?.isOwner ?? false) && ownership === "owner" && !reloadRequired,
-      conflictingDraft: readConflictingEditorDraft(),
+      // A cover Apply opens the Staff form itself; that form is the Apply, not a conflict.
+      conflictingDraft: applying ? null : conflictingDraft,
       // An interruption that moved the turn epoch past the one this Preview was
       // prepared under has already invalidated it, whether or not it has settled.
       invalidated: interrupting || (active !== null && active.turnEpoch !== liveTurnEpoch),
@@ -204,6 +230,8 @@ export function useAssistantProposals(): AssistantProposalController {
     documentRevision,
     ownership,
     reloadRequired,
+    conflictingDraft,
+    applying,
     interrupting,
     active,
     liveTurnEpoch,
@@ -319,18 +347,27 @@ export function useAssistantProposals(): AssistantProposalController {
 
   const undo = useCallback(
     async (receiptId: string) => {
-      await assistantProposalCommands.undoReceipt(receiptId);
-      // The reverted receipt is the one the Apply notice is narrating: that claim is
-      // no longer true, so drop it rather than leave the notice pointing at a change
-      // that no longer exists.
-      if (mounted.current) {
+      const draft = readConflictingEditorDraft();
+      if (draft) {
+        toast.error(conflictingDraftMessage(draft));
+        return;
+      }
+      const result = await assistantProposalCommands.undoReceipt(receiptId);
+      if (!result.ok) {
+        toast.error(describeUndoFailure(result.reason));
+      } else if (mounted.current) {
+        // The reverted receipt is the one the Apply notice is narrating: that claim is
+        // no longer true, so drop it rather than leave the notice pointing at a change
+        // that no longer exists.
         setOutcome((prev) =>
           prev?.kind === "applied" && prev.receiptId === receiptId ? null : prev,
         );
+        const standing = receipts.find((entry) => entry.receipt.receiptId === receiptId);
+        setUndone({ receiptId, summary: standing?.receipt.summary ?? [] });
       }
       await refresh();
     },
-    [refresh],
+    [refresh, receipts],
   );
 
   return {
@@ -338,6 +375,7 @@ export function useAssistantProposals(): AssistantProposalController {
     readiness,
     applying,
     outcome,
+    undone,
     receipts,
     confirm,
     withdraw,

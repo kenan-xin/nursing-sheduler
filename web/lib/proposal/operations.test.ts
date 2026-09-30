@@ -11,6 +11,7 @@ import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
 import type { AssistantCommandV1 } from "./commands";
 import { applyAssistantCommand, applyAssistantCommands } from "./operations";
+import { deriveProposalDiff } from "./diff";
 import {
   octoberWard,
   pairingWardScenario,
@@ -68,6 +69,90 @@ describe("set_roster_range", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.rejection.code).toBe("no_effect");
+  });
+});
+
+describe("set_roster_range holiday-import switch (bead 6975)", () => {
+  const imported = (): ScenarioUiState => {
+    const result = applyAssistantCommand(proposalScenario(), {
+      type: "set_roster_range",
+      start: "2026-05-01",
+      end: "2026-05-31",
+      importPublicHolidays: true,
+    });
+    if (!result.ok) throw new Error("import failed");
+    return result.next;
+  };
+
+  it("false keeps the holiday groups as they are and remembers the switch off", () => {
+    const before = imported();
+    expect(before.importPublicHolidays).toBe(true);
+    const result = applyAssistantCommand(before, {
+      type: "set_roster_range",
+      start: "2026-05-01",
+      end: "2026-05-20",
+      importPublicHolidays: false,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.importPublicHolidays).toBe(false);
+    expect(result.next.dateGroups.map((g) => g.id)).toEqual(before.dateGroups.map((g) => g.id));
+
+    // Preview reports the switch, as the user asked for it.
+    const diff = deriveProposalDiff(before, result.next, [
+      {
+        type: "set_roster_range",
+        start: "2026-05-01",
+        end: "2026-05-20",
+        importPublicHolidays: false,
+      },
+    ]);
+    expect(diff.direct.find((entry) => entry.key === "dates:holiday-import")).toMatchObject({
+      label: "Import Singapore public holidays",
+      before: "On",
+      after: "Off",
+    });
+  });
+
+  it("true turns a stored-off switch back on and rebuilds the groups", () => {
+    const off = { ...imported(), importPublicHolidays: false, dateGroups: [] };
+    const result = applyAssistantCommand(off, {
+      type: "set_roster_range",
+      start: "2026-05-01",
+      end: "2026-05-31",
+      importPublicHolidays: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.importPublicHolidays).toBe(true);
+    expect(result.next.dateGroups.map((g) => g.id)).toContain("PH");
+  });
+});
+
+describe("set_roster_range holiday coverage (bead si4j)", () => {
+  it("refuses a holiday import it cannot mark, with the Dates card's warning", () => {
+    const result = applyAssistantCommand(proposalScenario(), {
+      type: "set_roster_range",
+      start: "2027-12-01",
+      end: "2028-01-31",
+      importPublicHolidays: true,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain(
+      "No public-holiday data for 2028 yet. Holidays in those dates are not marked.",
+    );
+  });
+
+  it("still sets that period without the import", () => {
+    const result = applyAssistantCommand(proposalScenario(), {
+      type: "set_roster_range",
+      start: "2027-12-01",
+      end: "2028-01-31",
+      importPublicHolidays: false,
+    });
+    expect(result.ok).toBe(true);
   });
 });
 
@@ -530,8 +615,9 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const added = result.next.shifts.slice(2);
-    expect(added.map((s) => s.id)).toEqual(["am1", "am2", "am3", "pm1", "pm2", "pm3", "L", "N"]);
-    expect(added.find((s) => s.id === "am1")).toMatchObject({
+    // Stored uppercase, as the Shifts page stores a code; the groups name the same ids.
+    expect(added.map((s) => s.id)).toEqual(["AM1", "AM2", "AM3", "PM1", "PM2", "PM3", "L", "N"]);
+    expect(added.find((s) => s.id === "AM1")).toMatchObject({
       startTime: "08:00",
       endTime: "15:00",
       durationMinutes: 420,
@@ -544,8 +630,8 @@ describe("add_shift_type / add_shift_group", () => {
       durationMinutes: 750,
     });
     expect(result.next.shiftGroups.map((g) => [g.id, g.members])).toEqual([
-      ["AM", ["am1", "am2", "am3"]],
-      ["PM", ["pm1", "pm2", "pm3"]],
+      ["AM", ["AM1", "AM2", "AM3"]],
+      ["PM", ["PM1", "PM2", "PM3"]],
       ["Long", ["L"]],
       ["Night shifts", ["N"]],
     ]);
@@ -559,7 +645,7 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const created = result.next.shifts.at(-1);
-    expect(created?.id).toBe("am1");
+    expect(created?.id).toBe("AM1");
     expect(created?.description).toBeUndefined();
   });
 
@@ -568,7 +654,7 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.rejection.code).toBe("invalid_value");
-    expect(result.rejection.message).toContain('Shift "Day"');
+    expect(result.rejection.message).toContain('Shift "DAY"');
   });
 
   it("refuses a duplicate inside the batch at the second occurrence", () => {
@@ -579,14 +665,38 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.rejection.index).toBe(1);
-    expect(result.rejection.message).toContain('Shift "am1"');
+    expect(result.rejection.message).toContain('Shift "AM1"');
   });
 
-  it("accepts a case-variant code, as the Shifts page does", () => {
-    // Ids are exact-identity across the app; `Night` and `NIGHT` are distinct.
-    expect(applyAssistantCommand(proposalScenario(), shift("NIGHT", "20:00", "08:30")).ok).toBe(
-      true,
-    );
+  it("matches a later reference to a code this batch adds in any case (tz3y)", () => {
+    const result = applyAssistantCommands(proposalScenario(), [
+      shift("am1", "08:00", "15:00"),
+      group("Early", ["Am1", "Day"]),
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.shifts.at(-1)?.id).toBe("AM1");
+    expect(result.next.shiftGroups.at(-1)?.members).toEqual(["Day", "AM1"]);
+  });
+
+  it("leaves a lowercase code the document already holds as written (tz3y)", () => {
+    const base = proposalScenario();
+    const state = { ...base, shifts: [...base.shifts, { ...base.shifts[0], id: "early" }] };
+    const result = applyAssistantCommands(state, [
+      shift("pm1", "13:00", "21:00"),
+      group("Mixed", ["early", "pm1"]),
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.shifts.map((s) => s.id)).toContain("early");
+    expect(result.next.shiftGroups.at(-1)?.members).toEqual(["early", "PM1"]);
+  });
+
+  it("refuses a case-variant code, as the Shifts page does (T4)", () => {
+    // A card uppercases its code, so `Night` and `NIGHT` would read as one shift.
+    const result = applyAssistantCommand(proposalScenario(), shift("NIGHT", "20:00", "08:30"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("invalid_value");
   });
 
   it("refuses reserved, numbers-only and empty codes", () => {
@@ -602,7 +712,7 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.rejection.code).toBe("invalid_value");
-    expect(result.rejection.message).toContain('Shift "am1"');
+    expect(result.rejection.message).toContain('Shift "AM1"');
     expect(result.rejection.message).toContain("09:00");
   });
 
@@ -622,7 +732,7 @@ describe("add_shift_type / add_shift_group", () => {
     const result = applyAssistantCommand(proposalScenario(), shift("am1", "08:15", "15:00"));
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.rejection.message).toContain('Shift "am1"');
+    expect(result.rejection.message).toContain('Shift "AM1"');
     expect(result.rejection.message).toContain("30-minute grid");
   });
 
@@ -664,7 +774,7 @@ describe("add_shift_type / add_shift_group", () => {
       expect(result.ok, String(restMinutes)).toBe(false);
       if (result.ok) continue;
       expect(result.rejection.code).toBe("invalid_value");
-      expect(result.rejection.message).toContain('Shift "am1"');
+      expect(result.rejection.message).toContain('Shift "AM1"');
       expect(result.rejection.message).toContain(text);
     }
   });
@@ -875,13 +985,19 @@ describe("leave and request arms", () => {
   });
 
   it("replaces leave with a day-off request, as painting OFF does", () => {
-    const result = applyAssistantCommand(octoberWard(), off("Ana", "2026-10-14", "2026-10-14", 0));
+    const result = applyAssistantCommand(octoberWard(), off("Ana", "2026-10-14", "2026-10-14", 5));
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(at(result.next, "Ana", "14")).toEqual([
-        { kind: "off", person: "Ana", date: "14", weight: 0 },
+        { kind: "off", person: "Ana", date: "14", weight: 5 },
       ]);
     }
+  });
+
+  it("refuses a day off at weight 0, which would have no effect", () => {
+    const result = applyAssistantCommand(octoberWard(), off("Ana", "2026-10-14", "2026-10-14", 0));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("invalid_value");
   });
 
   it("accepts a staff group row, a shift group and ALL", () => {
@@ -1176,7 +1292,7 @@ describe("add_shift_sequence_rule / edit_shift_sequence_rule", () => {
       if (result.ok) continue;
       expect(result.rejection.message).toContain('Shift sequence rule "No day after night"');
       expect(result.rejection.message).toContain(
-        "Weight must be a valid number, Infinity, or -Infinity",
+        "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
       );
     }
   });
@@ -2261,12 +2377,23 @@ describe("add_pairing_rule / edit_pairing_rule", () => {
     expect(result.next.cardsByKind.affinities.at(-1)).toEqual({
       uid: expect.any(String),
       description: "Keep Ana and Ben apart on nights",
-      people1: [["ana"]],
-      people2: [["ben"]],
-      shiftTypes: [["Night"]],
+      people1: ["ana"],
+      people2: ["ben"],
+      shiftTypes: ["Night"],
       date: ["ALL"],
       weight: Number.NEGATIVE_INFINITY,
     });
+  });
+
+  it("reads a thousands separator and refuses unclear weight text (bug hunt C6)", () => {
+    const thousand = applyAssistantCommand(pairingWardScenario(), { ...apart, weight: "1,000" });
+    expect(thousand.ok && thousand.next.cardsByKind.affinities.at(-1)?.weight).toBe(1000);
+    for (const weight of ["10abc", "1e3", "1.2.3", "10.5"]) {
+      const result = applyAssistantCommand(pairingWardScenario(), { ...apart, weight });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.rejection.message).toContain("Not a number");
+    }
   });
 
   it("refuses ALL as people, naming the rule", () => {
@@ -2338,7 +2465,7 @@ describe("add_pairing_rule / edit_pairing_rule", () => {
   it("edit refuses a card the form cannot open, and an unknown rule", () => {
     const state = pairingWardScenario();
     state.cardsByKind.affinities = [
-      { ...state.cardsByKind.affinities[0], people1: [["ana"], ["cai"]] },
+      { ...state.cardsByKind.affinities[0], people1: [["ana", "cai"]] },
     ];
     const multi = applyAssistantCommand(state, edit({ weight: "-5" }));
     expect(multi.ok).toBe(false);
@@ -2371,7 +2498,7 @@ describe("add_supervision_rule / edit_supervision_rule", () => {
       description: "A senior on every shift Ana works",
       preceptors: [["Senior"]],
       preceptees: [["ana"]],
-      shiftTypes: [["Day", "Night"]],
+      shiftTypes: ["Day", "Night"],
       weight: 1,
     });
   });
@@ -2418,7 +2545,7 @@ describe("add_supervision_rule / edit_supervision_rule", () => {
           description: "Ben needs a senior on Day",
           preceptors: [["Senior"]],
           preceptees: [["ben"]],
-          shiftTypes: [["Day"]],
+          shiftTypes: ["Day"],
           date: ["WEEKEND"],
           weight: 1,
         },

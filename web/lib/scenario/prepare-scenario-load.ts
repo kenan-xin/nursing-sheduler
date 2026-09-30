@@ -10,9 +10,9 @@
 //   projectImportTarget → validateScenario (producer preflight, which runs
 //   validateContractedHoursContract) → { target, doc, issues, warnings }
 //
-// It mutates nothing and never throws into its caller: a YAML syntax error, an
-// import/schema failure, and a producer/contracted V-message all come back
-// through `issues`; non-blocking advanced-syntax survivors come back through
+// It mutates nothing and never throws into its caller: a YAML syntax error and an
+// import/schema failure come back through `issues`; a producer/contracted V-message
+// comes back through `optimizeIssues` (non-blocking, C-22); non-blocking advanced-syntax survivors come back through
 // `warnings`. The returned `target` is the keyless import target, byte-identical
 // to what `importScenarioValue` produced, so the later `loadScenario(target)` can
 // allocate its own fresh card identity without collision.
@@ -22,6 +22,11 @@ import { currentAppVersion } from "./app-version";
 import { projectScenarioDocument } from "./canonical";
 import { importScenarioValue, parseScenarioYaml } from "./import-scenario";
 import { validateScenario, type ScenarioValidationIssue } from "./serialize";
+import {
+  planV1LeaveShiftConversion,
+  v1LeaveShiftIssue,
+  type V1LeaveShiftPlan,
+} from "./v1-leave-shift";
 import {
   checkWorkspaceIdentityIntegrity,
   classifyWorkspaceSource,
@@ -46,7 +51,7 @@ export interface PrepareScenarioLoadResult {
   doc: CanonicalScenarioDocument | null;
   /**
    * Blocking problems, in one channel: a YAML syntax error (path `""`) OR the
-   * import-schema / producer / contracted-hours V-messages. Empty ⇒ load may proceed.
+   * import-schema V-messages. Empty ⇒ load may proceed.
    */
   issues: ScenarioValidationIssue[];
   /**
@@ -54,6 +59,22 @@ export interface PrepareScenarioLoadResult {
    * shapes preserved on import but outside the web UI editing subset. Never blocks.
    */
   warnings: string[];
+  /**
+   * Producer-preflight V-messages on a file that otherwise loads (C-22, v1 parity).
+   * They do not block the load; Optimize stays blocked until they are fixed.
+   */
+  optimizeIssues?: ScenarioValidationIssue[];
+  /**
+   * Set when the file defines its own shift type named "Leave" (a v1 file; v2
+   * reserves LEAVE). Unless the caller asked to convert it (and it has no
+   * blockers), the load is blocked with an issue naming the shift.
+   */
+  v1LeaveShift?: V1LeaveShiftPlan;
+}
+
+export interface PrepareScenarioLoadOptions {
+  /** Convert a v1 "Leave" shift type into LEAVE pins (the user accepted the offer). */
+  convertV1LeaveShift?: boolean;
 }
 
 /**
@@ -73,7 +94,10 @@ export function projectImportTarget(target: ImportNormalizationTarget): Canonica
  * See the module header for the pipeline; the store is untouched by construction
  * (this function has no store handle).
  */
-export function prepareScenarioLoad(raw: string): PrepareScenarioLoadResult {
+export function prepareScenarioLoad(
+  raw: string,
+  options: PrepareScenarioLoadOptions = {},
+): PrepareScenarioLoadResult {
   // 0. Dual-format dispatch (DL12 §4). A `workspaceVersion` scalar routes to the
   //    Workspace V1 loader; its absence keeps the legacy strict/import path below,
   //    which is unchanged. Only the discriminator picks the path — a Workspace file
@@ -104,6 +128,22 @@ export function prepareScenarioLoad(raw: string): PrepareScenarioLoadResult {
     };
   }
 
+  // 1b. A v1 shift type named "Leave" clashes with the reserved LEAVE. Block with a
+  //     rename hint unless the caller opted into (a blocker-free) conversion.
+  const v1LeaveShift = planV1LeaveShiftConversion(parsed) ?? undefined;
+  if (v1LeaveShift) {
+    if (!options.convertV1LeaveShift || !v1LeaveShift.convertible) {
+      return {
+        target: null,
+        doc: null,
+        issues: [v1LeaveShiftIssue(v1LeaveShift)],
+        warnings: [],
+        v1LeaveShift,
+      };
+    }
+    parsed = v1LeaveShift.doc;
+  }
+
   // 2. Lenient import — accepts every backend-valid form; LEAVE/OFF selectors are
   //    normalized into leave/off matrix cells inside `normalizeImport`. Structural
   //    / schema failures return the second issue channel (no target, no doc).
@@ -130,10 +170,12 @@ export function prepareScenarioLoad(raw: string): PrepareScenarioLoadResult {
   }
 
   // 4. Producer preflight (runs `validateContractedHoursContract` transitively).
+  //    A file that fails it still loads, as in v1 (C-22): its issues come back as
+  //    `optimizeIssues`, and Optimize's own strict gate blocks until they are fixed.
   const validation = validateScenario(doc);
   const warnings = collectImportWarnings(target);
   if (!validation.ok) {
-    return { target, doc, issues: validation.issues, warnings };
+    return { target, doc, issues: [], warnings, optimizeIssues: validation.issues };
   }
   return { target, doc: validation.document, issues: [], warnings };
 }

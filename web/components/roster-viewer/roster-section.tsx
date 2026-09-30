@@ -26,7 +26,7 @@ import { useCallback, useRef, useState } from "react";
 import { FaDownload } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { rosterStorage } from "@/lib/store";
+import { currentRosterStorage, useAuthorityStore } from "@/lib/store";
 import type { RosterDocument } from "@/lib/roster";
 import {
   clearRosterDataAndNotify,
@@ -38,6 +38,7 @@ import type { CurrentCandidatePointer } from "@/lib/store";
 import type { RosterCaptureSurface } from "@/lib/optimize";
 import { Callout } from "@/components/optimize/callout";
 import { ConfirmDialog } from "@/components/shell/confirm-dialog";
+import { ReplaceRosterDialog } from "./replace-roster-dialog";
 import { EmptyRosterActions } from "./roster-actions";
 import { describeReplacementFailure, ROSTER_CLEAR_PARTIAL_MESSAGE } from "./replacement-outcome";
 import { useWorkingRoster } from "./use-working-roster";
@@ -60,7 +61,10 @@ export function RosterSection({ capture }: RosterSectionProps) {
   const [loadPending, setLoadPending] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dismissPending, setDismissPending] = useState(false);
-  const [confirmReplace, setConfirmReplace] = useState<CurrentCandidatePointer | null>(null);
+  const [confirmReplace, setConfirmReplace] = useState<{
+    pointer: CurrentCandidatePointer;
+    viewed: RosterDocument | null;
+  } | null>(null);
   // The empty-state document actions. Kept in a channel of their own so an
   // Import/Clear failure never overwrites (or is overwritten by) a candidate
   // Load/Dismiss message describing a different action.
@@ -122,9 +126,10 @@ export function RosterSection({ capture }: RosterSectionProps) {
       setLoadPending(true);
       setLoadError(null);
       try {
-        const epoch = await rosterStorage.getClearEpoch();
+        const storage = currentRosterStorage();
+        const epoch = await storage.getClearEpoch();
         const outcome = await promoteCandidateRosterToWorking(pointer, {
-          storage: rosterStorage,
+          storage,
           expectedWorkingRevision: null,
           expectedClearEpoch: epoch,
         });
@@ -163,9 +168,10 @@ export function RosterSection({ capture }: RosterSectionProps) {
       setActionError(null);
       setClearFailed(false);
       try {
-        const epoch = await rosterStorage.getClearEpoch();
+        const storage = currentRosterStorage();
+        const epoch = await storage.getClearEpoch();
         const outcome = await importRosterFileToWorking(file, {
-          storage: rosterStorage,
+          storage,
           expectedWorkingRevision: null,
           expectedClearEpoch: epoch,
         });
@@ -220,11 +226,14 @@ export function RosterSection({ capture }: RosterSectionProps) {
   const onLoadClick = useCallback(() => {
     if (loadable === null) return;
     if (hasWorkingRoster) {
-      setConfirmReplace(loadable.pointer);
+      setConfirmReplace({
+        pointer: loadable.pointer,
+        viewed: panelRef.current?.viewedDocument() ?? roster.document,
+      });
       return;
     }
     void promoteEmpty(loadable.pointer);
-  }, [hasWorkingRoster, loadable, promoteEmpty]);
+  }, [hasWorkingRoster, loadable, promoteEmpty, roster.document]);
 
   /**
    * The confirmed replacement of an existing roster. Routes through the panel's
@@ -232,7 +241,7 @@ export function RosterSection({ capture }: RosterSectionProps) {
    * Import share one coordinator.
    */
   const onConfirmReplace = useCallback(async () => {
-    const pointer = confirmReplace;
+    const pointer = confirmReplace?.pointer ?? null;
     setConfirmReplace(null);
     if (pointer === null) return;
     const handle = panelRef.current;
@@ -251,6 +260,7 @@ export function RosterSection({ capture }: RosterSectionProps) {
   }, [confirmReplace, promoteEmpty]);
 
   const onClear = useCallback(() => setConfirmClear(true), []);
+  const [confirmDismiss, setConfirmDismiss] = useState(false);
 
   /**
    * Dismissal goes to the gate keyed by the EXACT `{jobId, candidateVersion}`
@@ -270,6 +280,7 @@ export function RosterSection({ capture }: RosterSectionProps) {
       const outcome = await capture.gate.dismissDurableCandidate({
         jobId: loadable.pointer.jobId,
         candidateVersion: loadable.pointer.candidateVersion,
+        scenarioId: useAuthorityStore.getState().scenarioId,
       });
       if (outcome.status === "failed") {
         setLoadError(outcome.message);
@@ -336,12 +347,25 @@ export function RosterSection({ capture }: RosterSectionProps) {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => void onDismissClick()}
+              onClick={() => setConfirmDismiss(true)}
               disabled={loadPending || dismissPending}
               data-testid="roster-candidate-dismiss"
             >
-              Dismiss
+              Delete this result
             </Button>
+            <ConfirmDialog
+              open={confirmDismiss}
+              onOpenChange={setConfirmDismiss}
+              title="Delete this result?"
+              description={
+                hasWorkingRoster
+                  ? "This deletes the saved result from this browser. The roster below stays as it is."
+                  : "This deletes the saved result from this browser. Your downloaded XLSX is unaffected."
+              }
+              confirmLabel="Delete this result"
+              variant="destructive"
+              onConfirm={() => void onDismissClick()}
+            />
           </>
         }
       >
@@ -384,8 +408,8 @@ export function RosterSection({ capture }: RosterSectionProps) {
       open={confirmClear}
       onOpenChange={setConfirmClear}
       title="Clear roster & stored data?"
-      description="This permanently removes every saved result and all roster data stored in this browser. This cannot be undone."
-      confirmLabel="Clear all roster data"
+      description="This permanently removes this schedule's roster, its saved results and its stored run data from this browser. Other schedules keep theirs. This cannot be undone."
+      confirmLabel="Clear this schedule's roster"
       variant="destructive"
       onConfirm={() => void onConfirmClear()}
     />
@@ -393,13 +417,13 @@ export function RosterSection({ capture }: RosterSectionProps) {
 
   const replaceDialog =
     loadable === null ? null : (
-      <ConfirmDialog
+      <ReplaceRosterDialog
         open={confirmReplace !== null}
         onOpenChange={(open) => !open && setConfirmReplace(null)}
-        title="Replace the roster on screen?"
         description="The roster you are viewing will be replaced by your latest saved result."
-        confirmLabel="Replace roster"
+        viewed={confirmReplace?.viewed ?? null}
         onConfirm={() => void onConfirmReplace()}
+        onSaveError={setLoadError}
       />
     );
 
@@ -415,6 +439,12 @@ export function RosterSection({ capture }: RosterSectionProps) {
       <section className="flex min-w-0 flex-col gap-3" data-testid="roster-section">
         {candidateCallout}
         {loadErrorCallout}
+        {roster.possiblyOtherSchedule ? (
+          <Callout tone="warn" placement="page" data-testid="roster-possibly-other-schedule">
+            This roster was saved before each schedule kept its own, and its dates or people do not
+            match this schedule. It may belong to a different schedule.
+          </Callout>
+        ) : null}
         <WorkingRosterPanel
           ref={panelRef}
           document={roster.document}

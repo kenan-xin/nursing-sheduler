@@ -7,8 +7,43 @@
 import {
   createEmptyScenarioUiState,
   serializeScenario,
+  type V1LeaveShiftPlan,
   type VersionConfirmStatus,
 } from "@/lib/scenario";
+
+// ---------------------------------------------------------------------------
+// v1 "Leave" shift conversion offer (nursing-sheduler-objg). v1 let a file define
+// its own "Leave" shift; v2 reserves LEAVE as the paid-leave pin.
+// ---------------------------------------------------------------------------
+
+/** Copy for the confirm that offers converting a v1 "Leave" shift to paid leave. */
+export function v1LeaveShiftOfferCopy(plan: V1LeaveShiftPlan): {
+  title: string;
+  description: string;
+  detail: string;
+} {
+  const lines = [
+    `Requests that become paid leave: ${plan.convertedRequests}`,
+    `History entries that become LEAVE: ${plan.historyEntries}`,
+  ];
+  if (plan.droppedRequests > 0)
+    lines.push(`Requests dropped (zero or negative weight): ${plan.droppedRequests}`);
+  if (plan.allShiftRules > 0)
+    lines.push(
+      plan.allShiftRules === 1
+        ? "1 rule that counts ALL shifts will no longer count leave days after conversion."
+        : `${plan.allShiftRules} rules that count ALL shifts will no longer count leave days after conversion.`,
+    );
+  return {
+    title: `Convert "${plan.shiftId}" to paid leave?`,
+    description:
+      `This file has its own shift type "${plan.shiftId}". This app has a built-in LEAVE for ` +
+      `paid leave, so the two clash. Convert it: the shift type is removed and its requests ` +
+      `become fixed paid-leave days, which the schedule always keeps. ` +
+      `To keep it as a worked shift instead, choose Don't convert.`,
+    detail: lines.join("\n"),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // FR-SL-19/20 version-mismatch wording (spec 08, ported from the current
@@ -79,13 +114,17 @@ export function versionMismatchCopy(
 
 /** Title/lead for the replacement half of the combined load confirmation. */
 export const REPLACEMENT_CONFIRM_TITLE = "Replace your current workspace?";
+// A Load mints a new scenario identity, so Undo cannot reach back across it
+// (`lib/store/lifecycle.ts`). The copy must not promise otherwise (C-05).
 export const REPLACEMENT_CONFIRM_BODY =
-  "Loading this file replaces your current workspace — your current setup will be " +
-  "overwritten. You can undo the load afterwards to restore it.";
+  "This replaces your current schedule and cannot be undone. Download a copy first. " +
+  "The current roster will also be cleared.";
 
 export interface LoadConfirmCopy {
   title: string;
   description: string;
+  /** True when the load overwrites a non-empty workspace — render the destructive style. */
+  destructive?: boolean;
   /** The FR-SL-19 mono version box lines, when the version case applies (see `VersionMismatchCopy.detail`). */
   detail?: string;
 }
@@ -111,10 +150,15 @@ export function loadConfirmCopy(
       title: REPLACEMENT_CONFIRM_TITLE,
       description: `${REPLACEMENT_CONFIRM_BODY}\n\n${version.title}\n\n${version.description}`,
       detail: version.detail,
+      destructive: true,
     };
   }
   if (version) return version;
-  return { title: REPLACEMENT_CONFIRM_TITLE, description: REPLACEMENT_CONFIRM_BODY };
+  return {
+    title: REPLACEMENT_CONFIRM_TITLE,
+    description: REPLACEMENT_CONFIRM_BODY,
+    destructive: true,
+  };
 }
 
 // ---------------------------------------------------------------------------

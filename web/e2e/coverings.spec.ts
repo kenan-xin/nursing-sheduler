@@ -148,8 +148,12 @@ test.describe.serial("T13 shift-type coverings editor (rebuild)", () => {
     expect(cards[0].description).toBe("Chloe covered by Aisha");
     expect(cards[0].preceptors).toEqual([["Aisha"]]);
     expect(cards[0].preceptees).toEqual([["Chloe"]]);
-    expect(cards[0].shiftTypes).toEqual([["Day"]]);
+    // Flat: core checks each shift on its own (bead yzty).
+    expect(cards[0].shiftTypes).toEqual(["Day"]);
     expect(cards[0].date).toEqual(["WEEKEND"]);
+    await expect(page.getByTestId("covering-card-0")).toContainText(
+      "A preceptor on the same shift on the same day",
+    );
     expect(cards[0].weight).toBe(1); // inert enforced weight
     expect(cards[0].disabled).toBeUndefined();
     // The compound add is exactly ONE tracked mutation (one undo entry).
@@ -276,8 +280,10 @@ test.describe.serial("T13 shift-type coverings editor (rebuild)", () => {
     await seed(page, BASE_SEED);
     await page.getByTestId("add-card-toggle").click();
 
-    // Add all preceptors at once (M2 Add-all) — Aisha, Chloe, Daniel in item order.
+    // Add all preceptors at once (M2 Add-all) — Aisha, Chloe, Daniel in item order —
+    // then take Chloe back out: a preceptee who is also every preceptor is blocked (S1).
     await page.getByTestId("transfer-add-all-preceptors").click();
+    await page.getByRole("button", { name: "Remove Chloe from preceptors" }).click();
     await page.getByRole("button", { name: "Add Chloe as a preceptee" }).click();
     await page.getByTestId("transfer-add-all-shiftTypes").click();
     // Specific dates as a compact range text (M3): days 1 and 3 of Jan 2026.
@@ -285,9 +291,39 @@ test.describe.serial("T13 shift-type coverings editor (rebuild)", () => {
     await page.getByTestId("card-editor-submit").click();
 
     const cards = await readCoverings(page);
-    expect(cards[0].preceptors).toEqual([["Aisha", "Chloe", "Daniel"]]);
-    expect(cards[0].shiftTypes).toEqual([["Day", "Night"]]);
+    expect(cards[0].preceptors).toEqual([["Aisha", "Daniel"]]);
+    expect(cards[0].shiftTypes).toEqual(["Day", "Night"]);
     expect(cards[0].date).toEqual(["2026-01-01", "2026-01-03"]);
+  });
+
+  test("a pre-yzty grouped-shift card stays read-only and says what it really checks", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    await seed(page, {
+      cardsByKind: {
+        requirements: [],
+        successions: [],
+        counts: [],
+        affinities: [],
+        coverings: [
+          {
+            uid: "cov-grouped",
+            preceptors: [["Aisha"]],
+            preceptees: [["Chloe"]],
+            shiftTypes: [["Day", "Night"]],
+            weight: 1,
+          },
+        ],
+      },
+    });
+    const card = page.getByTestId("covering-card-0");
+    await expect(card.getByText("Advanced (grouped)")).toBeVisible();
+    await expect(card).toContainText("even on a different shift from the preceptee");
+    await expect(page.getByTestId("covering-readonly-note-0")).toBeVisible();
+    await expect(page.getByTestId("covering-edit-0")).toHaveCount(0);
+    expect((await readCoverings(page))[0].shiftTypes).toEqual([["Day", "Night"]]);
   });
 
   test("move up/down reorders durably (FR-CV-21)", async ({ page }) => {
@@ -541,7 +577,10 @@ test.describe.serial("T13 cold-review regressions", () => {
     await seed(page, {
       rangeStart: "2026-01-01",
       rangeEnd: "2026-01-31",
-      staff: [{ id: 1, history: [] }],
+      staff: [
+        { id: 1, history: [] },
+        { id: 2, history: [] },
+      ],
       staffGroups: [{ id: "1", description: "StrOne", members: [] }],
       shifts: [{ id: "Day" }],
     });
@@ -551,8 +590,8 @@ test.describe.serial("T13 cold-review regressions", () => {
     // Both rows are present and addable (distinct via their labels/aria).
     await page.getByRole("button", { name: "Add 1 as a preceptor" }).click();
     await page.getByRole("button", { name: "Add 1 — StrOne as a preceptor" }).click();
-    // A preceptee + shift type make the draft valid.
-    await page.getByRole("button", { name: "Add 1 as a preceptee" }).click();
+    // A preceptee who is not a preceptor (S1) + a shift type make the draft valid.
+    await page.getByRole("button", { name: "Add 2 as a preceptee" }).click();
     await page.getByRole("button", { name: "Add Day as a covered shift type" }).click();
     await page.getByTestId("card-editor-submit").click();
 

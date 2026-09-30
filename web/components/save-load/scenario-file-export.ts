@@ -16,9 +16,15 @@ import {
   type ScenarioUiState,
 } from "@/lib/scenario";
 import { computeScenarioFingerprint, pickScenario } from "@/lib/store";
+import { localCalendarDate } from "@/lib/roster-viewer";
 
-/** The filename stamped on every plain (non-anonymised) scenario download. */
-export const SCENARIO_DOWNLOAD_FILENAME = "scenario.yaml";
+/**
+ * The filename stamped on every plain (non-anonymised) scenario download, dated
+ * with the local day as v1 did, so successive backups do not collide.
+ */
+export function scenarioDownloadFilename(now: Date = new Date()): string {
+  return `nurse-scheduling-${localCalendarDate(now)}.yaml`;
+}
 
 export interface PerformDownloadDeps {
   /** Write the validated YAML to a file download. Never called on an invalid draft. */
@@ -53,7 +59,7 @@ export function performDownload(
 ): PrepareExportResult {
   const result = prepareWorkspaceExport(state);
   if (!result.ok) return result;
-  deps.writeFile(result.yaml, SCENARIO_DOWNLOAD_FILENAME);
+  deps.writeFile(result.yaml, scenarioDownloadFilename());
   deps.recordBackup(computeScenarioFingerprint(pickScenario(state)));
   return result;
 }

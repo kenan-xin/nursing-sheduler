@@ -160,6 +160,7 @@ test.describe("F4 roster viewer — durable candidate through production storage
     await expect(page.getByTestId("roster-candidate-dismiss")).toBeVisible();
 
     await page.getByTestId("roster-candidate-dismiss").click();
+    await page.getByTestId("confirm-dialog-confirm").click();
     await expect(page.getByTestId("roster-candidate-available")).toBeHidden();
 
     // A reload does not resurrect the offer.
@@ -270,6 +271,7 @@ test.describe("F4 roster viewer — durable A beside a current failed run B", ()
     //    CURRENT run — which would have minted a token for B and let the terminal
     //    chain destroy B's job. Zero DELETEs is what says it did not.
     await page.getByTestId("roster-candidate-dismiss").click();
+    await page.getByTestId("confirm-dialog-confirm").click();
     await expect(page.getByTestId("roster-candidate-available")).toBeHidden();
     expect(bDeletes, "dismissing A must not authorize deleting B's job").toBe(0);
 
@@ -1314,7 +1316,7 @@ test.describe("F5 roster editing — editing + actions + layout", () => {
 
     // Clear (confirmed). The working roster must be gone.
     await page.getByTestId("roster-clear").click();
-    await page.getByRole("button", { name: "Clear all roster data" }).click();
+    await page.getByRole("button", { name: "Clear this schedule's roster" }).click();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
   });
 
@@ -1525,7 +1527,7 @@ test.describe("F5 roster documents — real downloads and real imports", () => {
 
     const error = page.getByTestId("roster-action-error");
     await expect(error).toBeVisible();
-    await expect(error).toContainText(/edited workbook could not be exported/i);
+    await expect(error).toContainText(/Excel file could not be made/i);
     expect(downloaded, "a failed patch must not produce a download").toBe(false);
 
     // The roster and its edit survive the failed export — nothing was lost.
@@ -1703,7 +1705,7 @@ test.describe("G3 empty roster — Import and the privacy Clear", () => {
     });
 
     await page.getByTestId("roster-clear").click();
-    await page.getByRole("button", { name: "Clear all roster data" }).click();
+    await page.getByRole("button", { name: "Clear this schedule's roster" }).click();
 
     // The candidate offer goes with it, and no partial-failure notice appears.
     await expect(page.getByTestId("roster-candidate-available")).toBeHidden();
@@ -1895,7 +1897,7 @@ test.describe("F5 Clear — verified purge with no residue", () => {
     });
 
     await page.getByTestId("roster-clear").click();
-    await page.getByRole("button", { name: "Clear all roster data" }).click();
+    await page.getByRole("button", { name: "Clear this schedule's roster" }).click();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
 
     // Both sensitive session keys are provably gone, and Clear did not report a
@@ -1924,7 +1926,7 @@ test.describe("F5 Clear — verified purge with no residue", () => {
     await expect(page.getByTestId("roster-save-saving")).toBeVisible();
 
     await page.getByTestId("roster-clear").click();
-    await page.getByRole("button", { name: "Clear all roster data" }).click();
+    await page.getByRole("button", { name: "Clear this schedule's roster" }).click();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
 
     // Now let the parked write land. The epoch fence must reject it.
@@ -2057,7 +2059,7 @@ test.describe("roster documents — save, clear, import round trip without Optim
     // CLEAR — the confirmed privacy purge. Nothing local survives it, so the
     // import below can only be restoring the file itself.
     await page.getByTestId("roster-clear").click();
-    await page.getByRole("button", { name: "Clear all roster data" }).click();
+    await page.getByRole("button", { name: "Clear this schedule's roster" }).click();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
     await page.reload();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();

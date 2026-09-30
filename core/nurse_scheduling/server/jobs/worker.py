@@ -52,9 +52,12 @@ class JobWorker:
         claim_poll_seconds: float,
         worker_lease_seconds: float,
         timeout_grace_seconds: float = DEFAULT_TIMEOUT_GRACE_SECONDS,
+        child_memory_limit_bytes: int = 0,
         unexpected_error_formatter: Callable[[Exception], str] = str,
     ):
         """Configure a process-local worker without starting its thread."""
+        self._child_memory_limit_bytes = child_memory_limit_bytes
+        """RLIMIT_DATA for each optimization child, 0 for none."""
         self._controller = controller
         """Controller used for claims, events, control requests, and outcomes."""
         self._runner = runner
@@ -446,6 +449,7 @@ class JobWorker:
                 control=process_control,
                 hard_timeout_seconds=job.request.timeout_seconds + self._timeout_grace_seconds,
                 finish_now_enabled=finish_now_supported,
+                memory_limit_bytes=self._child_memory_limit_bytes,
             )
             if process_result.status is ProcessStatus.COMPLETED:
                 if process_result.output is None:

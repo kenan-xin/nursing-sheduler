@@ -134,8 +134,8 @@ async function seedCandidate(jobId = JOB_A, ordinal = 1): Promise<CurrentCandida
  * The edit operation is for later revisions of this same roster and would carry
  * any existing row's candidate source forward, which a seed must not do.
  */
-async function seedWorking(): Promise<void> {
-  const document = await fixtureRosterDocument();
+async function seedWorking(edits: RosterDocument["edits"] = []): Promise<void> {
+  const document = { ...(await fixtureRosterDocument()), edits };
   const epoch = await rosterStorage.getClearEpoch();
   const outcome = await rosterStorage.promoteDocumentToWorking({
     document,
@@ -666,6 +666,43 @@ describe("RosterSection — replacing a working roster", () => {
     await waitFor(() => expect(promotion.calls).toBe(1));
   });
 
+  // Audit C-07: replacing drops hand edits, so the dialog must say so.
+  it("plain replace confirm when the roster has no edits", async () => {
+    await seedWorking();
+    await seedCandidate();
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-candidate-load")).toBeDefined());
+    fireEvent.click(screen.getByTestId("roster-candidate-load"));
+    await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
+    expect(screen.getByTestId("confirm-dialog")).not.toHaveTextContent(/will be lost/);
+    expect(document.querySelector("[data-slot='alert-dialog-media']")).toHaveAttribute(
+      "data-tone",
+      "brand",
+    );
+    expect(screen.queryByTestId("confirm-dialog-secondary")).toBeNull();
+  });
+
+  it("counts the edits that will be lost and offers to save the roster file first", async () => {
+    await seedWorking([
+      { personIdx: 0, dateIdx: 0, day: { kind: "off" } },
+      { personIdx: 1, dateIdx: 1, day: { kind: "leave" } },
+    ]);
+    await seedCandidate();
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-candidate-load")).toBeDefined());
+    fireEvent.click(screen.getByTestId("roster-candidate-load"));
+    await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
+
+    expect(screen.getByTestId("confirm-dialog")).toHaveTextContent("2 manual edits will be lost.");
+    expect(document.querySelector("[data-slot='alert-dialog-media']")).toHaveAttribute(
+      "data-tone",
+      "error",
+    );
+    expect(screen.getByTestId("confirm-dialog-secondary")).toHaveTextContent(
+      "Save roster file first",
+    );
+  });
+
   it("loads WITHOUT a confirmation when there is no roster to replace", async () => {
     const promotion = stubPromotion();
     await seedCandidate();
@@ -681,7 +718,32 @@ describe("RosterSection — replacing a working roster", () => {
 // Job/version-keyed dismissal
 // ---------------------------------------------------------------------------
 
+/** C-18 — Delete this result asks first; confirm it. */
+async function confirmDelete(): Promise<void> {
+  fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+  await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
+  fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+}
+
 describe("RosterSection — keyed dismissal", () => {
+  it("asks first: Delete this result does nothing until confirmed", async () => {
+    await seedCandidate();
+    const recording = recordingSurface();
+    render(<RosterSection capture={recording.surface} />);
+    await waitFor(() => expect(screen.getByTestId("roster-candidate-dismiss")).toBeDefined());
+    expect(screen.getByTestId("roster-candidate-dismiss").textContent).toBe("Delete this result");
+
+    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
+    expect(screen.getByTestId("confirm-dialog").textContent).toMatch(
+      /downloaded XLSX is unaffected/,
+    );
+    expect(recording.refs.length).toBe(0);
+    fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("confirm-dialog")).toBeNull());
+    expect(recording.refs.length).toBe(0);
+  });
+
   // THE DEFECT THIS REPLACES. Dismiss used to call the terminal hook's unkeyed
   // `dismissCapture()`, which resolves the CURRENT run at click time. With
   // durable candidate A displayed and later run B in the panel above, that
@@ -693,12 +755,14 @@ describe("RosterSection — keyed dismissal", () => {
     render(<RosterSection capture={recording.surface} />);
     await waitFor(() => expect(screen.getByTestId("roster-candidate-dismiss")).toBeDefined());
 
-    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await confirmDelete();
     await waitFor(() => expect(recording.refs.length).toBe(1));
 
     expect(recording.refs[0]).toEqual({
       jobId: JOB_A,
       candidateVersion: pointer.candidateVersion,
+      // No schedule is open in this suite, so the unscoped slot (plq5 P2).
+      scenarioId: null,
     });
   });
 
@@ -711,7 +775,7 @@ describe("RosterSection — keyed dismissal", () => {
     const recording = recordingSurface();
     render(<RosterSection capture={recording.surface} />);
     await waitFor(() => expect(screen.getByTestId("roster-candidate-dismiss")).toBeDefined());
-    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await confirmDelete();
     await waitFor(() => expect(recording.refs.length).toBe(1));
 
     expect(recording.refs[0].jobId).toBe(JOB_A);
@@ -726,7 +790,7 @@ describe("RosterSection — keyed dismissal", () => {
     const recording = recordingSurface();
     render(<RosterSection capture={recording.surface} />);
     await waitFor(() => expect(screen.getByTestId("roster-candidate-dismiss")).toBeDefined());
-    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await confirmDelete();
     await waitFor(() => expect(recording.refs.length).toBe(1));
 
     // The version displayed is the version dismissed — not a stale first capture.
@@ -741,7 +805,7 @@ describe("RosterSection — keyed dismissal", () => {
     });
     render(<RosterSection capture={refusing.surface} />);
     await waitFor(() => expect(screen.getByTestId("roster-candidate-dismiss")).toBeDefined());
-    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await confirmDelete();
 
     await waitFor(() => expect(screen.getByTestId("roster-load-error")).toBeDefined());
     // A refusal must not look like success: the candidate is still on offer.
@@ -762,7 +826,7 @@ describe("RosterSection — keyed dismissal", () => {
       candidateVersion: pointer.candidateVersion,
       expectedClearEpoch: epoch,
     });
-    fireEvent.click(screen.getByTestId("roster-candidate-dismiss"));
+    await confirmDelete();
 
     await waitFor(() => expect(screen.queryByTestId("roster-candidate-available")).toBeNull());
   });
@@ -980,7 +1044,7 @@ describe("RosterSection — empty-state Clear", () => {
     await waitFor(() => expect(screen.getByTestId("roster-clear")).toBeDefined());
     fireEvent.click(screen.getByTestId("roster-clear"));
     await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: /clear all roster data/i }));
+    fireEvent.click(screen.getByRole("button", { name: /clear this schedule's roster/i }));
 
     await waitFor(() => expect(screen.queryByTestId("roster-candidate-available")).toBeNull());
     const residue = await readResidue();
@@ -1005,7 +1069,7 @@ describe("RosterSection — empty-state Clear", () => {
     await waitFor(() => expect(screen.getByTestId("roster-clear")).toBeDefined());
     fireEvent.click(screen.getByTestId("roster-clear"));
     await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: /clear all roster data/i }));
+    fireEvent.click(screen.getByRole("button", { name: /clear this schedule's roster/i }));
 
     // Never a silent privacy success: the failure is stated, and the control is
     // still mounted so the user can try again.

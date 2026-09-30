@@ -25,6 +25,7 @@ import {
   buildRequirementShiftTypeDomain,
   emptyRequirementForm,
   requirementToForm,
+  REQUIREMENT_MESSAGES,
   validateRequirementForm,
   type RequirementErrors,
   type RequirementFormState,
@@ -144,9 +145,12 @@ export class ShiftRequirementValidationError extends Error {
   readonly errors: RequirementErrors;
 
   constructor(errors: RequirementErrors) {
+    // The inline fields are "Min. nurses" and "Preferred", so their errors use those words.
     const message =
-      errors.requiredNumPeople ??
-      errors.preferredNumPeople ??
+      (errors.requiredNumPeople && "Min. nurses must be a whole number, 0 or more.") ??
+      (errors.preferredNumPeople === REQUIREMENT_MESSAGES.preferredLessThanRequired
+        ? "Preferred must be more than Min. nurses."
+        : errors.preferredNumPeople && "Preferred must be a whole number, 1 or more.") ??
       errors.shiftType ??
       errors.qualifiedPeople ??
       errors.date ??

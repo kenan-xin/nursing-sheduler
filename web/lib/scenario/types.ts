@@ -658,6 +658,14 @@ export interface ScenarioStateShared {
    * description is authorable.
    */
   maxOneShiftPerDay?: { description?: string };
+  /**
+   * The Dates screen's "Import Singapore public holidays" switch, as last applied
+   * (bead 6975). `false` = the user turned it off: a range change leaves the
+   * WORKDAY / NON-WORKDAY / PH groups exactly as they are. Absent = never set, so the
+   * switch reads from whether those groups exist. Only `false` reaches a Workspace
+   * file (`dates.importPublicHolidays`); the strict solver document never has it.
+   */
+  importPublicHolidays?: boolean;
 }
 
 /** The constraint kinds a Guided rule row can be derived from — same union as

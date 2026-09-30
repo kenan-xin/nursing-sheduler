@@ -1,0 +1,155 @@
+# 99db patch for server/jobs/models.py, server/stores/memory.py, server/stores/redis.py, server/config.py and server/app.py against genie 1bf4b85.
+# hunk: per-client_id pending cap inside the atomic admission step (JOB_MAX_PENDING_PER_CLIENT, default 2), a 429 naming the cap (bug hunt D-07, bead 99db)
+
+diff --git a/core/nurse_scheduling/server/app.py b/core/nurse_scheduling/server/app.py
+index c6cacf1..68a136a 100644
+--- a/core/nurse_scheduling/server/app.py
++++ b/core/nurse_scheduling/server/app.py
+@@ -190,6 +190,7 @@ def create_app(
+             max_pending=settings.max_pending_jobs,
+             max_retained=settings.max_retained_jobs,
+             ordinary_reserved_slots=settings.ordinary_reserved_slots,
++            max_pending_per_client=settings.max_pending_per_client,
+         ),
+         retention_seconds=settings.job_retention_seconds,
+         worker_lease_seconds=settings.worker_lease_seconds,
+diff --git a/core/nurse_scheduling/server/config.py b/core/nurse_scheduling/server/config.py
+index 8dee82b..26b05cb 100644
+--- a/core/nurse_scheduling/server/config.py
++++ b/core/nurse_scheduling/server/config.py
+@@ -199,6 +199,12 @@ class ServerSettings:
+     `ServerSettings(max_pending_jobs=1)` stay valid. `from_env` and the compose file
+     supply the shipped value of 1.
+     """
++    max_pending_per_client: int = 0
++    """Queued, running, or cancelling jobs one `client_id` may hold, 0 for no cap (bead 99db D-07).
++
++    Zero for direct construction; `from_env` supplies the shipped 2 from JOB_MAX_PENDING_PER_CLIENT.
++    The client controls its `client_id` cookie, so this guards accidents, not abuse.
++    """
+     max_retained_jobs: int = DEFAULT_MAX_RETAINED_JOBS
+     """Maximum total jobs retained, including terminal history."""
+     job_retention_seconds: int = DEFAULT_JOB_RETENTION_SECONDS
+@@ -349,6 +355,7 @@ class ServerSettings:
+             redis_key_prefix=os.getenv("JOB_REDIS_KEY_PREFIX", "nurse_scheduling:jobs:v2"),
+             max_pending_jobs=_positive_int("JOB_MAX_PENDING", 32),
+             ordinary_reserved_slots=_non_negative_int("JOB_ORDINARY_RESERVED_SLOTS", 1),
++            max_pending_per_client=_non_negative_int("JOB_MAX_PENDING_PER_CLIENT", 2),
+             max_retained_jobs=_positive_int("JOB_MAX_RETAINED", DEFAULT_MAX_RETAINED_JOBS),
+             job_retention_seconds=_positive_int("JOB_RETENTION_SECONDS", DEFAULT_JOB_RETENTION_SECONDS),
+             max_events_per_job=_positive_int("JOB_MAX_EVENTS_PER_JOB", DEFAULT_MAX_EVENTS_PER_JOB),
+diff --git a/core/nurse_scheduling/server/jobs/models.py b/core/nurse_scheduling/server/jobs/models.py
+index d59f7f8..63f70f2 100644
+--- a/core/nurse_scheduling/server/jobs/models.py
++++ b/core/nurse_scheduling/server/jobs/models.py
+@@ -190,7 +190,15 @@ class StoreLimits:
+     compose file supply the shipped value of 1.
+     """
+ 
++    max_pending_per_client: int = 0
++    """Pending jobs one `client_id` may hold, 0 for no cap (bead 99db D-07).
++
++    Zero for direct construction; `ServerSettings.from_env()` supplies the shipped 2.
++    """
++
+     def __post_init__(self) -> None:
++        if self.max_pending_per_client < 0:
++            raise ValueError("max_pending_per_client must be at least 0")
+         if not 0 <= self.ordinary_reserved_slots < self.max_pending:
+             raise ValueError("ordinary_reserved_slots must satisfy 0 <= reserve < max_pending")
+ 
+diff --git a/core/nurse_scheduling/server/stores/memory.py b/core/nurse_scheduling/server/stores/memory.py
+index a44d54f..8cb24a5 100644
+--- a/core/nurse_scheduling/server/stores/memory.py
++++ b/core/nurse_scheduling/server/stores/memory.py
+@@ -45,6 +45,7 @@ from ..jobs.models import (
+     WorkerLease,
+ )
+ from ..queue_state import (
++    ADMISSION_CLIENT_EXHAUSTED,
+     ADMISSION_OK,
+     ADMISSION_ORDINARY_RESERVED,
+     DIAGNOSTIC_CAPACITY_MESSAGE,
+@@ -52,6 +53,7 @@ from ..queue_state import (
+     QueueMember,
+     QueueStateSnapshot,
+     admission_decision,
++    client_capacity_message,
+     queue_sort_key,
+     validate_transition,
+ )
+@@ -134,13 +136,17 @@ class MemoryJobStore:
+                 raise StoreWriteConflictError(f"Job already exists: {job.id}")
+             if job.state != JobState.QUEUED:
+                 raise QueueInvariantError("A job may only be admitted in the queued state")
+-            pending_count = sum(not record.job.state.terminal for record in self._records.values())
++            pending = [record.job for record in self._records.values() if not record.job.state.terminal]
+             decision = admission_decision(
+                 job.request.purpose,
+-                pending_count=pending_count,
++                pending_count=len(pending),
+                 max_pending=limits.max_pending,
+                 ordinary_reserved_slots=limits.ordinary_reserved_slots,
++                client_pending_count=sum(p.request.client_id == job.request.client_id for p in pending),
++                max_pending_per_client=limits.max_pending_per_client,
+             )
++            if decision == ADMISSION_CLIENT_EXHAUSTED:
++                raise JobCapacityError(client_capacity_message(limits.max_pending_per_client))
+             if decision == ADMISSION_ORDINARY_RESERVED:
+                 raise DiagnosticCapacityError(DIAGNOSTIC_CAPACITY_MESSAGE)
+             if decision != ADMISSION_OK:
+diff --git a/core/nurse_scheduling/server/stores/redis.py b/core/nurse_scheduling/server/stores/redis.py
+index c440108..9657673 100644
+--- a/core/nurse_scheduling/server/stores/redis.py
++++ b/core/nurse_scheduling/server/stores/redis.py
+@@ -55,6 +55,7 @@ from ..jobs.models import (
+     WorkerLease,
+ )
+ from ..queue_state import (
++    ADMISSION_CLIENT_EXHAUSTED,
+     ADMISSION_OK,
+     ADMISSION_ORDINARY_RESERVED,
+     DIAGNOSTIC_CAPACITY_MESSAGE,
+@@ -66,6 +67,7 @@ from ..queue_state import (
+     QueueMember,
+     QueueStateSnapshot,
+     admission_decision,
++    client_capacity_message,
+     fifo_sorted,
+     validate_transition,
+ )
+@@ -302,9 +304,17 @@ class RedisJobStore:
+                         pending_count=transaction.scard(self._pending_key) - stale_pending,
+                         max_pending=limits.max_pending,
+                         ordinary_reserved_slots=limits.ordinary_reserved_slots,
++                        client_pending_count=(
++                            self._client_pending_count(transaction, job.request.client_id)
++                            if limits.max_pending_per_client
++                            else 0
++                        ),
++                        max_pending_per_client=limits.max_pending_per_client,
+                     )
+                     if decision != ADMISSION_OK:
+                         transaction.unwatch()
++                        if decision == ADMISSION_CLIENT_EXHAUSTED:
++                            raise JobCapacityError(client_capacity_message(limits.max_pending_per_client))
+                         if decision == ADMISSION_ORDINARY_RESERVED:
+                             raise DiagnosticCapacityError(DIAGNOSTIC_CAPACITY_MESSAGE)
+                         raise JobCapacityError("Too many jobs are queued or running")
+@@ -972,6 +982,16 @@ class RedisJobStore:
+                 repairs.append((INVARIANT_ERROR_STALE_PENDING_MEMBER, job_id, None))
+         return repairs
+ 
++    def _client_pending_count(self, transaction, client_id: str) -> int:
++        """Count one client's live pending jobs; the watched pending index keeps this consistent."""
++        count = 0
++        for raw_id in transaction.smembers(self._pending_key):
++            raw = transaction.get(self._job_key(_decode(raw_id)))
++            if raw is not None:
++                pending = self._deserialize_job(raw)
++                count += not pending.state.terminal and pending.request.client_id == client_id
++        return count
++
+     def _stage_repairs(self, transaction, repairs, occurred_at: datetime) -> None:
+         """v2 P9: stage residue removals and their bounded repair records."""
+         for kind, job_id, purpose in repairs:

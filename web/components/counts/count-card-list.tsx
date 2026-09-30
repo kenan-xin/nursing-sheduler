@@ -78,6 +78,8 @@ interface CountCardListProps {
    *  `findSavedUncreditedLeaveFindings` and joined by `uid`, so the badge follows
    *  the card through reorder/duplicate and never rides a persisted index. */
   leaveGuardUids?: ReadonlySet<string>;
+  /** UIDs of contracted cards whose hours no longer match a Shift Type length. */
+  staleHoursUids?: ReadonlySet<string>;
 }
 
 /** The inline Confirm/Cancel panel for converting a marked card back to a generic
@@ -98,9 +100,11 @@ function ConvertToGenericConfirm({
   const willBeEditable = isContractedHoursCard(card)
     ? isEditableCountCard(convertContractedToGeneric(card))
     : true;
-  const preview = willBeEditable
-    ? "This becomes an editable Shift Count."
-    : "This becomes an advanced (list) rule, editable via Save & Load (YAML).";
+  const preview = `${
+    willBeEditable
+      ? "This becomes an editable Shift Count."
+      : "This becomes an advanced (list) rule, editable via Save & Load (YAML)."
+  } Values stay in half-hours (320 = 160h).`;
   return (
     // An inline confirm inside a card, so it is an inset well rather than a second
     // bordered box on the same tone. `h-9 px-4` is gone: 9 spacing steps is
@@ -173,6 +177,7 @@ export function CountCardList({
   onConfirmConvertToGeneric,
   onCancelConvertToGeneric,
   leaveGuardUids,
+  staleHoursUids,
 }: CountCardListProps) {
   // HTML5 DnD state for the shared card-list reorder (the primary control; the
   // shared Up/Down buttons below are its keyboard path).
@@ -238,6 +243,16 @@ export function CountCardList({
                   >
                     <FaTriangleExclamation />
                     Leave not credited
+                  </Badge>
+                )}
+                {contractedHours && staleHoursUids?.has(card.uid) && (
+                  <Badge
+                    variant="warn"
+                    data-testid={`count-stale-hours-badge-${index}`}
+                    title="A shift's length changed since this was saved. Edit it and use Refresh from Shift Types."
+                  >
+                    <FaTriangleExclamation />
+                    Hours out of date
                   </Badge>
                 )}
                 {unsupported && (

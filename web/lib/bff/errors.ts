@@ -100,12 +100,32 @@ const JOB_FAILURE_MESSAGES: Record<string, string> = {
   cancelled: "Optimisation cancelled.",
   worker_lost: "The optimisation worker stopped before the job completed.",
   process_timeout: "The optimisation run did not finish within its time limit and was stopped.",
-  invalid_model: "The generated solver model is invalid.",
+  invalid_model:
+    "The generated solver model is invalid. A rule weight may be too large for the solver; use a smaller weight or Infinity/-Infinity for a hard rule.",
   no_solution_found: "No schedule was produced.",
+  // The solver child hit its memory cap (OPTIMIZE_CHILD_MEMORY_LIMIT_MB).
+  scenario_too_large:
+    "This roster is too large for the server: the solver ran out of memory. Use fewer people, days, shift types or pairing rules, then run again.",
 };
 
 export function jobFailureMessage(code: string | null, backendMessage: string): string {
   return (code !== null && JOB_FAILURE_MESSAGES[code]) || backendMessage;
+}
+
+// The per-client cap (JOB_MAX_PENDING_PER_CLIENT) shares `job_capacity_exceeded`
+// with the global queue cap; only the backend text (`queue_state.py::
+// client_capacity_message`) tells them apart and carries the cap.
+// ponytail: message match, swap for a distinct backend code if core adds one.
+const CLIENT_CAP = /already has (\d+) optimi[sz]ations/;
+
+/** Web-owned wording for a rejected submit. The 422 size guard
+ * (`invalid_scheduling_data`) already names the size, the limit and what to
+ * shrink, so it and any other code keep the backend text. */
+export function submitRejectionMessage(code: string | null, backendMessage: string): string {
+  const cap = code === "job_capacity_exceeded" ? CLIENT_CAP.exec(backendMessage) : null;
+  if (cap === null) return backendMessage;
+  const n = Number(cap[1]);
+  return `You already have ${n} ${n === 1 ? "optimisation" : "optimisations"} running. Wait for one to finish or cancel it.`;
 }
 
 // Pull a code-first `{ error: { code, message, ... } }` envelope out of a parsed

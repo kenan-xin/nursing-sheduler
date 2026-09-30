@@ -42,10 +42,16 @@ import { useShallow } from "zustand/react/shallow";
 import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
 import { SHIFT_TYPES_ADD_ANCHOR } from "./capability-anchors";
 import { toast } from "sonner";
-import { useScenarioStore, scenarioCommands, type ScenarioStoreState } from "@/lib/store";
+import {
+  useScenarioStore,
+  scenarioCommands,
+  type CommandOutcome,
+  type ScenarioStoreState,
+} from "@/lib/store";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import type { RequirementOverride, ScenarioUiState, UiShiftType } from "@/lib/scenario";
-import { RenameCollisionError } from "@/lib/cascade";
+import { deleteImpact, describeDeleteImpact, RenameCollisionError } from "@/lib/cascade";
+import { ConfirmDialog } from "@/components/shell/confirm-dialog";
 import { formatShortDate } from "@/lib/dates/date-id";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import { cn } from "@/lib/utils";
@@ -74,6 +80,7 @@ import {
   type IconType,
 } from "@/components/icons";
 import {
+  deleteGroup,
   deleteItem,
   reorderItems,
   validateFullEditId,
@@ -88,6 +95,7 @@ import { changeKeys } from "@/lib/change-highlight/keys";
 import { useChangeTarget } from "@/lib/change-highlight/store";
 import { InfoTip } from "@/components/ui/info-tip";
 import type { RequirementNumberValue } from "@/components/requirements/requirements-model";
+import { contractsStaleFor, refreshContracts } from "@/components/counts/contracted-model";
 import { shiftTypesDescriptor } from "./shift-types-descriptor";
 import {
   resolveStaffingCardState,
@@ -104,7 +112,9 @@ import {
  * against the state the previous command committed — so rapid actions compose
  * instead of overwriting each other. Returning `null` withdraws the write.
  */
-type Commit = (transform: (live: ScenarioUiState) => ScenarioUiState | null) => void;
+type Commit = (
+  transform: (live: ScenarioUiState) => ScenarioUiState | null,
+) => Promise<CommandOutcome>;
 type CurrentState = () => ScenarioUiState;
 
 /**
@@ -239,7 +249,7 @@ export function ShiftTypeGrid() {
       // queue head so rapid actions compose, and the form-open token is snapshotted
       // at the click rather than read after a newer commit has already cleared it.
       const token = openToken.current;
-      void scenarioCommands.mutate((live) => {
+      return scenarioCommands.mutate((live) => {
         if (
           token !== null &&
           (descriptor.readItems(live) !== token.items ||
@@ -259,6 +269,35 @@ export function ShiftTypeGrid() {
 
   const [sel, setSel] = React.useState<Sel>(null);
   const editing = sel !== null;
+
+  // T1: a shift or shift-group delete cascades into rules, requests and history the
+  // user cannot see from here, so it confirms with the counts, then offers Undo.
+  const [pendingDelete, setPendingDelete] = React.useState<{
+    kind: "shift" | "group";
+    id: UiShiftType["id"];
+    lines: string[];
+  } | null>(null);
+  const askDelete = (kind: "shift" | "group", id: UiShiftType["id"]) =>
+    setPendingDelete({
+      kind,
+      id,
+      lines: describeDeleteImpact(deleteImpact(currentState(), "shift", id)),
+    });
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const { kind, id } = pendingDelete;
+    setSel(null);
+    const outcome = await scenarioCommands.mutate((live) =>
+      kind === "shift"
+        ? deleteItem(live, descriptor, id)
+        : deleteGroup(live, descriptor, String(id)),
+    );
+    if (outcome.ok && outcome.committed) {
+      toast(`Deleted ${kind === "shift" ? "shift" : "group"} “${String(id)}”.`, {
+        action: { label: "Undo", onClick: () => void scenarioCommands.undo() },
+      });
+    }
+  };
 
   // Register the open add/edit form as a losable draft (T08a / FR-PR-06).
   useLosableDraft("shift-type-grid", editing, "Shifts editor");
@@ -431,10 +470,7 @@ export function ShiftTypeGrid() {
               onMoveUp={() => move(index, index - 1)}
               onMoveDown={() => move(index, index + 1)}
               onEdit={() => setSel({ t: "edit-shift", key })}
-              onDelete={() => {
-                setSel(null);
-                commit((live) => deleteItem(live, descriptor, item.id));
-              }}
+              onDelete={() => askDelete("shift", item.id)}
               onDragStart={() => setDragIndex(index)}
               onDragOver={() => setOverIndex(index)}
               onDropRow={() => onDrop(index)}
@@ -465,6 +501,21 @@ export function ShiftTypeGrid() {
         onCloseForm={() => setSel(null)}
         config={SHIFT_GROUPS_CONFIG}
         groupChangeKey={changeKeys.shiftGroup}
+        onDeleteGroup={(id) => askDelete("group", id)}
+      />
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+        variant="destructive"
+        title={`Delete ${pendingDelete?.kind === "group" ? "group" : "shift"} “${String(pendingDelete?.id ?? "")}”?`}
+        description={
+          pendingDelete?.lines.length
+            ? "This also removes what depends on it. Undo brings it all back."
+            : "Nothing else uses it."
+        }
+        consequences={pendingDelete?.lines}
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
       />
     </Surface>
   );
@@ -1018,9 +1069,14 @@ function StaffingEditor({
           className="rounded-control border border-warn bg-warntint px-3 py-2 text-label font-semibold text-warnink"
           data-testid={`${prefix}-preferred-collapse`}
         >
-          Preferred will be cleared and its weight reset from {staffing.baseline?.weight} to -1 when
-          you save.
+          Preferred will be cleared when you save.
         </div>
+      )}
+
+      {staffing.baseline && (
+        <StaffingLink testId={`${prefix}-staffing-remove`}>
+          Remove staffing in Staffing Requirements
+        </StaffingLink>
       )}
 
       <StaffingContextChips chips={staffing.contextChips} testKey={`${prefix}-editor`} />
@@ -1145,12 +1201,26 @@ function ShiftCardEditor({
             staffing: staffingDraft,
           },
     );
-    const collapseCopy = result.preferredCollapsed
-      ? " Preferred was cleared and its weight reset to -1."
-      : "";
+    const collapseCopy = result.preferredCollapsed ? " Preferred was cleared." : "";
     toast.success(
       `Shift “${String(result.effectiveId)}” ${mode === "add" ? "added" : "saved"}.${collapseCopy}`,
     );
+    // T2: contracted-hours rules keep the hours they were saved with, so a length
+    // change leaves them stale until refreshed (the card list marks them meanwhile).
+    const shiftId = String(result.effectiveId);
+    const stale = contractsStaleFor(useScenarioStore.getState() as ScenarioUiState, shiftId);
+    if (stale.length > 0) {
+      toast(
+        `${shiftId} is used by ${stale.length} contracted-hours ${stale.length === 1 ? "rule" : "rules"}. Refresh ${stale.length === 1 ? "it" : "them"} now?`,
+        {
+          duration: 15_000,
+          action: {
+            label: "Refresh",
+            onClick: () => void scenarioCommands.mutate((live) => refreshContracts(live, stale)),
+          },
+        },
+      );
+    }
   };
 
   const save = async () => {

@@ -329,7 +329,7 @@ export type AssistantCommandV1 =
   | { type: "remove_temporary_cover"; name: string; date: string; shiftType: string }
   /**
    * Add one pairing rule -- the Affinities screen's Add form: `people` and `withPeople` on
-   * the same shifts on the same date, encouraged (positive weight) or kept apart
+   * the same shift on the same day (each id and shift scored on its own), encouraged (positive weight) or kept apart
    * (negative). `weight` is the text the Weight box would hold.
    */
   | {
@@ -354,7 +354,8 @@ export type AssistantCommandV1 =
     }
   /**
    * Add one supervision rule -- the Shift Type Coverings screen's Add form: whenever one
-   * of `supervisedPeople` works one of the shifts, one of `supervisors` works it too.
+   * of `supervisedPeople` works one of the shifts, one of `supervisors` works that same
+   * shift on the same day (each shift checked on its own).
    * Always a hard rule, so it has no weight. `dates: []` means every date.
    */
   | {
@@ -625,6 +626,7 @@ function requirementFields() {
     dates: ruleDatesSchema(),
     requiredNumPeople: z
       .number()
+      .int()
       .describe(
         "The exact number of people on that shift on each date, e.g. 2 (a hard rule), " +
           "unless the requirement has a preferred count, which makes it the lowest " +
@@ -633,6 +635,7 @@ function requirementFields() {
       ),
     preferredNumPeople: z
       .number()
+      .int()
       .optional()
       .describe(
         "The Preferred number of people: 'at least requiredNumPeople, ideally this many'. " +
@@ -658,8 +661,8 @@ function pairingFields() {
     z
       .array(refSchema)
       .describe(
-        `${which}: person ids and staff group ids exactly as in the schedule. A group means ` +
-          'any one of its members. "ALL" is not accepted.',
+        `${which}: person ids and staff group ids exactly as in the schedule. Each id is ` +
+          'scored on its own; a group id means any one of its members. "ALL" is not accepted.',
       );
   return {
     description: ruleDescriptionSchema(),
@@ -668,16 +671,18 @@ function pairingFields() {
     shiftTypes: z
       .array(z.string())
       .describe(
-        "The shifts it is about: shift codes, shift group ids, OFF, LEAVE or ALL. Someone " +
-          "from each side on any of these shifts on the same date counts as together.",
+        "The shifts it is about: shift codes, shift group ids, OFF, LEAVE or ALL. Each is " +
+          "scored on its own: together means on the same shift on the same day (ALL or a " +
+          "shift group id counts as one shift, any of its members).",
       ),
     dates: ruleDatesSchema(),
     weight: z
       .string()
       .describe(
-        "How strongly, written as you would type it in the Weight box. On each date where " +
-          "someone from people and someone from withPeople both work one of these shifts, the " +
-          'solver gains the weight: a positive number such as "5" = together where possible, ' +
+        "How strongly, written as you would type it in the Weight box. On each date, for " +
+          "each id in people, each id in withPeople and each listed shift where both work " +
+          'that same shift, the solver gains the weight: a positive number such as "5" = ' +
+          "together where possible, " +
           'a negative number such as "-10" = apart where possible, "-infinity" = keep apart ' +
           'always (hard rule). Soft weights are finite numbers; "+infinity" is refused, ' +
           "because it forces both sides onto those shifts on every date. The schedule shows " +
@@ -701,13 +706,15 @@ function supervisionFields() {
       .describe(
         "Who needs a supervisor on shift with them, e.g. a new nurse or a student: person " +
           "ids and staff group ids. Whenever one of them works one of the shifts, at least " +
-          "one supervisor works it too. Always a hard rule.",
+          "one supervisor works that same shift on the same day. Always a hard rule.",
       ),
     shiftTypes: z
       .array(z.string())
       .describe(
-        "The shifts it applies to: shift codes or shift group ids. OFF and LEAVE are not " +
-          "allowed, and neither is ALL: list every worked shift it applies to.",
+        "The shifts it applies to: shift codes or shift group ids. Each is checked on its " +
+          "own, so a supervisor on a different listed shift does not count (a shift group id " +
+          "counts as one shift, any of its members). OFF and LEAVE are not allowed, and " +
+          "neither is ALL: list every worked shift it applies to.",
       ),
     dates: z.array(z.string()).describe(
       // Deliberately NOT `ruleDatesSchema()`: unlike the other rule dates fields,
@@ -774,8 +781,11 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     importPublicHolidays: z
       .boolean()
       .describe(
-        "Whether to (re)import the Singapore public-holiday date groups for the new period. " +
-          "Ask the user; never assume.",
+        "The Dates screen's 'Import Singapore public holidays' switch for the new period. " +
+          "true (re)imports and overwrites the WORKDAY, NON-WORKDAY and PH date groups; " +
+          "false keeps those groups as they are and leaves the switch off. " +
+          "The schedule's importPublicHolidays: false means the user turned it off, so send false " +
+          "unless the user asks to turn it back on. Otherwise ask the user; never assume.",
       ),
   }),
   z.strictObject({
@@ -789,6 +799,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     ruleId: z.string().min(1).describe("The staffing requirement's stable id."),
     requiredNumPeople: z
       .number()
+      .int()
       .describe(
         "How many people that shift must have: exactly this many, or at least this many " +
           "when the requirement has a preferred count.",
@@ -859,8 +870,8 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     startDate: startDateSchema,
     endDate: endDateSchema,
     weight: requestWeightSchema.describe(
-      "How much they want those days off: a positive number wants them (e.g. 5), 0 is a plain " +
-        'day-off request, a negative number would rather not be off. "must" makes it a hard ' +
+      "How much they want those days off: a positive number wants them (e.g. 5), a negative " +
+        'number would rather not be off; 0 is refused. "must" makes it a hard ' +
         "rule; use it only when the user says it is not negotiable. Replaces anything already " +
         "on those dates, including leave.",
     ),
@@ -960,6 +971,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     date: isoDateSchema.describe("One roster date the requirement covers, YYYY-MM-DD."),
     requiredNumPeople: z
       .number()
+      .int()
       .describe(
         "A different number of people for this one requirement on this one date only, for " +
           "example fewer on a public holiday: exactly this many, or at least this many when " +

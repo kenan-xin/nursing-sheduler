@@ -33,7 +33,12 @@ import {
   validateCoefficientPairs,
   type CoefficientPair,
 } from "@/components/card-editor/coefficient-model";
-import { buildCountShiftTypeDomain, COUNT_MESSAGES, type CountScenarioInput } from "./counts-model";
+import {
+  buildCountShiftTypeDomain,
+  COUNT_MESSAGES,
+  isContractedHoursCard,
+  type CountScenarioInput,
+} from "./counts-model";
 import { formatHalfHours, LEAVE_CREDIT_HALF_HOURS, parseHalfHours } from "./half-hour-codec";
 import { applyContractedRefresh, deriveContractedRefresh } from "./refresh-model";
 import {
@@ -54,7 +59,7 @@ export const CONTRACTED_MESSAGES = {
   person: COUNT_MESSAGES.person,
   countDates: COUNT_MESSAGES.countDates,
   countShiftTypes: COUNT_MESSAGES.countShiftTypes,
-  target: "Enter contracted hours on the half-hour grid (e.g. 160h, 8h 30m, or 8.5h)",
+  target: "Enter half-hours (320 = 160h)",
   rangeOrder: "Minimum contracted hours must not exceed the maximum",
 } as const;
 
@@ -454,4 +459,61 @@ export function findContractedDraftLeaveAdvisory(
   const finding = findings[0];
   if (!finding) return null;
   return affectedPersonNames(finding.affectedPersonIndices, state.staff);
+}
+
+/**
+ * The worked shift ids whose saved hours no longer match their Shift Type length
+ * (the Refresh preview's `changed`/`added` rows). LEAVE is left out: its credit is
+ * a policy value, not a shift length. Empty ⇒ the card is up to date.
+ */
+export function staleContractShifts(
+  card: ContractedHoursCountCard,
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups">,
+): string[] {
+  const preview = deriveContractedRefresh(toContractedForm(card, state), state);
+  return preview.rows
+    .filter(
+      (row) =>
+        row.id !== RESERVED_SHIFT_TYPE.leave &&
+        (row.category === "changed" || row.category === "added"),
+    )
+    .map((row) => row.id);
+}
+
+/** The uids of contracted-hours cards whose hours for `shiftId` are stale. */
+export function contractsStaleFor(
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups" | "cardsByKind">,
+  shiftId: string,
+): string[] {
+  return state.cardsByKind.counts
+    .filter(
+      (card) => isContractedHoursCard(card) && staleContractShifts(card, state).includes(shiftId),
+    )
+    .map((card) => card.uid);
+}
+
+/**
+ * Apply "Refresh from Shift Types" to the saved cards in `uids`, outside the form:
+ * the same preview/apply pair the form's Refresh runs, keeping every other field.
+ * Only shift lengths move: a manual LEAVE credit is kept, since nobody reviews it here.
+ */
+export function refreshContracts(
+  state: Pick<ScenarioUiState, "shifts" | "shiftGroups" | "cardsByKind">,
+  uids: readonly string[],
+): Pick<ScenarioUiState, "cardsByKind"> {
+  const counts = state.cardsByKind.counts.map((card) => {
+    if (!isContractedHoursCard(card) || !uids.includes(card.uid)) return card;
+    const form = toContractedForm(card, state);
+    const preview = deriveContractedRefresh(form, state);
+    const rows = preview.rows.map((row) =>
+      row.id === RESERVED_SHIFT_TYPE.leave ? { ...row, category: "unchanged" as const } : row,
+    );
+    const refreshed = applyContractedRefresh(form, { ...preview, rows });
+    const { countShiftTypeCoefficients } = buildContractedCard(refreshed, state, card.uid);
+    const next = { ...card };
+    if (countShiftTypeCoefficients) next.countShiftTypeCoefficients = countShiftTypeCoefficients;
+    else delete next.countShiftTypeCoefficients;
+    return next;
+  });
+  return { cardsByKind: { ...state.cardsByKind, counts } };
 }

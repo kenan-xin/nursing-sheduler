@@ -8,6 +8,7 @@ import type { ScenarioUiState } from "@/lib/scenario";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { downloadBlob } from "@/lib/utils/download";
 import { RequestsEditor } from "./requests-editor";
+import { GlobalConfirmDialog } from "@/components/shell/app-shell";
 import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -384,6 +385,26 @@ describe("RequestsEditor — History Editor restores focus to its exact origin",
   });
 });
 
+describe("RequestsEditor — clear confirms name what goes (F5)", () => {
+  it("All requests counts shift requests, OFF days and paid-leave pins", async () => {
+    await seed({
+      ...BASE_SEED,
+      reqData: [
+        { kind: "request", person: "Aisha", date: "01", shiftType: "AM", weight: 5 },
+        { kind: "off", person: "Chloe", date: "02", weight: 5 },
+        { kind: "leave", person: "Chloe", date: "03" },
+        { kind: "leave", person: "Aisha", date: "03" },
+      ],
+    });
+    render(<RequestsEditor />);
+    fireEvent.click(screen.getByTestId("requests-toggle-clear"));
+    fireEvent.click(screen.getByTestId("clear-data-button-All requests"));
+    expect(await screen.findByTestId("clear-confirm-dialog")).toHaveTextContent(
+      "Are you sure you want to clear all requests? This removes 1 shift request, 1 OFF day and 2 paid-leave pins.",
+    );
+  });
+});
+
 describe("RequestsEditor — leave copy (FR-SR-48)", async () => {
   it("does not promise a built-in 8h contracted-hours credit", async () => {
     await seed(BASE_SEED);
@@ -409,7 +430,199 @@ describe("RequestsEditor — Download CSV", () => {
     const [blob, filename] = vi.mocked(downloadBlob).mock.calls[0];
     expect(filename).toBe("shift-requests.csv");
     expect(await blob.text()).toBe(
-      ["person,01,02,03", "Aisha,AM,,", "Chloe,,LEAVE,OFF"].join("\n"),
+      ["person,01,02,03", "Aisha,AM:+5,,", "Chloe,,LEAVE,OFF:-2"].join("\n"),
     );
+  });
+});
+
+describe("RequestsEditor — Requests CSV import round trip (F1)", () => {
+  const MATRIX = [
+    { kind: "request" as const, person: "Aisha", date: "01", shiftType: "AM", weight: 5 },
+    { kind: "off" as const, person: "Chloe", date: "02", weight: -3 },
+  ];
+
+  async function openImport() {
+    render(<RequestsEditor />);
+    fireEvent.click(screen.getByTestId("requests-tab-quick"));
+    fireEvent.click(screen.getByTestId("requests-open-requests-csv"));
+  }
+
+  it("re-importing an unedited export at the default weight 0 keeps every weight", async () => {
+    await seed({ ...BASE_SEED, reqData: MATRIX });
+    await openImport();
+    uploadCsv(["person,01,02,03", "Aisha,AM:+5,,", "Chloe,,OFF:-3,"].join("\n"));
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "CSV imported: no changes, the file matches the current requests.",
+      ),
+    );
+    await drainScenarioCommands();
+    expect(useScenarioStore.getState().reqData).toMatchObject(MATRIX);
+    expect(screen.queryByTestId("clear-confirm-dialog")).toBeNull();
+  });
+
+  it("reports added and changed counts", async () => {
+    await seed({ ...BASE_SEED, reqData: MATRIX });
+    await openImport();
+    uploadCsv(["person,01,02,03", "Aisha,AM:+2,,PM:+1", "Chloe,,OFF:-3,"].join("\n"));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("CSV imported: 1 added, 1 changed, 0 removed."),
+    );
+  });
+
+  it("asks before removing cells, says how many, and removes nothing on Cancel", async () => {
+    await seed({ ...BASE_SEED, reqData: MATRIX });
+    await openImport();
+    // Bare entries at the default quick-paint weight 0 delete their selector.
+    uploadCsv(["person,01,02,03", "Aisha,AM,,", "Chloe,,OFF,"].join("\n"));
+
+    const dialog = await screen.findByTestId("clear-confirm-dialog");
+    expect(dialog).toHaveTextContent("This import will remove 2 existing requests. Import anyway?");
+    expect(screen.getByTestId("clear-confirm-confirm")).toHaveTextContent("Import");
+    fireEvent.click(screen.getByTestId("clear-confirm-cancel"));
+    await drainScenarioCommands();
+    expect(useScenarioStore.getState().reqData).toMatchObject(MATRIX);
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("removes and reports the count once confirmed", async () => {
+    await seed({ ...BASE_SEED, reqData: MATRIX });
+    await openImport();
+    uploadCsv(["person,01,02,03", "Aisha,AM,,", "Chloe,,OFF,"].join("\n"));
+    fireEvent.click(await screen.findByTestId("clear-confirm-confirm"));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("CSV imported: 0 added, 0 changed, 2 removed."),
+    );
+    await drainScenarioCommands();
+    expect(useScenarioStore.getState().reqData).toEqual([]);
+  });
+});
+
+describe("RequestsEditor — group requests and group leave (bb8t)", () => {
+  // 2026-01-01..03: Thu, Fri, Sat. Seniors = Aisha + Chloe.
+  const GROUP_SEED: Partial<ScenarioUiState> = {
+    ...BASE_SEED,
+    staffGroups: [{ id: "Seniors", members: ["Aisha", "Chloe"] }],
+  };
+
+  function renderWithConfirm() {
+    render(
+      <>
+        <RequestsEditor />
+        <GlobalConfirmDialog />
+      </>,
+    );
+  }
+
+  async function leaveCells() {
+    await act(async () => {
+      await drainScenarioCommands();
+    });
+    return useScenarioStore
+      .getState()
+      .reqData.filter((c) => c.kind === "leave")
+      .map((c) => `${String(c.person)}@${String(c.date)}`)
+      .sort();
+  }
+
+  function quickPaintLeave() {
+    fireEvent.click(screen.getByTestId("requests-tab-quick"));
+    fireEvent.click(screen.getByTestId("quick-paint-chip-LEAVE"));
+  }
+
+  it("marks person cells a group row covers, named in the title and accessible name", async () => {
+    await seed({
+      ...GROUP_SEED,
+      reqData: [
+        { kind: "request", person: "Seniors", date: "02", shiftType: "AM", weight: 5 },
+        { kind: "off", person: "Chloe", date: "WEEKEND", weight: 20 },
+      ],
+    });
+    render(<RequestsEditor />);
+
+    const aisha = screen.getByTestId("cell-Aisha-02");
+    expect(screen.getByTestId("group-source-Aisha-02")).toBeInTheDocument();
+    expect(aisha).toHaveAttribute("title", "From Seniors · AM +5");
+    expect(aisha).toHaveAccessibleName(/no request; From Seniors · AM \+5$/);
+    expect(screen.getByTestId("cell-Chloe-03")).toHaveAccessibleName(/From WEEKEND · OFF \+20$/);
+    // The group row itself and uncovered person cells carry no marker.
+    expect(screen.queryByTestId("group-source-Seniors-02")).toBeNull();
+    expect(screen.queryByTestId("group-source-Aisha-01")).toBeNull();
+    expect(screen.getByText("From a group row or date-group column")).toBeInTheDocument();
+  });
+
+  it("quick paint: LEAVE on a group cell asks first; Cancel changes nothing", async () => {
+    await seed(GROUP_SEED);
+    renderWithConfirm();
+    quickPaintLeave();
+
+    fireEvent.pointerDown(screen.getByTestId("cell-Seniors-01"));
+    fireEvent.mouseUp(window);
+    const dialog = await screen.findByTestId("confirm-dialog");
+    expect(dialog).toHaveTextContent("Pin paid leave for 2 people on 1 day (2 person-days)?");
+
+    fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("confirm-dialog")).toBeNull());
+    expect(await leaveCells()).toEqual([]);
+  });
+
+  it("quick paint: a drag starting on a group cell asks ONCE and applies the whole gesture", async () => {
+    await seed(GROUP_SEED);
+    renderWithConfirm();
+    quickPaintLeave();
+
+    fireEvent.pointerDown(screen.getByTestId("cell-Seniors-02"));
+    fireEvent.pointerEnter(screen.getByTestId("cell-Aisha-02"));
+    fireEvent.pointerEnter(screen.getByTestId("cell-Chloe-03"));
+    fireEvent.pointerEnter(screen.getByTestId("cell-Seniors-WEEKEND"));
+    fireEvent.mouseUp(window);
+
+    // People {Aisha, Chloe}; days {02, 03}; person-days {A02, C02, C03, A03}.
+    expect(await screen.findAllByTestId("confirm-dialog")).toHaveLength(1);
+    expect(screen.getByTestId("confirm-dialog")).toHaveTextContent(
+      "Pin paid leave for 2 people on 2 days (4 person-days)?",
+    );
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    await waitFor(async () =>
+      expect(await leaveCells()).toEqual(["Aisha@02", "Chloe@03", "Seniors@02", "Seniors@WEEKEND"]),
+    );
+  });
+
+  it("quick paint: a person-only LEAVE drag commits without asking", async () => {
+    await seed(GROUP_SEED);
+    renderWithConfirm();
+    quickPaintLeave();
+
+    fireEvent.pointerDown(screen.getByTestId("cell-Aisha-01"));
+    fireEvent.pointerEnter(screen.getByTestId("cell-Chloe-01"));
+    fireEvent.mouseUp(window);
+
+    expect(await leaveCells()).toEqual(["Aisha@01", "Chloe@01"]);
+    expect(screen.queryByTestId("confirm-dialog")).toBeNull();
+  });
+
+  it("Edit cell: saving LEAVE on a date-group column asks first; Cancel writes nothing", async () => {
+    await seed(GROUP_SEED);
+    renderWithConfirm();
+
+    const saveLeave = () => {
+      fireEvent.click(screen.getByTestId("cell-Chloe-WEEKDAY"));
+      fireEvent.click(screen.getByTestId("cell-editor-tab-leave"));
+      fireEvent.click(screen.getByTestId("cell-editor-save"));
+    };
+
+    saveLeave();
+    expect(await screen.findByTestId("confirm-dialog")).toHaveTextContent(
+      "Pin paid leave for 1 person on 2 days (2 person-days)?",
+    );
+    fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("confirm-dialog")).toBeNull());
+    expect(await leaveCells()).toEqual([]);
+
+    saveLeave();
+    await screen.findByTestId("confirm-dialog");
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    await waitFor(async () => expect(await leaveCells()).toEqual(["Chloe@WEEKDAY"]));
   });
 });

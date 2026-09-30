@@ -67,6 +67,27 @@ describe("CellPreferenceEditor — seeding from existing cells", () => {
     expect(screen.getByTestId("cell-editor-off-weight-input")).toHaveValue("-5");
   });
 
+  it("starts the Off tab at the day-off wish weight 20 on a cell with no OFF", () => {
+    const { onSave } = renderEditor({
+      cells: [{ kind: "request", person: "kevin", date: "2026-01-05", shiftType: "PM", weight: 7 }],
+    });
+    fireEvent.click(screen.getByTestId("cell-editor-tab-off"));
+    expect(screen.getByTestId("cell-editor-off-weight-input")).toHaveValue("20");
+    fireEvent.click(screen.getByTestId("cell-editor-save"));
+    expect(onSave).toHaveBeenCalledWith({ kind: "off", weight: 20 });
+  });
+
+  it("the Off tab note states the truthful weight semantics in a neutral box", () => {
+    renderEditor();
+    fireEvent.click(screen.getByTestId("cell-editor-tab-off"));
+    const note = screen.getByTestId("cell-editor-off-note");
+    expect(note).toHaveTextContent(
+      "20 is a normal day-off wish. A higher number wins more often, 0 removes it, and ∞ makes it a must.",
+    );
+    expect(note.className).not.toMatch(/error/);
+    expect(screen.getByTestId("cell-editor-off")).not.toHaveTextContent(/blank|no preference/);
+  });
+
   it("seeds per-target weights from request cells", () => {
     renderEditor({
       cells: [{ kind: "request", person: "kevin", date: "2026-01-05", shiftType: "PM", weight: 7 }],
@@ -95,11 +116,14 @@ describe("CellPreferenceEditor — save (strict XOR, FR-SR-17/21-23)", () => {
     expect(onSave).toHaveBeenCalledWith({ kind: "off", weight: 3 });
   });
 
-  it("Save on the Requests off tab with weight 0 omits the weight field", () => {
+  it("Save on the Requests off tab with weight 0 clears the cell (weight 0 removes OFF)", () => {
     const { onSave } = renderEditor();
     fireEvent.click(screen.getByTestId("cell-editor-tab-off"));
+    fireEvent.change(screen.getByTestId("cell-editor-off-weight-input"), {
+      target: { value: "0" },
+    });
     fireEvent.click(screen.getByTestId("cell-editor-save"));
-    expect(onSave).toHaveBeenCalledWith({ kind: "off", weight: undefined });
+    expect(onSave).toHaveBeenCalledWith({ kind: "clear" });
   });
 
   it("Save on Available builds prefs only for nonzero weights", () => {
@@ -127,7 +151,7 @@ describe("CellPreferenceEditor — save (strict XOR, FR-SR-17/21-23)", () => {
     });
     fireEvent.click(screen.getByTestId("cell-editor-save"));
     expect(screen.getByTestId("cell-editor-error")).toHaveTextContent(
-      "Weight must be a valid number, Infinity, or -Infinity",
+      "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
     );
     expect(onSave).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
@@ -141,7 +165,7 @@ describe("CellPreferenceEditor — save (strict XOR, FR-SR-17/21-23)", () => {
     });
     fireEvent.click(screen.getByTestId("cell-editor-save"));
     expect(screen.getByTestId("cell-editor-error")).toHaveTextContent(
-      "Weight must be a valid number, Infinity, or -Infinity",
+      "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
     );
     expect(onSave).not.toHaveBeenCalled();
   });

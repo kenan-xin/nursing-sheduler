@@ -4,8 +4,8 @@
 // lives in Save & Load — not the top bar — inside a "Start over" section with
 // explanatory backup copy and a destructive (error-outline) treatment, matching
 // the prototype (ScreenSaveLoad.dc.html:50-58). On confirm it calls the verified
-// full reset, `resetToNewSchedule`: the roster/candidate/snapshot/session/marker
-// and capture cleanup first, and only once that is proven, the T04 scenario reset
+// reset, `resetToNewSchedule`: the run's session/marker cleanup first (saved
+// rosters stay with their schedules, plq5 P2), and only once that is proven, the T04 scenario reset
 // (drop the persisted record, replace every scenario slice with the empty default,
 // clear undo history, reset the hot store).
 //
@@ -17,10 +17,10 @@
 // coarse-pointer target come from the primitive instead of a local class override.
 //
 // G4 closure — the confirmed reset now goes through `resetToNewSchedule`, which
-// runs the existing verified roster/stored-data cut BEFORE the scenario reset. So
-// `New schedule` genuinely leaves the previous run behind (no surviving roster,
-// candidate, capture state or session record, and therefore no stale capture
-// notice on Optimize), and it fails closed: an unverified cut changes nothing and
+// runs the verified run-residue cut BEFORE the scenario reset. So `New schedule`
+// leaves the previous run behind (no surviving session record, and therefore no
+// stale capture notice on Optimize; the saved roster stays with the schedule it
+// belongs to, plq5 P2), and it fails closed: an unverified cut changes nothing and
 // reports plainly instead of claiming `New schedule created`. `onResetComplete` is
 // called only on a real reset.
 //
@@ -29,7 +29,7 @@
 // inbound pipeline the Upload modal and Edit-YAML use (`useScenarioImport` →
 // `prepareScenarioLoad` → replacement/version confirm → `loadScenario`), so the
 // confirmation, the V-issue list and the advanced-syntax warnings are the shared
-// ones, and a normal import replaces the SCENARIO only — no invented residue cut.
+// ones. Like every Load it starts the new schedule with no roster of its own.
 // The `New schedule` action keeps `resetToNewSchedule` exactly as before.
 
 import { useState } from "react";
@@ -101,7 +101,9 @@ export function StartOverCard({
     setExampleError(null);
     setExampleBusy(true);
     try {
-      handleFile(await (fetchExampleSchedule ?? fetchBundledExampleSchedule)());
+      // Busy until the WHOLE load settles — roster clear, switch, or a cancelled
+      // confirm — not just the fetch, so a second click cannot start a second load.
+      await handleFile(await (fetchExampleSchedule ?? fetchBundledExampleSchedule)());
     } catch {
       setExampleError(EXAMPLE_SCHEDULE_FAILED_MESSAGE);
     } finally {
@@ -110,7 +112,7 @@ export function StartOverCard({
   };
 
   const handleConfirm = async () => {
-    // The verified roster/stored-data cut FIRST, then the scenario reset — and the
+    // The verified run-residue cut FIRST, then the scenario reset — and the
     // outcome is BRANCHED ON, not merely awaited. Both halves fail closed: nothing is
     // announced as done unless both succeeded, and the retry path is this same button.
     //
@@ -143,9 +145,8 @@ export function StartOverCard({
       <div className="flex flex-col gap-1 border-b border-line2 px-5 py-4">
         <h2 className="font-heading text-title font-semibold tracking-[-0.015em]">Start over</h2>
         <p className="max-w-[60ch] text-meta text-ink2">
-          Start a new schedule: begin empty, or load the realistic 87-person November 2025 example.
-          Starting empty removes everything saved in this browser and cannot be undone — download a
-          copy first if you want to keep it.
+          Start a new, empty schedule, or load the realistic 87-person November 2025 example. Your
+          current schedule stays in Recent schedules.
         </p>
       </div>
       <div className="flex flex-col gap-3 px-5 py-4">
@@ -184,23 +185,17 @@ export function StartOverCard({
             {exampleError}
           </p>
         ) : null}
-        {issues ? <ScenarioIssuesList issues={issues} /> : null}
+        {issues ? <ScenarioIssuesList issues={issues} action="the example can load" /> : null}
         {warnings ? <ImportWarningsBanner warnings={warnings} onDismiss={dismissWarnings} /> : null}
       </div>
       <ConfirmDialog
         open={open}
         onOpenChange={setOpen}
-        title="Start over?"
-        description="This clears your entire current schedule and starts a new, empty one. It cannot be undone."
-        confirmLabel="Start over"
+        title="Start a new schedule?"
+        description="Your current schedule stays in Recent schedules, with its roster, where you can open it again."
+        confirmLabel="Start new schedule"
         cancelLabel="Cancel"
         variant="destructive"
-        consequences={[
-          "All people, shift types and dates",
-          "Every rule and request",
-          "Your export layout",
-          "The saved roster and the last run's result",
-        ]}
         onConfirm={handleConfirm}
       />
       {/* The example's staged replacement/version confirmation — the same modal the

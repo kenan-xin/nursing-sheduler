@@ -50,8 +50,23 @@ export function stringifyScenario(scenario: ScenarioUiState): string {
     shiftType,
     groups,
   }));
+  // The backend document also drops switched-off rules, yet they are still on the user's
+  // screens (off) and can be turned back on: name them, so the model never says there is
+  // no such rule or adds a duplicate. Omitted when none, like the covers.
+  const cards = scenario.cardsByKind;
+  const switchedOffRules = (Object.keys(cards) as (keyof typeof cards)[]).flatMap((ruleKind) =>
+    cards[ruleKind]
+      .filter((card) => card.disabled)
+      .map((card) => ({ ruleKind, ruleId: card.uid, description: card.description })),
+  );
   return JSON.stringify(
-    covers.length === 0 ? document : { ...document, temporaryCover: covers },
+    {
+      ...document,
+      ...(covers.length === 0 ? {} : { temporaryCover: covers }),
+      ...(switchedOffRules.length === 0 ? {} : { switchedOffRules }),
+      // The holiday-import switch (bead 6975), sent only when the user turned it off.
+      ...(scenario.importPublicHolidays === false ? { importPublicHolidays: false } : {}),
+    },
     (_key, value: unknown) => {
       if (typeof value === "number" && !Number.isFinite(value)) {
         return Number.isNaN(value) ? "nan" : value > 0 ? ".inf" : "-.inf";
@@ -114,7 +129,7 @@ export function summarizeScenario(
  */
 export const KNOWLEDGE_LINES: readonly string[] = [
   "Beyond those Employment Act facts, you are not a source of law or policy: never state a ministry rule or nurse ratio as fact; say the ward decides. To offer to set the ward's own numbers, use offer_choices, never a question in text.",
-  "A staffing number is exact, not a minimum: for 'at least 2, ideally 3', prepare 2 and say the preferred 3 is set on the Staffing requirements screen.",
+  "A staffing number alone is exact, not a minimum: for 'at least 2, ideally 3', prepare requiredNumPeople 2 and preferredNumPeople 3 on the same requirement, never 2 alone.",
   "A skill mix (for example at least 1 RN on a shift, others allowed too) is set with set_skill_mix, or skillMix on add_staffing_requirement; never lower or remove one, and never approximate it by naming who may work the whole shift.",
   "Before promising a rule, make sure the app can express it; when unsure, read explain_app_capability for scheduler-limits and say plainly what it cannot do.",
   "A new optimiser run can change everyone's shifts: for one change to a roster staff already have, such as a nurse on MC, say so and use the cover steps above, or hand edits on the Roster screen, before offering a run.",
@@ -299,7 +314,9 @@ export function buildAssistantContext(input: BuildContextInput): AssistantContex
         "Weights of `.inf` / `-.inf` are HARD constraints; numeric weights are soft preferences. " +
         "`temporaryCover` lists the temporary covers booked on the Staff screen: each is a nurse " +
         "from another ward covering ONE shift on ONE date, and each lowers that date's need for " +
-        "that shift by one. They are not staff: no rule, request or roster row names them.",
+        "that shift by one. They are not staff: no rule, request or roster row names them. " +
+        "`switchedOffRules` lists the rules the user switched off: they exist but are left out " +
+        "of the document above and the optimiser ignores them; set_rule_enabled turns one back on.",
       value: stringifyScenario(input.scenario),
     },
     {

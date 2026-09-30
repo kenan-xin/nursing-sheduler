@@ -39,6 +39,9 @@ SHIFT_COUNT = "shift count"
 SHIFT_AFFINITY = "shift affinity"
 SHIFT_TYPE_COVERING = "shift type covering"
 SUPPORTED_SHIFT_COUNT_EXPRESSIONS = frozenset({"|x - T|^2", "x >= T", "x <= T", "x > T", "x < T", "x = T"})
+# Head counts past this crash OR-Tools with an int64 overflow (bug hunt D-05, bead 99db).
+MAX_HEAD_COUNT = 10_000
+HeadCount = Annotated[int, Field(le=MAX_HEAD_COUNT)]
 
 
 def validate_weight(weight: float) -> int | float:
@@ -343,7 +346,7 @@ class SkillMixEntry(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     people: int | str  # One person or people-group id
-    minNumPeople: int
+    minNumPeople: HeadCount
 
 
 class ShiftTypeRequirementsPreference(BasePreference):
@@ -354,17 +357,17 @@ class ShiftTypeRequirementsPreference(BasePreference):
     # nested aggregate groups of shift type IDs.
     shiftType: str | list[str | list[str]]
     shiftTypeCoefficients: list[tuple[str, int]] | None = None
-    requiredNumPeople: int
+    requiredNumPeople: HeadCount
     # None and the reserved "ALL" selector both mean all people. The frontend
     # intentionally normalizes implicit all-people values to explicit "ALL".
     qualifiedPeople: (int | str) | list[int | str] | None = None
-    preferredNumPeople: int | None = None  # Preferred number of people for each shift type
+    preferredNumPeople: HeadCount | None = None  # Preferred number of people for each shift type
     # Skill mix: each entry is a hard floor on how many of its people work the
     # shift. Unlike qualifiedPeople it bans nobody. See shift_type_requirements.
     skillMix: list[SkillMixEntry] | None = None
     # Per-date exceptions to requiredNumPeople: [[date, count], ...]. On a listed date
     # the requirement uses that count instead. Every other field still applies there.
-    requiredNumPeopleOverrides: list[tuple[datetime.date, int]] | None = None
+    requiredNumPeopleOverrides: list[tuple[datetime.date, HeadCount]] | None = None
     # None and the reserved "ALL" selector both mean all dates. The frontend
     # intentionally normalizes implicit all-date values to explicit "ALL".
     date: (int | str | datetime.date) | list[int | str | datetime.date] | None = None  # Single date or list of dates
@@ -388,6 +391,16 @@ class ShiftTypeRequirementsPreference(BasePreference):
                 raise ValueError(f"Duplicate requiredNumPeopleOverrides date {date}.")
             seen.add(date)
         return v
+
+    @model_validator(mode="after")
+    def validate_required_not_above_preferred(self) -> Self:
+        # The solver would pin actual >= required and actual <= preferred: a silent INFEASIBLE (bead 99db C1).
+        if self.preferredNumPeople is not None and self.requiredNumPeople > self.preferredNumPeople:
+            raise ValueError(
+                f"requiredNumPeople ({self.requiredNumPeople}) must not exceed "
+                f"preferredNumPeople ({self.preferredNumPeople})."
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_skill_mix(self) -> Self:

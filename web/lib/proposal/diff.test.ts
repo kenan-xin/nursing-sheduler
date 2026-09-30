@@ -20,6 +20,7 @@ import { planChangeHighlight } from "@/lib/change-highlight/plan";
 import { resolveScreenName } from "@/lib/capability/resolve";
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
+import { buildRestDaysRuleCard } from "@/lib/rules/rest-days";
 import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
 import type { AssistantCommandV1 } from "./commands";
 
@@ -142,7 +143,7 @@ describe("deriveProposalDiff", () => {
       {
         type: "add_shift_group" as const,
         groupId: "Night shifts",
-        members: ["N", "Night"],
+        members: ["N", "Night", "am1"],
       },
     ];
     const applied = applyAssistantCommands(before, commands);
@@ -150,10 +151,12 @@ describe("deriveProposalDiff", () => {
 
     const diff = deriveProposalDiff(before, applied.next, commands);
     expect(diff.direct.map((entry) => entry.key).sort()).toEqual([
+      'shift:"AM1"',
       'shift:"N"',
-      'shift:"am1"',
       "shiftgroup:Night shifts",
     ]);
+    // The added "am1" is stored as AM1 (Shifts page rule, bead tz3y); its highlight key
+    // must name that row, or it would fall into the cascade.
     expect(diff.cascade).toEqual([]);
 
     const night = diff.direct.find((entry) => entry.key === 'shift:"N"');
@@ -163,12 +166,12 @@ describe("deriveProposalDiff", () => {
       "Night shift · 20:00–08:30 (ends next day) · 60 min break (11h 30m paid)",
     );
     // Rest 0 is stored as absent, exactly as the Shifts page stores it -- no break text.
-    expect(diff.direct.find((entry) => entry.key === 'shift:"am1"')?.after).toBe(
-      "am1 · 08:00–15:00",
+    expect(diff.direct.find((entry) => entry.key === 'shift:"AM1"')?.after).toBe(
+      "AM1 · 08:00–15:00",
     );
-    // Members follow shift order: Night (existing) before N (new).
+    // Members follow shift order: Night (existing) before N and AM1 (new).
     expect(diff.direct.find((entry) => entry.key === "shiftgroup:Night shifts")?.after).toBe(
-      "Night, N",
+      "Night, N, AM1",
     );
     expect(diff.capabilityIds).toContain("shift-types");
     expect(diff.needsReview).toEqual([]);
@@ -223,7 +226,7 @@ describe("deriveProposalDiff", () => {
     ]);
     const entry = (key: string) => diff.direct.find((candidate) => candidate.key === key);
     expect(entry('cell:"Ana"|"10"')).toMatchObject({
-      label: "Ana on 10",
+      label: "Ana on Sat 10 Oct",
       before: null,
       after: "On leave",
       kind: "created",
@@ -239,15 +242,67 @@ describe("deriveProposalDiff", () => {
     expect(diff.needsReview).toEqual([]);
   });
 
-  it("reads a weight-0 day-off request as a plain ask, not a weighted one", () => {
+  it("states the person-days leave on a staff-group row pins (bb8t)", () => {
     const before = octoberWard();
     const commands = [
       {
-        type: "set_off_request" as const,
+        type: "add_leave" as const,
+        personId: "Seniors",
+        startDate: "2026-10-05",
+        endDate: "2026-10-07",
+      },
+      {
+        type: "add_leave" as const,
+        personId: "Ana",
+        startDate: "2026-10-20",
+        endDate: "2026-10-20",
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(`fixture should apply: ${applied.rejection.message}`);
+
+    const lines = deriveProposalDiff(before, applied.next, commands).direct.filter((entry) =>
+      entry.key.startsWith("groupleave:"),
+    );
+    // Seniors = Ana + Chris; a person row needs no such line.
+    expect(lines).toEqual([
+      {
+        key: 'groupleave:"Seniors"|2026-10-05|2026-10-07',
+        scope: "leave-and-requests",
+        label: "Seniors: paid leave for every member",
+        before: null,
+        after: "Pins paid leave for 2 people on 3 days (6 person-days)",
+        kind: "created",
+      },
+    ]);
+  });
+
+  it("names a group row and a date keyword in words, not ids (F13)", () => {
+    const before = ruleWardScenario();
+    const after = {
+      ...before,
+      reqData: [
+        ...before.reqData,
+        { kind: "off" as const, person: "Senior", date: "WEEKEND", weight: 5 },
+      ],
+    };
+    expect(diffScenarioDocuments(before, after).map((entry) => entry.label)).toEqual([
+      "everyone in Senior on weekends",
+    ]);
+  });
+
+  it("says an imported weight-0 day-off request has no effect", () => {
+    const ward = octoberWard();
+    const before = {
+      ...ward,
+      reqData: [...ward.reqData, { kind: "off" as const, person: "Chris", date: "01", weight: 0 }],
+    };
+    const commands = [
+      {
+        type: "clear_requests" as const,
         personId: "Chris",
         startDate: "2026-10-01",
         endDate: "2026-10-01",
-        weight: 0,
       },
     ];
     const applied = applyAssistantCommands(before, commands);
@@ -258,10 +313,10 @@ describe("deriveProposalDiff", () => {
       {
         key: 'cell:"Chris"|"01"',
         scope: "leave-and-requests",
-        label: "Chris on 01",
-        before: null,
-        after: "Asked for the day off",
-        kind: "created",
+        label: "Chris on Thu 1 Oct",
+        before: "Day off at weight 0 (no effect)",
+        after: null,
+        kind: "removed",
       },
     ]);
   });
@@ -292,7 +347,7 @@ describe("deriveProposalDiff", () => {
       {
         key: 'cell:"Ana"|"14"',
         scope: "leave-and-requests",
-        label: "Ana on 14",
+        label: "Ana on Wed 14 Oct",
         before: "On leave",
         after: "Must work N",
         kind: "changed",
@@ -686,7 +741,9 @@ describe("rule sentences state what the solver enforces", () => {
       },
     };
     const diff = deriveProposalDiff(before, after, []);
-    return [...diff.direct, ...diff.cascade].find((entry) => entry.key === `rule:${kind}:x`)?.after;
+    return [...diff.direct, ...diff.cascade].find(
+      (entry) => entry.key === `rule:${kind}:${String(card.uid)}`,
+    )?.after;
   };
   const requirement = {
     uid: "x",
@@ -710,7 +767,43 @@ describe("rule sentences state what the solver enforces", () => {
         preferredNumPeople: 3,
         weight: -50,
       }),
-    ).toBe("On · At least 2, ideally 3 people on Night, every date (weight -50)");
+    ).toBe("On · 2 to 3 people on Night, every date, aiming for 3 (weight -50)");
+  });
+
+  it("a preferred count at -∞ is exactly that count, a must (C-14)", () => {
+    expect(
+      sentence("requirements", {
+        ...requirement,
+        preferredNumPeople: 3,
+        weight: Number.NEGATIVE_INFINITY,
+      }),
+    ).toBe("On · Exactly 3 people on Night, every date (a must)");
+  });
+
+  it("a count with coefficients says it is a weighted count (C5)", () => {
+    expect(
+      sentence("counts", { ...count, countShiftTypeCoefficients: [["Night", 2]], weight: -1 }),
+    ).toBe(
+      "On · At most 5 Night shifts (weighted count) for everyone, across every date: " +
+        "avoided where possible (weight -1)",
+    );
+  });
+
+  it("an edit that leaves a rule off says the optimiser ignores it (C-13)", () => {
+    const card = { ...count, weight: -1, disabled: true };
+    const scenario = ruleWardScenario();
+    const withCount = (target: number) => ({
+      ...scenario,
+      cardsByKind: {
+        ...scenario.cardsByKind,
+        counts: [...scenario.cardsByKind.counts, { ...card, target }],
+      },
+    });
+    const [entry] = diffScenarioDocuments(withCount(5), withCount(4));
+    expect(entry.after).toMatch(
+      /^Off · At most 4 Night shifts.* · This rule is off\. The optimiser ignores it\.$/,
+    );
+    expect(entry.before).not.toContain("optimiser ignores");
   });
 
   it("an aggregate group is one combined count, and qualified people ban everyone else", () => {
@@ -726,14 +819,23 @@ describe("rule sentences state what the solver enforces", () => {
     );
   });
 
-  it("a count's weight rewards the expression holding, so a negative one works against it", () => {
-    expect(sentence("counts", { ...count, weight: -50 })).toBe(
-      "On · At most 5 Night shifts for everyone, across every date: " +
-        "worked against, the solver is rewarded for breaking it (weight -50)",
+  it("a count's weight rewards the expression holding, so a negative one avoids it", () => {
+    expect(sentence("counts", { ...count, expression: "x > T", weight: -50 })).toBe(
+      "On · More than 5 Night shifts for everyone, across every date: " +
+        "avoided where possible (weight -50)",
     );
     expect(sentence("counts", { ...count, weight: Number.NEGATIVE_INFINITY })).toBe(
       "On · At most 5 Night shifts for everyone, across every date: " +
         "must never hold, the solver forces the opposite",
+    );
+  });
+
+  it("the rest-days card reads as the rule it is, not the stored x > 5 count", () => {
+    expect(
+      sentence("counts", buildRestDaysRuleCard("r1") as unknown as Record<string, unknown>),
+    ).toBe(
+      "On · “2 rest days in any 7 days in a row” · Every nurse gets 2 rest days in any 7 days " +
+        "in a row (at most 5 shifts); strong preference",
     );
   });
 
@@ -1187,15 +1289,29 @@ describe("the temporary-cover commands in the Preview (d582)", () => {
 });
 
 describe("scope identities", () => {
-  it("every scope but the deferred export route is a real shipped capability id", () => {
+  it("every scope is a real shipped capability id", () => {
     // The Preview says "this affects these screens" by naming capability ids. If one
     // of them were not in the deployed registry, the assistant would be pointing at
     // a screen the app does not have -- the exact failure the registry exists to stop.
     const ids = new Set(getCapabilityRegistry().entries.map((entry) => entry.id));
     for (const scope of Object.keys(SCOPE_LABEL) as DiffScope[]) {
-      if (scope === "export-layout") continue;
       expect(ids.has(scope), `${scope} is not a shipped capability id`).toBe(true);
     }
+  });
+
+  it("badges use the sidebar's screen names (C-28)", () => {
+    expect(SCOPE_LABEL["shift-type-coverings"]).toBe("Shift Type Coverings");
+    expect(SCOPE_LABEL["shift-affinities"]).toBe("Affinities");
+    expect(SCOPE_LABEL["leave-and-requests"]).toBe("Requests & Leave");
+  });
+
+  it("lists no export-layout change: that screen does not ship (C-26)", () => {
+    const before = ruleWardScenario();
+    const after = {
+      ...before,
+      exportLayout: { ...before.exportLayout, extraRows: [...before.exportLayout.extraRows, {}] },
+    } as unknown as ScenarioUiState;
+    expect(diffScenarioDocuments(before, after)).toEqual([]);
   });
 });
 
@@ -1242,19 +1358,19 @@ describe("pairing and supervision rules in the Preview", () => {
     expect(pairing).toMatchObject({
       scope: "shift-affinities",
       after:
-        "On · “Keep Ana and Cai apart on nights” · ana with cai on Night, every date: never together",
+        "On · “Keep Ana and Cai apart on nights” · ana with cai on the same shift on the same day (Night), every date: never together",
     });
     expect(supervision).toMatchObject({
       scope: "shift-type-coverings",
       after:
-        "On · “A senior whenever Ana works” · Whenever ana works Day or Night, at least one of Senior works it too, every date",
+        "On · “A senior whenever Ana works” · Whenever ana works Day or Night, at least one of Senior works on the same shift on the same day, every date",
     });
     expect(edited).toMatchObject({
       kind: "changed",
       before:
-        "On · “Ana and Ben apart on nights” · ana with ben on Night, every date: apart where possible (weight -10)",
+        "On · “Ana and Ben apart on nights” · ana with ben on the same shift on the same day (Night), every date: apart where possible (weight -10)",
       after:
-        "On · “Ana and Ben together on weekends” · ana with ben on Working shifts, weekends: together where possible (weight 5)",
+        "On · “Ana and Ben together on weekends” · ana with ben on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together (Working shifts), weekends: together where possible (weight 5)",
     });
     expect(diff.cascade).toEqual([]);
 

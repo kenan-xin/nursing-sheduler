@@ -258,11 +258,6 @@ function lower(
 ): Lowered {
   const count = requiredOn(card, iso);
   const credit = target ? coverCredit(target, iso, covers, closure) : 0;
-  const required = wardNeed(count, credit);
-  const preferred =
-    card.preferredNumPeople === undefined || credit === 0
-      ? card.preferredNumPeople
-      : Math.max(required, card.preferredNumPeople - credit);
   const mix = (card.skillMix ?? []).map((entry) =>
     target && credit > 0
       ? Math.max(
@@ -271,6 +266,13 @@ function lower(
         )
       : entry.minNumPeople,
   );
+  // A cover outside a skill-mix group lowers the head count but not that floor, and core
+  // rejects a count below any skill-mix minimum: the ward still needs those people.
+  const required = Math.max(wardNeed(count, credit), Math.min(count, Math.max(0, ...mix)));
+  const preferred =
+    card.preferredNumPeople === undefined || credit === 0
+      ? card.preferredNumPeople
+      : Math.max(required, card.preferredNumPeople - credit);
   return { count, credit, required, preferred, mix };
 }
 
@@ -473,8 +475,8 @@ export type CoverValidation = { ok: true } | { ok: false; message: string };
  * The Staff form's validation, shared with the assistant host (d582 §6): a name, a
  * date, a worked shift, groups that exist, and no second entry for the same name on
  * the same date. `editingIndex` is the entry being re-saved (so it does not clash
- * with itself). A date outside the period is NOT refused here — that is a drift
- * flag (F3), not a form error.
+ * with itself). A NEW cover must fall inside the roster period; an entry being
+ * re-saved is not refused for it — that is a drift flag (F3), not a form error.
  */
 export function validateCover(
   state: CoverInput,
@@ -484,6 +486,14 @@ export function validateCover(
   const name = entry.name.trim();
   if (!name) return { ok: false, message: "Enter the nurse's name." };
   if (!isValidIso(entry.date)) return { ok: false, message: "Pick a date." };
+  if (
+    editingIndex === undefined &&
+    state.rangeStart &&
+    state.rangeEnd &&
+    (entry.date < state.rangeStart || entry.date > state.rangeEnd)
+  ) {
+    return { ok: false, message: "Pick a date inside the roster period." };
+  }
   const shift = String(entry.shiftType);
   if (!workedShiftIds(state).has(shift)) return { ok: false, message: "Pick a shift she works." };
   const groupIds = new Set(state.staffGroups.map((group) => String(group.id)));

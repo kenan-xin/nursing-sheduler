@@ -16,7 +16,13 @@
 // proves the gap is caught there, not here).
 
 import { z } from "zod";
-import { DAY_STATE_SELECTOR_VALUES, PREFERENCE_TYPE, RESERVED_SHIFT_TYPE } from "../types";
+import { expandPersonRefs } from "@/lib/rules/expansion";
+import {
+  DAY_STATE_SELECTOR_VALUES,
+  PREFERENCE_TYPE,
+  RESERVED_SHIFT_TYPE,
+  type PersonRef,
+} from "../types";
 import { validateContractedHoursContract } from "./contracted-hours";
 import {
   buildShiftTypeIndexMap,
@@ -141,9 +147,13 @@ const zRequirement = z.strictObject({
   description: z.string().optional(),
   shiftType: z.union([zShiftTypeSelector, zNestedShiftRefList]),
   shiftTypeCoefficients: z.array(zCoefficientEntry).optional(),
-  requiredNumPeople: z.number().int(),
+  requiredNumPeople: z.number().int().min(0, { error: "requiredNumPeople must be 0 or more." }),
   qualifiedPeople: zRefOrList.optional(),
-  preferredNumPeople: z.number().int().optional(),
+  preferredNumPeople: z
+    .number()
+    .int()
+    .min(0, { error: "preferredNumPeople must be 0 or more." })
+    .optional(),
   skillMix: z.array(zSkillMixEntry).optional(),
   requiredNumPeopleOverrides: z.array(z.tuple([zIsoDate, z.number().int().min(0)])).optional(),
   date: zRefOrList.optional(),
@@ -450,6 +460,61 @@ function validateScenarioCrossFields(doc: ProducerDoc, ctx: z.RefinementCtx): vo
     validateContractedHours(doc, map, shiftGroupIds, ctx);
     validateShiftRequestReservedExpansion(doc, map, ctx);
   }
+  validateSolvableCounts(doc, ctx);
+}
+
+/**
+ * Documents core refuses to load or cannot solve (bug hunt BH2): a requirement's counts
+ * out of order or under a skill-mix floor (`models.validate_required_num_people_overrides`),
+ * and a people selector whose groups are all empty (core raises for coverings, and bans
+ * everyone from the shift for `qualifiedPeople`).
+ */
+function validateSolvableCounts(doc: ProducerDoc, ctx: z.RefinementCtx): void {
+  const people = { staff: doc.people.items, staffGroups: doc.people.groups ?? [] };
+  const groupIds = new Set(people.staffGroups.map((g) => g.id));
+  doc.preferences.forEach((pref, i) => {
+    const rule = pref.description?.trim()
+      ? `Rule ${quote(pref.description.trim())}`
+      : `Rule ${i + 1} (${pref.type})`;
+    const addIssue = (message: string, field: string) =>
+      ctx.addIssue({ code: "custom", message, path: ["preferences", i, field] });
+    const needsSomeone = (field: string, refs: unknown) => {
+      if (refs == null) return;
+      const flat = [refs].flat(2) as PersonRef[];
+      if (expandPersonRefs(flat, people).size > 0) return;
+      const empty = flat.filter((ref) => groupIds.has(String(ref))).map(quote);
+      addIssue(
+        `${rule}: ${field} names only staff groups with no members (${empty.join(", ")}), so it covers no one.`,
+        field,
+      );
+    };
+    if (pref.type === PREFERENCE_TYPE.shiftTypeCovering) {
+      needsSomeone("preceptors", pref.preceptors);
+      needsSomeone("preceptees", pref.preceptees);
+    }
+    if (pref.type !== PREFERENCE_TYPE.shiftTypeRequirement) return;
+    needsSomeone("qualifiedPeople", pref.qualifiedPeople);
+    pref.skillMix?.forEach((entry) => needsSomeone("skillMix", entry.people));
+    const { requiredNumPeople: required, preferredNumPeople: preferred } = pref;
+    if (preferred !== undefined && preferred < required)
+      addIssue(
+        `${rule}: preferredNumPeople (${preferred}) must be at least requiredNumPeople (${required}).`,
+        "preferredNumPeople",
+      );
+    for (const [date, count] of pref.requiredNumPeopleOverrides ?? []) {
+      if (preferred !== undefined && count > preferred)
+        addIssue(
+          `requiredNumPeopleOverrides count for '${date}' must not exceed preferredNumPeople.`,
+          "requiredNumPeopleOverrides",
+        );
+      for (const entry of pref.skillMix ?? [])
+        if (count < entry.minNumPeople)
+          addIssue(
+            `requiredNumPeopleOverrides count for ${date} is below skillMix minNumPeople for '${entry.people}'.`,
+            "requiredNumPeopleOverrides",
+          );
+    }
+  });
 }
 
 /** Build the ordered shift-type map; surface a forward-ref/cycle as an issue. */

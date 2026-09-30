@@ -46,8 +46,19 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useRosterContentWidth } from "./roster-content-width";
 import { cn } from "@/lib/utils";
-import { buildCoverSheetPlan, encodeRosterFile, parseSubmissionDocument } from "@/lib/roster";
-import type { AutosaveSnapshot, CoverSheetPlan, RosterDocument } from "@/lib/roster";
+import {
+  buildCountCellDeltas,
+  buildCoverSheetPlan,
+  deriveEditedSinceSolve,
+  encodeRosterFile,
+  parseSubmissionDocument,
+} from "@/lib/roster";
+import type {
+  AutosaveSnapshot,
+  CountCellDelta,
+  CoverSheetPlan,
+  RosterDocument,
+} from "@/lib/roster";
 import { patchFrozenXlsxWithEdits } from "@/lib/roster";
 import { downloadBlob } from "@/lib/utils/download";
 
@@ -96,19 +107,20 @@ export function RosterActions({
         edits: document.edits,
         coordinateMap: document.coordinateMap,
         provenance: document.provenance,
-        cover: coverSheetPlan(document),
+        ...submissionPlans(document),
       });
       const firstDate = document.context.calendar[0]?.iso ?? "roster";
-      downloadBlob(blob, `roster-${firstDate}-edited.xlsx`);
+      const suffix = deriveEditedSinceSolve(document.edits) ? "-edited" : "";
+      downloadBlob(blob, `roster-${firstDate}${suffix}.xlsx`);
     } catch (error) {
       // The patcher fails closed (EditedXlsxError); the roster stays visible.
       // Surface a plain-language message — and especially do not swallow the
-      // failed-save rescue export, which the user depends on to keep a copy.
-      const reason =
-        error instanceof Error && error.message.length > 0
-          ? error.message
-          : "the edited workbook could not be exported";
-      onExportError(`The edited workbook could not be exported (${reason}). Try again.`);
+      // failed-save rescue export, which the user depends on to keep a copy. The
+      // failure is deterministic, so point at what does work rather than a retry.
+      console.error("Excel export failed:", error);
+      onExportError(
+        "The Excel file could not be made from this roster. Your roster is safe: use Save roster file to keep a copy, or run Optimize again for a new Excel file.",
+      );
     }
   };
 
@@ -174,13 +186,26 @@ export function RosterActions({
  * it ever does not, throw: the patcher fails closed and the caller reports it,
  * rather than exporting a workbook that silently drops a cover nurse.
  */
-function coverSheetPlan(document: RosterDocument): CoverSheetPlan | null {
-  if (document.cover.entries.length === 0) return null;
+function submissionPlans(document: RosterDocument): {
+  cover: CoverSheetPlan | null;
+  counts: CountCellDelta[];
+} {
+  if (document.cover.entries.length === 0 && document.edits.length === 0) {
+    return { cover: null, counts: [] };
+  }
   const parsed = parseSubmissionDocument(document.submission.canonicalYaml);
   if (!parsed.ok) {
     throw new Error("the submission could not be read");
   }
-  return buildCoverSheetPlan(parsed.document, document.cover.entries);
+  return {
+    cover: buildCoverSheetPlan(parsed.document, document.cover.entries),
+    counts: buildCountCellDeltas(
+      parsed.document,
+      document.solvedDays,
+      document.edits,
+      document.coordinateMap,
+    ),
+  };
 }
 
 /**

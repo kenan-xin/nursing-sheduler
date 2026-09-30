@@ -13,6 +13,7 @@ import {
   type PersonRef,
   type UiRequestCell,
 } from "@/lib/scenario";
+import { isValidWeightValue, parseWeightInput } from "@/components/card-editor/weight-value";
 import { resolveDayStatePrecedence } from "./requests-model";
 
 /** A weight value as produced by the shared weight parser: a valid weight is a
@@ -40,6 +41,8 @@ export interface ShiftRequestDelta {
    *  as the matrix export writes them; the caller routes the day-states to a
    *  leave/off cell rather than a worked request. */
   shiftType: string;
+  /** The cell's own weight (`AM:+5`); absent means the caller's weight applies. */
+  weight?: number;
 }
 
 export interface PeopleHistoryCsvOptions {
@@ -146,10 +149,27 @@ function validateShiftRequestRows(
       // them) or one-or-more worked selectors joined with ` | ` (the export's
       // several-entries-per-cell form). Splitting on `|` and trimming also accepts
       // the unspaced `AM|PM` a hand-editor might type.
-      const tokens = cellValue
-        .split("|")
-        .map((token) => token.trim())
-        .filter((token) => token.length > 0);
+      const entries: { selector: string; weight?: number }[] = [];
+      for (const token of cellValue.split("|").map((t) => t.trim())) {
+        if (token.length === 0) continue;
+        // `SELECTOR:WEIGHT` carries the entry's own weight (as the export writes
+        // it); a bare selector takes the caller's weight.
+        const colon = token.lastIndexOf(":");
+        if (colon < 0 || validShiftTypeSet.has(token)) {
+          entries.push({ selector: token });
+          continue;
+        }
+        const weightText = token.slice(colon + 1).trim();
+        const weight = parseWeightInput(weightText);
+        if (!isValidWeightValue(weight)) {
+          return {
+            ok: false,
+            error: `Invalid weight "${weightText}" at row ${r + 1}, column ${c + 1}. Use a number, Infinity, or -Infinity.`,
+          };
+        }
+        entries.push({ selector: token.slice(0, colon).trim(), weight });
+      }
+      const tokens = entries.map((e) => e.selector);
       const dayState = tokens.find(isDayStateSelector);
 
       if (dayState !== undefined) {
@@ -159,20 +179,29 @@ function validateShiftRequestRows(
             error: `Cell at row ${r + 1}, column ${c + 1} mixes the day-state "${dayState}" with other entries; a cell is either one day-state (OFF/LEAVE) or shift types joined with " | ".`,
           };
         }
-        deltas.push({ personId, dateId: dateItemIds[c - 1], shiftType: dayState });
+        const { weight } = entries[0];
+        deltas.push({
+          personId,
+          dateId: dateItemIds[c - 1],
+          shiftType: dayState,
+          ...(weight !== undefined && { weight }),
+        });
         continue;
       }
 
-      if (tokens.length === 0) continue;
-
-      for (const token of tokens) {
-        if (!validShiftTypeSet.has(token)) {
+      for (const { selector, weight } of entries) {
+        if (!validShiftTypeSet.has(selector)) {
           return {
             ok: false,
-            error: `Invalid shift type "${token}" at row ${r + 1}, column ${c + 1}. Valid shift types: ${validShiftTypeIds.join(", ")}`,
+            error: `Invalid shift type "${selector}" at row ${r + 1}, column ${c + 1}. Valid shift types: ${validShiftTypeIds.join(", ")}`,
           };
         }
-        deltas.push({ personId, dateId: dateItemIds[c - 1], shiftType: token });
+        deltas.push({
+          personId,
+          dateId: dateItemIds[c - 1],
+          shiftType: selector,
+          ...(weight !== undefined && { weight }),
+        });
       }
     }
   }
@@ -183,15 +212,20 @@ function validateShiftRequestRows(
 /**
  * Parse + validate a Shift Requests CSV (FR-SR-36): a people × dates matrix,
  * column 0 = person ID, remaining columns = one cell per date item in order.
- * On success returns the additive deltas (all at `weight`) for the caller to
- * group per (person, date) and merge into the existing preferences.
+ * On success returns the additive deltas for the caller to group per (person,
+ * date) and merge into the existing preferences; a delta without its own
+ * `weight` applies at `options.weight`.
  */
 export function validateShiftRequestCsv(
   text: string,
   options: ShiftRequestCsvOptions,
 ): CsvValidationResult<ShiftRequestDelta[]> {
   if (!isValidWeight(options.weight)) {
-    return { ok: false, error: "Weight must be a valid number, Infinity, or -Infinity." };
+    return {
+      ok: false,
+      error:
+        "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity.",
+    };
   }
 
   if (!text) {
@@ -218,10 +252,17 @@ export interface ShiftRequestCsvExportOptions {
   dateItemIds: readonly DateRef[];
 }
 
+/** A weight as `parseWeightInput` reads it back, exactly (no k/M abbreviation). */
+function encodeCsvWeight(weight: number): string {
+  if (weight === Infinity) return "+inf";
+  if (weight === -Infinity) return "-inf";
+  return weight > 0 ? `+${weight}` : String(weight);
+}
+
 /**
- * The CSV text for one coordinate's cells: a leave pin and an off-day are written
- * as their reserved selector labels (`LEAVE`/`OFF`), a worked request as its
- * shift-type/group id. Several coexisting worked entries join with ` | ` so a
+ * The CSV text for one coordinate's cells: a leave pin is written as `LEAVE`
+ * (a pin has no weight), an off-day as `OFF:<weight>`, a worked request as
+ * `<shift-type/group id>:<weight>`, so a round trip keeps every weight. Several coexisting worked entries join with ` | ` so a
  * whole matrix cell survives one round-trip; an empty coordinate is blank.
  * Duplicate encodings are collapsed so the emitted cell is always one the parser
  * accepts.
@@ -230,9 +271,7 @@ function encodeShiftRequestCell(cells: readonly UiRequestCell[]): string {
   const entries = cells.map((cell) =>
     cell.kind === "leave"
       ? RESERVED_SHIFT_TYPE.leave
-      : cell.kind === "off"
-        ? RESERVED_SHIFT_TYPE.off
-        : cell.shiftType,
+      : `${cell.kind === "off" ? RESERVED_SHIFT_TYPE.off : cell.shiftType}:${encodeCsvWeight(cell.weight)}`,
   );
   return [...new Set(entries)].join(" | ");
 }
@@ -244,8 +283,8 @@ function encodeShiftRequestCell(cells: readonly UiRequestCell[]): string {
  * matrix renders (LEAVE > OFF > worked), so what is exported is what the user
  * sees, and several coexisting worked requests at one coordinate join with ` | `.
  * An export therefore re-imports through the Requests CSV modal with the same
- * (person, date, selector) cells. Weights are not part of the matrix format — the
- * import applies the caller's weight — so they are not written.
+ * (person, date, selector, weight) cells: each entry carries its own weight, so
+ * the import's fallback weight never overrides an exported one.
  *
  * Group-person and date-group/`H-n` columns are out of scope: the import parser
  * only reads the individual-people × date-item matrix (see the artifact).
