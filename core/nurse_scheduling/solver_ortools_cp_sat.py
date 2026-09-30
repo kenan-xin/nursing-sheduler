@@ -44,6 +44,28 @@ class ORToolsSolver(SolverInterface):
         self.status = None
         self.solver_status = SolverStatus.UNKNOWN
         self._active_solution_callback = None
+        # a5pb: guard literals for the infeasibility explanation, one per rule unit
+        # (`guard_key`, set by the scheduler and handlers). None = off.
+        self.guards: dict[Any, cp_model.IntVar] | None = None
+        self.guard_key: Any = None
+        self.guard_constraints: dict[Any, list[int]] = {}
+
+    def enable_guards(self) -> None:
+        """a5pb: give every constraint added under `guard_key` that unit's guard literal."""
+        self.guards = {}
+
+    def _guarded(self, constraint: cp_model.Constraint) -> None:
+        if self.guards is None or self.guard_key is None:
+            return
+        literal = self.guards.get(self.guard_key)
+        if literal is None:
+            literal = self.guards[self.guard_key] = self.model.NewBoolVar(f"guard_{len(self.guards)}")
+            # Pinned true by its domain, so presolve drops it and the normal solve keeps
+            # every worker (assumptions would force one). explain.py frees it after INFEASIBLE.
+            self.model.proto.variables[literal.index].domain[0] = 1
+            self.guard_constraints[self.guard_key] = []
+        self.guard_constraints[self.guard_key].append(constraint.index)
+        constraint.OnlyEnforceIf(literal)
 
     def new_bool_var(self, name: str) -> cp_model.IntVar:
         """Create a new boolean variable."""
@@ -55,11 +77,11 @@ class ORToolsSolver(SolverInterface):
 
     def add_constraint(self, constraint) -> None:
         """Add a constraint to the model."""
-        self.model.Add(constraint)
+        self._guarded(self.model.Add(constraint))
 
     def add_bool_or(self, literals: list[Any]) -> None:
         """Add a boolean OR constraint."""
-        self.model.AddBoolOr(literals)
+        self._guarded(self.model.AddBoolOr(literals))
 
     def create_bool_and_var(self, name: str, literals: list[Any]) -> Any:
         """Create a boolean variable equivalent to the AND of the literals."""

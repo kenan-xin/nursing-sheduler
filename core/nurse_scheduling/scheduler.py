@@ -276,6 +276,9 @@ def schedule(
     else:
         raise ValueError(f"Unsupported solver configuration: {solver!r}")
 
+    if on_explanation is not None and forced_solution is None and hasattr(ctx.solver, "enable_guards"):
+        ctx.solver.enable_guards()  # a5pb: explain an INFEASIBLE run
+
     _emit_phase_progress(progress_callback, "creating_shift_variables", "Creating shift variables", progress_started_at)
     logger.info("Creating shift variables...")
     step_started_at, start_counts = start_model_build_step(model_build_stats_callback, ctx)
@@ -380,6 +383,7 @@ def schedule(
     # TODO: Check no overlapping preferences
     for i, preference in enumerate(ctx.scenario.preferences):
         ctx.current_preference = i
+        ctx.solver.guard_key = (i, None)
         step_started_at, start_counts = start_model_build_step(
             model_build_stats_callback,
             ctx,
@@ -399,6 +403,8 @@ def schedule(
             preference_index=i,
             preference_type=preference.type,
         )
+
+    ctx.solver.guard_key = None  # background from here on: never guarded
 
     # Leave is input-only: it is 1 exactly where a LEAVE shift request pinned
     # it (recorded in ctx.pinned_leaves while processing shift requests), and 0
@@ -463,6 +469,12 @@ def schedule(
         logger.info(f"  - {key}: {value}")
 
     if not found:
+        if on_explanation is not None and getattr(ctx.solver, "guards", None) is not None:
+            explanation = explain.explain_no_roster(ctx, status, should_stop)
+            if explanation is not None:
+                # a5pb: an UNKNOWN run whose no-objective check proved INFEASIBLE is INFEASIBLE.
+                ctx.solver_status = SolverStatus.INFEASIBLE.value
+                on_explanation(explanation)
         logger.info("Done.")
         return ScheduleResult(None, None, None, ctx.solver_status, None)
 

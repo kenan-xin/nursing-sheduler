@@ -81,6 +81,7 @@ def shift_type_requirements(
     for d in compiled_preference.dates:
         required = required_by_date.get(d, preference.requiredNumPeople)
         for group_idx, ss in enumerate(compiled_preference.shift_type_groups):
+            ctx.solver.guard_key = (preference_idx, ("who", d, group_idx))  # a5pb guard unit
             for s in ss:
                 # A requirement expands through date and shift type groups into
                 # concrete (date, shift type) pairs. Duplicates are allowed
@@ -118,11 +119,13 @@ def shift_type_requirements(
             # per-shift constraint; for aggregate groups this sums across all
             # shift types in the group.
             actual_n_people = sum(coefficients[s] * ctx.shifts[(d, s, p)] for s in ss for p in qualified_ps_by_s[s])
+            ctx.solver.guard_key = (preference_idx, ("staff", d, group_idx))  # a5pb: headcount first
             if preference.preferredNumPeople is not None:
                 ctx.solver.add_constraint(actual_n_people >= required)
             else:
                 ctx.solver.add_constraint(actual_n_people == required)
 
+            ctx.solver.guard_key = (preference_idx, ("mix", d, group_idx))  # a5pb guard unit
             # Skill mix: at least k of the named people among this group's staff.
             # Nobody is banned; the headcount above still fixes the total, so the
             # rest of the places go to anyone eligible. A person in two entries'
@@ -138,6 +141,7 @@ def shift_type_requirements(
 
             # Add soft constraint for preferred number of people if specified
             if preference.preferredNumPeople is not None:
+                ctx.solver.guard_key = (preference_idx, ("staff", d, group_idx))  # a5pb guard unit
                 ctx.solver.add_constraint(actual_n_people <= preference.preferredNumPeople)
                 # Create a variable to track the difference between actual and preferred number of people
                 diff_var_name = f"pref_{preference_idx}_d_{d}_g_{group_idx}_diff"
@@ -176,6 +180,7 @@ def shift_request(
     for d in compiled_preference.dates:
         # Note that the order of p and s is inverted deliberately
         for p in compiled_preference.people:
+            ctx.solver.guard_key = (preference_idx, (d, p))  # a5pb guard unit
             weight = preference.weight
             if utils.is_ss_equivalent_to_all(compiled_preference.shift_types, ctx.n_shift_types):
                 # "Work any shift": a worked day, which excludes both the OFF
@@ -254,6 +259,7 @@ def shift_type_successions(
     # for every selected person and pattern start date.
     histories = ctx.compiled_schedule.histories
     for p in compiled_preference.people:
+        ctx.solver.guard_key = (preference_idx, (p,))  # a5pb guard unit
         history = histories[p]
         for d_begin in range(ctx.n_days - len(compiled_preference.pattern) + 1):
             # Check if all dates in the pattern range are valid
@@ -352,6 +358,7 @@ def shift_count(
     weight = preference.weight
     for i, (expression, T) in enumerate(zip(compiled_preference.expressions, compiled_preference.targets, strict=True)):
         for p in compiled_preference.people:
+            ctx.solver.guard_key = (preference_idx, (p, i))  # a5pb guard unit
             # Include the expression/target pair index so a multi-pair count
             # (e.g. a contracted-hours Range emitting `x >= T` and `x <= T`)
             # names each boundary's model variable and report distinctly instead
@@ -516,6 +523,7 @@ def shift_type_covering(
     as a hard constraint the solver cannot violate.
     """
     for d in compiled_preference.dates:
+        ctx.solver.guard_key = (preference_idx, (d,))  # a5pb guard unit
         for k, ss in enumerate(compiled_preference.shift_type_groups):
             # Cross-product: a covering constraint is added for every (preceptor
             # group, preceptee group, shift type group) tuple. Each preceptor

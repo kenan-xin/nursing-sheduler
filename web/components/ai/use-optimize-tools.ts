@@ -22,7 +22,9 @@ import { terminalHeading } from "@/lib/optimize/run-display";
 import { resolvedLedgerOf, type OptimizeRunView } from "@/lib/optimize/run-view";
 import {
   diffLedgers,
+  summarizeCore,
   summarizeLedger,
+  type CoreSummary,
   type LedgerDiff,
   type LedgerSummary,
 } from "@/lib/optimize/explanation";
@@ -137,6 +139,16 @@ function guidanceFor(
                 : "It is also saved in the app: the user can open it with Open & adjust roster.")
         );
       case "infeasible":
+        if (hasProvenCore(view)) {
+          return (
+            "The rules as written cannot all be met, so no roster exists. explanation.why lists " +
+            "the hard rules the optimiser PROVED cannot all hold together (solver-proven, not a " +
+            "guess): tell the user in plain ward words, naming only those rules, people and " +
+            "dates. Changing one of them is a candidate fix, not a promise. Then call " +
+            "suggest_feasibility_options with afterInfeasibleRun true and test its options with " +
+            "test_feasibility_candidates."
+          );
+        }
         return (
           "The rules as written cannot all be met, so no roster exists. The optimiser does not " +
           "say which rule is responsible. Call suggest_feasibility_options with " +
@@ -159,12 +171,19 @@ function guidanceFor(
 
 export interface RunExplanationSummary {
   /** Points per rule (lost first), and the nurses and dates that lost the most. */
-  score: LedgerSummary;
+  score?: LedgerSummary;
   /** Change against the previous run on this screen, by rule id; null for the first run. */
-  sinceLastRun: LedgerDiff | null;
+  sinceLastRun?: LedgerDiff | null;
+  /** Infeasible run: the hard rules the solver proved cannot all hold together. */
+  why?: CoreSummary;
 }
 
 function summarizeExplanation(view: OptimizeRunView): RunExplanationSummary | null {
+  const explanation = view.result?.explanation;
+  if (explanation?.kind === "infeasible" && view.explainContext !== null) {
+    const why = summarizeCore(explanation, view.explainContext);
+    return why === null ? null : { why };
+  }
   const ledger = resolvedLedgerOf(view);
   if (ledger === null) return null;
   return {
@@ -172,6 +191,9 @@ function summarizeExplanation(view: OptimizeRunView): RunExplanationSummary | nu
     sinceLastRun: view.previousLedger ? diffLedgers(view.previousLedger, ledger) : null,
   };
 }
+
+const hasProvenCore = (view: OptimizeRunView) =>
+  view.result?.explanation?.kind === "infeasible" && view.result.explanation.core !== null;
 
 /** Project the screen's run view into what the model may read. Pure. */
 export function summarizeOptimizeRun(

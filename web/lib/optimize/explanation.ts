@@ -29,7 +29,47 @@ export interface Ledger {
   seconds: number;
 }
 
-export type RunExplanation = { kind: "ledger"; ledger: Ledger };
+/** One hard rule unit in an infeasibility core: a request cell, a staffing slot, a nurse's cap... */
+export interface CoreMember {
+  rule: number;
+  kind:
+    | "request"
+    | "leave"
+    | "staffing"
+    | "skill_mix"
+    | "qualification"
+    | "cap"
+    | "count_floor"
+    | "contracted_hours"
+    | "succession"
+    | "covering"
+    | "affinity"
+    | "other";
+  nurse?: string | number;
+  date?: string;
+  shift?: string[];
+  need?: number;
+  expression?: string;
+  target?: number;
+}
+
+export interface InfeasibleCore {
+  members: CoreMember[];
+  /** Every member proven necessary within the time budget. */
+  minimal: boolean;
+  solves: number;
+  seconds: number;
+}
+
+export type RunExplanation =
+  | { kind: "ledger"; ledger: Ledger }
+  | {
+      kind: "infeasible";
+      /** `main_run`, or `feasibility_check:<s>` when a no-objective check proved it. */
+      proof: string;
+      /** Null when the core solve ran out of time: the run is still proven infeasible. */
+      core: InfeasibleCore | null;
+    };
 
 /** What a preference index stands for in the submitted document. */
 export interface RuleSource {
@@ -180,6 +220,78 @@ export function summarizeLedger(ledger: ResolvedLedger): LedgerSummary {
     byNurse: topBy(nurses, (p) => p).map(([nurse, points]) => ({ nurse, points })),
     byDate: topBy(dates, (p) => p).map(([date, points]) => ({ date, points })),
     partial: ledger.truncated,
+  };
+}
+
+export interface ResolvedCoreMember extends Omit<CoreMember, "rule" | "nurse"> {
+  ruleId: string;
+  label: string;
+  nurse?: string;
+}
+
+/** A proven clash in ward words: the members and one sentence per date (or rule). */
+export interface CoreSummary {
+  proof: string;
+  minimal: boolean;
+  members: ResolvedCoreMember[];
+  text: string;
+}
+
+export function resolveCore(core: InfeasibleCore, ctx: ExplainContext): ResolvedCoreMember[] {
+  const person = realPerson(ctx.people);
+  return core.members.map(({ rule, nurse, ...rest }) => {
+    const source = ctx.sources[rule];
+    return {
+      ...rest,
+      ruleId: source?.ruleId ?? `rule#${rule}`,
+      label: source?.label ?? `rule ${rule}`,
+      ...(nurse === undefined ? {} : { nurse: person(nurse)! }),
+    };
+  });
+}
+
+function clause(m: ResolvedCoreMember): string {
+  const shift = m.shift?.join("/") ?? "";
+  switch (m.kind) {
+    case "staffing":
+      return `${m.need} needed on ${shift}`;
+    case "leave":
+      return `${m.nurse} is on leave`;
+    case "request":
+      return `${m.nurse} must work ${shift}`;
+    case "skill_mix":
+      return `"${m.label}" needs its skill mix on ${shift}`;
+    case "qualification":
+      return `only qualified staff may work ${shift} ("${m.label}")`;
+    default:
+      return m.nurse === undefined ? `"${m.label}"` : `"${m.label}" for ${m.nurse}`;
+  }
+}
+
+/** "On 2026-11-03: 1 needed on N; rn1 is on leave." Members without a date close the sentence. */
+export function coreText(members: ResolvedCoreMember[]): string {
+  const byDate = new Map<string, string[]>();
+  const undated: string[] = [];
+  for (const m of members) {
+    if (m.date === undefined) undated.push(clause(m));
+    else byDate.set(m.date, [...(byDate.get(m.date) ?? []), clause(m)]);
+  }
+  const parts = [...byDate].map(([date, clauses]) => `On ${date}: ${clauses.join("; ")}.`);
+  if (undated.length > 0) parts.push(`Together with ${undated.join("; ")}.`);
+  return `These cannot all hold. ${parts.join(" ")}`;
+}
+
+export function summarizeCore(
+  explanation: Extract<RunExplanation, { kind: "infeasible" }>,
+  ctx: ExplainContext,
+): CoreSummary | null {
+  if (explanation.core === null) return null;
+  const members = resolveCore(explanation.core, ctx);
+  return {
+    proof: explanation.proof,
+    minimal: explanation.core.minimal,
+    members,
+    text: coreText(members),
   };
 }
 

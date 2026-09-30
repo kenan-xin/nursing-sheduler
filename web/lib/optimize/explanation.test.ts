@@ -5,12 +5,16 @@ import type { JobResponse } from "@/lib/bff/types";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import { toCanonicalScenarioDocument } from "@/lib/scenario";
 import {
+  coreText,
   diffLedgers,
   preferenceSources,
+  resolveCore,
   resolveLedger,
   summarizeLedger,
   type ExplainContext,
+  type InfeasibleCore,
   type Ledger,
+  type RunExplanation,
 } from "./explanation";
 import { INITIAL_OPTIMIZE_RUN_VIEW, reduceRunView, resolvedLedgerOf } from "./run-view";
 
@@ -121,7 +125,33 @@ describe("ledger read-out", () => {
   });
 });
 
-function completedJob(explanation: Ledger): JobResponse {
+const core: InfeasibleCore = {
+  members: [
+    { rule: 1, kind: "staffing", date: "2026-11-03", shift: ["N"], need: 1 },
+    { rule: 2, kind: "leave", nurse: "P1", date: "2026-11-03", shift: ["LEAVE"] },
+  ],
+  minimal: true,
+  solves: 3,
+  seconds: 0.01,
+};
+
+describe("infeasibility core", () => {
+  it("names rules by id and people by their real id, in one sentence per date", () => {
+    const members = resolveCore(core, ctx);
+    expect(members[1]).toMatchObject({ ruleId: "request:Ana:2026-10-02:OFF", nurse: "Ana" });
+    expect(coreText(members)).toBe(
+      "These cannot all hold. On 2026-11-03: 1 needed on N; Ana is on leave.",
+    );
+  });
+});
+
+function completedJob(
+  explanation: Ledger | RunExplanation,
+  outcome: "optimal" | "infeasible" = "optimal",
+): JobResponse {
+  const wrapped: RunExplanation =
+    "kind" in explanation ? explanation : { kind: "ledger", ledger: explanation };
+  const infeasible = outcome === "infeasible";
   return {
     id: "opt_1",
     state: "completed",
@@ -140,11 +170,11 @@ function completedJob(explanation: Ledger): JobResponse {
       basis: null,
     },
     result: {
-      outcome: "optimal",
-      score: explanation.objective,
-      solver_status: "OPTIMAL",
-      termination_reason: "optimality_proven",
-      explanation: { kind: "ledger", ledger: explanation },
+      outcome,
+      score: wrapped.kind === "ledger" ? wrapped.ledger.objective : null,
+      solver_status: infeasible ? "INFEASIBLE" : "OPTIMAL",
+      termination_reason: infeasible ? "infeasibility_proven" : "optimality_proven",
+      explanation: wrapped,
     },
     error: null,
     controls: { cancellable: false, early_completion_available: false },
@@ -183,5 +213,27 @@ describe("run view", () => {
     expect(summary.explanation?.sinceLastRun?.scoreDelta).toBe(-8);
     // A stale result says nothing about the schedule now, so no breakdown either.
     expect(summarizeOptimizeRun(view, true, "started", true).explanation).toBeNull();
+  });
+
+  it("gives the assistant the proven clash and tells it the cause is solver-proven", () => {
+    let view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
+      type: "submit-started",
+      anonymized: true,
+      peopleCount: 1,
+      explainContext: ctx,
+    });
+    view = reduceRunView(view, {
+      type: "job-snapshot",
+      job: completedJob({ kind: "infeasible", proof: "main_run", core }, "infeasible"),
+    });
+    const summary = summarizeOptimizeRun(view, false, "started");
+    expect(summary.explanation?.why?.text).toContain("Ana is on leave");
+    expect(summary.guidance).toContain("PROVED");
+
+    view = reduceRunView(view, {
+      type: "job-snapshot",
+      job: completedJob({ kind: "infeasible", proof: "main_run", core: null }, "infeasible"),
+    });
+    expect(summarizeOptimizeRun(view, false, "started").guidance).toContain("does not");
   });
 });

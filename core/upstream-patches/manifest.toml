@@ -40,6 +40,7 @@ patch_order = [
   "99db-B5-leave-satisfies-hard-off.patch",
   "99db-D07-per-client-queue-cap.patch",
   "a5pb-ledger.patch",
+  "a5pb-why-solve.patch",
 ]
 
 file = [
@@ -56,9 +57,9 @@ file = [
   { path = "nurse_scheduling/loader.py", class = "verbatim", upstream_blob = "308e2076a5790a946c52a133900a6509aa309595" },
   { path = "nurse_scheduling/model_build_stats.py", class = "verbatim", upstream_blob = "77640eb47261f11a6501e11dddfafdb18de97d73" },
   { path = "nurse_scheduling/models.py", class = "patched", upstream_blob = "edcdab1503ea2ca11977d1693b259a53449d5245", patches = ["P2-P3-skillmix-overrides.patch", "99db-D05-head-count-bound.patch", "99db-C1-required-not-above-preferred.patch"] },
-  { path = "nurse_scheduling/preference_types.py", class = "patched", upstream_blob = "51f7cb3570bd74af8e2e7d50d3eb7d1b64509b8f", patches = ["P2-P3-skillmix-overrides.patch", "99db-B1-history-completed-hard-sequence.patch", "99db-B5-leave-satisfies-hard-off.patch", "a5pb-ledger.patch"] },
+  { path = "nurse_scheduling/preference_types.py", class = "patched", upstream_blob = "51f7cb3570bd74af8e2e7d50d3eb7d1b64509b8f", patches = ["P2-P3-skillmix-overrides.patch", "99db-B1-history-completed-hard-sequence.patch", "99db-B5-leave-satisfies-hard-off.patch", "a5pb-ledger.patch", "a5pb-why-solve.patch"] },
   { path = "nurse_scheduling/report.py", class = "verbatim", upstream_blob = "8cff02666faf52b60c86256f70e3049991ba8574" },
-  { path = "nurse_scheduling/scheduler.py", class = "patched", upstream_blob = "7867e7d1b1591456fc637ec342a140ba37f8afde", patches = ["P4-on-roster.patch", "a5pb-ledger.patch"] },
+  { path = "nurse_scheduling/scheduler.py", class = "patched", upstream_blob = "7867e7d1b1591456fc637ec342a140ba37f8afde", patches = ["P4-on-roster.patch", "a5pb-ledger.patch", "a5pb-why-solve.patch"] },
   { path = "nurse_scheduling/serve.py", class = "verbatim", upstream_blob = "8a844abe3b79c6028740e4598cc225f231f6e064" },
   { path = "nurse_scheduling/server/__init__.py", class = "verbatim", upstream_blob = "7b3119b1236edca1dfd0ce39d50c31d0abfbad36" },
   { path = "nurse_scheduling/server/api/__init__.py", class = "verbatim", upstream_blob = "10c7354468e847bbc5c9514b3ab1b7cef88eb3a3" },
@@ -100,7 +101,7 @@ file = [
   { path = "nurse_scheduling/server/usage_report.py", class = "excluded", note = "X6: no usage telemetry" },
   { path = "nurse_scheduling/server/workspace.py", class = "v2-only", note = "P5 Workspace V1 input and located errors (X14)" },
   { path = "nurse_scheduling/solver_interface.py", class = "verbatim", upstream_blob = "63db2a420257b3ee09a28add74253f722a2061f6" },
-  { path = "nurse_scheduling/solver_ortools_cp_sat.py", class = "patched", upstream_blob = "346f334d671384e11d4ffdc0473ef7f7d45842dc", patches = ["3c91-solver-max-lp-sym.patch"] },
+  { path = "nurse_scheduling/solver_ortools_cp_sat.py", class = "patched", upstream_blob = "346f334d671384e11d4ffdc0473ef7f7d45842dc", patches = ["3c91-solver-max-lp-sym.patch", "a5pb-why-solve.patch"] },
   { path = "nurse_scheduling/solver_ortools_linear.py", class = "verbatim", upstream_blob = "36c4d411e7ae69af9cb96d301590035d3b540426" },
   { path = "nurse_scheduling/solver_ortools_mathopt.py", class = "verbatim", upstream_blob = "b2a2cf0db5477154d3f1fbb82b3445b1d75180fa" },
   { path = "nurse_scheduling/solver_pulp.py", class = "verbatim", upstream_blob = "a796fcb7e6846b9cce9dcda88695e86ef65c25ba" },
@@ -609,4 +610,5 @@ file = [
   { path = "upstream-patches/a5pb-ledger.patch", class = "v2-only", note = "sync patch or manifest" },
   { path = "nurse_scheduling/explain.py", class = "v2-only", note = "a5pb run explanations: penalty ledger, infeasibility core, smallest fix" },
   { path = "tests/test_explain.py", class = "v2-only", note = "a5pb run explanation tests" },
+  { path = "upstream-patches/a5pb-why-solve.patch", class = "v2-only", note = "sync patch or manifest" },
 ]
