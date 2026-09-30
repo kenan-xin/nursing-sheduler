@@ -19,6 +19,7 @@ import { StartOverCard } from "@/components/shell/new-schedule-button";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { AnonymiseCard } from "./anonymise-card";
 import { ImportWarningsBanner } from "./import-warnings-banner";
+import { RecentSchedulesCard } from "./recent-schedules-card";
 import { buildSampleScenarioYaml } from "./load-controls-core";
 import { ScenarioFileCard } from "./scenario-file-card";
 import { ScenarioIssuesList } from "./scenario-issues-list";
@@ -123,6 +124,7 @@ export function SaveLoadWorkspace() {
             onUpload={openUpload}
             onStartEdit={startEdit}
           />
+          <RecentSchedulesCard onOpened={handleScenarioReplaced} />
           <StartOverCard
             onResetComplete={handleScenarioReplaced}
             onExampleLoaded={handleScenarioReplaced}

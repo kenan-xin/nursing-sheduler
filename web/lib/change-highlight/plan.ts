@@ -39,6 +39,7 @@ const SCREEN_ORDER: readonly string[] = [
 /** [key prefix, singular, plural]. `available:` is absent: it restates an added person. */
 const NOUNS: readonly (readonly [string, string, string])[] = [
   ["dates:range", "roster period", "roster periods"],
+  ["dates:holiday-import", "holiday import switch", "holiday import switches"],
   ["dategroup:", "date group", "date groups"],
   ["peoplegroup:", "staff group", "staff groups"],
   ["person:", "person", "people"],

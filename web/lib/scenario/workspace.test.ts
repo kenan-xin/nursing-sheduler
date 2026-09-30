@@ -557,3 +557,27 @@ describe("workspace temporary cover (d582)", () => {
     });
   });
 });
+
+describe("Workspace V1 holiday-import switch (bead 6975)", () => {
+  it("emits nothing unless the switch is off, so existing files stay byte-identical", () => {
+    const state = makeValidUiState();
+    const yaml = serializeWorkspace(state);
+    expect(yaml).not.toMatch(/importPublicHolidays/);
+    expect(serializeWorkspace({ ...state, importPublicHolidays: true })).toBe(yaml);
+  });
+
+  it("round-trips the switch off through save and load, and the strict document drops it", () => {
+    const state = { ...makeValidUiState(), importPublicHolidays: false };
+    const yaml = serializeWorkspace(state);
+    expect(buildWorkspaceDocument(state).dates.importPublicHolidays).toBe(false);
+
+    const loaded = prepareScenarioLoad(yaml);
+    expect(loaded.issues).toEqual([]);
+    expect(loaded.target?.importPublicHolidays).toBe(false);
+
+    const result = convert(yaml);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.document.dates).not.toHaveProperty("importPublicHolidays");
+  });
+});

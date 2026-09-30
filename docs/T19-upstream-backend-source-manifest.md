@@ -377,6 +377,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `tests/test_utils.py` | verbatim | `0850cbb2d6aa` |  |
 | `tests/test_version.py` | v2-only |  | v2 version stamping |
 | `tests/test_ward_shift_patterns_roster.py` | v2-only |  | 8-shift-pattern ward case |
+| `tests/test_workspace_holiday_import_switch.py` | v2-only |  | P5 holiday-import switch in Workspace input (6975) |
 | `tests/test_workspace_temporary_cover.py` | v2-only |  | P5 temporary cover in Workspace input |
 | `tests/test_yaml_bound.py` | v2-only |  | coded 400 for the YAML expansion bound |
 | `tests/testcases/artificial/ortools/README.md` | verbatim | `8e5bfb197203` |  |

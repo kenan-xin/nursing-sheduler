@@ -105,7 +105,7 @@ import {
   type EditorItemBase,
 } from "./core";
 import { TransferList } from "./transfer-list";
-import { deleteWithSummary } from "./delete-with-summary";
+import { deleteWithSummary, saveRefusalMessage } from "./delete-with-summary";
 
 /**
  * Apply an operation to the durable scenario. The callback runs AT THE QUEUE HEAD,
@@ -804,13 +804,7 @@ function GroupForm<TItem extends EditorItemBase>({
       return;
     }
     if (!outcome.ok) {
-      toast.error(
-        outcome.reason === "not-owner"
-          ? "This schedule is being edited in another tab. Take over editing, then save again."
-          : outcome.reason === "superseded"
-            ? "This group changed elsewhere. Reopen it and try again."
-            : "This group could not be saved. Reload the page and try again.",
-      );
+      toast.error(saveRefusalMessage(outcome, "group"));
       return;
     }
     toast.success(`Group “${idCheck.id}” ${mode === "add" ? "added" : "saved"}.`);

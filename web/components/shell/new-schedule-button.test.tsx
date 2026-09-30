@@ -179,15 +179,16 @@ describe("StartOverCard — the confirmation gate", () => {
     expect(onResetComplete).not.toHaveBeenCalled();
   });
 
-  it("names the consequences in the confirmation rather than only the verb", async () => {
+  it("names only what is really cleared: the schedule itself stays in Recent schedules (plq5)", async () => {
     render(<StartOverCard />);
     fireEvent.click(screen.getByTestId("new-schedule-button"));
+    const dialog = await screen.findByRole("alertdialog", { name: "Start a new schedule?" });
+    expect(dialog).toHaveTextContent("Your current schedule stays in Recent schedules");
+    expect(dialog).not.toHaveTextContent("cannot be undone");
     const consequences = await screen.findByTestId("confirm-dialog-consequences");
-    expect(consequences).toHaveTextContent("All people, shift types and dates");
-    expect(consequences).toHaveTextContent("Every rule and request");
-    // The reset now removes the previous run's roster too, so the confirmation has
-    // to say so — the consequence list is the only place the user is told.
     expect(consequences).toHaveTextContent("The saved roster and the last run's result");
+    expect(consequences).not.toHaveTextContent("All people, shift types and dates");
+    expect(screen.getByTestId("start-over-card")).not.toHaveTextContent("removes everything");
   });
 });
 
@@ -300,10 +301,9 @@ describe("StartOverCard — the 87-person example", () => {
     await waitFor(() => expect(screen.getByTestId("new-schedule-example")).not.toBeDisabled());
   });
 
-  it("rides the normal import path, not the empty reset — the previous run's roster residue survives", async () => {
-    // The coordinator's constraint: the example does whatever a normal import does
-    // (replace the SCENARIO) and no invented residue cut. So a committed roster from
-    // the previous run is left exactly as the Upload path would leave it.
+  it("rides the normal import path — like every Load it clears the previous roster (C-23)", async () => {
+    // The example does whatever a normal import does, and since ymmp (C-23) a Load
+    // clears the saved roster of the schedule it replaces.
     const document = await fixtureRosterDocument();
     const epoch = await rosterStorage.getClearEpoch();
     await rosterStorage.commitCandidate<RosterDocument>({
@@ -319,7 +319,7 @@ describe("StartOverCard — the 87-person example", () => {
     await waitFor(async () => {
       expect((await snapshot()).staff.map((person) => person.id)).toEqual(["Alice", "Bob"]);
     });
-    expect(await rosterStorage.readWorking<RosterDocument>()).not.toBeNull();
-    expect(await rosterStorage.readCandidate<RosterDocument>("job-example")).not.toBeNull();
+    await waitFor(async () => expect(await rosterStorage.readWorking<RosterDocument>()).toBeNull());
+    expect(await rosterStorage.readCandidate<RosterDocument>("job-example")).toBeNull();
   });
 });

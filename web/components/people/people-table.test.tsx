@@ -116,6 +116,29 @@ describe("PeopleTable — read + toolbar", () => {
 });
 
 describe("PeopleTable — add / duplicate / delete", () => {
+  it("llmu: says 'saved' only once the write lands; a refusal toasts and keeps the row open", async () => {
+    await seed({ staff: [{ id: "Alice", history: [] }], staffGroups: [] });
+    render(<PeopleTable />);
+    fireEvent.click(screen.getByTestId(`people-edit-${sk("Alice")}`));
+    const refuse = vi
+      .spyOn(scenarioCommands, "mutate")
+      .mockResolvedValueOnce({ ok: false, reason: "not-owner", code: "not_owner" });
+    fireEvent.click(screen.getByTestId(`people-save-${sk("Alice")}`));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "This schedule is being edited in another tab. Take over editing, then save again.",
+      ),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.getByTestId(`people-edit-row-${sk("Alice")}`)).toBeInTheDocument();
+    refuse.mockRestore();
+
+    fireEvent.click(screen.getByTestId(`people-save-${sk("Alice")}`));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Nurse “Alice” saved."));
+    expect(screen.queryByTestId(`people-edit-row-${sk("Alice")}`)).toBeNull();
+  });
+
   it("adds a nurse via the inline draft row (history stamped, one undo entry)", async () => {
     await seed({ staff: [], staffGroups: [] });
     render(<PeopleTable />);

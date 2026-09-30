@@ -220,6 +220,43 @@ describe("applyRangeChange range cascade (FR-DC-41 / AC-DC-18)", () => {
     );
     expect(next.dateGroups.map((g) => g.id)).not.toContain("PH");
   });
+
+  it("with the switch off keeps hand-edited holiday groups and remembers off (6975)", () => {
+    const may = { start: "2026-05-01", end: "2026-05-31" };
+    const imported = applyRangeChange(seeded(), may, { importSingaporeHolidays: true });
+    expect(imported.importPublicHolidays).toBe(true);
+    // Hand edit: PH keeps only Labour Day.
+    const edited = {
+      ...imported,
+      dateGroups: imported.dateGroups.map((g) => (g.id === "PH" ? { ...g, members: ["01"] } : g)),
+    };
+
+    const off = applyRangeChange(edited, may, { importSingaporeHolidays: false });
+    expect(off.importPublicHolidays).toBe(false);
+    expect(off.dateGroups).toEqual(edited.dateGroups);
+
+    // A later range change with the switch off never rebuilds them.
+    const moved = applyRangeChange(
+      off,
+      { start: "2026-05-01", end: "2026-05-15" },
+      {
+        importSingaporeHolidays: false,
+      },
+    );
+    expect(moved.dateGroups.find((g) => g.id === "PH")!.members).toEqual(["01"]);
+    expect(moved.importPublicHolidays).toBe(false);
+
+    // Omitting the option (removal counting) leaves the remembered switch alone.
+    expect(applyRangeChange(off, may).importPublicHolidays).toBe(false);
+  });
+
+  it("turning the switch back on rebuilds the groups and remembers on", () => {
+    const may = { start: "2026-05-01", end: "2026-05-31" };
+    const off = { ...seeded(), importPublicHolidays: false };
+    const on = applyRangeChange(off, may, { importSingaporeHolidays: true });
+    expect(on.importPublicHolidays).toBe(true);
+    expect(on.dateGroups.find((g) => g.id === "PH")!.members).toContain("01");
+  });
 });
 
 describe("applyRangeChange prunes rule-card dates that left the range (A-04)", () => {

@@ -8,6 +8,7 @@ export {
   deleteEntity,
   applyDelete,
   deleteImpact,
+  countDateExceptions,
   describeDeleteImpact,
   type DeleteImpact,
 } from "./delete";

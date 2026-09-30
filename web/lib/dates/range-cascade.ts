@@ -29,8 +29,11 @@ import { isRangeSupported } from "./holidays-sg";
 /** Options for {@link applyRangeChange}. */
 export interface RangeChangeOptions {
   /**
-   * When `true` and the new range is within the supported window, (re)build and
-   * overwrite the WORKDAY/NON-WORKDAY/PH groups from the new date items.
+   * The import switch for this commit, remembered on the scenario
+   * (`importPublicHolidays`). `true`: when the new range is within the supported
+   * window, (re)build and overwrite the WORKDAY/NON-WORKDAY/PH groups. `false`: leave
+   * those groups untouched. Omitted: import nothing and leave the remembered switch
+   * as it is.
    */
   importSingaporeHolidays?: boolean;
 }
@@ -91,6 +94,9 @@ export function applyRangeChange(
     rangeEnd: newRange.end as IsoDate,
   };
 
+  if (options.importSingaporeHolidays !== undefined) {
+    next = { ...next, importPublicHolidays: options.importSingaporeHolidays };
+  }
   if (options.importSingaporeHolidays && isRangeSupported(newRange)) {
     const imported = buildSingaporeHolidayGroups(generateDateItems(newRange));
     next = { ...next, dateGroups: replaceDateGroups(next.dateGroups, imported) };

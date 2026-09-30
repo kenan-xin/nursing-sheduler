@@ -68,6 +68,14 @@ async function seed(page: Page, patch: Record<string, unknown>) {
 }
 
 /** Resolve a CSS variable to its computed value on this page, via a probe. */
+/** sRGB channels (0-255) of a computed `rgb()`/`rgba()`/`color(srgb …)` value, alpha dropped. */
+function rgb(css: string) {
+  const n = (css.match(/[\d.]+/g) ?? []).map(Number);
+  return (css.startsWith("color(") ? n.slice(0, 3).map((v) => v * 255) : n.slice(0, 3)).map(
+    Math.round,
+  );
+}
+
 async function resolveVar(page: Page, prop: "color" | "backgroundColor", token: string) {
   return page.evaluate(
     ([p, t]) => {
@@ -161,12 +169,17 @@ test.describe("R5 shift requests — migrated surface geometry and paint", () =>
     for (const c of cases) {
       await expect(page.getByTestId(c.testid)).toBeVisible();
       const cell = page.getByTestId(c.testid);
-      const bg = await cell.evaluate((el) => getComputedStyle(el).backgroundColor);
-      const color = await cell.evaluate((el) => getComputedStyle(el).color);
+      const { bg, color, opacity } = await cell.evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return { bg: cs.backgroundColor, color: cs.color, opacity: cs.opacity };
+      });
       const tint = await resolveVar(page, "backgroundColor", c.tint);
       const ink = await resolveVar(page, "color", c.ink);
-      expect(bg, `${c.label}: cell background resolves to its status tint`).toBe(tint);
+      // FR-SR-16 weight alpha rides on the tint only (a `color(srgb … / α)`), so
+      // compare channels; the cell itself stays opaque so its ink keeps AA (t4tz).
+      expect(rgb(bg), `${c.label}: cell background resolves to its status tint`).toEqual(rgb(tint));
       expect(color, `${c.label}: cell text resolves to its paired semantic ink`).toBe(ink);
+      expect(opacity, `${c.label}: the cell is never faded as a whole`).toBe("1");
     }
   });
 
