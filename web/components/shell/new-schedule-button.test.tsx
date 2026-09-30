@@ -229,6 +229,7 @@ describe("StartOverCard — v2 surface reading", async () => {
 
 /** A backend-valid YAML the example seam returns in place of the bundled file. */
 const EXAMPLE_YAML = serializeScenario(makeValidUiState());
+const SCENARIO_LOADED = "Scenario loaded — this replaces your current setup.";
 
 async function snapshot() {
   await drainScenarioCommands();
@@ -299,6 +300,12 @@ describe("StartOverCard — the 87-person example", () => {
 
     resolve(EXAMPLE_YAML);
     await waitFor(() => expect(screen.getByTestId("new-schedule-example")).not.toBeDisabled());
+    // The busy state covers the fetch only; the load it hands off (roster clear, then
+    // the scenario switch) is still running. Wait for it, or it lands in the NEXT
+    // test: its Alice/Bob switch turns that test's example load into a staged
+    // replacement confirm, so its roster is never cleared.
+    const { toast } = await import("sonner");
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(SCENARIO_LOADED));
   });
 
   it("rides the normal import path — like every Load it clears the previous roster (C-23)", async () => {
@@ -316,10 +323,11 @@ describe("StartOverCard — the 87-person example", () => {
     render(<StartOverCard fetchExampleSchedule={async () => EXAMPLE_YAML} />);
     fireEvent.click(screen.getByTestId("new-schedule-example"));
 
-    await waitFor(async () => {
-      expect((await snapshot()).staff.map((person) => person.id)).toEqual(["Alice", "Bob"]);
-    });
-    await waitFor(async () => expect(await rosterStorage.readWorking<RosterDocument>()).toBeNull());
+    // THIS click's load completing (clear, then switch), not merely Alice/Bob in the store.
+    const { toast } = await import("sonner");
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(SCENARIO_LOADED));
+    expect((await snapshot()).staff.map((person) => person.id)).toEqual(["Alice", "Bob"]);
+    expect(await rosterStorage.readWorking<RosterDocument>()).toBeNull();
     expect(await rosterStorage.readCandidate<RosterDocument>("job-example")).toBeNull();
   });
 });
