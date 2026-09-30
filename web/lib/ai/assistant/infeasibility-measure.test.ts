@@ -689,6 +689,7 @@ const found = (s: Solve) => s.status === "OPTIMAL" || s.status === "FEASIBLE";
 type Verdict =
   | "excluded_feasible"
   | "excluded_baseline_unknown"
+  | "excluded_not_submittable"
   | "certain"
   | "fix_found"
   | "unknown_all_infeasible"
@@ -770,8 +771,37 @@ function witnessFor(state: ScenarioUiState, baseline: Solve) {
 
 async function diagnose(s: Scenario): Promise<Row> {
   const state = s.build();
-  const baseline = await solve(toYaml(state), WITNESS);
-  const report = buildFeasibilityReport(state, true, witnessFor(state, baseline));
+  let yaml: string;
+  try {
+    yaml = toYaml(state);
+  } catch {
+    // A scenario the producer now rejects (e.g. preferred below required, C1) is not a run.
+    const none: Solve = { status: "ERROR", seconds: 0 };
+    return {
+      name: s.name,
+      source: s.source,
+      cause: s.cause,
+      verdict: "excluded_not_submittable",
+      findings: [],
+      baseline: none,
+      candidates: [],
+      diagnosisSeconds: 0,
+      singleRuleFixes: null,
+    };
+  }
+  const baseline = await solve(yaml, WITNESS);
+  const witness = witnessFor(state, baseline);
+  const report = buildFeasibilityReport(state, true, witness);
+  const e = baseline.explanation;
+  if (e?.kind === "infeasible") {
+    // a5pb: what the backend explained, next to what reached the options.
+    const solverWitness = report.options.filter((o) => o.evidence === "solver_witness").length;
+    console.log(
+      `a5pb ${s.name}: proof=${e.proof} core=${e.core ? e.core.members.map((m) => m.kind).join(",") : "none"} ` +
+        `fixable=${e.fixes?.fixable} remedies=${JSON.stringify(e.fixes?.remedies.map((r) => [r.cost, r.members.map((m) => m.kind)]))} ` +
+        `witnessOptions=${solverWitness}`,
+    );
+  }
   const row: Row = {
     name: s.name,
     source: s.source,
