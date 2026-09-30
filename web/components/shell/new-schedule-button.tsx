@@ -4,8 +4,8 @@
 // lives in Save & Load — not the top bar — inside a "Start over" section with
 // explanatory backup copy and a destructive (error-outline) treatment, matching
 // the prototype (ScreenSaveLoad.dc.html:50-58). On confirm it calls the verified
-// full reset, `resetToNewSchedule`: the roster/candidate/snapshot/session/marker
-// and capture cleanup first, and only once that is proven, the T04 scenario reset
+// reset, `resetToNewSchedule`: the run's session/marker cleanup first (saved
+// rosters stay with their schedules, plq5 P2), and only once that is proven, the T04 scenario reset
 // (drop the persisted record, replace every scenario slice with the empty default,
 // clear undo history, reset the hot store).
 //
@@ -17,10 +17,10 @@
 // coarse-pointer target come from the primitive instead of a local class override.
 //
 // G4 closure — the confirmed reset now goes through `resetToNewSchedule`, which
-// runs the existing verified roster/stored-data cut BEFORE the scenario reset. So
-// `New schedule` genuinely leaves the previous run behind (no surviving roster,
-// candidate, capture state or session record, and therefore no stale capture
-// notice on Optimize), and it fails closed: an unverified cut changes nothing and
+// runs the verified run-residue cut BEFORE the scenario reset. So `New schedule`
+// leaves the previous run behind (no surviving session record, and therefore no
+// stale capture notice on Optimize; the saved roster stays with the schedule it
+// belongs to, plq5 P2), and it fails closed: an unverified cut changes nothing and
 // reports plainly instead of claiming `New schedule created`. `onResetComplete` is
 // called only on a real reset.
 //
@@ -29,7 +29,7 @@
 // inbound pipeline the Upload modal and Edit-YAML use (`useScenarioImport` →
 // `prepareScenarioLoad` → replacement/version confirm → `loadScenario`), so the
 // confirmation, the V-issue list and the advanced-syntax warnings are the shared
-// ones. Like every Load it also clears the saved roster first (C-23).
+// ones. Like every Load it starts the new schedule with no roster of its own.
 // The `New schedule` action keeps `resetToNewSchedule` exactly as before.
 
 import { useState } from "react";
@@ -110,7 +110,7 @@ export function StartOverCard({
   };
 
   const handleConfirm = async () => {
-    // The verified roster/stored-data cut FIRST, then the scenario reset — and the
+    // The verified run-residue cut FIRST, then the scenario reset — and the
     // outcome is BRANCHED ON, not merely awaited. Both halves fail closed: nothing is
     // announced as done unless both succeeded, and the retry path is this same button.
     //
@@ -190,13 +190,10 @@ export function StartOverCard({
         open={open}
         onOpenChange={setOpen}
         title="Start a new schedule?"
-        description="Your current schedule stays in Recent schedules, where you can open it again. Starting a new one clears:"
+        description="Your current schedule stays in Recent schedules, with its roster, where you can open it again."
         confirmLabel="Start new schedule"
         cancelLabel="Cancel"
         variant="destructive"
-        // plq5 P1: only what is actually cleared. The roster is still one slot per
-        // browser until P2 gives each schedule its own; P2 drops this line.
-        consequences={["The saved roster and the last run's result"]}
         onConfirm={handleConfirm}
       />
       {/* The example's staged replacement/version confirmation — the same modal the

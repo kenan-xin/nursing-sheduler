@@ -86,9 +86,9 @@ test.describe("F07 — the Start-over card's two new-schedule choices", () => {
     expect((await scenario(page)).rangeStart).toBe("2026-05-14");
 
     await page.getByTestId("new-schedule-button").click();
-    // The confirmation still NAMES the roster consequence, unchanged.
-    await expect(page.getByTestId("confirm-dialog-consequences")).toContainText(
-      "The saved roster and the last run's result",
+    // plq5 P2: the roster stays with the schedule being left, and the copy says so.
+    await expect(page.getByRole("alertdialog")).toContainText(
+      "Your current schedule stays in Recent schedules, with its roster",
     );
     await page.getByTestId("confirm-dialog-confirm").click();
     await expect(page.getByText("New schedule created")).toBeVisible();

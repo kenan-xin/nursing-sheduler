@@ -191,9 +191,11 @@ export {
 
 export {
   clearRosterDataAndNotify,
+  clearRunResidue,
   clearViewPreferenceLive,
   type RosterClearDeps,
   type RosterClearOutcome,
+  type RunResidueOutcome,
 } from "./roster-clear";
 
 export {

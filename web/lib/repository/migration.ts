@@ -39,6 +39,7 @@ import type { NurseSchedulerDb } from "./schema";
 import {
   type LegacyMigrationRecord,
   LEGACY_MIGRATION_KEY,
+  rosterKeys,
   type ScenarioCommitV1,
   type ScenarioEnvelopeV3,
   type ScenarioSnapshot,
@@ -312,4 +313,84 @@ export async function migrateLegacyScenarioRecord(
       return { status, scenarioId, envelope, reason };
     },
   );
+}
+
+/**
+ * Give the pre-P2 origin-wide roster slot to a schedule (plq5 P2). Safe on every boot.
+ *
+ * The working roster, every legacy candidate and the candidate pointer move TOGETHER,
+ * so a working row promoted from the pointed candidate still names it. The owner is
+ * the newest schedule whose range and people match the roster's own calendar and
+ * people; with no match it is the most recent schedule, and the working row is marked
+ * `possiblyOtherSchedule`. A row is never dropped: one whose target
+ * key is already taken stays where it is.
+ */
+export async function migrateLegacyRosterSlot(db: NurseSchedulerDb): Promise<void> {
+  await db.transaction("rw", [db.roster, db.meta, db.scenarioEnvelopes], async () => {
+    const working = await db.roster.get(rosterKeys.working());
+    // A legacy candidate key has no scenario segment: `candidate:<jobId>`.
+    const candidates = await db.roster
+      .where("key")
+      .startsWith("candidate:")
+      .filter((row) => row.key.split(":").length === 2)
+      .toArray();
+    let pointerRow = await db.meta.get(rosterKeys.currentCandidate());
+    if (pointerRow !== undefined && pointerRow.value === null) {
+      // What a pre-P2 Clear left behind: no pointer at all.
+      await db.meta.delete(pointerRow.key);
+      pointerRow = undefined;
+    }
+    const pointer = pointerRow?.value as { jobId: string } | undefined;
+    if (working === undefined && candidates.length === 0 && pointerRow === undefined) return;
+
+    const envelopes = await db.scenarioEnvelopes.orderBy("updatedAt").reverse().toArray();
+    if (envelopes.length === 0) return;
+    const probe =
+      working?.document ??
+      candidates.find((row) => row.key === rosterKeys.candidate(pointer?.jobId ?? ""))?.document;
+    const matched = envelopes.find((envelope) => rosterMatches(envelope.scenario, probe));
+    const scenarioId = (matched ?? envelopes[0]!).scenarioId;
+
+    if (
+      working !== undefined &&
+      (await db.roster.get(rosterKeys.working(scenarioId))) === undefined
+    ) {
+      await db.roster.put({
+        ...working,
+        key: rosterKeys.working(scenarioId),
+        ...(matched ? {} : { possiblyOtherSchedule: true as const }),
+      });
+      await db.roster.delete(working.key);
+    }
+    for (const row of candidates) {
+      const key = rosterKeys.candidate(row.key.slice("candidate:".length), scenarioId);
+      if ((await db.roster.get(key)) !== undefined) continue;
+      await db.roster.put({ ...row, key });
+      await db.roster.delete(row.key);
+    }
+    if (pointerRow !== undefined) {
+      const key = rosterKeys.currentCandidate(scenarioId);
+      if ((await db.meta.get(key)) === undefined) {
+        await db.meta.put({ key, value: pointerRow.value });
+        await db.meta.delete(pointerRow.key);
+      }
+    }
+  });
+}
+
+/** Whether a stored roster document was solved for exactly this range and staff. */
+function rosterMatches(scenario: ScenarioUiState, document: unknown): boolean {
+  const context = (
+    document as {
+      context?: { calendar?: readonly { iso?: unknown }[]; people?: readonly { id?: unknown }[] };
+    } | null
+  )?.context;
+  const calendar = context?.calendar;
+  const people = context?.people;
+  if (!Array.isArray(calendar) || !Array.isArray(people) || calendar.length === 0) return false;
+  if (calendar[0]?.iso !== scenario.rangeStart || calendar.at(-1)?.iso !== scenario.rangeEnd) {
+    return false;
+  }
+  const staff = new Set(scenario.staff.map((person) => String(person.id)));
+  return people.length === staff.size && people.every((person) => staff.has(String(person.id)));
 }

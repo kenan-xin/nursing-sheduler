@@ -62,11 +62,11 @@ vi.mock("@/lib/store", async (importOriginal) => {
       prepare: fixture.prepare,
       cancel: fixture.cancel,
     },
-    rosterStorage: {
+    currentRosterStorage: () => ({
       ...actual.rosterStorage,
       readWorking: async () => fixture.working,
       readCurrentCandidate: async () => fixture.pointer,
-    },
+    }),
   };
 });
 

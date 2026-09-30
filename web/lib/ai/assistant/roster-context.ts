@@ -27,7 +27,11 @@ import {
   type SwapPlan,
   type TradePlan,
 } from "@/lib/roster-viewer/swap";
-import { isWorkingRosterFromCandidate, rosterStorage, type RosterStorage } from "@/lib/store";
+import {
+  currentRosterStorage,
+  isWorkingRosterFromCandidate,
+  type RosterStorage,
+} from "@/lib/store";
 
 export type AssistantRosterRead =
   | { status: "ready"; document: RosterDocument; newerRunWaiting: boolean }
@@ -35,7 +39,7 @@ export type AssistantRosterRead =
   | { status: "unavailable" };
 
 export async function readRosterForAssistant(
-  storage: Pick<RosterStorage, "readWorking" | "readCurrentCandidate"> = rosterStorage,
+  storage: Pick<RosterStorage, "readWorking" | "readCurrentCandidate"> = currentRosterStorage(),
 ): Promise<AssistantRosterRead> {
   try {
     const [working, pointer] = await Promise.all([

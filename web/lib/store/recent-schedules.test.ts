@@ -7,6 +7,7 @@ import { createEmptyScenarioUiState } from "@/lib/scenario";
 import { useAuthorityStore, type OwnershipHint } from "./authority";
 import { scenarioCommands } from "./commands";
 import { loadScenario } from "./lifecycle";
+import { createRosterStorageForDb, WORKING_ROSTER_KEY } from "./roster-storage";
 import { stateSpine } from "./spine";
 import { installTestAuthority, type TestAuthority } from "./test-authority";
 
@@ -117,5 +118,55 @@ describe("rename, pin and delete", () => {
       heldByTabId: harness.tabId,
     });
     expect(peer.scenario.getState().rangeStart).toBe("2026-05-01");
+  });
+});
+
+describe("each schedule keeps its own roster (plq5 P2)", () => {
+  /** The open schedule's roster, in this harness's database. */
+  const openRoster = () =>
+    createRosterStorageForDb(() => harness.db).forScenario(
+      useAuthorityStore.getState().scenarioId!,
+    );
+
+  it("Load B, then open A again: A shows its own roster and B has none", async () => {
+    const april = await loadMonth("04");
+    const epoch = await openRoster().getClearEpoch();
+    expect(
+      await openRoster().promoteDocumentToWorking({
+        document: { tag: "april" },
+        validate: (document) => ({ ok: true, document }),
+        expectedWorkingRevision: null,
+        expectedClearEpoch: epoch,
+      }),
+    ).toMatchObject({ status: "promoted" });
+
+    await loadMonth("05");
+    expect(await openRoster().readWorking()).toBeNull();
+
+    expect((await scenarioCommands.openSchedule(april)).ok).toBe(true);
+    expect((await openRoster().readWorking<{ tag: string }>())?.document.tag).toBe("april");
+    expect((await scenarioCommands.listSchedules()).map((row) => row.hasRoster)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("bring-up hands the pre-P2 roster slot to a schedule", async () => {
+    const april = await loadMonth("04");
+    await harness.db.roster.put({
+      key: WORKING_ROSTER_KEY,
+      document: { tag: "legacy" },
+      revision: 3,
+      clearEpoch: 0,
+    });
+    const peer = await installTestAuthority({ databaseName: harness.databaseName, install: false });
+    await peer.authority.initialize();
+    const roster = createRosterStorageForDb(() => harness.db);
+    expect(await roster.readWorking()).toBeNull();
+    expect(await roster.forScenario(april).readWorking()).toMatchObject({
+      document: { tag: "legacy" },
+      revision: 3,
+      possiblyOtherSchedule: true,
+    });
   });
 });

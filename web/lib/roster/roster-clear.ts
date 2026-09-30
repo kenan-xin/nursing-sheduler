@@ -164,6 +164,35 @@ export async function clearRosterDataAndNotify(
   };
 }
 
+/** The outcome of {@link clearRunResidue}. */
+export interface RunResidueOutcome {
+  /** `cleared` only when the session, marker and view residue are provably gone. */
+  readonly status: "cleared" | "failed";
+  readonly sessionResidue: SessionResidueReport;
+  readonly viewMetadataCleared: boolean;
+}
+
+/**
+ * Leave the last run behind WITHOUT touching any saved roster (plq5 P2, New schedule).
+ *
+ * Each schedule keeps its own roster, candidate and snapshot, so none of them is
+ * purged and no capture is invalidated: a run still in flight lands in the schedule
+ * it was submitted from. Only this tab's run residue goes, so the new schedule's
+ * Optimize screen does not reattach to the previous run: the optimize session
+ * records, the retirement marker and the roster view metadata, each verified.
+ */
+export function clearRunResidue(
+  deps: Pick<RosterClearDeps, "clearViewMetadata" | "sessionStorage"> = {},
+): RunResidueOutcome {
+  const sessionResidue = clearSessionResidue(deps.sessionStorage ?? acquireSessionStorage());
+  const viewMetadataCleared = (deps.clearViewMetadata ?? clearViewPreferenceLive)();
+  const status =
+    sessionResidue.sessionCleared && sessionResidue.retireMarkerCleared && viewMetadataCleared
+      ? "cleared"
+      : "failed";
+  return { status, sessionResidue, viewMetadataCleared };
+}
+
 /**
  * Remove every optimize session record and the retirement marker, with verified
  * read-back.

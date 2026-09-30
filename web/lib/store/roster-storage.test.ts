@@ -1890,3 +1890,78 @@ describe("commitCandidate — the caller's visit fence", () => {
     expect(outcome.status).toBe("committed");
   });
 });
+
+describe("one roster per schedule (plq5 P2)", () => {
+  it("scopes working, candidates and the pointer; the version counter stays origin-wide", async () => {
+    const { db, storage } = openTab(freshDbName());
+    const [april, may] = [storage.forScenario("april"), storage.forScenario("may")];
+    const epoch = await storage.getClearEpoch();
+
+    const a = await april.commitCandidate({
+      jobId: "job-a",
+      submissionOrdinal: 5,
+      document: { tag: "april" },
+      expectedClearEpoch: epoch,
+    });
+    // A LOWER ordinal still commits in another schedule: supersession is per schedule.
+    const m = await may.commitCandidate({
+      jobId: "job-m",
+      submissionOrdinal: 1,
+      document: { tag: "may" },
+      expectedClearEpoch: epoch,
+    });
+    expect(a).toMatchObject({ status: "committed", working: { kind: "loaded-empty" } });
+    expect(m).toMatchObject({ status: "committed", working: { kind: "loaded-empty" } });
+    if (a.status !== "committed" || m.status !== "committed") throw new Error("unreachable");
+    // Never reused across schedules, so an exact-version authority stays exact (ABA).
+    expect(m.pointer.candidateVersion).toBe(a.pointer.candidateVersion + 1);
+
+    expect((await april.readWorking<{ tag: string }>())?.document.tag).toBe("april");
+    expect((await may.readWorking<{ tag: string }>())?.document.tag).toBe("may");
+    expect((await april.readCurrentCandidate())?.jobId).toBe("job-a");
+    expect(await april.readCandidate("job-m")).toBeNull();
+    // The unscoped pre-P2 slot is a different key from both.
+    expect(await storage.readWorking()).toBeNull();
+    expect(await db.roster.get(candidateRosterKey("job-a", "april"))).toBeDefined();
+
+    // Dismissing May's candidate leaves April's pointer alone.
+    await may.dismissCandidate({
+      jobId: "job-m",
+      candidateVersion: m.pointer.candidateVersion,
+      expectedClearEpoch: epoch,
+    });
+    expect(await may.readCurrentCandidate()).toBeNull();
+    expect((await april.readCurrentCandidate())?.jobId).toBe("job-a");
+  });
+
+  it("a snapshot records the schedule it was staged from", async () => {
+    const { storage } = openTab(freshDbName());
+    await storage.forScenario("april").allocateSubmissionSnapshot({
+      ownerId: "owner-1",
+      payload: {},
+      expectedClearEpoch: await storage.getClearEpoch(),
+    });
+    expect((await storage.readSubmissionSnapshot("owner-1"))?.scenarioId).toBe("april");
+  });
+
+  it("Clear stays origin-wide: every schedule's roster and pointer go, and the epoch fences all", async () => {
+    const { storage } = openTab(freshDbName());
+    const april = storage.forScenario("april");
+    const epoch = await storage.getClearEpoch();
+    await april.commitCandidate({
+      jobId: "job-a",
+      submissionOrdinal: 1,
+      document: { tag: "april" },
+      expectedClearEpoch: epoch,
+    });
+    expect(await storage.clearRosterData()).toMatchObject({ status: "cleared" });
+    expect(await april.readWorking()).toBeNull();
+    expect(await april.readCurrentCandidate()).toBeNull();
+    const late = await storage.forScenario("may").writeWorkingEdit({
+      document: { tag: "late" },
+      expectedRevision: null,
+      expectedClearEpoch: epoch,
+    });
+    expect(late.status).toBe("stale-epoch");
+  });
+});

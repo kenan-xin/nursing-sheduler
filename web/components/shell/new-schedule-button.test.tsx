@@ -7,7 +7,14 @@ import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 // INTEGRATION: `drainScenarioPersist` and the direct `resetToNewScenario` import are
 // gone — the persist seam was retired by T03, and this suite drives the reset through
 // the product's `resetToNewSchedule` and the test authority instead.
-import { pickScenario, rosterStorage, scenarioCommands, useScenarioStore } from "@/lib/store";
+import {
+  currentRosterStorage,
+  pickScenario,
+  rosterStorageFor,
+  scenarioCommands,
+  useAuthorityStore,
+  useScenarioStore,
+} from "@/lib/store";
 import { NEW_SCHEDULE_FAILED_MESSAGE } from "@/lib/roster";
 import type { RosterDocument } from "@/lib/roster";
 import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
@@ -23,8 +30,8 @@ import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-au
 // The all-slices proof for `resetToNewScenario` itself lives in reset.test.ts, and
 // the fail-closed ordering proof in `lib/roster/new-schedule-reset.test.ts`; what
 // is proved here is that the BUTTON reaches the reset only through a confirm, that
-// the reset it reaches genuinely removes the previous run's roster data, and that
-// an unverified cut is never announced as `New schedule created`.
+// the previous schedule keeps its own roster (plq5 P2) while the new one has none,
+// and that an unverified cut is never announced as `New schedule created`.
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -83,20 +90,21 @@ describe("StartOverCard — the confirmation gate", () => {
     expect(toast.success).toHaveBeenCalledWith("New schedule created");
   });
 
-  it("clears the previous run's roster data, not only the scenario", async () => {
-    // The defect this closes: a confirmed reset used to leave the working roster,
-    // the durable candidate and its pointer in place, so Optimize kept announcing
-    // the previous run's capture outcome inside a supposedly new schedule.
+  it("keeps the previous schedule's roster with it; the new schedule starts with none (plq5 P2)", async () => {
+    // Each schedule keeps its own roster, so New neither shows the previous roster in
+    // the new schedule nor deletes it: reopening the old schedule brings it back.
+    const previous = useAuthorityStore.getState().scenarioId!;
+    const storage = currentRosterStorage();
     const document = await fixtureRosterDocument();
-    const epoch = await rosterStorage.getClearEpoch();
-    const commit = await rosterStorage.commitCandidate<RosterDocument>({
+    const epoch = await storage.getClearEpoch();
+    const commit = await storage.commitCandidate<RosterDocument>({
       jobId: "job-stale",
       submissionOrdinal: 1,
       document,
       expectedClearEpoch: epoch,
     });
     expect(commit.status).toBe("committed");
-    expect(await rosterStorage.readWorking<RosterDocument>()).not.toBeNull();
+    expect(await storage.readWorking<RosterDocument>()).not.toBeNull();
 
     // AWAITED. Pre-T03 this seed was a synchronous `mutateScenario`; it is a durable
     // repository command now, so leaving the promise floating both races the assertion
@@ -108,9 +116,13 @@ describe("StartOverCard — the confirmation gate", () => {
 
     const { toast } = await import("sonner");
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("New schedule created"));
-    expect(await rosterStorage.readWorking<RosterDocument>()).toBeNull();
-    expect(await rosterStorage.readCandidate<RosterDocument>("job-stale")).toBeNull();
-    expect(await rosterStorage.readCurrentCandidate()).toBeNull();
+    expect(useAuthorityStore.getState().scenarioId).not.toBe(previous);
+    expect(await currentRosterStorage().readWorking<RosterDocument>()).toBeNull();
+    expect(await currentRosterStorage().readCurrentCandidate()).toBeNull();
+    const kept = rosterStorageFor(previous);
+    expect(await kept.readWorking<RosterDocument>()).not.toBeNull();
+    expect(await kept.readCandidate<RosterDocument>("job-stale")).not.toBeNull();
+    expect((await kept.readCurrentCandidate())?.jobId).toBe("job-stale");
   });
 
   it("never claims New schedule created when the stored-data cut is unverified", async () => {
@@ -179,15 +191,15 @@ describe("StartOverCard — the confirmation gate", () => {
     expect(onResetComplete).not.toHaveBeenCalled();
   });
 
-  it("names only what is really cleared: the schedule itself stays in Recent schedules (plq5)", async () => {
+  it("claims nothing is cleared: the schedule and its roster stay in Recent schedules (plq5)", async () => {
     render(<StartOverCard />);
     fireEvent.click(screen.getByTestId("new-schedule-button"));
     const dialog = await screen.findByRole("alertdialog", { name: "Start a new schedule?" });
-    expect(dialog).toHaveTextContent("Your current schedule stays in Recent schedules");
+    expect(dialog).toHaveTextContent(
+      "Your current schedule stays in Recent schedules, with its roster",
+    );
     expect(dialog).not.toHaveTextContent("cannot be undone");
-    const consequences = await screen.findByTestId("confirm-dialog-consequences");
-    expect(consequences).toHaveTextContent("The saved roster and the last run's result");
-    expect(consequences).not.toHaveTextContent("All people, shift types and dates");
+    expect(screen.queryByTestId("confirm-dialog-consequences")).toBeNull();
     expect(screen.getByTestId("start-over-card")).not.toHaveTextContent("removes everything");
   });
 });
@@ -300,20 +312,22 @@ describe("StartOverCard — the 87-person example", () => {
 
     resolve(EXAMPLE_YAML);
     await waitFor(() => expect(screen.getByTestId("new-schedule-example")).not.toBeDisabled());
-    // The busy state covers the fetch only; the load it hands off (roster clear, then
-    // the scenario switch) is still running. Wait for it, or it lands in the NEXT
+    // The busy state covers the fetch only; the load it hands off (the scenario
+    // switch) is still running. Wait for it, or it lands in the NEXT
     // test: its Alice/Bob switch turns that test's example load into a staged
     // replacement confirm, so its roster is never cleared.
     const { toast } = await import("sonner");
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith(SCENARIO_LOADED));
   });
 
-  it("rides the normal import path — like every Load it clears the previous roster (C-23)", async () => {
-    // The example does whatever a normal import does, and since ymmp (C-23) a Load
-    // clears the saved roster of the schedule it replaces.
+  it("rides the normal import path — the example never shows the previous roster (plq5 P2)", async () => {
+    // The example does whatever a normal import does: a fresh schedule with no roster
+    // of its own, while the schedule it replaces keeps its roster.
+    const previous = useAuthorityStore.getState().scenarioId!;
+    const storage = currentRosterStorage();
     const document = await fixtureRosterDocument();
-    const epoch = await rosterStorage.getClearEpoch();
-    await rosterStorage.commitCandidate<RosterDocument>({
+    const epoch = await storage.getClearEpoch();
+    await storage.commitCandidate<RosterDocument>({
       jobId: "job-example",
       submissionOrdinal: 1,
       document,
@@ -323,11 +337,12 @@ describe("StartOverCard — the 87-person example", () => {
     render(<StartOverCard fetchExampleSchedule={async () => EXAMPLE_YAML} />);
     fireEvent.click(screen.getByTestId("new-schedule-example"));
 
-    // THIS click's load completing (clear, then switch), not merely Alice/Bob in the store.
+    // THIS click's load completing (the switch), not merely Alice/Bob in the store.
     const { toast } = await import("sonner");
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith(SCENARIO_LOADED));
     expect((await snapshot()).staff.map((person) => person.id)).toEqual(["Alice", "Bob"]);
-    expect(await rosterStorage.readWorking<RosterDocument>()).toBeNull();
-    expect(await rosterStorage.readCandidate<RosterDocument>("job-example")).toBeNull();
+    expect(await currentRosterStorage().readWorking<RosterDocument>()).toBeNull();
+    expect(await currentRosterStorage().readCandidate<RosterDocument>("job-example")).toBeNull();
+    expect(await rosterStorageFor(previous).readWorking<RosterDocument>()).not.toBeNull();
   });
 });

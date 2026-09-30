@@ -36,7 +36,6 @@ import {
   loadScenario,
   useScenarioStore,
 } from "@/lib/store";
-import { clearRosterDataAndNotify } from "@/lib/roster";
 import { loadConfirmCopy, v1LeaveShiftOfferCopy } from "./load-controls-core";
 
 /** Ready-to-render props for the combined load confirmation dialog. */
@@ -56,10 +55,6 @@ export interface PendingImportConfirm {
   onContinue: () => Promise<void>;
   onCancel: () => void;
 }
-
-export const LOAD_ROSTER_CLEAR_FAILED =
-  "The file could not be loaded: the current roster could not be cleared from this browser. " +
-  "Your current schedule has been kept. Try loading again.";
 
 export interface UseScenarioImportOptions {
   /** Runs after a successful `loadScenario` replace -- direct version match, or Continue on the version-confirm gate. */
@@ -205,13 +200,8 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     // not settle before the IndexedDB switch has committed, or a hard reload in that
     // window aborts the write and silently drops the import (nursing-sheduler-iks).
     //
-    // C-23: the saved roster belongs to the schedule being replaced, so it is cleared
-    // first, as New schedule does (`resetToNewSchedule`), and fails closed the same way.
-    const cleared = await clearRosterDataAndNotify().catch(() => null);
-    if (cleared?.status !== "cleared") {
-      toast.error(LOAD_ROSTER_CLEAR_FAILED);
-      return;
-    }
+    // plq5 P2 (replaces C-23): nothing is cleared. The saved roster stays with the
+    // schedule being left, and the fresh identity starts with none of its own.
     const outcome = await loadScenario(target);
     if (!outcome.ok) {
       toast.error(

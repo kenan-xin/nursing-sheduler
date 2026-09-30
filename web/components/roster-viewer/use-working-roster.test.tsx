@@ -5,8 +5,8 @@
 
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
-import { rosterStorage } from "@/lib/store";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { rosterStorage, useAuthorityStore } from "@/lib/store";
 import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
 import { useWorkingRoster } from "./use-working-roster";
 
@@ -14,7 +14,10 @@ beforeEach(async () => {
   await rosterStorage.clearRosterData();
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  useAuthorityStore.setState({ scenarioId: null });
+});
 
 describe("useWorkingRoster", () => {
   it("upgrades a stored roster-file/1 working roster to roster-file/2", async () => {
@@ -34,5 +37,26 @@ describe("useWorkingRoster", () => {
       schemaVersion: "roster-file/2",
       cover: { entries: [], decrements: [] },
     });
+  });
+
+  it("shows the open schedule's own roster, and re-reads on a switch (plq5 P2)", async () => {
+    const document = await fixtureRosterDocument();
+    const april = rosterStorage.forScenario("april");
+    await april.promoteDocumentToWorking({
+      document,
+      validate: (value) => ({ ok: true as const, document: value }),
+      expectedWorkingRevision: null,
+      expectedClearEpoch: await april.getClearEpoch(),
+    });
+    useAuthorityStore.setState({ scenarioId: "april" });
+
+    const { result } = renderHook(() => useWorkingRoster());
+    await waitFor(() => expect(result.current.document).not.toBeNull());
+
+    act(() => useAuthorityStore.setState({ scenarioId: "may" }));
+    await waitFor(() => expect(result.current.document).toBeNull());
+
+    act(() => useAuthorityStore.setState({ scenarioId: "april" }));
+    await waitFor(() => expect(result.current.document).not.toBeNull());
   });
 });

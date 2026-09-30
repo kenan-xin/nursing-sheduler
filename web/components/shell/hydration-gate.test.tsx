@@ -203,7 +203,7 @@ describe("HydrationGate — the corrupt-storage reset", () => {
     window.localStorage.clear();
   });
 
-  it("clears the previous run's roster and session residue, then completes hydration", async () => {
+  it("clears the previous run's session residue, keeps saved rosters (plq5 P2), then completes hydration", async () => {
     await seedPreviousRun();
     // ACCEPTING PRE-STATE — the absences below cannot pass against an empty store.
     expect(await rosterStorage.readWorking<RosterDocument>()).not.toBeNull();
@@ -219,13 +219,12 @@ describe("HydrationGate — the corrupt-storage reset", () => {
     expect(toast.success).toHaveBeenCalledTimes(1);
     expect(toast.error).not.toHaveBeenCalled();
 
-    // The state a stale Optimize capture notice is a projection of is gone.
-    expect(await rosterStorage.readWorking<RosterDocument>()).toBeNull();
-    expect(await rosterStorage.readCandidate<RosterDocument>(JOB)).toBeNull();
-    expect(await rosterStorage.readCurrentCandidate()).toBeNull();
-    expect(await rosterStorage.readSubmissionSnapshot(OWNER)).toBeNull();
+    // The state a stale Optimize capture notice is a projection of is gone...
     expect(window.sessionStorage.getItem(OPTIMIZE_SESSION_STORAGE_KEY)).toBeNull();
     expect(window.sessionStorage.getItem(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY)).toBeNull();
+    // ...while saved rosters are no longer purged: each belongs to a schedule.
+    expect(await rosterStorage.readWorking<RosterDocument>()).not.toBeNull();
+    expect(await rosterStorage.readCandidate<RosterDocument>(JOB)).not.toBeNull();
 
     // Hydration completed into the empty workspace: the gate stops gating.
     await waitFor(() => expect(screen.getByTestId("gated-children")).toBeTruthy());

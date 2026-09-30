@@ -58,9 +58,13 @@
 //     flight across the purge is rejected and cannot repopulate the stores, and
 //     a write started under the NEW epoch cannot exist until after the purge has
 //     committed — it is therefore never something the purge can delete.
+//   • ONE ROSTER PER SCHEDULE (plq5 P2). `forScenario` scopes the working row,
+//     candidates and pointer to one schedule; the epoch, counters, snapshots and
+//     Clear stay origin-wide. An unscoped instance is the pre-P2 single slot.
 
 import {
   getRosterDb,
+  rosterKeys,
   type MetaRow,
   type RosterRow,
   type ScenarioPersistenceDb,
@@ -71,12 +75,12 @@ import {
 // Keys
 // ---------------------------------------------------------------------------
 
-/** The single working-roster row key. */
-export const WORKING_ROSTER_KEY = "working";
+/** The unscoped (pre-P2, origin-wide) working-roster row key. */
+export const WORKING_ROSTER_KEY = rosterKeys.working();
 
-/** The `roster` row key for a captured candidate. */
-export function candidateRosterKey(jobId: string): string {
-  return `candidate:${jobId}`;
+/** The `roster` row key for a captured candidate, in one schedule's scope when given. */
+export function candidateRosterKey(jobId: string, scenarioId?: string): string {
+  return rosterKeys.candidate(jobId, scenarioId);
 }
 
 /** The `snapshot` row key for a submission, authorized by its owner id. */
@@ -309,6 +313,14 @@ async function fenceEpoch(
  * if there is none).
  */
 export interface RosterStorage {
+  /**
+   * The same repositories scoped to one schedule (plq5 P2): its own working roster,
+   * candidates and candidate pointer. Snapshots it allocates record the schedule, so
+   * the capture of a run lands in the schedule the run was submitted from. The clear
+   * epoch, both counters and `clearRosterData` stay origin-wide.
+   */
+  forScenario(scenarioId: string): RosterStorage;
+
   /** The epoch a caller must capture before starting any mutating flow. */
   getClearEpoch(): Promise<number>;
 
@@ -472,8 +484,14 @@ export function createRosterStorage(databaseName?: string): RosterStorage {
  * opened on the same database name model two tabs; the shared-name accessor
  * intentionally returns one cached instance instead.
  */
-export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb): RosterStorage {
+export function createRosterStorageForDb(
+  resolveDb: () => ScenarioPersistenceDb,
+  scenarioId?: string,
+): RosterStorage {
   const db = resolveDb;
+  const workingKey = rosterKeys.working(scenarioId);
+  const candidateKey = (jobId: string) => rosterKeys.candidate(jobId, scenarioId);
+  const pointerKey = rosterKeys.currentCandidate(scenarioId);
 
   async function commitWorkingDocument<TDocument>(input: {
     document: unknown;
@@ -516,7 +534,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
 
       // The working CAS applies to promotion too: an autosave that committed
       // while validation was running must not be silently overwritten.
-      const existing = await handle.roster.get(WORKING_ROSTER_KEY);
+      const existing = await handle.roster.get(workingKey);
       const currentRevision = existing?.revision ?? null;
       if (currentRevision !== input.expectedWorkingRevision) {
         return { status: "working-conflict" as const, currentRevision };
@@ -527,7 +545,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
       // and the source candidate/import untouched.
       const revision = (currentRevision ?? 0) + 1;
       await handle.roster.put({
-        key: WORKING_ROSTER_KEY,
+        key: workingKey,
         document: verdict.document,
         revision,
         clearEpoch: input.expectedClearEpoch,
@@ -541,6 +559,10 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
   }
 
   return {
+    forScenario(id: string) {
+      return createRosterStorageForDb(resolveDb, id);
+    },
+
     async getClearEpoch() {
       return readMeta(db(), META_CLEAR_EPOCH, 0);
     },
@@ -572,6 +594,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
           ownerId: input.ownerId,
           submissionOrdinal,
           payload: input.payload,
+          ...(scenarioId === undefined ? {} : { scenarioId }),
         };
         await handle.snapshot.add(snapshot);
         return { status: "allocated" as const, snapshot };
@@ -618,11 +641,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
         const stale = await fenceEpoch(handle, input.expectedClearEpoch);
         if (stale) return stale;
 
-        const pointer = await readMeta<CurrentCandidatePointer | null>(
-          handle,
-          META_CURRENT_CANDIDATE,
-          null,
-        );
+        const pointer = await readMeta<CurrentCandidatePointer | null>(handle, pointerKey, null);
 
         // Ordering authority is the origin-wide ordinal, never completion order.
         // A strictly older submission, or a different job that shares the current
@@ -672,7 +691,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
 
         await writeMeta(handle, META_NEXT_CANDIDATE_VERSION, candidateVersion + 1);
 
-        const key = candidateRosterKey(input.jobId);
+        const key = candidateKey(input.jobId);
         await handle.roster.put({
           key,
           document: input.document,
@@ -685,12 +704,12 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
           candidateVersion,
           submissionOrdinal: input.submissionOrdinal,
         };
-        await writeMeta(handle, META_CURRENT_CANDIDATE, next);
+        await writeMeta(handle, pointerKey, next);
 
         // Same transaction as the pointer move: the prior candidate's payload can
         // never be deleted without the pointer actually having moved off it.
         if (pointer !== null && pointer.jobId !== input.jobId) {
-          await handle.roster.delete(candidateRosterKey(pointer.jobId));
+          await handle.roster.delete(candidateKey(pointer.jobId));
         }
 
         // THE WORKING-SLOT CAS. Same transaction, so this is a compare-and-set
@@ -704,7 +723,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
         let existingWorking: RosterRow | undefined;
         let absenceProven = true;
         try {
-          existingWorking = await handle.roster.get(WORKING_ROSTER_KEY);
+          existingWorking = await handle.roster.get(workingKey);
         } catch {
           absenceProven = false;
         }
@@ -722,7 +741,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
           // `writeWorkingEdit({ expectedRevision: null })` would put it.
           const workingRevision = 1;
           await handle.roster.put({
-            key: WORKING_ROSTER_KEY,
+            key: workingKey,
             document: input.document,
             revision: workingRevision,
             clearEpoch: input.expectedClearEpoch,
@@ -740,13 +759,11 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
     },
 
     async readCurrentCandidate() {
-      return readMeta<CurrentCandidatePointer | null>(db(), META_CURRENT_CANDIDATE, null);
+      return readMeta<CurrentCandidatePointer | null>(db(), pointerKey, null);
     },
 
     async readCandidate<TDocument>(jobId: string) {
-      const row = (await db().roster.get(candidateRosterKey(jobId))) as
-        | RosterRow<TDocument>
-        | undefined;
+      const row = (await db().roster.get(candidateKey(jobId))) as RosterRow<TDocument> | undefined;
       return row ?? null;
     },
 
@@ -756,7 +773,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
       expectedClearEpoch: number;
     }): Promise<CandidateDismissalOutcome> {
       const handle = db();
-      const key = candidateRosterKey(input.jobId);
+      const key = candidateKey(input.jobId);
       return handle.transaction("rw", handle.roster, handle.meta, async () => {
         const stale = await fenceEpoch(handle, input.expectedClearEpoch);
         if (stale) return stale;
@@ -770,20 +787,16 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
         }
 
         await handle.roster.delete(key);
-        const pointer = await readMeta<CurrentCandidatePointer | null>(
-          handle,
-          META_CURRENT_CANDIDATE,
-          null,
-        );
+        const pointer = await readMeta<CurrentCandidatePointer | null>(handle, pointerKey, null);
         const pointsAtDismissed =
           pointer?.jobId === input.jobId && pointer.candidateVersion === input.candidateVersion;
-        if (pointsAtDismissed) await writeMeta(handle, META_CURRENT_CANDIDATE, null);
+        if (pointsAtDismissed) await writeMeta(handle, pointerKey, null);
         return { status: "dismissed" as const, clearedPointer: pointsAtDismissed };
       });
     },
 
     async readWorking<TDocument>() {
-      const row = (await db().roster.get(WORKING_ROSTER_KEY)) as RosterRow<TDocument> | undefined;
+      const row = (await db().roster.get(workingKey)) as RosterRow<TDocument> | undefined;
       return row ?? null;
     },
 
@@ -797,7 +810,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
         const stale = await fenceEpoch(handle, input.expectedClearEpoch);
         if (stale) return stale;
 
-        const existing = await handle.roster.get(WORKING_ROSTER_KEY);
+        const existing = await handle.roster.get(workingKey);
         const currentRevision = existing?.revision ?? null;
         if (currentRevision !== input.expectedRevision) {
           return { status: "conflict" as const, currentRevision };
@@ -805,7 +818,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
 
         const revision = (currentRevision ?? 0) + 1;
         await handle.roster.put({
-          key: WORKING_ROSTER_KEY,
+          key: workingKey,
           document: input.document,
           revision,
           clearEpoch: input.expectedClearEpoch,
@@ -829,7 +842,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
       expectedWorkingRevision: number | null;
       expectedClearEpoch: number;
     }): Promise<WorkingPromotionOutcome> {
-      const key = candidateRosterKey(input.jobId);
+      const key = candidateKey(input.jobId);
       const staged = await db().roster.get(key);
       if (!staged) return { status: "source-missing" };
 
@@ -901,7 +914,8 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
         // old one.
         await handle.roster.clear();
         await handle.snapshot.clear();
-        await writeMeta(handle, META_CURRENT_CANDIDATE, null);
+        // Every schedule's pointer, and the pre-P2 origin-wide one.
+        await handle.meta.where("key").startsWith(META_CURRENT_CANDIDATE).delete();
         await writeMeta(handle, META_CLEAR_EPOCH, epoch);
 
         // Verified inside the transaction, so the counts describe exactly the

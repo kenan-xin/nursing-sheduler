@@ -18,7 +18,7 @@
 // quota-failed replacement preserves both.
 
 import { forwardRef, useCallback, useImperativeHandle, useState } from "react";
-import { rosterStorage } from "@/lib/store";
+import { currentRosterStorage } from "@/lib/store";
 import {
   clearRosterDataAndNotify,
   importRosterFileToWorking,
@@ -82,17 +82,18 @@ export const WorkingRosterPanel = forwardRef<WorkingRosterPanelHandle, WorkingRo
     const performPromotion = useCallback(
       async (pending: PendingReplacement): Promise<void> => {
         setActionError(null);
-        const epoch = await rosterStorage.getClearEpoch();
-        const workingRow = await rosterStorage.readWorking<RosterDocument>();
+        const storage = currentRosterStorage();
+        const epoch = await storage.getClearEpoch();
+        const workingRow = await storage.readWorking<RosterDocument>();
         const outcome: WorkingPromotionOutcome | RosterImportOutcome =
           pending.kind === "load"
             ? await promoteCandidateRosterToWorking(pending.pointer, {
-                storage: rosterStorage,
+                storage,
                 expectedWorkingRevision: workingRow?.revision ?? null,
                 expectedClearEpoch: epoch,
               })
             : await importRosterFileToWorking(pending.file, {
-                storage: rosterStorage,
+                storage,
                 expectedWorkingRevision: workingRow?.revision ?? null,
                 expectedClearEpoch: epoch,
               });

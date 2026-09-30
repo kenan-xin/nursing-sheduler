@@ -761,6 +761,8 @@ describe("RosterSection — keyed dismissal", () => {
     expect(recording.refs[0]).toEqual({
       jobId: JOB_A,
       candidateVersion: pointer.candidateVersion,
+      // No schedule is open in this suite, so the unscoped slot (plq5 P2).
+      scenarioId: null,
     });
   });
 

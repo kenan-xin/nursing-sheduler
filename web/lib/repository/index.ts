@@ -53,6 +53,7 @@ export {
 } from "./repository";
 
 export {
+  migrateLegacyRosterSlot,
   migrateLegacyScenarioRecord,
   readLegacyMigrationRecord,
   type LegacyMigrationOutcome,
@@ -63,6 +64,7 @@ export { commandDigest, stableStringify } from "./digest";
 export {
   GLOBAL_GENERATION_SCOPE,
   LEGACY_MIGRATION_KEY,
+  rosterKeys,
   scenarioGenerationScope,
   type AssistantProposalStatus,
   type AssistantProposalV1,

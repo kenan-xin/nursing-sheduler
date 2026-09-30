@@ -2065,3 +2065,49 @@ describe("roster capture — the visit fence at the commit linearization point",
     expect(await store.readWorking()).not.toBeNull();
   });
 });
+
+describe("roster capture — lands in the schedule the run was submitted from (plq5 P2)", () => {
+  it("commits into the staging schedule's own slot, not the unscoped or another one", async () => {
+    const store = freshStore();
+    // Staged while April was open; the gate itself holds the unscoped store.
+    const capture = await stage(store.forScenario("april"), "own-april");
+    const { gate } = harness(store);
+
+    const outcome = await gate.capture(request("job-april", capture));
+
+    expect(outcome.state).toMatchObject({ status: "committed", working: { kind: "loaded-empty" } });
+    const april = store.forScenario("april");
+    expect(await april.readWorking()).not.toBeNull();
+    expect((await april.readCurrentCandidate())?.jobId).toBe("job-april");
+    expect(await store.readWorking()).toBeNull();
+    expect(await store.forScenario("may").readCurrentCandidate()).toBeNull();
+
+    // A later dismissal reaches the same schedule's candidate.
+    expect((await gate.dismiss(request("job-april", capture))).status).toBe("dismissed");
+    expect(await april.readCandidate("job-april")).toBeNull();
+  });
+
+  it("a durable dismissal after a reload reaches the displaying schedule's candidate", async () => {
+    const store = freshStore();
+    const april = store.forScenario("april");
+    const committed = await april.commitCandidate({
+      jobId: "job-shown",
+      submissionOrdinal: 1,
+      document: { tag: "april" },
+      expectedClearEpoch: await store.getClearEpoch(),
+    });
+    if (committed.status !== "committed") throw new Error("seed failed");
+    // A fresh process: the gate has never seen this job.
+    const { gate } = harness(store);
+
+    const outcome = await gate.dismissDurableCandidate({
+      jobId: "job-shown",
+      candidateVersion: committed.pointer.candidateVersion,
+      scenarioId: "april",
+    });
+
+    expect(outcome.status).toBe("dismissed");
+    expect(await april.readCandidate("job-shown")).toBeNull();
+    expect(await april.readCurrentCandidate()).toBeNull();
+  });
+});
