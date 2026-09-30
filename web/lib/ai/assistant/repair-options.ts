@@ -46,6 +46,7 @@ import {
 } from "@/lib/rules/shortfalls";
 // Direct path: the barrel re-exports this module and `@/lib/scenario` would cycle.
 import { cardNeedOn, coverStatuses } from "@/lib/scenario/temporary-cover";
+import type { ResolvedCoreMember, ResolvedRemedy } from "@/lib/optimize/explanation";
 import type {
   ContractedHoursCountCard,
   CountCard,
@@ -94,8 +95,12 @@ export interface RepairOption {
   needsFromUser: string[];
   /** A screen to open for advice-only options. */
   capabilityId: CapabilityId | null;
-  /** static_check: the gap is proven. hypothesis: a guess to test on a copy. */
-  evidence: "static_check" | "hypothesis";
+  /**
+   * static_check: the gap is proven. hypothesis: a guess to test on a copy.
+   * solver_witness (a5pb, experimental): the optimiser found a roster with exactly
+   * these changes, so the fix itself is proven (that roster is never shown).
+   */
+  evidence: "static_check" | "hypothesis" | "solver_witness";
 }
 
 interface Ctx {
@@ -1071,15 +1076,185 @@ const BUILDERS: Record<RepairId, Builder> = {
   split_long_shift: splitLongShift,
 };
 
+// --- Solver-proven fixes (a5pb, experimental) --------------------------------
+
+const WITNESS_WHY =
+  "The optimiser found a roster with exactly these changes and nothing else, so they are " +
+  "proven to make the schedule possible. That roster is only the proof and is not shown.";
+
+/** The card a core unit came from: the n-th enabled card with its label (`#n` in the rule id). */
+function witnessCard<T extends { description?: string; disabled?: boolean }>(
+  cards: T[],
+  member: ResolvedCoreMember,
+): T | undefined {
+  const n = Number(/#(\d+)$/.exec(member.ruleId)?.[1] ?? 1);
+  return cards.filter((c) => !c.disabled && c.description === member.label)[n - 1];
+}
+
+function witnessRequirement(ctx: Ctx, member: ResolvedCoreMember): RequirementCard | undefined {
+  const enabled = ctx.state.cardsByKind.requirements.filter((c) => !c.disabled);
+  // Preference 0 is the fixed max-one-shift rule; the enabled requirement cards follow it.
+  return witnessCard(enabled, member) ?? enabled[member.rule - 1];
+}
+
+/**
+ * One option for one proven remedy. Staffing slots are run short, or, with `borrow`,
+ * covered by borrowed nurses: a temporary cover is the same staffing credit.
+ */
+function witnessOption(ctx: Ctx, remedy: ResolvedRemedy, borrow: boolean): RepairOption | null {
+  const operations: AssistantCommandV1[] = [];
+  const parts: string[] = [];
+  const asks: string[] = [];
+  const done = new Set<string>();
+  let repairId: RepairId = "soften_hard_request";
+  let level = 0;
+  const use = (id: RepairId, rank: number) => {
+    if (rank > level) [repairId, level] = [id, rank];
+  };
+  let borrowed = 0;
+  for (const m of remedy.members) {
+    const once = `${m.kind}|${m.nurse}|${m.date}|${m.ruleId}`;
+    if (done.has(once)) continue; // two rules pinning the same leave day
+    done.add(once);
+    if ((m.kind === "request" || m.kind === "leave") && (!m.nurse || !m.date)) return null;
+    if (m.kind === "request") {
+      const cell = ctx.state.reqData
+        .filter(isHardCell)
+        .find(
+          (c) =>
+            String(c.person) === m.nurse &&
+            isoOf(ctx, toDateId(c.date, range(ctx)) ?? "") === m.date,
+        );
+      if (!cell) return null;
+      const off = cell.kind === "off";
+      operations.push(
+        off
+          ? {
+              type: "set_off_request",
+              personId: cell.person,
+              startDate: m.date!,
+              endDate: m.date!,
+              weight: SOFT_REQUEST_WEIGHT,
+            }
+          : {
+              type: "set_shift_request",
+              personId: cell.person,
+              shiftType: String(cell.shiftType),
+              startDate: m.date!,
+              endDate: m.date!,
+              weight: cell.weight === -Infinity ? -SOFT_REQUEST_WEIGHT : SOFT_REQUEST_WEIGHT,
+            },
+      );
+      parts.push(
+        `${m.nurse}'s hard ${off ? "day off" : `"${cell.shiftType}" request`} on ${m.date} becomes a strong wish`,
+      );
+      asks.push(`Whether ${m.nurse} agrees, and why they made the request.`);
+      use("soften_hard_request", 1);
+    } else if (m.kind === "cap") {
+      const card = witnessCard(ctx.state.cardsByKind.counts, m);
+      if (!editableCap(card) || m.needed === undefined || m.cap === undefined) return null;
+      const relaxed = relaxOption(ctx, card, m.needed - m.cap, null);
+      if (operations.some((op) => JSON.stringify(op) === JSON.stringify(relaxed.operations[0])))
+        continue; // the same card raised for another nurse
+      operations.push(...relaxed.operations);
+      parts.push(relaxed.title);
+      asks.push(...relaxed.needsFromUser);
+      use("relax_count_rule", 2);
+    } else if (m.kind === "staffing") {
+      const short = m.short ?? 0;
+      const shift = m.shift?.[0];
+      if (!m.date || !shift || short < 1) return null;
+      if (borrow) {
+        // A slot that counts only named people needs a borrowed nurse in their group.
+        const card = witnessRequirement(ctx, m);
+        const groups = isNamed(card)
+          ? asList(card?.qualifiedPeople)
+              .map(String)
+              .filter((g) => ctx.groupIds.has(g))
+              .slice(0, 1)
+          : [];
+        if (isNamed(card) && groups.length === 0) return null;
+        for (let i = 0; i < short; i++) {
+          borrowed += 1;
+          operations.push({
+            type: "add_temporary_cover",
+            name: `Borrowed nurse ${borrowed} (another ward)`,
+            date: m.date,
+            shiftType: shift,
+            groups,
+          });
+        }
+        parts.push(`borrow ${short} for ${m.shift!.join("/")} on ${m.date}`);
+        asks.push("Which ward, float pool or agency can lend the nurse.");
+        use("borrow_temporary_nurse", 4);
+      } else {
+        const card = witnessRequirement(ctx, m);
+        if (!card) return null;
+        operations.push({
+          type: "set_staffing_requirement_on_date",
+          ruleId: card.uid,
+          date: m.date,
+          requiredNumPeople: requiredOn(card, m.date) - short,
+        });
+        parts.push(`run ${m.shift!.join("/")} on ${m.date} with ${m.filled} instead of ${m.need}`);
+        asks.push(
+          "Whether the manager accepts running the shift short. Only they can make that safety call.",
+        );
+        use("run_one_short", 3);
+      }
+    } else if (m.kind === "leave") {
+      operations.push({
+        type: "clear_requests",
+        personId: personRef(ctx, m.nurse!),
+        startDate: m.date!,
+        endDate: m.date!,
+      });
+      parts.push(`${m.nurse} gives up their leave on ${m.date}`);
+      asks.push(
+        `What kind of leave it is (never sick or compassionate leave), and whether ${m.nurse} agreed.`,
+      );
+      use("ask_nurse_on_leave", 5);
+    } else {
+      return null; // the backend never relaxes other kinds
+    }
+  }
+  if (operations.length === 0 || operations.length > MAX_ASSISTANT_OPERATIONS) return null;
+  const change = parts.join("; ");
+  return makeOption(repairId, {
+    title: `Proven fix: ${change}`,
+    why: WITNESS_WHY,
+    operations,
+    ...(borrow ? { enforcedBy: "chat" as const } : {}),
+    confirmationQuestion: `As the manager, do you accept: ${change}?`,
+    needsFromUser: [...new Set(asks)],
+    capabilityId: null,
+    evidence: "solver_witness",
+  });
+}
+
+/** Options from the backend's proven remedies, cheapest first, safe ones only. */
+export function witnessOptions(state: ScenarioUiState, remedies: ResolvedRemedy[]): RepairOption[] {
+  const ctx = makeCtx(state);
+  return remedies
+    .flatMap((remedy) => [
+      witnessOption(ctx, remedy, false),
+      remedy.members.some((m) => m.kind === "staffing") ? witnessOption(ctx, remedy, true) : null,
+    ])
+    .filter((o): o is RepairOption => o !== null && isSafeOption(state, o));
+}
+
 export function rankRepairOptions(
   state: ScenarioUiState,
   findings: StaffingFinding[],
-  opts: { runInfeasible: boolean },
+  opts: { runInfeasible: boolean; witness?: ResolvedRemedy[] | null },
 ): RepairOption[] {
+  // a5pb: solver-proven fixes come first; the playbook's own options fill the rest.
+  const proven = opts.witness ? witnessOptions(state, opts.witness) : [];
+  if (proven.length >= MAX_OPTIONS) return proven.slice(0, MAX_OPTIONS);
   const situation = classifySituation(findings, opts.runInfeasible);
-  if (situation === null) return [];
+  if (situation === null) return proven;
   const ctx = makeCtx(state);
-  const options: RepairOption[] = [];
+  const options: RepairOption[] = [...proven];
   for (const id of REPAIR_ORDER[situation]) {
     const built = BUILDERS[id](ctx, findings, situation);
     if (built && isSafeOption(state, built)) options.push(built);
@@ -1490,17 +1665,28 @@ export interface FeasibilityReport {
 export function buildFeasibilityReport(
   state: ScenarioUiState,
   afterInfeasibleRun: boolean,
+  witness: ResolvedRemedy[] | null = null,
 ): FeasibilityReport {
   const findings = findStaffingShortfalls(state);
+  const options = rankRepairOptions(state, findings, {
+    runInfeasible: afterInfeasibleRun,
+    witness,
+  });
+  const proven = options.some((o) => o.evidence === "solver_witness")
+    ? " Options with evidence solver_witness are already proven by the optimiser: you may call them tested without test_feasibility_candidates, but still ask every needsFromUser question."
+    : "";
   return {
     playbookVersion: PLAYBOOK_VERSION,
     findings: findings.slice(0, MAX_EXPLAINED_FINDINGS).map((f) => explainFinding(state, f)),
     moreFindings: Math.max(0, findings.length - MAX_EXPLAINED_FINDINGS),
     certainty:
-      findings.length > 0
+      (findings.length > 0
         ? "These gaps are certain: the rules as written cannot be met on those days, so you may name them as the cause."
-        : "No certain cause was found. The cause is unknown, and every option is a guess to test.",
-    options: rankRepairOptions(state, findings, { runInfeasible: afterInfeasibleRun }),
+        : proven
+          ? "No gap shows in the static check."
+          : "No certain cause was found. The cause is unknown, and every option is a guess to test.") +
+      proven,
+    options,
     safetyFloor: SAFETY_FLOOR,
     instructions: FEASIBILITY_INSTRUCTIONS,
   };

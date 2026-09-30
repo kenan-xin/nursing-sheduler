@@ -1,0 +1,71 @@
+# a5pb patch against genie 1bf4b85 (experimental branch exp/timefold-on-cpsat).
+# hunk: ledger reads a negative soft succession from the roster (add_objective truth=), not from is_match, which the model only bounds below; points a non-optimal roster pays with no real match are reported as unattributed
+
+diff --git a/core/nurse_scheduling/context.py b/core/nurse_scheduling/context.py
+index d2bba3c..62ce30a 100644
+--- a/core/nurse_scheduling/context.py
++++ b/core/nurse_scheduling/context.py
+@@ -62,9 +62,9 @@ class Context:
+ 
+     # Optimization objective (expression type varies by solver)
+     objective: Any = 0
+-    # v2 penalty ledger: one (preference index, (d, s, p) key, weight, expression)
++    # v2 penalty ledger: one (preference index, (d, s, p) key, weight, expression, truth)
+     # row per finite objective term, read after the solve by explain.read_ledger.
+-    objective_terms: list[tuple[Any, Any, Any, Any]] = field(default_factory=list)
++    objective_terms: list[tuple[Any, Any, Any, Any, Any]] = field(default_factory=list)
+     # Index of the preference whose handler is running, set by scheduler.schedule.
+     current_preference: int | None = None
+ 
+diff --git a/core/nurse_scheduling/preference_types.py b/core/nurse_scheduling/preference_types.py
+index 24e7343..09aa2bc 100644
+--- a/core/nurse_scheduling/preference_types.py
++++ b/core/nurse_scheduling/preference_types.py
+@@ -323,7 +323,15 @@ def shift_type_successions(
+                     # objective weight makes 0 strictly preferred.
+                     ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
+                     ctx.solver.add_constraint(is_match >= actual_n_matched - target_n_matched + 1)
+-                    utils.add_objective(ctx, weight, is_match, key=(d_begin, None, p))
++                    # is_match is only bounded below, so a non-optimal roster may carry it at 1
++                    # with no real match: the v2 ledger reads the pattern from the roster instead.
++                    utils.add_objective(
++                        ctx,
++                        weight,
++                        is_match,
++                        key=(d_begin, None, p),
++                        truth=lambda value, n=actual_n_matched, t=target_n_matched: int(value(n) == t),
++                    )
+                     ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 0))
+                     continue
+                 if is_literal_pattern and ctx.solver.should_use_bool_and_var(len(pattern_element_matches)):
+diff --git a/core/nurse_scheduling/utils.py b/core/nurse_scheduling/utils.py
+index 1b994c8..d222329 100644
+--- a/core/nurse_scheduling/utils.py
++++ b/core/nurse_scheduling/utils.py
+@@ -32,7 +32,7 @@ def ensure_list(val):
+     return [val] if not isinstance(val, list) else val
+ 
+ 
+-def add_objective(ctx, weight, expression, key=None):
++def add_objective(ctx, weight, expression, key=None, truth=None):
+     """
+     Add an objective term with the given weight.
+ 
+@@ -41,6 +41,8 @@ def add_objective(ctx, weight, expression, key=None):
+         weight: Weight for the objective term (can be inf/-inf for hard constraints)
+         expression: Expression to add to objective
+         key: Optional (day, shift type, person) indices naming the term in the v2 ledger
++        truth: Optional `truth(value) -> int` giving the term's real value from the roster, for a
++            term the model only bounds (the v2 ledger reports that instead of the variable)
+     """
+     if weight == math.inf:
+         ctx.solver.add_constraint(expression == 1)
+@@ -48,7 +50,7 @@ def add_objective(ctx, weight, expression, key=None):
+         ctx.solver.add_constraint(expression == 0)
+     else:
+         ctx.objective += weight * expression
+-        ctx.objective_terms.append((ctx.current_preference, key, weight, expression))
++        ctx.objective_terms.append((ctx.current_preference, key, weight, expression, truth))
+ 
+ 
+ def _parse_single_date(date: str, date_range: "DateRange") -> datetime.date:

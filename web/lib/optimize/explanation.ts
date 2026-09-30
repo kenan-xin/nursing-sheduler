@@ -22,6 +22,8 @@ export interface LedgerMatch {
 export interface Ledger {
   objective: number;
   balanced: boolean;
+  /** Points a non-optimal roster pays with no real match behind them (negative successions). */
+  unattributed?: number;
   terms: number;
   rules: { rule: number; points: number; matches: number }[];
   matches: LedgerMatch[];
@@ -39,7 +41,7 @@ export interface CoreMember {
     | "skill_mix"
     | "qualification"
     | "cap"
-    | "count_floor"
+    | "count"
     | "contracted_hours"
     | "succession"
     | "covering"
@@ -61,6 +63,33 @@ export interface InfeasibleCore {
   seconds: number;
 }
 
+/** A unit a remedy changes: a staffing slot run `short`, or a cap raised from `cap` to `needed`. */
+export interface RemedyMember extends CoreMember {
+  short?: number;
+  filled?: number;
+  cap?: number;
+  needed?: number;
+}
+
+/** One smallest fix, proven by a backup solve whose roster is never shown. */
+export interface Remedy {
+  rank: number;
+  cost: number;
+  /** The cheapest fix left (else just a fix found in time). */
+  optimal: boolean;
+  members: RemedyMember[];
+  proof: string;
+  seconds: number;
+}
+
+export interface SmallestFixes {
+  remedies: Remedy[];
+  /** False: only rules that are never relaxed (safety, contracts) can fix it. Null: unknown. */
+  fixable: boolean | null;
+  solves: number;
+  seconds: number;
+}
+
 export type RunExplanation =
   | { kind: "ledger"; ledger: Ledger }
   | {
@@ -69,6 +98,7 @@ export type RunExplanation =
       proof: string;
       /** Null when the core solve ran out of time: the run is still proven infeasible. */
       core: InfeasibleCore | null;
+      fixes?: SmallestFixes | null;
     };
 
 /** What a preference index stands for in the submitted document. */
@@ -223,10 +253,17 @@ export function summarizeLedger(ledger: ResolvedLedger): LedgerSummary {
   };
 }
 
-export interface ResolvedCoreMember extends Omit<CoreMember, "rule" | "nurse"> {
+export interface ResolvedCoreMember extends Omit<RemedyMember, "nurse"> {
   ruleId: string;
   label: string;
   nurse?: string;
+}
+
+export interface ResolvedRemedy {
+  rank: number;
+  cost: number;
+  optimal: boolean;
+  members: ResolvedCoreMember[];
 }
 
 /** A proven clash in ward words: the members and one sentence per date (or rule). */
@@ -235,16 +272,31 @@ export interface CoreSummary {
   minimal: boolean;
   members: ResolvedCoreMember[];
   text: string;
+  /** False: only never-relaxed rules can fix it; the fixes come as suggest_feasibility_options. */
+  fixable: boolean | null;
+  provenFixes: number;
 }
 
-export function resolveCore(core: InfeasibleCore, ctx: ExplainContext): ResolvedCoreMember[] {
+export function resolveRemedies(fixes: SmallestFixes, ctx: ExplainContext): ResolvedRemedy[] {
+  return fixes.remedies.map(({ rank, cost, optimal, members }) => ({
+    rank,
+    cost,
+    optimal,
+    members: resolveCore({ members }, ctx),
+  }));
+}
+
+export function resolveCore(
+  core: { members: RemedyMember[] },
+  ctx: ExplainContext,
+): ResolvedCoreMember[] {
   const person = realPerson(ctx.people);
-  return core.members.map(({ rule, nurse, ...rest }) => {
-    const source = ctx.sources[rule];
+  return core.members.map(({ nurse, ...rest }) => {
+    const source = ctx.sources[rest.rule];
     return {
       ...rest,
-      ruleId: source?.ruleId ?? `rule#${rule}`,
-      label: source?.label ?? `rule ${rule}`,
+      ruleId: source?.ruleId ?? `rule#${rest.rule}`,
+      label: source?.label ?? `rule ${rest.rule}`,
       ...(nurse === undefined ? {} : { nurse: person(nurse)! }),
     };
   });
@@ -292,6 +344,8 @@ export function summarizeCore(
     minimal: explanation.core.minimal,
     members,
     text: coreText(members),
+    fixable: explanation.fixes?.fixable ?? null,
+    provenFixes: explanation.fixes?.remedies.length ?? 0,
   };
 }
 

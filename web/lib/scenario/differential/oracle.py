@@ -81,10 +81,17 @@ def op_schedule(req):
     An optional `timeout` (seconds) is the job's solver budget; `seconds` is wall time."""
     try:
         started = time.monotonic()
+        # a5pb (experimental): `explain` asks for the run explanation (core and proven fixes).
+        explanations = []
         _df, _sol, _score, status, _cell = nurse_scheduling.schedule(
-            req["yaml"].encode("utf-8"), timeout=req.get("timeout")
+            req["yaml"].encode("utf-8"),
+            timeout=req.get("timeout"),
+            **({"on_explanation": explanations.append} if req.get("explain") else {}),
         )
-        return {"ok": True, "status": status, "seconds": round(time.monotonic() - started, 2)}
+        out = {"ok": True, "status": status, "seconds": round(time.monotonic() - started, 2)}
+        if explanations:
+            out["explanation"] = explanations[0]
+        return out
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e), "errorType": type(e).__name__}
 

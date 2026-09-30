@@ -50,6 +50,11 @@ import { withCoverOverrides } from "@/lib/scenario/temporary-cover";
 import { ORACLE, PYTHON } from "@/lib/scenario/differential/oracle-client";
 import { MAX_DIAGNOSTIC_CANDIDATES } from "@/lib/ai/diagnostic";
 import { buildFeasibilityReport, violatesSafetyFloor } from "./repair-options";
+import {
+  preferenceSources,
+  resolveRemedies,
+  type RunExplanation,
+} from "@/lib/optimize/explanation";
 
 const GATED = !!process.env.RUN_INFEASIBILITY_MEASURE;
 const TIMEOUT_S = Number(process.env.MEASURE_TIMEOUT_S ?? 90);
@@ -636,6 +641,7 @@ interface Solve {
   status: SolveStatus;
   seconds: number;
   error?: string;
+  explanation?: RunExplanation;
 }
 
 function toYaml(state: ScenarioUiState): string {
@@ -647,7 +653,7 @@ function toYaml(state: ScenarioUiState): string {
 }
 
 /** One real CP-SAT run through the differential oracle, as a job with `timeout_seconds`. */
-function solve(yaml: string): Promise<Solve> {
+function solve(yaml: string, explain = false): Promise<Solve> {
   return new Promise((resolve) => {
     const child = spawn(PYTHON, [ORACLE], { stdio: ["pipe", "pipe", "pipe"] });
     let out = "";
@@ -661,17 +667,18 @@ function solve(yaml: string): Promise<Solve> {
           status?: SolveStatus;
           seconds?: number;
           error?: string;
+          explanation?: RunExplanation;
         };
         resolve(
           res.ok
-            ? { status: res.status!, seconds: res.seconds! }
+            ? { status: res.status!, seconds: res.seconds!, explanation: res.explanation }
             : { status: "ERROR", seconds: 0, error: res.error },
         );
       } catch {
         resolve({ status: "ERROR", seconds: 0, error: err.slice(-300) || out.slice(-300) });
       }
     });
-    child.stdin.end(JSON.stringify({ op: "schedule", yaml, timeout: TIMEOUT_S }));
+    child.stdin.end(JSON.stringify({ op: "schedule", yaml, timeout: TIMEOUT_S, explain }));
   });
 }
 
@@ -748,10 +755,23 @@ function singleRuleRelaxations(state: ScenarioUiState): { label: string; next: S
   return out;
 }
 
+/**
+ * a5pb arm (A5PB_WITNESS=1): the baseline run also returns the solver's proven remedies,
+ * which the report ranks first (evidence solver_witness), as the app does.
+ */
+const WITNESS = !!process.env.A5PB_WITNESS;
+
+function witnessFor(state: ScenarioUiState, baseline: Solve) {
+  const e = baseline.explanation;
+  if (!WITNESS || e?.kind !== "infeasible" || !e.fixes) return null;
+  const sources = preferenceSources(toCanonicalScenarioDocument(withCoverOverrides(state)));
+  return resolveRemedies(e.fixes, { sources, people: [] });
+}
+
 async function diagnose(s: Scenario): Promise<Row> {
   const state = s.build();
-  const baseline = await solve(toYaml(state));
-  const report = buildFeasibilityReport(state, true);
+  const baseline = await solve(toYaml(state), WITNESS);
+  const report = buildFeasibilityReport(state, true, witnessFor(state, baseline));
   const row: Row = {
     name: s.name,
     source: s.source,

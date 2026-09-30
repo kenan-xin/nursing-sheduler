@@ -23,6 +23,7 @@ import glob
 import os
 from dataclasses import replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from ortools.sat.python import cp_model
@@ -58,6 +59,7 @@ def test_ledger_sums_to_the_objective(path):
     ledger = explanation["ledger"]
     assert explanation["kind"] == "ledger"
     assert ledger["balanced"], path
+    assert ledger["unattributed"] == 0  # deterministic runs are OPTIMAL here
     assert ledger["objective"] == result.score
     assert sum(m["points"] for m in ledger["matches"]) == result.score
     assert sum(r["points"] for r in ledger["rules"]) == result.score
@@ -79,6 +81,40 @@ def test_ledger_names_nurse_date_and_shift():
     keys = {k for m in explanation["ledger"]["matches"] for k in m}
     assert result.score != 0
     assert {"rule", "points", "nurse", "date"} <= keys
+
+
+def test_ledger_reads_a_negative_succession_from_the_roster_not_its_bound():
+    """is_match is only bounded below: a non-optimal roster may carry it at 1 with no match."""
+    ctx = SimpleNamespace(
+        scenario=SimpleNamespace(
+            people=SimpleNamespace(items=[SimpleNamespace(id="ana")]),
+            shiftTypes=SimpleNamespace(items=[SimpleNamespace(id="N")]),
+        ),
+        compiled_schedule=SimpleNamespace(dates=["2026-11-01"]),
+        solver=SimpleNamespace(get_value={"is_match": 1, "matched": 1}.get, get_objective_value=lambda: -10),
+        # A two-night pattern with one night worked: is_match = 1 is legal, but no match.
+        objective_terms=[(3, (0, None, 0), -10, "is_match", lambda value: int(value("matched") == 2))],
+    )
+    ledger = explain.read_ledger(ctx)
+    assert (ledger["balanced"], ledger["matches"], ledger["unattributed"]) == (True, [], -10)
+
+
+def test_ledger_reports_a_real_negative_succession_match():
+    content = b"""apiVersion: alpha
+dates: {range: {startDate: 2026-11-01, endDate: 2026-11-02}}
+people: {items: [{id: ana}]}
+shiftTypes: {items: [{id: N}]}
+preferences:
+  - type: at most one shift per day
+  - {type: shift type requirement, shiftType: N, requiredNumPeople: 1}
+  - {type: shift type successions, person: ana, pattern: [N, N], weight: -10}
+"""
+    out = []
+    result = nurse_scheduling.schedule(content, on_explanation=out.append)
+    ledger = out[0]["ledger"]
+    assert result.score == -10
+    assert ledger["matches"] == [{"rule": 2, "nurse": "ana", "date": "2026-11-01", "points": -10}]
+    assert ledger["unattributed"] == 0
 
 
 def _run(path: str, purpose=JobPurpose.ORDINARY):
@@ -118,8 +154,13 @@ def _core_with_ctx(monkeypatch, path, **kwargs):
     real = explain.core_units
 
     def spy(ctx, should_stop=None):
-        seen["ctx"], seen["core"] = ctx, real(ctx, should_stop)
-        return dict(seen["core"], units=list(seen["core"]["units"])) if seen["core"] else None
+        core = real(ctx, should_stop)
+        if core:
+            # Re-check now: the fix-solve changes the model next.
+            units = core["units"]
+            seen["core_holds"] = not _feasible_with(ctx, units)
+            seen["drop_one"] = [_feasible_with(ctx, [u for u in units if u != unit]) for unit in units]
+        return core
 
     monkeypatch.setattr(explain, "core_units", spy)
     result, out = _explain(path, **kwargs)
@@ -143,10 +184,8 @@ def test_infeasible_core_is_a_minimal_clash(monkeypatch, path):
     assert result.solver_status == "INFEASIBLE"
     assert (explanation["kind"], explanation["proof"]) == ("infeasible", "main_run")
     assert core["minimal"] and core["members"]
-    units = seen["core"]["units"]
-    assert not _feasible_with(seen["ctx"], units)
-    for unit in units:  # drop any one member and the rest can hold
-        assert _feasible_with(seen["ctx"], [u for u in units if u != unit]), unit
+    assert seen["core_holds"]
+    assert all(seen["drop_one"])  # drop any one member and the rest can hold
 
 
 def test_core_names_the_staffing_slot_and_the_leave():
@@ -154,6 +193,44 @@ def test_core_names_the_staffing_slot_and_the_leave():
     kinds = {member["kind"]: member for member in explanation["core"]["members"]}
     assert kinds["staffing"]["need"] == 1 and kinds["staffing"]["date"] == kinds["leave"]["date"]
     assert kinds["leave"]["nurse"] == "rn1"
+
+
+REPAIR = f"{TESTCASES}/../fixtures/assistant_repair"
+
+
+def test_smallest_fixes_rank_one_short_before_moving_leave():
+    _result, [explanation] = _explain(f"{REPAIR}/onlyRnOnLeave.before.yaml")
+    fixes = explanation["fixes"]
+    assert fixes["fixable"] is True
+    first, second = fixes["remedies"][:2]
+    assert (first["cost"], first["optimal"], first["proof"]) == (100, True, "backup_solve")
+    [short] = first["members"]
+    assert (short["kind"], short["short"], short["filled"]) == ("staffing", 1, short["need"] - 1)
+    assert [(m["kind"], m["nurse"]) for m in second["members"]] == [("leave", "rn1")]
+
+
+def test_smallest_fix_raises_a_cap_by_the_least():
+    _result, [explanation] = _explain(f"{REPAIR}/personalCapsTooLow.before.yaml")
+    [cap] = explanation["fixes"]["remedies"][0]["members"]
+    assert (cap["kind"], cap["cap"], cap["needed"]) == ("cap", 3, 4)
+
+
+def test_a_clash_of_never_relaxed_rules_has_no_fix():
+    content = b"""apiVersion: alpha
+dates: {range: {startDate: 2023-08-18, endDate: 2023-08-19}}
+people: {items: [{id: 0}]}
+shiftTypes: {items: [{id: D}]}
+preferences:
+  - type: at most one shift per day
+  - {type: shift count, person: 0, countDates: ALL, countShiftTypes: D, expression: 'x = T', target: 1, weight: .inf}
+  - {type: shift type successions, person: 0, pattern: [OFF], weight: .inf}
+"""
+    out = []
+    result = nurse_scheduling.schedule(content, on_explanation=out.append)
+    [explanation] = out
+    assert result.solver_status == "INFEASIBLE"
+    assert {m["kind"] for m in explanation["core"]["members"]} == {"count", "succession"}
+    assert explanation["fixes"] == {**explanation["fixes"], "remedies": [], "fixable": False}
 
 
 def _unknown_main_run(monkeypatch):

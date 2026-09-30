@@ -323,7 +323,15 @@ def shift_type_successions(
                     # objective weight makes 0 strictly preferred.
                     ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
                     ctx.solver.add_constraint(is_match >= actual_n_matched - target_n_matched + 1)
-                    utils.add_objective(ctx, weight, is_match, key=(d_begin, None, p))
+                    # is_match is only bounded below, so a non-optimal roster may carry it at 1
+                    # with no real match: the v2 ledger reads the pattern from the roster instead.
+                    utils.add_objective(
+                        ctx,
+                        weight,
+                        is_match,
+                        key=(d_begin, None, p),
+                        truth=lambda value, n=actual_n_matched, t=target_n_matched: int(value(n) == t),
+                    )
                     ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 0))
                     continue
                 if is_literal_pattern and ctx.solver.should_use_bool_and_var(len(pattern_element_matches)):

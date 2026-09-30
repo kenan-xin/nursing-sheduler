@@ -32,7 +32,7 @@ def ensure_list(val):
     return [val] if not isinstance(val, list) else val
 
 
-def add_objective(ctx, weight, expression, key=None):
+def add_objective(ctx, weight, expression, key=None, truth=None):
     """
     Add an objective term with the given weight.
 
@@ -41,6 +41,8 @@ def add_objective(ctx, weight, expression, key=None):
         weight: Weight for the objective term (can be inf/-inf for hard constraints)
         expression: Expression to add to objective
         key: Optional (day, shift type, person) indices naming the term in the v2 ledger
+        truth: Optional `truth(value) -> int` giving the term's real value from the roster, for a
+            term the model only bounds (the v2 ledger reports that instead of the variable)
     """
     if weight == math.inf:
         ctx.solver.add_constraint(expression == 1)
@@ -48,7 +50,7 @@ def add_objective(ctx, weight, expression, key=None):
         ctx.solver.add_constraint(expression == 0)
     else:
         ctx.objective += weight * expression
-        ctx.objective_terms.append((ctx.current_preference, key, weight, expression))
+        ctx.objective_terms.append((ctx.current_preference, key, weight, expression, truth))
 
 
 def _parse_single_date(date: str, date_range: "DateRange") -> datetime.date:

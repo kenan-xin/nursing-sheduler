@@ -65,8 +65,11 @@ def read_ledger(ctx: Context) -> dict[str, Any]:
     """Per-term points of the solved roster, like Timefold's ScoreAnalysis.
 
     Every finite objective term was recorded by utils.add_objective. A term's
-    points are weight * value. The points of all terms sum to the objective
-    exactly; `balanced` is False only if a term bypassed add_objective.
+    points are weight * value. The variables' points sum to the objective exactly;
+    `balanced` is False only if a term bypassed add_objective. A term the model only
+    bounds (a negative soft succession's is_match) is read from the roster instead,
+    so a non-optimal roster never shows a violation that did not happen; the points
+    such a variable still costs are `unattributed`.
     """
     started = time.monotonic()
     names = _names(ctx)
@@ -84,9 +87,12 @@ def read_ledger(ctx: Context) -> dict[str, Any]:
 
     rules: dict[int, dict[str, int]] = {}
     matches = []
-    total = 0
-    for rule, key, weight, expression in ctx.objective_terms:
+    total = counted = 0
+    for rule, key, weight, expression, truth in ctx.objective_terms:
         points = weight * value(expression)
+        counted += points
+        if truth is not None:
+            points = weight * truth(value)
         if not points:
             continue
         total += points
@@ -95,12 +101,13 @@ def read_ledger(ctx: Context) -> dict[str, Any]:
         entry["matches"] += 1
         matches.append({"rule": rule, **_key_fields(key, names), "points": points})
     objective = solver.get_objective_value()
-    if total != objective:
-        logger.error("Ledger total %s differs from objective %s", total, objective)
+    if counted != objective:
+        logger.error("Ledger total %s differs from objective %s", counted, objective)
     matches.sort(key=lambda m: -abs(m["points"]))
     return {
         "objective": objective,
-        "balanced": total == objective,
+        "balanced": counted == objective,
+        "unattributed": objective - total,
         "terms": len(ctx.objective_terms),
         "rules": sorted(rules.values(), key=lambda r: r["rule"]),
         "matches": matches[:MAX_LEDGER_MATCHES],
@@ -146,7 +153,7 @@ def unit_kind(ctx: Context, key) -> str:
         if preference.hoursContract is not None or any(c != 1 for _, c in compiled.coefficients):
             return "contracted_hours"
         upper = (preference.weight, compiled.expressions[detail[1]]) in _UPPER
-        return "cap" if upper else "count_floor"
+        return "cap" if upper else "count"  # a floor or an exact count: never relaxed
     return {
         models.SHIFT_TYPE_SUCCESSIONS: "succession",
         models.SHIFT_TYPE_COVERING: "covering",
@@ -268,6 +275,120 @@ def why_infeasible(ctx: Context, should_stop=None) -> dict[str, Any] | None:
     return {"members": [unit_fields(ctx, key, names) for key in units], **core}
 
 
+# --- The smallest fix: a weighted minimal correction set ------------------------------
+#
+# One solve on the same model, no assumptions (so every worker): relaxable guards are
+# free and cost their RELAX_COST when off; a staffing slot keeps its guard but its
+# head count gets a `short` slack at 100 a place (run one short, or borrow a nurse);
+# never-relaxed units stay pinned. The optimum is the cheapest set of changes that
+# makes a roster exist, and the solution found is the proof. That backup roster is
+# never shown (user decision); only the changes it proves are returned. Blocking a
+# found set and solving again gives the next remedy.
+
+FIX_BUDGET_SECONDS = 10.0
+MAX_REMEDIES = 3
+SHORT_COST = RELAX_COST["staffing"]
+
+
+def _cap_over(ctx: Context, key, model: cp_model.CpModel):
+    """Places over a nurse's cap, as a variable the fix-solve prices per unit."""
+    from .preference_types import _day_state_expr
+
+    i, (p, pair) = key
+    compiled = ctx.compiled_schedule.preferences[i]
+    coefficients = dict(compiled.coefficients)
+    x = sum(coefficients[s] * _day_state_expr(ctx, d, s, p) for d in compiled.dates for s in compiled.shift_types)
+    target = compiled.targets[pair]
+    # The largest allowed value: x <= T and not(x > T) allow T; x < T and not(x >= T) allow T - 1.
+    cap = target if compiled.expressions[pair] in ("x <= T", "x > T") else target - 1
+    most = len(compiled.dates) * max(coefficients.values())
+    over = model.new_int_var(0, max(0, most - cap), "cap_over")
+    model.add(over >= x - cap)
+    return over, cap
+
+
+def smallest_fixes(ctx: Context, should_stop=None) -> dict[str, Any]:
+    started = time.monotonic()
+    solver, model, guards = ctx.solver, ctx.solver.model, ctx.solver.guards
+    model.clear_assumptions()
+    names = _names(ctx)
+    relaxable: dict[Any, Any] = {}
+    shorts: dict[Any, Any] = {}
+    overs: dict[Any, tuple[Any, int]] = {}
+    for key, literal in guards.items():
+        kind = unit_kind(ctx, key)
+        domain = model.proto.variables[literal.index].domain
+        domain[0] = 1
+        if kind == "cap":
+            # Free the cap, then price every place over it: "raise by 1" costs 20, by 3 costs 60.
+            domain[0] = 0
+            overs[key] = _cap_over(ctx, key, model)
+        elif kind in RELAX_COST and kind != "staffing":
+            domain[0] = 0
+            relaxable[key] = literal
+        elif kind == "staffing":
+            headcount = model.proto.constraints[solver.guard_constraints[key][0]]
+            if headcount.has_linear() and headcount.linear.domain[0] > 0:
+                short = model.new_int_var(0, headcount.linear.domain[0], f"short_{len(shorts)}")
+                headcount.linear.vars.append(short.index)
+                headcount.linear.coeffs.append(1)
+                shorts[key] = short
+    model.minimize(
+        sum(RELAX_COST[unit_kind(ctx, k)] * (1 - lit) for k, lit in relaxable.items())
+        + SHORT_COST * sum(shorts.values())
+        + RELAX_COST["cap"] * sum(over for over, _cap in overs.values())
+    )
+    remedies, solves, fixable = [], 0, None
+    while len(remedies) < MAX_REMEDIES:
+        remaining = FIX_BUDGET_SECONDS - (time.monotonic() - started)
+        if remaining <= 0.2 or (should_stop is not None and should_stop()):
+            break
+        check = _cpsat(workers=solver.solver.parameters.num_workers, seconds=remaining)
+        solve_started = time.monotonic()
+        status = check.solve(model)
+        solves += 1
+        if status == cp_model.INFEASIBLE:
+            fixable = fixable or False  # no (more) fix among the relaxable rules
+            break
+        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            break
+        fixable = True
+        relaxed = [k for k, lit in relaxable.items() if check.value(lit) == 0]
+        short = [(k, check.value(v)) for k, v in shorts.items() if check.value(v) > 0]
+        over = [(k, check.value(v)) for k, (v, _cap) in overs.items() if check.value(v) > 0]
+        members = [unit_fields(ctx, key, names) for key in relaxed]
+        for key, places in over:
+            members.append({**unit_fields(ctx, key, names), "cap": overs[key][1], "needed": overs[key][1] + places})
+        for key, places in short:
+            member = unit_fields(ctx, key, names)
+            members.append({**member, "short": places, "filled": member["need"] - places})
+        remedies.append(
+            {
+                "rank": len(remedies) + 1,
+                "cost": int(check.objective_value),
+                "optimal": status == cp_model.OPTIMAL,
+                "members": members,
+                "proof": "backup_solve",
+                "seconds": round(time.monotonic() - solve_started, 3),
+            }
+        )
+        # Next remedy: keep at least one of these changes out.
+        kept = [relaxable[k] for k in relaxed]
+        for slack, changed in [(shorts, short), (overs, over)]:
+            for key, _places in changed:
+                variable = slack[key][0] if isinstance(slack[key], tuple) else slack[key]
+                unchanged = model.new_bool_var("unchanged")
+                model.add(variable == 0).only_enforce_if(unchanged)
+                kept.append(unchanged)
+        model.add_bool_or(kept)
+    return {
+        "remedies": remedies,
+        "fixable": fixable,
+        "solves": solves,
+        "seconds": round(time.monotonic() - started, 3),
+    }
+
+
 def explain_no_roster(ctx: Context, status: SolverStatus, should_stop=None) -> dict[str, Any] | None:
     """Explain a run that found no roster, if it is proven INFEASIBLE.
 
@@ -289,7 +410,14 @@ def explain_no_roster(ctx: Context, status: SolverStatus, should_stop=None) -> d
             proof = f"feasibility_check:{time.monotonic() - started:.2f}s"
         elif status != SolverStatus.INFEASIBLE:
             return None
-        return {"kind": "infeasible", "proof": proof, "core": why_infeasible(ctx, should_stop)}
+        explanation = {"kind": "infeasible", "proof": proof, "core": why_infeasible(ctx, should_stop)}
+        try:
+            explanation["fixes"] = smallest_fixes(ctx, should_stop)
+        except Exception:
+            # A fix-solve failure keeps the core; it never turns INFEASIBLE into FAILED.
+            logger.exception("The smallest-fix solve failed")
+            explanation["fixes"] = None
+        return explanation
     except Exception:
         logger.exception("Explaining the run without a roster failed")
         return None

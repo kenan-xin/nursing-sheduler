@@ -62,9 +62,9 @@ class Context:
 
     # Optimization objective (expression type varies by solver)
     objective: Any = 0
-    # v2 penalty ledger: one (preference index, (d, s, p) key, weight, expression)
+    # v2 penalty ledger: one (preference index, (d, s, p) key, weight, expression, truth)
     # row per finite objective term, read after the solve by explain.read_ledger.
-    objective_terms: list[tuple[Any, Any, Any, Any]] = field(default_factory=list)
+    objective_terms: list[tuple[Any, Any, Any, Any, Any]] = field(default_factory=list)
     # Index of the preference whose handler is running, set by scheduler.schedule.
     current_preference: int | None = None
 

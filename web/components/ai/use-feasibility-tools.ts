@@ -8,8 +8,10 @@
 
 import { z } from "zod";
 import { useModelVisibleTool } from "./register-model-visible-tool";
-import { pickScenario, useHotStore, useScenarioStore } from "@/lib/store";
+import { pickScenario, useAuthorityStore, useHotStore, useScenarioStore } from "@/lib/store";
 import { buildFeasibilityReport } from "@/lib/ai/assistant/repair-options";
+import { resolveRemedies } from "@/lib/optimize/explanation";
+import { isRunStale, useRunRequestStore } from "@/lib/optimize/run-request";
 
 export const feasibilityParameters = z.object({
   afterInfeasibleRun: z
@@ -37,7 +39,26 @@ export function useFeasibilityTools(agentId: string, turnEpoch: number): void {
       handler: async () => {
         const view = useHotStore.getState().runView;
         const infeasible = view.lifecycle === "completed" && view.outcome === "infeasible";
-        return buildFeasibilityReport(pickScenario(useScenarioStore.getState()), infeasible);
+        // a5pb: the run's solver-proven fixes, unless the schedule changed since that run.
+        const explanation = view.result?.explanation;
+        const stale = isRunStale(
+          view.lifecycle,
+          useRunRequestStore.getState().runRevision,
+          useAuthorityStore.getState().documentRevision,
+        );
+        const witness =
+          infeasible &&
+          !stale &&
+          explanation?.kind === "infeasible" &&
+          explanation.fixes &&
+          view.explainContext
+            ? resolveRemedies(explanation.fixes, view.explainContext)
+            : null;
+        return buildFeasibilityReport(
+          pickScenario(useScenarioStore.getState()),
+          infeasible,
+          witness,
+        );
       },
     },
     [agentId, turnEpoch],
