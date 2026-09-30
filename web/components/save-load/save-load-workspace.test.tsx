@@ -173,8 +173,8 @@ describe("SaveLoadWorkspace — Upload flow", () => {
 
     await screen.findByTestId("confirm-dialog-confirm");
     expect(screen.getByText(/replace your current workspace/i)).toBeInTheDocument();
-    // C-05: truthful copy — a Load cannot be undone.
-    expect(screen.getByText(/cannot be undone\. Download a copy first\./)).toBeInTheDocument();
+    // C-05 + plq5 P2: truthful copy — no Undo promised; the current schedule is kept.
+    expect(screen.getByText(/stays in Recent schedules, with its roster/)).toBeInTheDocument();
     expect(screen.queryByText(/undo the load/i)).not.toBeInTheDocument();
 
     // Continue commits the replacement, as another atomic switch.
