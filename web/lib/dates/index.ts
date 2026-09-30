@@ -47,6 +47,7 @@ export {
   SINGAPORE_NONWORKDAY_GROUP_ID,
   SINGAPORE_PH_GROUP_ID,
   buildSingaporeHolidayGroups,
+  holidayImportApplied,
   replaceDateGroups,
 } from "./holiday-groups";
 
