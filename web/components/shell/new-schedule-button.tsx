@@ -29,7 +29,7 @@
 // inbound pipeline the Upload modal and Edit-YAML use (`useScenarioImport` →
 // `prepareScenarioLoad` → replacement/version confirm → `loadScenario`), so the
 // confirmation, the V-issue list and the advanced-syntax warnings are the shared
-// ones, and a normal import replaces the SCENARIO only — no invented residue cut.
+// ones. Like every Load it also clears the saved roster first (C-23).
 // The `New schedule` action keeps `resetToNewSchedule` exactly as before.
 
 import { useState } from "react";

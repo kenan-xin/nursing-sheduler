@@ -196,7 +196,7 @@ function RosterChangeBody({
                       ? "Opens the Staff screen and books the temporary cover. You can undo it from the change list."
                       : "Makes this change to the schedule. You can undo it from the change list."
                     : linked === null
-                      ? "Opens the Roster screen and makes this change. You can undo it there."
+                      ? "Opens the Roster screen and makes this change. You can undo the last change there."
                       : "Opens the Roster screen and makes this change. Undo the roster part on the Roster screen and the schedule part from the change list.",
                 primary: true,
                 testId: "roster-change-apply",
