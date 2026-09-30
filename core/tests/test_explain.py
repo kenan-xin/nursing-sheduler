@@ -66,13 +66,29 @@ def test_ledger_sums_to_the_objective(path):
     assert all(m["points"] != 0 for m in ledger["matches"])
 
 
-@pytest.mark.parametrize("path", BASICS[::4], ids=os.path.basename)
-def test_guards_leave_a_feasible_run_unchanged(path):
+def _solved_models(monkeypatch, content, **kwargs):
+    """The text of every model the optimising solve ran on."""
+    models = []
+    real = solver_ortools_cp_sat.ORToolsSolver.solve
+
+    def solve(self, *args, **kw):
+        models.append(str(self.model.proto))
+        return real(self, *args, **kw)
+
+    monkeypatch.setattr(solver_ortools_cp_sat.ORToolsSolver, "solve", solve)
+    result = nurse_scheduling.schedule(content, deterministic=True, **kwargs)
+    return result, models
+
+
+@pytest.mark.parametrize("path", [*BASICS[::4], *sorted(glob.glob(f"{TESTCASES}/../fixtures/assistant_repair/*.yaml"))])
+def test_explanations_leave_the_optimising_model_byte_identical(monkeypatch, path):
     with open(path, "rb") as f:
         content = f.read()
-    plain = nurse_scheduling.schedule(content, deterministic=True)
-    guarded = nurse_scheduling.schedule(content, deterministic=True, on_explanation=lambda _: None)
-    assert (guarded.solver_status, guarded.score) == (plain.solver_status, plain.score)
+    plain, [plain_model] = _solved_models(monkeypatch, content)
+    explained, models = _solved_models(monkeypatch, content, on_explanation=lambda _: None)
+    # An INFEASIBLE run rebuilds a guarded model to explain itself, but never re-optimises.
+    assert models == [plain_model]
+    assert explained.score == plain.score
 
 
 def test_ledger_names_nurse_date_and_shift():

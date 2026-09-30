@@ -205,6 +205,7 @@ def schedule(
     *,
     on_roster: Callable[[dict], None] | None = None,
     on_explanation: Callable[[dict], None] | None = None,
+    _explain_status: SolverStatus | None = None,
 ) -> ScheduleResult:
     progress_started_at = time.monotonic()
     _emit_phase_progress(
@@ -276,8 +277,8 @@ def schedule(
     else:
         raise ValueError(f"Unsupported solver configuration: {solver!r}")
 
-    if on_explanation is not None and forced_solution is None and hasattr(ctx.solver, "enable_guards"):
-        ctx.solver.enable_guards()  # a5pb: explain an INFEASIBLE run
+    if _explain_status is not None:
+        ctx.solver.enable_guards()  # a5pb: this build only explains a run that found no roster
 
     _emit_phase_progress(progress_callback, "creating_shift_variables", "Creating shift variables", progress_started_at)
     logger.info("Creating shift variables...")
@@ -435,12 +436,16 @@ def schedule(
 
     _emit_phase_progress(progress_callback, "solving", "Solving schedule", progress_started_at)
     logger.info("Solving and showing partial results...")
-    status = ctx.solver.solve(
-        timeout=timeout,
-        deterministic=deterministic,
-        progress_callback=progress_callback_with_export,
-        should_stop=should_stop,
-    )
+    if _explain_status is not None:
+        # a5pb: the optimising run already ended without a roster; keep its status.
+        status = ctx.solver.solver_status = _explain_status
+    else:
+        status = ctx.solver.solve(
+            timeout=timeout,
+            deterministic=deterministic,
+            progress_callback=progress_callback_with_export,
+            should_stop=should_stop,
+        )
 
     # Get status name
     ctx.solver_status = ctx.solver.get_status_name()
@@ -464,12 +469,30 @@ def schedule(
         raise ValueError(f"Unexpected solver status: {ctx.solver_status}")
 
     logger.info("Statistics:")
-    stats = ctx.solver.get_statistics()
+    stats = ctx.solver.get_statistics() if _explain_status is None else {}  # a5pb: no solve ran
     for key, value in stats.items():
         logger.info(f"  - {key}: {value}")
 
     if not found:
-        if on_explanation is not None and getattr(ctx.solver, "guards", None) is not None:
+        if (
+            on_explanation is not None
+            and _explain_status is None
+            and forced_solution is None
+            and solver_selector.canonical == ORTOOLS_CP_SAT_SOLVER
+            and status in (SolverStatus.INFEASIBLE, SolverStatus.UNKNOWN)
+        ):
+            # a5pb: rebuild with guard literals only now, so the optimising run's model
+            # stays byte-identical to one without explanations (l3m G1 fallback).
+            return schedule(
+                file_content,
+                avoid_solution=avoid_solution,
+                timeout=timeout,
+                solver=solver,
+                should_stop=should_stop,
+                on_explanation=on_explanation,
+                _explain_status=status,
+            )
+        if _explain_status is not None:
             explanation = explain.explain_no_roster(ctx, status, should_stop)
             if explanation is not None:
                 # a5pb: an UNKNOWN run whose no-objective check proved INFEASIBLE is INFEASIBLE.

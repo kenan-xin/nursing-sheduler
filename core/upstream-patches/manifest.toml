@@ -42,6 +42,7 @@ patch_order = [
   "a5pb-ledger.patch",
   "a5pb-why-solve.patch",
   "a5pb-ledger-truth.patch",
+  "a5pb-explain-rebuild.patch",
 ]
 
 file = [
@@ -60,7 +61,7 @@ file = [
   { path = "nurse_scheduling/models.py", class = "patched", upstream_blob = "edcdab1503ea2ca11977d1693b259a53449d5245", patches = ["P2-P3-skillmix-overrides.patch", "99db-D05-head-count-bound.patch", "99db-C1-required-not-above-preferred.patch"] },
   { path = "nurse_scheduling/preference_types.py", class = "patched", upstream_blob = "51f7cb3570bd74af8e2e7d50d3eb7d1b64509b8f", patches = ["P2-P3-skillmix-overrides.patch", "99db-B1-history-completed-hard-sequence.patch", "99db-B5-leave-satisfies-hard-off.patch", "a5pb-ledger.patch", "a5pb-why-solve.patch", "a5pb-ledger-truth.patch"] },
   { path = "nurse_scheduling/report.py", class = "verbatim", upstream_blob = "8cff02666faf52b60c86256f70e3049991ba8574" },
-  { path = "nurse_scheduling/scheduler.py", class = "patched", upstream_blob = "7867e7d1b1591456fc637ec342a140ba37f8afde", patches = ["P4-on-roster.patch", "a5pb-ledger.patch", "a5pb-why-solve.patch"] },
+  { path = "nurse_scheduling/scheduler.py", class = "patched", upstream_blob = "7867e7d1b1591456fc637ec342a140ba37f8afde", patches = ["P4-on-roster.patch", "a5pb-ledger.patch", "a5pb-why-solve.patch", "a5pb-explain-rebuild.patch"] },
   { path = "nurse_scheduling/serve.py", class = "verbatim", upstream_blob = "8a844abe3b79c6028740e4598cc225f231f6e064" },
   { path = "nurse_scheduling/server/__init__.py", class = "verbatim", upstream_blob = "7b3119b1236edca1dfd0ce39d50c31d0abfbad36" },
   { path = "nurse_scheduling/server/api/__init__.py", class = "verbatim", upstream_blob = "10c7354468e847bbc5c9514b3ab1b7cef88eb3a3" },
@@ -613,4 +614,5 @@ file = [
   { path = "tests/test_explain.py", class = "v2-only", note = "a5pb run explanation tests" },
   { path = "upstream-patches/a5pb-why-solve.patch", class = "v2-only", note = "sync patch or manifest" },
   { path = "upstream-patches/a5pb-ledger-truth.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/a5pb-explain-rebuild.patch", class = "v2-only", note = "sync patch or manifest" },
 ]

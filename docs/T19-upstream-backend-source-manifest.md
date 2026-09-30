@@ -203,7 +203,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `nurse_scheduling/models.py` | patched | `edcdab1503ea` | `P2-P3-skillmix-overrides.patch` (P2, P3). `99db-D05-head-count-bound.patch`. `99db-C1-required-not-above-preferred.patch` |
 | `nurse_scheduling/preference_types.py` | patched | `51f7cb3570bd` | `P2-P3-skillmix-overrides.patch` (P2, P3). `99db-B1-history-completed-hard-sequence.patch`. `99db-B5-leave-satisfies-hard-off.patch`. `a5pb-ledger.patch`. `a5pb-why-solve.patch`. `a5pb-ledger-truth.patch` |
 | `nurse_scheduling/report.py` | verbatim | `8cff02666faf` |  |
-| `nurse_scheduling/scheduler.py` | patched | `7867e7d1b159` | `P4-on-roster.patch` (P4). `a5pb-ledger.patch`. `a5pb-why-solve.patch` |
+| `nurse_scheduling/scheduler.py` | patched | `7867e7d1b159` | `P4-on-roster.patch` (P4). `a5pb-ledger.patch`. `a5pb-why-solve.patch`. `a5pb-explain-rebuild.patch` |
 | `nurse_scheduling/serve.py` | verbatim | `8a844abe3b79` |  |
 | `nurse_scheduling/server/__init__.py` | verbatim | `7b3119b1236e` |  |
 | `nurse_scheduling/server/api/__init__.py` | verbatim | `10c7354468e8` |  |
@@ -751,6 +751,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `upstream-patches/W6-server-stores-memory.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/W6-server-stores-redis.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/W6-tests-test_serve.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/a5pb-explain-rebuild.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/a5pb-ledger-truth.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/a5pb-ledger.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/a5pb-why-solve.patch` | v2-only |  | sync patch or manifest |
