@@ -86,6 +86,9 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    # Container memory cap, e.g. BACKEND_MEM_LIMIT=2g in the host's env; unset or 0 = none.
+    # tc1 runs dev and prod on 3.6 GB, so a cap keeps a burst of runs from starving the host.
+    mem_limit: ${BACKEND_MEM_LIMIT:-0}
     # `depends_on: service_healthy` only orders STARTUP — Compose does not route or
     # gate runtime traffic on it (docker.com/reference/compose-file/services/#depends_on).
     # When Redis fails, `/ready` and `/health` return a bounded 503 (fail closed),
