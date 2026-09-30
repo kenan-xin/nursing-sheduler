@@ -278,11 +278,7 @@ export function deleteImpact(
   const history = (s: ScenarioUiState) =>
     s.staff.reduce((sum, person) => sum + (person.history?.length ?? 0), 0);
   const leave = (s: ScenarioUiState) => s.reqData.filter((cell) => cell.kind === "leave").length;
-  const overrides = (s: ScenarioUiState) =>
-    s.cardsByKind.requirements.reduce(
-      (sum, card) => sum + (card.requiredNumPeopleOverrides?.length ?? 0),
-      0,
-    );
+  const overrides = countDateExceptions;
   const leaveDropped = leave(state) - leave(next);
   const kept = new Set(
     Object.values(next.cardsByKind)
@@ -301,6 +297,14 @@ export function deleteImpact(
     // Overrides on a DROPPED rule go with it; count only those on a surviving one.
     overrides: overrides(state) - overrides(next) - droppedOverrides(state, next),
   };
+}
+
+/** Per-date staffing exceptions (requirement overrides) across every requirement. */
+export function countDateExceptions(state: ScenarioUiState): number {
+  return state.cardsByKind.requirements.reduce(
+    (sum, card) => sum + (card.requiredNumPeopleOverrides?.length ?? 0),
+    0,
+  );
 }
 
 /** Overrides carried by requirement cards the delete removed entirely. */

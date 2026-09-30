@@ -78,7 +78,10 @@ import {
   type EditorGroup,
 } from "@/components/entity-editor/core";
 import { GroupsSection, type GroupsSectionConfig } from "@/components/entity-editor/groups-section";
-import { deleteWithSummary } from "@/components/entity-editor/delete-with-summary";
+import {
+  deleteWithSummary,
+  saveRefusalMessage,
+} from "@/components/entity-editor/delete-with-summary";
 import { TemporaryCoverSection } from "./temporary-cover-section";
 import { changeKeys } from "@/lib/change-highlight/keys";
 import { useChangeTarget } from "@/lib/change-highlight/store";
@@ -750,7 +753,7 @@ function RowEditor({
     : ({ ok: true, id: name } as const);
   const canSave = check.ok;
 
-  const submit = () => {
+  const submit = async () => {
     // Synchronous stale-Save guard: abort entirely if the item/group slice moved since
     // the form opened (temporal travel / external cascade); the effect closes the row.
     if (isStale()) {
@@ -761,35 +764,38 @@ function RowEditor({
       toast.error(check.message);
       return;
     }
+    const effectiveId: EntityId = mode === "add" || nameChanged ? check.id : item!.id;
+    let outcome: CommandOutcome;
     try {
-      if (mode === "add") {
-        // New nurse: name → id, no description authored here. history:[] via descriptor.
-        commit((live) =>
-          writeItemGroups(
+      // AWAITED (T6, as the group Save): the rename cascade throws at the queue head
+      // and a refusal resolves, so "saved" is only said once the write has landed.
+      outcome = await commit((live) => {
+        if (mode === "add") {
+          // New nurse: name → id, no description authored here. history:[] via descriptor.
+          return writeItemGroups(
             addItem(live, descriptor, { id: check.id }),
             descriptor,
             check.id,
             draftGroups,
-          ),
-        );
-        toast.success(`Nurse “${String(check.id)}” added.`);
-      } else {
-        const effectiveId: EntityId = nameChanged ? check.id : item!.id;
+          );
+        }
         // The whole compound edit is ONE queue-head transform, so the rename cascade
-        // and the group write both apply to the committed roster.
-        commit((live) => {
-          // Rename cascade only when the name actually changed. Description is
-          // PRESERVED (never written from the table), so an inline name/group edit
-          // keeps it intact.
-          const renamed = nameChanged ? renameItem(live, descriptor, item!.id, check.id) : live;
-          return writeItemGroups(renamed, descriptor, effectiveId, draftGroups);
-        });
-        toast.success(`Nurse “${String(effectiveId)}” saved.`);
-      }
-      onDone();
+        // and the group write both apply to the committed roster. Rename only when
+        // the name actually changed. Description is PRESERVED (never written from
+        // the table), so an inline name/group edit keeps it intact.
+        const renamed = nameChanged ? renameItem(live, descriptor, item!.id, check.id) : live;
+        return writeItemGroups(renamed, descriptor, effectiveId, draftGroups);
+      });
     } catch (err) {
       toast.error(err instanceof RenameCollisionError ? err.message : "Save failed.");
+      return;
     }
+    if (!outcome.ok) {
+      toast.error(saveRefusalMessage(outcome, "nurse"));
+      return;
+    }
+    toast.success(`Nurse “${String(effectiveId)}” ${mode === "add" ? "added" : "saved"}.`);
+    onDone();
   };
 
   return (
