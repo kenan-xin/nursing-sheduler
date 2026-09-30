@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, NamedTuple
 
-from . import exporter, preference_types
+from . import exporter, explain, preference_types
 from .context import Context
 from .loader import load_data
 from .model_build_stats import ModelBuildStats, emit_model_build_stats, start_model_build_step
@@ -204,6 +204,8 @@ def schedule(
     forced_solution: Mapping[tuple[int, int, int], int] | None = None,
     *,
     on_roster: Callable[[dict], None] | None = None,
+    on_explanation: Callable[[dict], None] | None = None,
+    _explain_status: SolverStatus | None = None,
 ) -> ScheduleResult:
     progress_started_at = time.monotonic()
     _emit_phase_progress(
@@ -274,6 +276,9 @@ def schedule(
         ctx.solver = solver_classes[solver_selector.engine]()
     else:
         raise ValueError(f"Unsupported solver configuration: {solver!r}")
+
+    if _explain_status is not None:
+        ctx.solver.enable_guards()  # this build only explains a run that found no roster
 
     _emit_phase_progress(progress_callback, "creating_shift_variables", "Creating shift variables", progress_started_at)
     logger.info("Creating shift variables...")
@@ -378,6 +383,7 @@ def schedule(
     # TODO: Check no duplicated preferences
     # TODO: Check no overlapping preferences
     for i, preference in enumerate(ctx.scenario.preferences):
+        ctx.solver.guard_key = (i, None)
         step_started_at, start_counts = start_model_build_step(
             model_build_stats_callback,
             ctx,
@@ -397,6 +403,8 @@ def schedule(
             preference_index=i,
             preference_type=preference.type,
         )
+
+    ctx.solver.guard_key = None  # background from here on: never guarded
 
     # Leave is input-only: it is 1 exactly where a LEAVE shift request pinned
     # it (recorded in ctx.pinned_leaves while processing shift requests), and 0
@@ -427,12 +435,16 @@ def schedule(
 
     _emit_phase_progress(progress_callback, "solving", "Solving schedule", progress_started_at)
     logger.info("Solving and showing partial results...")
-    status = ctx.solver.solve(
-        timeout=timeout,
-        deterministic=deterministic,
-        progress_callback=progress_callback_with_export,
-        should_stop=should_stop,
-    )
+    if _explain_status is not None:
+        # The optimising run already ended without a roster; keep its status.
+        status = ctx.solver.solver_status = _explain_status
+    else:
+        status = ctx.solver.solve(
+            timeout=timeout,
+            deterministic=deterministic,
+            progress_callback=progress_callback_with_export,
+            should_stop=should_stop,
+        )
 
     # Get status name
     ctx.solver_status = ctx.solver.get_status_name()
@@ -456,11 +468,42 @@ def schedule(
         raise ValueError(f"Unexpected solver status: {ctx.solver_status}")
 
     logger.info("Statistics:")
-    stats = ctx.solver.get_statistics()
+    stats = ctx.solver.get_statistics() if _explain_status is None else {}  # no solve ran
     for key, value in stats.items():
         logger.info(f"  - {key}: {value}")
 
     if not found:
+        if (
+            on_explanation is not None
+            and _explain_status is None
+            and forced_solution is None
+            and solver_selector.canonical == ORTOOLS_CP_SAT_SOLVER
+            and status in (SolverStatus.INFEASIBLE, SolverStatus.UNKNOWN)
+            and not (should_stop is not None and should_stop())
+        ):
+            # Rebuild with guard literals only now, so the optimising run's model stays
+            # byte-identical to one without explanations.
+            _emit_phase_progress(
+                progress_callback,
+                "explaining_no_roster",
+                "Checking why no roster was found",
+                progress_started_at,
+            )
+            return schedule(
+                file_content,
+                avoid_solution=avoid_solution,
+                timeout=timeout,
+                solver=solver,
+                should_stop=should_stop,
+                on_explanation=on_explanation,
+                _explain_status=status,
+            )
+        if _explain_status is not None:
+            explanation = explain.explain_no_roster(ctx, status, should_stop)
+            if explanation is not None:
+                # An UNKNOWN run whose no-objective check proved INFEASIBLE is INFEASIBLE.
+                ctx.solver_status = SolverStatus.INFEASIBLE.value
+                on_explanation(explanation)
         logger.info("Done.")
         return ScheduleResult(None, None, None, ctx.solver_status, None)
 

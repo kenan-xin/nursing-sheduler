@@ -3,6 +3,7 @@
 // The body is adopted UNCHANGED: snake_case, nested `request`/`result`/`error`/
 // `controls`/`links`. The BFF does not camel-case it (tech-plan §5). Shared by the
 // server-side proxy (`web/lib/bff`) and the client hooks (`web/lib/query`).
+import type { RunExplanation } from "@/lib/optimize/explanation";
 
 // The ONLY cookie the BFF forwards upstream / rewrites on the way back
 // (optimize.py: CLIENT_ID_COOKIE_NAME). Seven-day diagnostic correlation only —
@@ -122,6 +123,8 @@ export interface JobResponse {
     score: number | null;
     solver_status: string;
     termination_reason: string | null;
+    /** Why a proven-infeasible run has no roster; absent from older backends. */
+    explanation?: RunExplanation | null;
   } | null;
   error: { code: string; message: string } | null;
   controls: {
