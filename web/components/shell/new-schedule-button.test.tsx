@@ -2,6 +2,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import { createEmptyScenarioUiState, serializeScenario } from "@/lib/scenario";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 // INTEGRATION: `drainScenarioPersist` and the direct `resetToNewScenario` import are
@@ -79,7 +80,6 @@ describe("StartOverCard — the confirmation gate", () => {
     });
     await waitFor(async () => expect(onResetComplete).toHaveBeenCalledOnce());
 
-    const { toast } = await import("sonner");
     expect(toast.success).toHaveBeenCalledWith("New schedule created");
   });
 
@@ -106,7 +106,6 @@ describe("StartOverCard — the confirmation gate", () => {
     fireEvent.click(screen.getByTestId("new-schedule-button"));
     fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
 
-    const { toast } = await import("sonner");
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("New schedule created"));
     expect(await rosterStorage.readWorking<RosterDocument>()).toBeNull();
     expect(await rosterStorage.readCandidate<RosterDocument>("job-stale")).toBeNull();
@@ -132,7 +131,6 @@ describe("StartOverCard — the confirmation gate", () => {
     fireEvent.click(screen.getByTestId("new-schedule-button"));
     fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
 
-    const { toast } = await import("sonner");
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(NEW_SCHEDULE_FAILED_MESSAGE));
     expect(toast.success).not.toHaveBeenCalled();
     expect(onResetComplete).not.toHaveBeenCalled();
@@ -168,7 +166,6 @@ describe("StartOverCard — the confirmation gate", () => {
     fireEvent.click(screen.getByTestId("new-schedule-button"));
     fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
 
-    const { toast } = await import("sonner");
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
         "This schedule is being edited in another tab. Take over editing, then start over.",
@@ -228,6 +225,9 @@ describe("StartOverCard — v2 surface reading", async () => {
 
 /** A backend-valid YAML the example seam returns in place of the bundled file. */
 const EXAMPLE_YAML = serializeScenario(makeValidUiState());
+
+/** The shared import path's success toast, published after the clear and the switch. */
+const SCENARIO_LOADED = "Scenario loaded — this replaces your current setup.";
 
 async function snapshot() {
   await drainScenarioCommands();
@@ -298,6 +298,11 @@ describe("StartOverCard — the 87-person example", () => {
 
     resolve(EXAMPLE_YAML);
     await waitFor(() => expect(screen.getByTestId("new-schedule-example")).not.toBeDisabled());
+    // The busy state covers the fetch only; the load it hands off (roster clear, then
+    // the scenario switch) is still running. Wait for it, or it lands in the NEXT
+    // test: its Alice/Bob switch turns that test's example load into a staged
+    // replacement confirm, so its roster is never cleared.
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(SCENARIO_LOADED));
   });
 
   it("rides the normal import path — the previous run's roster is cleared, as on Upload", async () => {
@@ -316,9 +321,9 @@ describe("StartOverCard — the 87-person example", () => {
     render(<StartOverCard fetchExampleSchedule={async () => EXAMPLE_YAML} />);
     fireEvent.click(screen.getByTestId("new-schedule-example"));
 
-    await waitFor(async () => {
-      expect((await snapshot()).staff.map((person) => person.id)).toEqual(["Alice", "Bob"]);
-    });
+    // THIS click's load completing (clear, then switch), not merely Alice/Bob in the store.
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(SCENARIO_LOADED));
+    expect((await snapshot()).staff.map((person) => person.id)).toEqual(["Alice", "Bob"]);
     expect(await rosterStorage.readWorking<RosterDocument>()).toBeNull();
     expect(await rosterStorage.readCandidate<RosterDocument>("job-example")).toBeNull();
   });
