@@ -60,7 +60,7 @@ export function SaveLoadWorkspace() {
   };
 
   const handleUploadedFile = (text: string) => {
-    handleFile(text);
+    void handleFile(text);
     setUploadOpen(false);
   };
 

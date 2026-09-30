@@ -101,7 +101,9 @@ export function StartOverCard({
     setExampleError(null);
     setExampleBusy(true);
     try {
-      handleFile(await (fetchExampleSchedule ?? fetchBundledExampleSchedule)());
+      // Busy until the WHOLE load settles — roster clear, switch, or a cancelled
+      // confirm — not just the fetch, so a second click cannot start a second load.
+      await handleFile(await (fetchExampleSchedule ?? fetchBundledExampleSchedule)());
     } catch {
       setExampleError(EXAMPLE_SCHEDULE_FAILED_MESSAGE);
     } finally {
