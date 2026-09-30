@@ -207,7 +207,7 @@ function buildCellView(cells: readonly UiRequestCell[], orderIndex: ShiftTypeOrd
 
 interface CellVisual {
   className: string;
-  style?: { opacity: number };
+  style?: { backgroundColor: string };
 }
 
 function cellVisual(view: CellView, cellsAt: readonly UiRequestCell[]): CellVisual {
@@ -225,13 +225,19 @@ function cellVisual(view: CellView, cellsAt: readonly UiRequestCell[]): CellVisu
   const prefs = cellsAt.map(cellPreferenceOf);
   const sign = aggregateSign(prefs);
   const alpha = cellAlpha(prefs);
-  const base =
+  const [tint, ink] =
     sign === "all-positive"
-      ? "bg-successtint text-successink"
+      ? ["--successtint", "text-successink"]
       : sign === "all-negative"
-        ? "bg-warntint text-warnink"
-        : "bg-panel text-ink2";
-  return { className: `${base} border border-line2`, style: { opacity: alpha } };
+        ? ["--warntint", "text-warnink"]
+        : ["--panel", "text-ink2"];
+  // FR-SR-16's α fades the TINT only (the spec's rgba background); the text keeps
+  // its full-strength ink so a low-weight cell still meets AA (t4tz). Element
+  // opacity faded the text with it, down to ~1.1:1 at the α floor.
+  return {
+    className: `${ink} border border-line2`,
+    style: { backgroundColor: `color-mix(in srgb, var(${tint}) ${alpha * 100}%, transparent)` },
+  };
 }
 
 export function RequestsMatrix({
@@ -408,7 +414,8 @@ export function RequestsMatrix({
                   {col.label}
                 </span>
                 {col.kind === "date-group" && col.count !== undefined ? (
-                  <span className="text-[9px] text-ink3">{col.count}</span>
+                  // ink2, not ink3: ink3 on dark --brandtint is 3.6-3.8:1 (t4tz).
+                  <span className="text-[9px] text-ink2">{col.count}</span>
                 ) : null}
                 {col.kind === "date-item" ? (
                   <span className="font-mono text-[9px] text-ink3">
@@ -472,7 +479,7 @@ export function RequestsMatrix({
                   const value = historyValueAt(person, columnIndex, historyCount);
                   const clickable = isHistorySlotClickable(person, columnIndex, historyCount);
                   // Prototype `showPlus`: an empty, clickable slot in normal mode gets a
-                  // faint "+" add affordance (ScreenRequests.dc.html:553-555); quick mode
+                  // "+" add affordance in ink3 (ScreenRequests.dc.html:553-555); quick mode
                   // never shows it since a click there doesn't open the history editor.
                   const showPlus = !value && clickable && mode === "normal";
                   // Only a clickable slot in NORMAL mode opens an editor, so only
@@ -488,7 +495,7 @@ export function RequestsMatrix({
                     className: cn(
                       "flex items-center justify-center border-b border-r border-line2 font-mono text-label",
                       clickable
-                        ? cn("cursor-pointer hover:bg-panel", showPlus ? "text-faint" : "text-ink2")
+                        ? cn("cursor-pointer hover:bg-panel", showPlus ? "text-ink3" : "text-ink2")
                         : "text-faint",
                     ),
                     "data-testid": `hist-${row.id}-${columnIndex}`,
@@ -541,9 +548,7 @@ export function RequestsMatrix({
                   // Inherited from a group row / date-group column: a small top-aligned
                   // glyph plus (on an empty cell) the bare selector with no tint or
                   // border, so it stays secondary to a direct request; the sources are
-                  // named in full in the title and accessible name. The glyph stays in
-                  // flow: positioning the cell (`relative`) changes how axe resolves the
-                  // opacity-faded request cells.
+                  // named in full in the title and accessible name.
                   const group = groupSources?.get(key);
                   const groupText = group ? group.sources.join("\n") : "";
                   // Identical presentation for both element types — see the
@@ -580,9 +585,7 @@ export function RequestsMatrix({
                     <>
                       <span className="truncate">
                         {view.primaryText}
-                        {view.shadowedCount > 0 ? (
-                          <span className="text-faint"> (+{view.shadowedCount})</span>
-                        ) : null}
+                        {view.shadowedCount > 0 ? <span> (+{view.shadowedCount})</span> : null}
                       </span>
                       {groupMark}
                     </>
