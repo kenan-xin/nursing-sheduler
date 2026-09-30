@@ -365,6 +365,37 @@ function validStateResponse(state: JobResponse["state"]): JobResponse {
   };
 }
 
+describe("a5pb explanation on a result", () => {
+  const completed = validStateResponse("completed");
+  const withExplanation = (explanation: unknown) =>
+    ({ ...completed, result: { ...completed.result!, explanation } }) as unknown;
+
+  it("accepts an object or null, and a result without one", () => {
+    const ledger = { kind: "ledger", ledger: {} };
+    expect(parseJobResponse(withExplanation(ledger))?.result?.explanation).toEqual(ledger);
+    expect(parseJobResponse(withExplanation(null))).not.toBeNull();
+    expect(parseJobResponse(completed)).not.toBeNull();
+  });
+
+  it("rejects an explanation that is not an object", () => {
+    expect(parseJobResponse(withExplanation("ledger"))).toBeNull();
+  });
+
+  it("accepts it on result_available", () => {
+    expect(
+      parseResultAvailablePayload({
+        occurred_at: "2026-07-20T00:01:00+00:00",
+        outcome: "optimal",
+        score: 9,
+        solver_status: "OPTIMAL",
+        termination_reason: "optimality_proven",
+        artifact_name: "x.roster.json",
+        explanation: { kind: "ledger" },
+      }),
+    ).not.toBeNull();
+  });
+});
+
 describe("parseJobResponse", () => {
   it("accepts every backend lifecycle boundary, including queued cancellation", () => {
     for (const state of [

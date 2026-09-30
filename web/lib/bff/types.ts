@@ -8,6 +8,8 @@
 // (optimize.py: CLIENT_ID_COOKIE_NAME). Seven-day diagnostic correlation only —
 // it never controls job liveness. The whole browser cookie header is never
 // forwarded (that would leak Next cookies to FastAPI).
+import type { RunExplanation } from "@/lib/optimize/explanation";
+
 export const CLIENT_ID_COOKIE_NAME = "nurse_scheduling_client_id";
 
 // The reconnect cursor header. The client sends its last applied opaque event
@@ -122,6 +124,8 @@ export interface JobResponse {
     score: number | null;
     solver_status: string;
     termination_reason: string | null;
+    /** a5pb (experimental): penalty ledger or infeasibility explanation. */
+    explanation?: RunExplanation | null;
   } | null;
   error: { code: string; message: string } | null;
   controls: {

@@ -66,6 +66,7 @@ import {
   stageSubmissionSnapshot,
 } from "./submission-snapshot";
 import { ROSTER_SUBMISSION_VERSION } from "./roster-candidate-builder";
+import { preferenceSources } from "./explanation";
 import { rosterStorage } from "@/lib/store";
 import { acquireSessionStorage } from "./session-storage";
 import type { PeopleReverseMap } from "@/lib/scenario";
@@ -772,6 +773,10 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
         type: "submit-started",
         anonymized: prep.anonymized,
         peopleCount: prep.peopleCount,
+        explainContext: {
+          sources: preferenceSources(input.document),
+          people: prep.reverseMap,
+        },
       });
 
       // F2 write-ahead: allocate the origin-wide submission ordinal and write the

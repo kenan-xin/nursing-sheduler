@@ -91,6 +91,8 @@ class OptimizationResult:
     """Original status reported by the selected solver."""
     termination_reason: str | None = None
     """Normalized explanation of why solver execution stopped."""
+    explanation: dict[str, Any] | None = None
+    """v2: penalty ledger (feasible) or infeasibility core and fixes, JSON-safe."""
 
 
 @dataclass(frozen=True)

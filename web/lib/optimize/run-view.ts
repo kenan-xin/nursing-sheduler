@@ -27,6 +27,12 @@
 import { jobFailureMessage } from "@/lib/bff/errors";
 import type { JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types";
 import {
+  resolveLedger,
+  type ExplainContext,
+  type ResolvedLedger,
+  type RunExplanation,
+} from "./explanation";
+import {
   MAX_CURSOR_BYTES,
   MAX_DISPLAY_FILENAME_BYTES,
   MAX_DISPLAY_LABEL_BYTES,
@@ -101,6 +107,8 @@ export interface RunResult {
   score: number | null;
   solverStatus: string;
   terminationReason: string | null;
+  /** a5pb (experimental): present only when the backend sent one. */
+  explanation?: RunExplanation;
 }
 
 /** Where a structured error originated, so the UI can route it correctly. */
@@ -327,6 +335,10 @@ export interface OptimizeRunView {
   phases: RunPhaseEntry[];
   log: RunLogEntry[];
   download: DownloadState;
+  /** a5pb: rule ids and real people of the submitted document, to read `result.explanation`. */
+  explainContext: ExplainContext | null;
+  /** a5pb: the last completed run's resolved ledger, kept across a new submission for a diff. */
+  previousLedger: ResolvedLedger | null;
   /** Monotonic sequence for deterministic log ordering. */
   seq: number;
 }
@@ -356,6 +368,8 @@ export const INITIAL_OPTIMIZE_RUN_VIEW: OptimizeRunView = {
   phases: [],
   log: [],
   download: INITIAL_DOWNLOAD,
+  explainContext: null,
+  previousLedger: null,
   seq: 0,
 };
 
@@ -371,7 +385,12 @@ export type RunSignal =
   // Full reset back to idle (New / Load / explicit clear).
   | { type: "reset" }
   // A submission started: resets prior run state and enters `submitting`.
-  | { type: "submit-started"; anonymized: boolean; peopleCount: number }
+  | {
+      type: "submit-started";
+      anonymized: boolean;
+      peopleCount: number;
+      explainContext?: ExplainContext;
+    }
   // T16q could not durably stage before POST (session conflict, storage failure).
   | { type: "submit-blocked"; code: string; message: string }
   // The server definitively rejected the submission — no job was created.
@@ -571,7 +590,15 @@ function mapResult(job: JobResponse): RunResult | null {
       job.result.termination_reason === null
         ? null
         : truncateUtf8(job.result.termination_reason, MAX_DISPLAY_LABEL_BYTES),
+    ...(job.result.explanation ? { explanation: job.result.explanation } : {}),
   };
+}
+
+/** The ledger of `view`'s completed run, named by rule id and real person, if it has one. */
+export function resolvedLedgerOf(view: OptimizeRunView): ResolvedLedger | null {
+  const explanation = view.result?.explanation;
+  if (explanation?.kind !== "ledger" || view.explainContext === null) return null;
+  return resolveLedger(explanation.ledger, view.explainContext);
 }
 
 /** A fresh run view that keeps only what a repeat run should carry forward. */
@@ -582,6 +609,8 @@ function freshRun(base: OptimizeRunView, patch: Partial<OptimizeRunView>): Optim
   return {
     ...INITIAL_OPTIMIZE_RUN_VIEW,
     seq: base.seq,
+    // a5pb: keep the last completed run's ledger so the next result can be diffed.
+    previousLedger: resolvedLedgerOf(base) ?? base.previousLedger,
     ...patch,
   };
 }
@@ -601,6 +630,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         lifecycle: "submitting",
         anonymized: signal.anonymized,
         peopleCount: signal.peopleCount,
+        explainContext: signal.explainContext ?? null,
       });
       const detail = expression(`anonymized=${signal.anonymized}, people=${signal.peopleCount}`);
       const { log, seq } = appendLog(started, "lifecycle", "submitting", detail);

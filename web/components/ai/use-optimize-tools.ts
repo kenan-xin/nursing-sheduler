@@ -19,7 +19,13 @@ import {
 } from "@/lib/store";
 import { deriveOptimizeReadiness } from "@/lib/optimize/optimize-readiness";
 import { terminalHeading } from "@/lib/optimize/run-display";
-import type { OptimizeRunView } from "@/lib/optimize/run-view";
+import { resolvedLedgerOf, type OptimizeRunView } from "@/lib/optimize/run-view";
+import {
+  diffLedgers,
+  summarizeLedger,
+  type LedgerDiff,
+  type LedgerSummary,
+} from "@/lib/optimize/explanation";
 import {
   isRunLive,
   isRunStale,
@@ -49,6 +55,11 @@ export interface OptimizeRunSummary {
   rosterOpened: boolean;
   /** The run was built from an earlier version of the schedule than the one now open. */
   stale: boolean;
+  /**
+   * a5pb (experimental): where the points went (per rule, nurse and date) and what
+   * changed since the previous run, read from the solver's penalty ledger.
+   */
+  explanation: RunExplanationSummary | null;
   guidance: string;
 }
 
@@ -146,6 +157,22 @@ function guidanceFor(
   );
 }
 
+export interface RunExplanationSummary {
+  /** Points per rule (lost first), and the nurses and dates that lost the most. */
+  score: LedgerSummary;
+  /** Change against the previous run on this screen, by rule id; null for the first run. */
+  sinceLastRun: LedgerDiff | null;
+}
+
+function summarizeExplanation(view: OptimizeRunView): RunExplanationSummary | null {
+  const ledger = resolvedLedgerOf(view);
+  if (ledger === null) return null;
+  return {
+    score: summarizeLedger(ledger),
+    sinceLastRun: view.previousLedger ? diffLedgers(view.previousLedger, ledger) : null,
+  };
+}
+
 /** Project the screen's run view into what the model may read. Pure. */
 export function summarizeOptimizeRun(
   view: OptimizeRunView,
@@ -169,6 +196,7 @@ export function summarizeOptimizeRun(
     rosterSaved,
     rosterOpened: followUp === "opened",
     stale,
+    explanation: stale ? null : summarizeExplanation(view),
     guidance: guidanceFor(view, rosterSaved, lastRequest, stale, followUp),
   };
 }

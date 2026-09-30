@@ -680,6 +680,7 @@ class JobController:
                 "score": job.result.score,
                 "solver_status": job.result.solver_status,
                 "termination_reason": job.result.termination_reason,
+                "explanation": job.result.explanation,
                 "artifact_name": job.artifact_name,
             },
             occurred_at=occurred_at,

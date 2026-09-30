@@ -62,6 +62,11 @@ class Context:
 
     # Optimization objective (expression type varies by solver)
     objective: Any = 0
+    # v2 penalty ledger: one (preference index, (d, s, p) key, weight, expression)
+    # row per finite objective term, read after the solve by explain.read_ledger.
+    objective_terms: list[tuple[Any, Any, Any, Any]] = field(default_factory=list)
+    # Index of the preference whose handler is running, set by scheduler.schedule.
+    current_preference: int | None = None
 
     def __post_init__(self) -> None:
         self.compiled_schedule = self.scenario.compiled_schedule

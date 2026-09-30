@@ -36,7 +36,7 @@ from ..roster_container import (
     OptimizationExecutionError,
     build_roster_container,
 )
-from .models import Job, JobFailure, OptimizationOutcome, OptimizationResult, StoredArtifact
+from .models import Job, JobFailure, JobPurpose, OptimizationOutcome, OptimizationResult, StoredArtifact
 
 EventCallback = Callable[[str, dict[str, Any], int | None], None]
 StopCallback = Callable[[], bool]
@@ -99,6 +99,9 @@ class OptimizationRunner:
         day-state handoff. Expected failures are returned as `JobFailure`.
         """
         roster_payloads: list[dict[str, Any]] = []
+        # v2 run explanation (ledger, or infeasibility core and fixes); ordinary runs only.
+        explanations: list[dict[str, Any]] = []
+        explain = job.request.purpose == JobPurpose.ORDINARY
 
         def publish_progress(payload: ScheduleProgress) -> None:
             """Normalize scheduler progress into job-domain events."""
@@ -117,7 +120,9 @@ class OptimizationRunner:
             progress_callback=publish_progress,
             should_stop=should_stop,
             on_roster=roster_payloads.append,
+            on_explanation=explanations.append if explain else None,
         )
+        explanation = explanations[0] if explanations else None
         stop_requested_when_solver_returned = should_stop is not None and should_stop()
 
         normalized_status = schedule_result.solver_status
@@ -128,6 +133,7 @@ class OptimizationRunner:
                     score=None,
                     solver_status=normalized_status,
                     termination_reason="infeasibility_proven",
+                    explanation=explanation,
                 ),
                 artifact=None,
             )
@@ -192,6 +198,7 @@ class OptimizationRunner:
                 score=schedule_result.score,
                 solver_status=normalized_status,
                 termination_reason=termination_reason,
+                explanation=explanation,
             ),
             artifact=StoredArtifact(
                 name=f"nurse-scheduling-{created_at:%Y%m%dT%H%M%SZ}.roster.json",

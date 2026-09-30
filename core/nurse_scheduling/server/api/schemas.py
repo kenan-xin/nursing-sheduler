@@ -18,7 +18,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import quote
 
 from pydantic import BaseModel
@@ -177,6 +177,8 @@ class OptimizationResultResponse(BaseModel):
     """Original solver status."""
     termination_reason: str | None
     """Normalized reason solver execution stopped."""
+    explanation: dict[str, Any] | None = None
+    """v2: penalty ledger (feasible) or infeasibility core and fixes."""
 
 
 class JobErrorResponse(BaseModel):
@@ -307,6 +309,7 @@ class JobResponse(BaseModel):
                     score=job.result.score,
                     solver_status=job.result.solver_status,
                     termination_reason=job.result.termination_reason,
+                    explanation=job.result.explanation,
                 )
                 if job.result is not None
                 else None

@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, NamedTuple
 
-from . import exporter, preference_types
+from . import exporter, explain, preference_types
 from .context import Context
 from .loader import load_data
 from .model_build_stats import ModelBuildStats, emit_model_build_stats, start_model_build_step
@@ -204,6 +204,7 @@ def schedule(
     forced_solution: Mapping[tuple[int, int, int], int] | None = None,
     *,
     on_roster: Callable[[dict], None] | None = None,
+    on_explanation: Callable[[dict], None] | None = None,
 ) -> ScheduleResult:
     progress_started_at = time.monotonic()
     _emit_phase_progress(
@@ -378,6 +379,7 @@ def schedule(
     # TODO: Check no duplicated preferences
     # TODO: Check no overlapping preferences
     for i, preference in enumerate(ctx.scenario.preferences):
+        ctx.current_preference = i
         step_started_at, start_counts = start_model_build_step(
             model_build_stats_callback,
             ctx,
@@ -487,6 +489,8 @@ def schedule(
     # never fires the callback. The return contract below is unchanged.
     if on_roster is not None:
         on_roster(_build_roster_payload(ctx, prettify))
+    if on_explanation is not None:
+        on_explanation({"kind": "ledger", "ledger": explain.read_ledger(ctx)})
     solution = {}
     for d, s, p in ctx.shifts:
         solution[(d, s, p)] = ctx.solver.get_value(ctx.shifts[(d, s, p)])

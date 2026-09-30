@@ -1,0 +1,304 @@
+# a5pb patch against genie 1bf4b85 (experimental branch exp/timefold-on-cpsat).
+# hunk: penalty ledger: add_objective records (preference, day/shift/person key, weight, term); scheduler on_explanation hands explain.read_ledger to the runner, which stores it on OptimizationResult.explanation (redis, API, SSE)
+
+diff --git a/core/nurse_scheduling/context.py b/core/nurse_scheduling/context.py
+index 0242cfd..d2bba3c 100644
+--- a/core/nurse_scheduling/context.py
++++ b/core/nurse_scheduling/context.py
+@@ -62,6 +62,11 @@ class Context:
+ 
+     # Optimization objective (expression type varies by solver)
+     objective: Any = 0
++    # v2 penalty ledger: one (preference index, (d, s, p) key, weight, expression)
++    # row per finite objective term, read after the solve by explain.read_ledger.
++    objective_terms: list[tuple[Any, Any, Any, Any]] = field(default_factory=list)
++    # Index of the preference whose handler is running, set by scheduler.schedule.
++    current_preference: int | None = None
+ 
+     def __post_init__(self) -> None:
+         self.compiled_schedule = self.scenario.compiled_schedule
+diff --git a/core/nurse_scheduling/preference_types.py b/core/nurse_scheduling/preference_types.py
+index d802114..f4b1fc2 100644
+--- a/core/nurse_scheduling/preference_types.py
++++ b/core/nurse_scheduling/preference_types.py
+@@ -148,7 +148,7 @@ def shift_type_requirements(
+ 
+                 # Add the objective
+                 weight = preference.weight
+-                utils.add_objective(ctx, weight, diff)
++                utils.add_objective(ctx, weight, diff, key=(d, ss[0] if len(ss) == 1 else None, None))
+                 ctx.reports.append(Report(f"shift_type_requirements_{diff_var_name}", diff, lambda x: x == 0))
+ 
+ 
+@@ -182,7 +182,7 @@ def shift_request(
+                 # and LEAVE day-states. sum_s shifts is 0/1 (exactly one
+                 # day-state per day), so it is the worked-day indicator.
+                 worked_sum = sum(ctx.shifts[(d, s, p)] for s in range(ctx.n_shift_types))
+-                utils.add_objective(ctx, weight, worked_sum)
++                utils.add_objective(ctx, weight, worked_sum, key=(d, None, p))
+                 ctx.reports.append(
+                     Report(f"shift_request_pref_{preference_idx}_d_{d}_p_{p}_worked", worked_sum, lambda x: x == 1)
+                 )
+@@ -195,7 +195,7 @@ def shift_request(
+                             # A leave day is also a day off: a hard OFF (e.g. on a group row) plus a
+                             # member's leave pin is not a conflict (bug hunt B5, bead 99db).
+                             off_expr = off_expr + ctx.leaves[(d, p)]
+-                        utils.add_objective(ctx, weight, off_expr)
++                        utils.add_objective(ctx, weight, off_expr, key=(d, s, p))
+                         ctx.reports.append(
+                             Report(
+                                 f"shift_request_pref_{preference_idx}_d_{d}_p_{p}_offs",
+@@ -217,7 +217,7 @@ def shift_request(
+                             )
+                         )
+                     else:
+-                        utils.add_objective(ctx, weight, ctx.shifts[(d, s, p)])
++                        utils.add_objective(ctx, weight, ctx.shifts[(d, s, p)], key=(d, s, p))
+                         ctx.reports.append(
+                             Report(
+                                 f"shift_request_pref_{preference_idx}_d_{d}_s_{s}_p_{p}_shifts",
+@@ -289,7 +289,7 @@ def shift_type_successions(
+                     is_match_var_name = f"{unique_var_prefix}_is_match"
+                     ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
+                     ctx.solver.add_constraint(is_match == 1)
+-                    utils.add_objective(ctx, preference.weight, is_match)
++                    utils.add_objective(ctx, preference.weight, is_match, key=(d_begin, None, p))
+                     ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 1))
+                     continue
+ 
+@@ -317,7 +317,7 @@ def shift_type_successions(
+                     # objective weight makes 0 strictly preferred.
+                     ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
+                     ctx.solver.add_constraint(is_match >= actual_n_matched - target_n_matched + 1)
+-                    utils.add_objective(ctx, weight, is_match)
++                    utils.add_objective(ctx, weight, is_match, key=(d_begin, None, p))
+                     ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 0))
+                     continue
+                 if is_literal_pattern and ctx.solver.should_use_bool_and_var(len(pattern_element_matches)):
+@@ -334,7 +334,7 @@ def shift_type_successions(
+                         (0, target_n_matched),
+                     )
+ 
+-                utils.add_objective(ctx, weight, is_match)
++                utils.add_objective(ctx, weight, is_match, key=(d_begin, None, p))
+                 ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 1))
+ 
+ 
+@@ -395,7 +395,7 @@ def shift_count(
+                 # Use abstracted squared equality method
+                 ctx.solver.add_squared_equality(squared, abs_diff, (0, max_abs_diff))
+                 # Add the objective
+-                utils.add_objective(ctx, weight, squared)
++                utils.add_objective(ctx, weight, squared, key=(None, None, p))
+                 ctx.reports.append(Report(f"shift_count_{squared_var_name}", squared, lambda x: x == 0))
+             else:
+                 expr_var_name = f"{unique_var_prefix}_expr"
+@@ -414,7 +414,7 @@ def shift_count(
+                     T,
+                     (0, max_x),
+                 )
+-                utils.add_objective(ctx, weight, expr)
++                utils.add_objective(ctx, weight, expr, key=(None, None, p))
+                 # TODO: Be aware of signs of `weight`?
+                 ctx.reports.append(Report(f"shift_count_{unique_var_prefix}_expr", expr, lambda x: x))
+ 
+@@ -491,7 +491,7 @@ def shift_affinity(
+                         (0, 2),
+                     )
+                     weight = preference.weight
+-                    utils.add_objective(ctx, weight, is_match)
++                    utils.add_objective(ctx, weight, is_match, key=(d, None, None))
+                     ctx.reports.append(
+                         Report(f"shift_affinity_{unique_var_prefix}_is_match", is_match, lambda x: x == 1)
+                     )
+diff --git a/core/nurse_scheduling/scheduler.py b/core/nurse_scheduling/scheduler.py
+index 5d58893..6ebe862 100644
+--- a/core/nurse_scheduling/scheduler.py
++++ b/core/nurse_scheduling/scheduler.py
+@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
+ from dataclasses import dataclass, replace
+ from typing import Any, NamedTuple
+ 
+-from . import exporter, preference_types
++from . import exporter, explain, preference_types
+ from .context import Context
+ from .loader import load_data
+ from .model_build_stats import ModelBuildStats, emit_model_build_stats, start_model_build_step
+@@ -204,6 +204,7 @@ def schedule(
+     forced_solution: Mapping[tuple[int, int, int], int] | None = None,
+     *,
+     on_roster: Callable[[dict], None] | None = None,
++    on_explanation: Callable[[dict], None] | None = None,
+ ) -> ScheduleResult:
+     progress_started_at = time.monotonic()
+     _emit_phase_progress(
+@@ -378,6 +379,7 @@ def schedule(
+     # TODO: Check no duplicated preferences
+     # TODO: Check no overlapping preferences
+     for i, preference in enumerate(ctx.scenario.preferences):
++        ctx.current_preference = i
+         step_started_at, start_counts = start_model_build_step(
+             model_build_stats_callback,
+             ctx,
+@@ -487,6 +489,8 @@ def schedule(
+     # never fires the callback. The return contract below is unchanged.
+     if on_roster is not None:
+         on_roster(_build_roster_payload(ctx, prettify))
++    if on_explanation is not None:
++        on_explanation({"kind": "ledger", "ledger": explain.read_ledger(ctx)})
+     solution = {}
+     for d, s, p in ctx.shifts:
+         solution[(d, s, p)] = ctx.solver.get_value(ctx.shifts[(d, s, p)])
+diff --git a/core/nurse_scheduling/server/api/schemas.py b/core/nurse_scheduling/server/api/schemas.py
+index 63a1a4e..d8ab1c9 100644
+--- a/core/nurse_scheduling/server/api/schemas.py
++++ b/core/nurse_scheduling/server/api/schemas.py
+@@ -18,7 +18,7 @@
+ # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ 
+ from datetime import datetime
+-from typing import Literal
++from typing import Any, Literal
+ from urllib.parse import quote
+ 
+ from pydantic import BaseModel
+@@ -177,6 +177,8 @@ class OptimizationResultResponse(BaseModel):
+     """Original solver status."""
+     termination_reason: str | None
+     """Normalized reason solver execution stopped."""
++    explanation: dict[str, Any] | None = None
++    """v2: penalty ledger (feasible) or infeasibility core and fixes."""
+ 
+ 
+ class JobErrorResponse(BaseModel):
+@@ -307,6 +309,7 @@ class JobResponse(BaseModel):
+                     score=job.result.score,
+                     solver_status=job.result.solver_status,
+                     termination_reason=job.result.termination_reason,
++                    explanation=job.result.explanation,
+                 )
+                 if job.result is not None
+                 else None
+diff --git a/core/nurse_scheduling/server/jobs/controller.py b/core/nurse_scheduling/server/jobs/controller.py
+index 04d9df5..eb721de 100644
+--- a/core/nurse_scheduling/server/jobs/controller.py
++++ b/core/nurse_scheduling/server/jobs/controller.py
+@@ -680,6 +680,7 @@ class JobController:
+                 "score": job.result.score,
+                 "solver_status": job.result.solver_status,
+                 "termination_reason": job.result.termination_reason,
++                "explanation": job.result.explanation,
+                 "artifact_name": job.artifact_name,
+             },
+             occurred_at=occurred_at,
+diff --git a/core/nurse_scheduling/server/jobs/models.py b/core/nurse_scheduling/server/jobs/models.py
+index 63f70f2..572a231 100644
+--- a/core/nurse_scheduling/server/jobs/models.py
++++ b/core/nurse_scheduling/server/jobs/models.py
+@@ -91,6 +91,8 @@ class OptimizationResult:
+     """Original status reported by the selected solver."""
+     termination_reason: str | None = None
+     """Normalized explanation of why solver execution stopped."""
++    explanation: dict[str, Any] | None = None
++    """v2: penalty ledger (feasible) or infeasibility core and fixes, JSON-safe."""
+ 
+ 
+ @dataclass(frozen=True)
+diff --git a/core/nurse_scheduling/server/jobs/runner.py b/core/nurse_scheduling/server/jobs/runner.py
+index 2863844..6f86010 100644
+--- a/core/nurse_scheduling/server/jobs/runner.py
++++ b/core/nurse_scheduling/server/jobs/runner.py
+@@ -36,7 +36,7 @@ from ..roster_container import (
+     OptimizationExecutionError,
+     build_roster_container,
+ )
+-from .models import Job, JobFailure, OptimizationOutcome, OptimizationResult, StoredArtifact
++from .models import Job, JobFailure, JobPurpose, OptimizationOutcome, OptimizationResult, StoredArtifact
+ 
+ EventCallback = Callable[[str, dict[str, Any], int | None], None]
+ StopCallback = Callable[[], bool]
+@@ -99,6 +99,9 @@ class OptimizationRunner:
+         day-state handoff. Expected failures are returned as `JobFailure`.
+         """
+         roster_payloads: list[dict[str, Any]] = []
++        # v2 run explanation (ledger, or infeasibility core and fixes); ordinary runs only.
++        explanations: list[dict[str, Any]] = []
++        explain = job.request.purpose == JobPurpose.ORDINARY
+ 
+         def publish_progress(payload: ScheduleProgress) -> None:
+             """Normalize scheduler progress into job-domain events."""
+@@ -117,7 +120,9 @@ class OptimizationRunner:
+             progress_callback=publish_progress,
+             should_stop=should_stop,
+             on_roster=roster_payloads.append,
++            on_explanation=explanations.append if explain else None,
+         )
++        explanation = explanations[0] if explanations else None
+         stop_requested_when_solver_returned = should_stop is not None and should_stop()
+ 
+         normalized_status = schedule_result.solver_status
+@@ -128,6 +133,7 @@ class OptimizationRunner:
+                     score=None,
+                     solver_status=normalized_status,
+                     termination_reason="infeasibility_proven",
++                    explanation=explanation,
+                 ),
+                 artifact=None,
+             )
+@@ -192,6 +198,7 @@ class OptimizationRunner:
+                 score=schedule_result.score,
+                 solver_status=normalized_status,
+                 termination_reason=termination_reason,
++                explanation=explanation,
+             ),
+             artifact=StoredArtifact(
+                 name=f"nurse-scheduling-{created_at:%Y%m%dT%H%M%SZ}.roster.json",
+diff --git a/core/nurse_scheduling/server/stores/redis.py b/core/nurse_scheduling/server/stores/redis.py
+index 9657673..5bf876b 100644
+--- a/core/nurse_scheduling/server/stores/redis.py
++++ b/core/nurse_scheduling/server/stores/redis.py
+@@ -1139,6 +1139,7 @@ class RedisJobStore:
+                     "score": job.result.score,
+                     "solver_status": job.result.solver_status,
+                     "termination_reason": job.result.termination_reason,
++                    "explanation": job.result.explanation,
+                 }
+                 if job.result is not None
+                 else None
+@@ -1186,6 +1187,7 @@ class RedisJobStore:
+                     score=result.get("score"),
+                     solver_status=result["solver_status"],
+                     termination_reason=result.get("termination_reason"),
++                    explanation=result.get("explanation"),
+                 )
+                 if result is not None
+                 else None
+diff --git a/core/nurse_scheduling/utils.py b/core/nurse_scheduling/utils.py
+index 28f9947..1b994c8 100644
+--- a/core/nurse_scheduling/utils.py
++++ b/core/nurse_scheduling/utils.py
+@@ -32,7 +32,7 @@ def ensure_list(val):
+     return [val] if not isinstance(val, list) else val
+ 
+ 
+-def add_objective(ctx, weight, expression):
++def add_objective(ctx, weight, expression, key=None):
+     """
+     Add an objective term with the given weight.
+ 
+@@ -40,6 +40,7 @@ def add_objective(ctx, weight, expression):
+         ctx: Context object
+         weight: Weight for the objective term (can be inf/-inf for hard constraints)
+         expression: Expression to add to objective
++        key: Optional (day, shift type, person) indices naming the term in the v2 ledger
+     """
+     if weight == math.inf:
+         ctx.solver.add_constraint(expression == 1)
+@@ -47,6 +48,7 @@ def add_objective(ctx, weight, expression):
+         ctx.solver.add_constraint(expression == 0)
+     else:
+         ctx.objective += weight * expression
++        ctx.objective_terms.append((ctx.current_preference, key, weight, expression))
+ 
+ 
+ def _parse_single_date(date: str, date_range: "DateRange") -> datetime.date:
