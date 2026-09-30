@@ -94,9 +94,10 @@ async function seedPreviousRun(storage: RosterStorage) {
   return { jobId: "job-1", ownerId: "owner-1" };
 }
 
-/** The production run-residue cut, bound to this test's session. */
-function boundClear(session: SessionTransactionStorage) {
-  return async () => clearRunResidue({ sessionStorage: session, clearViewMetadata: () => true });
+/** The production run-residue cut, bound to this test's session and database. */
+function boundClear(session: SessionTransactionStorage, snapshotStore?: RosterStorage) {
+  return () =>
+    clearRunResidue({ sessionStorage: session, snapshotStore, clearViewMetadata: () => true });
 }
 
 /**
@@ -142,7 +143,7 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
     expect(session.getItem(OPTIMIZE_SESSION_STORAGE_KEY)).not.toBeNull();
 
     const order: string[] = [];
-    const clearStoredData = boundClear(session);
+    const clearStoredData = boundClear(session, storage);
     const outcome = await resetToNewSchedule({
       clearStoredData: async () => {
         order.push("stored-data");
@@ -163,7 +164,9 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
     expect(await storage.readWorking<RosterDocument>()).not.toBeNull();
     expect(await storage.readCandidate<RosterDocument>(seeded.jobId)).not.toBeNull();
     expect(await storage.readCurrentCandidate()).toMatchObject({ jobId: seeded.jobId });
-    expect(await storage.readSubmissionSnapshot(seeded.ownerId)).not.toBeNull();
+    // The snapshot the dropped retirement marker named is purged first, so dropping
+    // the marker strands nothing.
+    expect(await storage.readSubmissionSnapshot(seeded.ownerId)).toBeNull();
 
     // ORDER: the verified cut runs FIRST, so a failure can still be retried from an
     // intact workspace. The reverse order would destroy the scenario and only then
@@ -194,6 +197,29 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
     if (outcome.status !== "failed") throw new Error("unreachable");
     expect(outcome.storedData?.sessionResidue.sessionCleared).toBe(false);
     // The scenario is untouched, so the retry starts from the same place.
+    expect(resetScenario).not.toHaveBeenCalled();
+  });
+
+  it("keeps the retirement marker, and fails closed, when its snapshot cannot be purged", async () => {
+    const storage = openTab();
+    await seedPreviousRun(storage);
+    const session = seededSession();
+    const broken: RosterStorage = {
+      ...storage,
+      deleteSubmissionSnapshot: async () => {
+        throw new Error("IndexedDB refused");
+      },
+    };
+    const resetScenario = vi.fn(async () => committed());
+
+    const outcome = await resetToNewSchedule({
+      clearStoredData: boundClear(session, broken),
+      resetScenario,
+    });
+
+    expect(outcome).toMatchObject({ status: "failed", failure: "stored-data" });
+    expect(session.getItem(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY)).not.toBeNull();
+    expect(await storage.readSubmissionSnapshot("owner-1")).not.toBeNull();
     expect(resetScenario).not.toHaveBeenCalled();
   });
 

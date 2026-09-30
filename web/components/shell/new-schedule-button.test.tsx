@@ -19,7 +19,11 @@ import { NEW_SCHEDULE_FAILED_MESSAGE } from "@/lib/roster";
 import type { RosterDocument } from "@/lib/roster";
 import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
 import { EXAMPLE_SCHEDULE_FAILED_MESSAGE, StartOverCard } from "./new-schedule-button";
-import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
+import {
+  drainScenarioCommands,
+  mirrorOpenScheduleForRoster,
+  resetScenarioForTest,
+} from "@/lib/store/test-authority";
 
 // Focused contract for the shared reset presenter. F2 is its sole VISUAL owner
 // before F4 — R1 and R7 render it without editing it — so this pins both halves:
@@ -93,6 +97,7 @@ describe("StartOverCard — the confirmation gate", () => {
   it("keeps the previous schedule's roster with it; the new schedule starts with none (plq5 P2)", async () => {
     // Each schedule keeps its own roster, so New neither shows the previous roster in
     // the new schedule nor deletes it: reopening the old schedule brings it back.
+    await mirrorOpenScheduleForRoster();
     const previous = useAuthorityStore.getState().scenarioId!;
     const storage = currentRosterStorage();
     const document = await fixtureRosterDocument();
@@ -323,6 +328,7 @@ describe("StartOverCard — the 87-person example", () => {
   it("rides the normal import path — the example never shows the previous roster (plq5 P2)", async () => {
     // The example does whatever a normal import does: a fresh schedule with no roster
     // of its own, while the schedule it replaces keeps its roster.
+    await mirrorOpenScheduleForRoster();
     const previous = useAuthorityStore.getState().scenarioId!;
     const storage = currentRosterStorage();
     const document = await fixtureRosterDocument();

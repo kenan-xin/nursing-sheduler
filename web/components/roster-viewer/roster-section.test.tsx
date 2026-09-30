@@ -1044,7 +1044,7 @@ describe("RosterSection — empty-state Clear", () => {
     await waitFor(() => expect(screen.getByTestId("roster-clear")).toBeDefined());
     fireEvent.click(screen.getByTestId("roster-clear"));
     await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: /clear all roster data/i }));
+    fireEvent.click(screen.getByRole("button", { name: /clear this schedule's roster/i }));
 
     await waitFor(() => expect(screen.queryByTestId("roster-candidate-available")).toBeNull());
     const residue = await readResidue();
@@ -1069,7 +1069,7 @@ describe("RosterSection — empty-state Clear", () => {
     await waitFor(() => expect(screen.getByTestId("roster-clear")).toBeDefined());
     fireEvent.click(screen.getByTestId("roster-clear"));
     await waitFor(() => expect(screen.getByTestId("confirm-dialog")).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: /clear all roster data/i }));
+    fireEvent.click(screen.getByRole("button", { name: /clear this schedule's roster/i }));
 
     // Never a silent privacy success: the failure is stated, and the control is
     // still mounted so the user can try again.

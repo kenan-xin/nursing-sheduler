@@ -145,10 +145,9 @@ describe("each schedule keeps its own roster (plq5 P2)", () => {
 
     expect((await scenarioCommands.openSchedule(april)).ok).toBe(true);
     expect((await openRoster().readWorking<{ tag: string }>())?.document.tag).toBe("april");
-    expect((await scenarioCommands.listSchedules()).map((row) => row.hasRoster)).toEqual([
-      true,
-      false,
-    ]);
+    const rows = await scenarioCommands.listSchedules();
+    expect(rows.find((row) => row.scenarioId === april)?.hasRoster).toBe(true);
+    expect(rows.filter((row) => row.hasRoster)).toHaveLength(1);
   });
 
   it("bring-up hands the pre-P2 roster slot to a schedule", async () => {
@@ -168,5 +167,28 @@ describe("each schedule keeps its own roster (plq5 P2)", () => {
       revision: 3,
       possiblyOtherSchedule: true,
     });
+  });
+
+  it("clearing June's roster keeps April's and May's, and their chips", async () => {
+    const roster = createRosterStorageForDb(() => harness.db);
+    const ids = [await loadMonth("04"), await loadMonth("05"), await loadMonth("06")];
+    for (const id of ids) {
+      const scoped = roster.forScenario(id);
+      await scoped.promoteDocumentToWorking({
+        document: { tag: id },
+        validate: (document) => ({ ok: true, document }),
+        expectedWorkingRevision: null,
+        expectedClearEpoch: await scoped.getClearEpoch(),
+      });
+    }
+
+    expect(await roster.forScenario(ids[2]!).clearRosterData()).toMatchObject({
+      status: "cleared",
+    });
+
+    const chips = new Map(
+      (await scenarioCommands.listSchedules()).map((row) => [row.scenarioId, row.hasRoster]),
+    );
+    expect(ids.map((id) => chips.get(id))).toEqual([true, true, false]);
   });
 });

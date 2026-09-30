@@ -100,7 +100,7 @@ export interface NewScheduleResetDeps {
 export async function resetToNewSchedule(
   deps: NewScheduleResetDeps = {},
 ): Promise<NewScheduleResetOutcome> {
-  const clearStoredData = deps.clearStoredData ?? (async () => clearRunResidue());
+  const clearStoredData = deps.clearStoredData ?? (() => clearRunResidue());
 
   // 1. THE VERIFIED CUT, FIRST. A throw proves nothing was verified, so it is the
   //    same fail-closed answer as a `failed` report with residue.

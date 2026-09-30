@@ -214,7 +214,8 @@ export type CandidateCommitOutcome =
   | { status: "superseded"; current: CurrentCandidatePointer }
   /**
    * The caller's `isAbandoned` predicate answered true INSIDE the transaction,
-   * immediately before the first write. Nothing was written at all.
+   * immediately before the first write — or, scoped, the schedule no longer
+   * exists (plq5 P2). Nothing was written at all.
    *
    * Distinct from `superseded` (a real rival won on ordinal) and from
    * `stale-epoch` (a verified Clear moved under us): here the CALLER's audience
@@ -467,7 +468,9 @@ export interface RosterStorage {
   /**
    * Privacy purge: invalidate the epoch, purge the roster and snapshot stores
    * plus the candidate pointer, and verify the purge — all in ONE transaction,
-   * reporting failure if anything sensitive survived. The ordinal counter is
+   * reporting failure if anything sensitive survived. Scoped (`forScenario`), only
+   * that schedule's rows go; unscoped, every schedule's. The epoch bump is
+   * origin-wide either way (plq5 P2). The ordinal counter is
    * deliberately kept so ordinals stay monotonic across a Clear; it carries no
    * personal data.
    */
@@ -637,9 +640,19 @@ export function createRosterStorageForDb(
       isAbandoned?: () => boolean;
     }): Promise<CandidateCommitOutcome> {
       const handle = db();
-      return handle.transaction("rw", handle.roster, handle.meta, async () => {
+      // Scoped, the schedule's envelope joins the transaction: a capture landing
+      // after its schedule was deleted must not recreate orphan rows (plq5 P2).
+      const tables =
+        scenarioId === undefined
+          ? [handle.roster, handle.meta]
+          : [handle.roster, handle.meta, handle.scenarioEnvelopes];
+      return handle.transaction("rw", tables, async () => {
         const stale = await fenceEpoch(handle, input.expectedClearEpoch);
         if (stale) return stale;
+        if (scenarioId !== undefined && !(await handle.scenarioEnvelopes.get(scenarioId))) {
+          // Nothing written: the audience (the schedule itself) is gone.
+          return { status: "abandoned" as const };
+        }
 
         const pointer = await readMeta<CurrentCandidatePointer | null>(handle, pointerKey, null);
 
@@ -905,6 +918,19 @@ export function createRosterStorageForDb(
       // and is rejected by the fence. Nothing can observe the new epoch until
       // the purge is part of the same commit, so no post-Clear write is ever
       // purgeable and no survivor count can see one.
+      //
+      // plq5 P2: a SCOPED instance purges only its own schedule's rows (working,
+      // candidates, pointer, the snapshots staged from it); the unscoped one purges
+      // every schedule's. The epoch bump stays origin-wide either way.
+      const rosterRows = () =>
+        handle.roster.filter(
+          (row) =>
+            scenarioId === undefined ||
+            row.key === workingKey ||
+            row.key.startsWith(candidateKey("")),
+        );
+      const snapshotRows = () =>
+        handle.snapshot.filter((row) => scenarioId === undefined || row.scenarioId === scenarioId);
       return handle.transaction("rw", handle.roster, handle.snapshot, handle.meta, async () => {
         const epoch = (await readMeta(handle, META_CLEAR_EPOCH, 0)) + 1;
 
@@ -912,10 +938,14 @@ export function createRosterStorageForDb(
         // personal data, and resetting them would let a pre-Clear submission look
         // newer than it is, or let a recycled candidate version impersonate an
         // old one.
-        await handle.roster.clear();
-        await handle.snapshot.clear();
-        // Every schedule's pointer, and the pre-P2 origin-wide one.
-        await handle.meta.where("key").startsWith(META_CURRENT_CANDIDATE).delete();
+        await rosterRows().delete();
+        await snapshotRows().delete();
+        if (scenarioId === undefined) {
+          // Every schedule's pointer, and the pre-P2 origin-wide one.
+          await handle.meta.where("key").startsWith(META_CURRENT_CANDIDATE).delete();
+        } else {
+          await handle.meta.delete(pointerKey);
+        }
         await writeMeta(handle, META_CLEAR_EPOCH, epoch);
 
         // Verified inside the transaction, so the counts describe exactly the
@@ -924,8 +954,8 @@ export function createRosterStorageForDb(
         // decides), and an abort anywhere above rejects the whole call with the
         // stores and the epoch untouched.
         const remaining = {
-          roster: await handle.roster.count(),
-          snapshot: await handle.snapshot.count(),
+          roster: await rosterRows().count(),
+          snapshot: await snapshotRows().count(),
         };
         if (remaining.roster > 0 || remaining.snapshot > 0) {
           return { status: "failed" as const, epoch, remaining };

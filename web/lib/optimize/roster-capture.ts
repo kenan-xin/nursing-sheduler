@@ -447,8 +447,11 @@ export interface RosterCaptureGate {
   abandon(jobId: string): void;
   /** Whether `abandon` has been called for this job (retirement lane only). */
   isAbandoned(jobId: string): boolean;
-  /** A verified Clear happened: invalidate every entry it could still affect. */
-  notifyCleared(): Promise<void>;
+  /**
+   * A verified Clear happened: invalidate every entry it could still affect — only
+   * that schedule's when `scenarioId` is given (plq5 P2), else every entry.
+   */
+  notifyCleared(scenarioId?: string | null): Promise<void>;
   subscribe(listener: () => void): () => void;
 }
 
@@ -1384,15 +1387,19 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       return entries.get(jobId)?.abandoned ?? false;
     },
 
-    async notifyCleared() {
+    async notifyCleared(scenarioId = null) {
+      // plq5 P2: a Clear of one schedule settles only that schedule's captures.
+      const affected = [...entries.values()].filter(
+        (entry) => scenarioId === null || entry.scenarioId === scenarioId,
+      );
       const flights: Promise<unknown>[] = [];
-      for (const entry of entries.values()) {
+      for (const entry of affected) {
         if (entry.token !== null) continue;
         entry.invalidated = "cleared";
         if (entry.inFlight !== null) flights.push(entry.inFlight);
       }
       await Promise.all(flights);
-      for (const entry of entries.values()) {
+      for (const entry of affected) {
         if (entry.state.status === "dismissed" && entry.state.reason === "cleared") continue;
 
         // A COMMITTED entry must not keep claiming "saved in this browser" once F1

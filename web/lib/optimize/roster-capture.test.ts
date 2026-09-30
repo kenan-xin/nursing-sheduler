@@ -2066,9 +2066,16 @@ describe("roster capture — the visit fence at the commit linearization point",
   });
 });
 
+/** A store whose database holds the schedule's envelope (a scoped commit checks it). */
+async function storeWithSchedule(scenarioId: string): Promise<RosterStorage> {
+  const db = new ScenarioPersistenceDb(`roster-capture-test-${dbCounter++}`);
+  await db.scenarioEnvelopes.put({ scenarioId } as never);
+  return createRosterStorageForDb(() => db);
+}
+
 describe("roster capture — lands in the schedule the run was submitted from (plq5 P2)", () => {
   it("commits into the staging schedule's own slot, not the unscoped or another one", async () => {
-    const store = freshStore();
+    const store = await storeWithSchedule("april");
     // Staged while April was open; the gate itself holds the unscoped store.
     const capture = await stage(store.forScenario("april"), "own-april");
     const { gate } = harness(store);
@@ -2088,7 +2095,7 @@ describe("roster capture — lands in the schedule the run was submitted from (p
   });
 
   it("a durable dismissal after a reload reaches the displaying schedule's candidate", async () => {
-    const store = freshStore();
+    const store = await storeWithSchedule("april");
     const april = store.forScenario("april");
     const committed = await april.commitCandidate({
       jobId: "job-shown",
@@ -2109,5 +2116,19 @@ describe("roster capture — lands in the schedule the run was submitted from (p
     expect(outcome.status).toBe("dismissed");
     expect(await april.readCandidate("job-shown")).toBeNull();
     expect(await april.readCurrentCandidate()).toBeNull();
+  });
+
+  it("a Clear of one schedule settles only that schedule's captures", async () => {
+    const db = new ScenarioPersistenceDb(`roster-capture-test-${dbCounter++}`);
+    await db.scenarioEnvelopes.bulkPut([{ scenarioId: "april" }, { scenarioId: "may" }] as never);
+    const store = createRosterStorageForDb(() => db);
+    const { gate } = harness(store);
+    await gate.capture(request("job-april", await stage(store.forScenario("april"), "own-a")));
+    await gate.capture(request("job-may", await stage(store.forScenario("may"), "own-m")));
+
+    await gate.notifyCleared("april");
+
+    expect(gate.getState("job-april")).toMatchObject({ status: "dismissed", reason: "cleared" });
+    expect(gate.getState("job-may")).toMatchObject({ status: "committed" });
   });
 });

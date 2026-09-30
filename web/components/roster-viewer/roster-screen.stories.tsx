@@ -93,7 +93,7 @@ export const ClearRoster: Story = {
   play: async ({ canvas, userEvent }) => {
     await expect(await canvas.findByTestId("roster-viewer")).toBeVisible();
     await userEvent.click(canvas.getByTestId("roster-clear"));
-    const confirm = await screen.findByRole("button", { name: "Clear all roster data" });
+    const confirm = await screen.findByRole("button", { name: "Clear this schedule's roster" });
     await waitFor(() => expect(confirm).toBeVisible());
     await userEvent.click(confirm);
     await expect(await canvas.findByTestId("roster-section-empty")).toBeVisible();

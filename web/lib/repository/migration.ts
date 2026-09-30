@@ -322,8 +322,8 @@ export async function migrateLegacyScenarioRecord(
  * so a working row promoted from the pointed candidate still names it. The owner is
  * the newest schedule whose range and people match the roster's own calendar and
  * people; with no match it is the most recent schedule, and the working row is marked
- * `possiblyOtherSchedule`. A row is never dropped: one whose target
- * key is already taken stays where it is.
+ * `possiblyOtherSchedule`. A row is never dropped: one whose target key is already
+ * taken stays where it is, and a diagnostic names it (the next boot retries).
  */
 export async function migrateLegacyRosterSlot(db: NurseSchedulerDb): Promise<void> {
   await db.transaction("rw", [db.roster, db.meta, db.scenarioEnvelopes], async () => {
@@ -351,20 +351,28 @@ export async function migrateLegacyRosterSlot(db: NurseSchedulerDb): Promise<voi
     const matched = envelopes.find((envelope) => rosterMatches(envelope.scenario, probe));
     const scenarioId = (matched ?? envelopes[0]!).scenarioId;
 
-    if (
-      working !== undefined &&
-      (await db.roster.get(rosterKeys.working(scenarioId))) === undefined
-    ) {
-      await db.roster.put({
-        ...working,
-        key: rosterKeys.working(scenarioId),
-        ...(matched ? {} : { possiblyOtherSchedule: true as const }),
-      });
-      await db.roster.delete(working.key);
+    const kept = (key: string) =>
+      console.warn(
+        `[plq5] pre-P2 roster row "${key}" kept in place: schedule ${scenarioId} already has one`,
+      );
+    if (working !== undefined) {
+      if ((await db.roster.get(rosterKeys.working(scenarioId))) === undefined) {
+        await db.roster.put({
+          ...working,
+          key: rosterKeys.working(scenarioId),
+          ...(matched ? {} : { possiblyOtherSchedule: true as const }),
+        });
+        await db.roster.delete(working.key);
+      } else {
+        kept(working.key);
+      }
     }
     for (const row of candidates) {
       const key = rosterKeys.candidate(row.key.slice("candidate:".length), scenarioId);
-      if ((await db.roster.get(key)) !== undefined) continue;
+      if ((await db.roster.get(key)) !== undefined) {
+        kept(row.key);
+        continue;
+      }
       await db.roster.put({ ...row, key });
       await db.roster.delete(row.key);
     }
@@ -373,6 +381,8 @@ export async function migrateLegacyRosterSlot(db: NurseSchedulerDb): Promise<voi
       if ((await db.meta.get(key)) === undefined) {
         await db.meta.put({ key, value: pointerRow.value });
         await db.meta.delete(pointerRow.key);
+      } else {
+        kept(pointerRow.key);
       }
     }
   });

@@ -235,8 +235,8 @@ export const WorkingRosterPanel = forwardRef<WorkingRosterPanelHandle, WorkingRo
           open={confirmClear}
           onOpenChange={setConfirmClear}
           title="Clear roster & stored data?"
-          description="This permanently removes the roster on screen, every saved result, and all roster data stored in this browser. This cannot be undone."
-          confirmLabel="Clear all roster data"
+          description="This permanently removes this schedule's roster on screen, its saved results and its stored run data from this browser. Other schedules keep theirs. This cannot be undone."
+          confirmLabel="Clear this schedule's roster"
           variant="destructive"
           onConfirm={() => void onConfirmClear()}
         />

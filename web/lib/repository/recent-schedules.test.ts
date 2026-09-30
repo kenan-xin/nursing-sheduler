@@ -2,7 +2,7 @@
 // 30-unpinned limit, against a real IndexedDB.
 
 import "fake-indexeddb/auto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RECENT_SCHEDULES_LIMIT } from "@/lib/scenario";
 import { isRepositoryError } from "./errors";
 import { LEASE_TTL_MS } from "./leases";
@@ -358,5 +358,23 @@ describe("a roster per schedule (plq5 P2)", () => {
     const working = await h.db.roster.get(rosterKeys.working(b.envelope.scenarioId));
     expect(working?.possiblyOtherSchedule).toBe(true);
     expect(await h.db.roster.count()).toBe(1);
+  });
+
+  it("migration keeps a legacy row whose target is taken, and says so", async () => {
+    const h = createHarness();
+    const a = await load(h, "tab-1");
+    const id = a.envelope.scenarioId;
+    await h.db.roster.put(rosterRow(rosterKeys.working(id), "04", []));
+    await h.db.roster.put(rosterRow(rosterKeys.working(), "09", ["zed"]));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await migrateLegacyRosterSlot(h.db);
+
+    expect(await h.db.roster.get(rosterKeys.working())).toBeDefined();
+    expect((await h.db.roster.get(rosterKeys.working(id)))?.document).toMatchObject({
+      context: { calendar: [{ iso: "2026-04-01" }, { iso: "2026-04-28" }] },
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"working" kept in place'));
+    warn.mockRestore();
   });
 });

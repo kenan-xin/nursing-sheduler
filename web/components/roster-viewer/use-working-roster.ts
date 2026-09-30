@@ -89,6 +89,7 @@ export function useWorkingRoster(): WorkingRosterState {
     setCandidate(pointer);
     if (pointer !== null) {
       const row = await storage.readCandidate<RosterDocument>(pointer.jobId);
+      if (useAuthorityStore.getState().scenarioId !== scenarioId) return;
       setCandidateDocument(row ? upgradeStoredRosterDocument(row.document) : null);
     } else {
       setCandidateDocument(null);

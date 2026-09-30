@@ -1891,9 +1891,15 @@ describe("commitCandidate — the caller's visit fence", () => {
   });
 });
 
+/** Schedules exist (a scoped candidate commit needs its envelope). Keys only matter. */
+async function withSchedules(db: ScenarioPersistenceDb, ...ids: string[]) {
+  for (const scenarioId of ids) await db.scenarioEnvelopes.put({ scenarioId } as never);
+}
+
 describe("one roster per schedule (plq5 P2)", () => {
   it("scopes working, candidates and the pointer; the version counter stays origin-wide", async () => {
     const { db, storage } = openTab(freshDbName());
+    await withSchedules(db, "april", "may");
     const [april, may] = [storage.forScenario("april"), storage.forScenario("may")];
     const epoch = await storage.getClearEpoch();
 
@@ -1944,8 +1950,9 @@ describe("one roster per schedule (plq5 P2)", () => {
     expect((await storage.readSubmissionSnapshot("owner-1"))?.scenarioId).toBe("april");
   });
 
-  it("Clear stays origin-wide: every schedule's roster and pointer go, and the epoch fences all", async () => {
-    const { storage } = openTab(freshDbName());
+  it("an unscoped Clear purges every schedule's roster and pointer, and the epoch fences all", async () => {
+    const { db, storage } = openTab(freshDbName());
+    await withSchedules(db, "april");
     const april = storage.forScenario("april");
     const epoch = await storage.getClearEpoch();
     await april.commitCandidate({
@@ -1963,5 +1970,55 @@ describe("one roster per schedule (plq5 P2)", () => {
       expectedClearEpoch: epoch,
     });
     expect(late.status).toBe("stale-epoch");
+  });
+
+  it("a scoped Clear of June keeps April's and May's rosters, pointers and snapshots", async () => {
+    const { db, storage } = openTab(freshDbName());
+    await withSchedules(db, "april", "may", "june");
+    const epoch = await storage.getClearEpoch();
+    for (const [ordinal, id] of ["april", "may", "june"].entries()) {
+      const scoped = storage.forScenario(id);
+      await scoped.allocateSubmissionSnapshot({
+        ownerId: `owner-${id}`,
+        payload: {},
+        expectedClearEpoch: epoch,
+      });
+      await scoped.commitCandidate({
+        jobId: `job-${id}`,
+        submissionOrdinal: ordinal + 1,
+        document: { tag: id },
+        expectedClearEpoch: epoch,
+      });
+    }
+
+    expect(await storage.forScenario("june").clearRosterData()).toEqual({
+      status: "cleared",
+      epoch: epoch + 1,
+    });
+
+    const june = storage.forScenario("june");
+    expect(await june.readWorking()).toBeNull();
+    expect(await june.readCurrentCandidate()).toBeNull();
+    expect(await june.readCandidate("job-june")).toBeNull();
+    expect(await storage.readSubmissionSnapshot("owner-june")).toBeNull();
+    for (const id of ["april", "may"]) {
+      const kept = storage.forScenario(id);
+      expect((await kept.readWorking<{ tag: string }>())?.document.tag).toBe(id);
+      expect((await kept.readCurrentCandidate())?.jobId).toBe(`job-${id}`);
+      expect(await storage.readSubmissionSnapshot(`owner-${id}`)).not.toBeNull();
+    }
+  });
+
+  it("a capture for a deleted schedule writes nothing (no orphan rows)", async () => {
+    const { db, storage } = openTab(freshDbName());
+    const outcome = await storage.forScenario("gone").commitCandidate({
+      jobId: "job-late",
+      submissionOrdinal: 1,
+      document: { tag: "late" },
+      expectedClearEpoch: await storage.getClearEpoch(),
+    });
+    expect(outcome).toEqual({ status: "abandoned" });
+    expect(await db.roster.count()).toBe(0);
+    expect(await storage.forScenario("gone").readCurrentCandidate()).toBeNull();
   });
 });

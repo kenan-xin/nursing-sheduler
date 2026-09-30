@@ -23,7 +23,7 @@
 // from New schedule (the broader workspace reset). It never introduces
 // Forget/Abandon/Optimize-again terminology or a technical recovery copy.
 
-import { rosterStorage, type RosterStorage } from "@/lib/store";
+import { rosterStorageFor, useAuthorityStore, type RosterStorage } from "@/lib/store";
 // DIRECT LEAF IMPORTS, not the `@/lib/optimize` and `@/lib/roster-viewer` barrels.
 // Both barrels' export surfaces reach back into `@/lib/roster`, so importing them from
 // inside the roster domain closed two real ESM cycles. Ownership is unchanged: F2 still
@@ -33,9 +33,14 @@ import { ROSTER_VIEW_PREFERENCE_KEY } from "@/lib/roster-viewer/view-preference"
 import {
   clearAllOptimizeSessions,
   clearRetirementPending,
+  OPTIMIZE_RETIRE_PENDING_STORAGE_KEY,
   type SessionTransactionStorage,
 } from "@/lib/optimize/session-transaction";
 import { acquireSessionStorage } from "@/lib/optimize/session-storage";
+import {
+  purgeRetiredSubmissionSnapshot,
+  type SubmissionSnapshotStore,
+} from "@/lib/optimize/submission-snapshot";
 
 /** The residue report for the session-storage cut. */
 export interface SessionResidueReport {
@@ -93,6 +98,10 @@ export interface RosterClearDeps {
 export async function clearRosterDataAndNotify(
   deps: RosterClearDeps = {},
 ): Promise<RosterClearOutcome> {
+  // plq5 P2: the Roster screen clears the OPEN schedule's roster only; other
+  // schedules keep theirs. (The epoch bump inside the purge stays origin-wide.)
+  const scenarioId = useAuthorityStore.getState().scenarioId;
+
   // 1. INVALIDATE F2 CAPTURE AUTHORITY FIRST. Settling the gate's in-flight
   //    captures before the purge means none can land fresh sensitive data on the
   //    far side of the destructive work. A capture that reads the NEW epoch after
@@ -102,7 +111,7 @@ export async function clearRosterDataAndNotify(
   //    gate is reported honestly in the outcome.
   let captureNotified = true;
   try {
-    await (deps.notifyCapture ?? notifyRosterCaptureCleared)();
+    await (deps.notifyCapture ?? (() => notifyRosterCaptureCleared(scenarioId)))();
   } catch {
     captureNotified = false;
   }
@@ -113,7 +122,7 @@ export async function clearRosterDataAndNotify(
   //    the new epoch until the purge is part of the same commit. A rejection
   //    (rare: a broken IndexedDB) is caught so the caller gets a report, not an
   //    unhandled promise.
-  const storage = deps.rosterStorage ?? rosterStorage;
+  const storage = deps.rosterStorage ?? rosterStorageFor(scenarioId);
   let purgeStatus: "cleared" | "failed" = "failed";
   let epoch = 0;
   let remaining = { roster: 0, snapshot: 0 };
@@ -180,11 +189,24 @@ export interface RunResidueOutcome {
  * it was submitted from. Only this tab's run residue goes, so the new schedule's
  * Optimize screen does not reattach to the previous run: the optimize session
  * records, the retirement marker and the roster view metadata, each verified.
+ *
+ * The legacy retirement marker is the only handle to the snapshot it names, so that
+ * snapshot is purged FIRST; if its removal is not proven, the marker is kept (and
+ * the cut reports failure) rather than stranding the snapshot's real identities.
  */
-export function clearRunResidue(
-  deps: Pick<RosterClearDeps, "clearViewMetadata" | "sessionStorage"> = {},
-): RunResidueOutcome {
-  const sessionResidue = clearSessionResidue(deps.sessionStorage ?? acquireSessionStorage());
+export async function clearRunResidue(
+  deps: Pick<RosterClearDeps, "clearViewMetadata" | "sessionStorage"> & {
+    /** Where the marker's snapshot lives. Defaults to the app's roster storage. */
+    readonly snapshotStore?: SubmissionSnapshotStore;
+  } = {},
+): Promise<RunResidueOutcome> {
+  const storage = deps.sessionStorage ?? acquireSessionStorage();
+  const owner = retirementMarkerOwner(storage);
+  const markerPurged =
+    owner === null ||
+    (await purgeRetiredSubmissionSnapshot(owner, deps.snapshotStore).catch(() => null))?.status ===
+      "purged";
+  const sessionResidue = clearSessionResidue(storage, { keepMarker: !markerPurged });
   const viewMetadataCleared = (deps.clearViewMetadata ?? clearViewPreferenceLive)();
   const status =
     sessionResidue.sessionCleared && sessionResidue.retireMarkerCleared && viewMetadataCleared
@@ -204,7 +226,10 @@ export function clearRunResidue(
  * reported as not-cleared: a privacy action must not claim a purge it could not
  * observe.
  */
-function clearSessionResidue(storage: SessionTransactionStorage): SessionResidueReport {
+function clearSessionResidue(
+  storage: SessionTransactionStorage,
+  options: { keepMarker?: boolean } = {},
+): SessionResidueReport {
   let sessionCleared = false;
   let sessionRemaining: readonly string[] = [];
   try {
@@ -217,6 +242,7 @@ function clearSessionResidue(storage: SessionTransactionStorage): SessionResidue
 
   // Retirement marker: reuse the verified-removal helper.
   let retireMarkerCleared = false;
+  if (options.keepMarker) return { sessionCleared, sessionRemaining, retireMarkerCleared };
   try {
     retireMarkerCleared = clearRetirementPending(storage).status === "cleared";
   } catch {
@@ -224,6 +250,28 @@ function clearSessionResidue(storage: SessionTransactionStorage): SessionResidue
   }
 
   return { sessionCleared, sessionRemaining, retireMarkerCleared };
+}
+
+/**
+ * The snapshot owner the legacy retirement marker names: a bare owner id, or the
+ * `{ ownerId }` record an older build wrote. `null` when there is no marker.
+ */
+function retirementMarkerOwner(storage: SessionTransactionStorage): string | null {
+  let raw: string | null;
+  try {
+    raw = storage.getItem(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+  if (raw === null || raw === "") return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const ownerId = (parsed as { ownerId?: unknown } | null)?.ownerId;
+    if (typeof ownerId === "string") return ownerId;
+  } catch {
+    // Not JSON: the bare owner id.
+  }
+  return raw;
 }
 
 /**
