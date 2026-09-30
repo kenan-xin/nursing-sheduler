@@ -186,3 +186,12 @@ Timings so far are toy-only on a fast desktop. tc1 is slower. Re-run G1, G2, G5 
 - The l3m `PreferenceSource` ids ship as specified. The ledger, core and diff depend on them.
 - Real ward cores stay near minimal, as in the toy (raw core within 2 of minimal).
 - The web run record can hold the ledger (not checked in `web/lib/query/optimize.ts`).
+
+## User decisions (2026-09-30)
+
+1. The backup roster that breaks musts is proof only. The assistant never shows it to the manager. It only uses it to check that a remedy works.
+2. The remedy order is approved: soften a hard nurse request, relax a cap, run one nurse short, borrow a nurse, move leave (with agreement), cancel leave. Safety rules are never offered for relaxing.
+3. The four core changes are approved for an EXPERIMENTAL branch only. Nothing merges into develop until the user decides to adopt the plan.
+4. Staffing guards are per rule, per date and per shift.
+5. Keep the last run's penalty ledger, so the assistant can compare the two most recent runs.
+6. Build the tuning and gate corpus from existing wards: upstream v1 `dev` and `feature/genie`, and this repo's tests and examples.
