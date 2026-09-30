@@ -41,6 +41,7 @@ patch_order = [
   "99db-D07-per-client-queue-cap.patch",
   "qb5v-why-solve.patch",
   "a5pb-ledger.patch",
+  "qb5v-review-fixes.patch",
 ]
 
 file = [
@@ -59,12 +60,12 @@ file = [
   { path = "nurse_scheduling/models.py", class = "patched", upstream_blob = "edcdab1503ea2ca11977d1693b259a53449d5245", patches = ["P2-P3-skillmix-overrides.patch", "99db-D05-head-count-bound.patch", "99db-C1-required-not-above-preferred.patch"] },
   { path = "nurse_scheduling/preference_types.py", class = "patched", upstream_blob = "51f7cb3570bd74af8e2e7d50d3eb7d1b64509b8f", patches = ["P2-P3-skillmix-overrides.patch", "99db-B1-history-completed-hard-sequence.patch", "99db-B5-leave-satisfies-hard-off.patch", "qb5v-why-solve.patch", "a5pb-ledger.patch"] },
   { path = "nurse_scheduling/report.py", class = "verbatim", upstream_blob = "8cff02666faf52b60c86256f70e3049991ba8574" },
-  { path = "nurse_scheduling/scheduler.py", class = "patched", upstream_blob = "7867e7d1b1591456fc637ec342a140ba37f8afde", patches = ["P4-on-roster.patch", "qb5v-why-solve.patch", "a5pb-ledger.patch"] },
+  { path = "nurse_scheduling/scheduler.py", class = "patched", upstream_blob = "7867e7d1b1591456fc637ec342a140ba37f8afde", patches = ["P4-on-roster.patch", "qb5v-why-solve.patch", "a5pb-ledger.patch", "qb5v-review-fixes.patch"] },
   { path = "nurse_scheduling/serve.py", class = "verbatim", upstream_blob = "8a844abe3b79c6028740e4598cc225f231f6e064" },
   { path = "nurse_scheduling/server/__init__.py", class = "verbatim", upstream_blob = "7b3119b1236edca1dfd0ce39d50c31d0abfbad36" },
   { path = "nurse_scheduling/server/api/__init__.py", class = "verbatim", upstream_blob = "10c7354468e847bbc5c9514b3ab1b7cef88eb3a3" },
   { path = "nurse_scheduling/server/api/optimize.py", class = "patched", upstream_blob = "5da18e2b4951e7acc93ac1ce4cdba97616f6c8fc", patches = ["W2-server-api-optimize.patch"] },
-  { path = "nurse_scheduling/server/api/schemas.py", class = "patched", upstream_blob = "c0ed76c4fe7fa5ec5984ec9add9a077c02e0c2ab", patches = ["W2-server-api-schemas.patch", "qb5v-why-solve.patch", "a5pb-ledger.patch"] },
+  { path = "nurse_scheduling/server/api/schemas.py", class = "patched", upstream_blob = "c0ed76c4fe7fa5ec5984ec9add9a077c02e0c2ab", patches = ["W2-server-api-schemas.patch", "qb5v-why-solve.patch", "a5pb-ledger.patch", "qb5v-review-fixes.patch"] },
   { path = "nurse_scheduling/server/api/sse.py", class = "verbatim", upstream_blob = "7b5e8dfa6fe4bd42d6c64bae4952cc3709f914c0" },
   { path = "nurse_scheduling/server/app.py", class = "patched", upstream_blob = "31e62ad1cfc5556db9e0400487dc44002af7ddcb", patches = ["W2-server-app.patch", "99db-D01-child-memory-cap.patch", "99db-D07-per-client-queue-cap.patch"] },
   { path = "nurse_scheduling/server/auth.py", class = "verbatim", upstream_blob = "f292e5c6cae46bb4c866a9178c6559cd0dd02854" },
@@ -76,7 +77,7 @@ file = [
   { path = "nurse_scheduling/server/event_cursor.py", class = "v2-only", note = "P6 opaque job-bound event cursors" },
   { path = "nurse_scheduling/server/job_store.py", class = "patched", upstream_blob = "fb656a30e27b8cf78d411d1cb10125ffdc921845", patches = ["W6-server-job_store.patch"] },
   { path = "nurse_scheduling/server/jobs/__init__.py", class = "verbatim", upstream_blob = "ec33f2782dcba7bbfb8e0585a93528fa105719dd" },
-  { path = "nurse_scheduling/server/jobs/controller.py", class = "patched", upstream_blob = "a18fb0bd1a343e87f79a104dcfce2ad13f0558a0", patches = ["W6-server-jobs-controller.patch", "qb5v-why-solve.patch"] },
+  { path = "nurse_scheduling/server/jobs/controller.py", class = "patched", upstream_blob = "a18fb0bd1a343e87f79a104dcfce2ad13f0558a0", patches = ["W6-server-jobs-controller.patch", "qb5v-why-solve.patch", "qb5v-review-fixes.patch"] },
   { path = "nurse_scheduling/server/jobs/models.py", class = "patched", upstream_blob = "1b358ba153420a1181df70e57a6f070cd75eca74", patches = ["W6-server-jobs-models.patch", "99db-D07-per-client-queue-cap.patch", "qb5v-why-solve.patch", "a5pb-ledger.patch"] },
   { path = "nurse_scheduling/server/jobs/process_executor.py", class = "patched", upstream_blob = "183712393bfc33af9a987cc9c33b233d8abe6884", patches = ["99db-D01-child-memory-cap.patch"] },
   { path = "nurse_scheduling/server/jobs/process_tree.py", class = "verbatim", upstream_blob = "8d5d3687550ea51aec412868da224e7d9c72ea0f" },
@@ -612,4 +613,5 @@ file = [
   { path = "nurse_scheduling/explain.py", class = "v2-only", note = "a5pb/qb5v run explanations: penalty ledger; why a run has no roster (no-objective proof check, minimal core)" },
   { path = "tests/test_explain.py", class = "v2-only", note = "a5pb/qb5v ledger, proof check, minimal core and byte-identical optimising model tests" },
   { path = "upstream-patches/a5pb-ledger.patch", class = "v2-only", note = "sync patch or manifest" },
+  { path = "upstream-patches/qb5v-review-fixes.patch", class = "v2-only", note = "sync patch or manifest" },
 ]

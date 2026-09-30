@@ -157,6 +157,23 @@ describe("infeasibility core", () => {
       "These cannot all hold. On 2026-11-03: 1 needed on N; Ana is on leave.",
     );
   });
+
+  const say = (member: InfeasibleCore["members"][number]) =>
+    coreText(resolveCore({ ...core, members: [member] }, ctx));
+  const cell = { rule: 2, kind: "request", nurse: "P1", date: "2026-11-01" } as const;
+
+  it("says which way a hard request binds", () => {
+    expect(say({ ...cell, shift: ["D"], must: false })).toContain("Ana must not work D");
+    expect(say({ ...cell, shift: ["D"], must: true })).toContain("Ana must work D");
+    expect(say({ ...cell, shift: ["OFF"], must: false })).toContain("Ana must not be off");
+    expect(say({ ...cell, shift: ["OFF"], must: true })).toContain("Ana must be off");
+  });
+
+  it("gives a staffing slot its floor and ceiling, not only the floor", () => {
+    const slot = { rule: 1, kind: "staffing" as const, date: "2026-11-01", shift: ["D"] };
+    expect(say({ ...slot, need: 1, max: 2 })).toContain("1 to 2 on D");
+    expect(say({ ...slot, need: 1, max: 1 })).toContain("exactly 1 on D");
+  });
 });
 
 function completedJob(

@@ -336,3 +336,79 @@ def test_the_runner_turns_a_proven_unknown_run_into_infeasibility_proven(monkeyp
 def test_diagnostic_copies_get_no_explanation(path):
     _job, output = _run(_read(path), JobPurpose.ASSISTANT_DIAGNOSTIC)
     assert output.result.explanation is None
+
+
+def _one_day(people: str, preferences: str) -> bytes:
+    return f"""apiVersion: alpha
+dates: {{range: {{startDate: 2026-11-01, endDate: 2026-11-01}}}}
+people: {{items: [{people}]}}
+shiftTypes: {{items: [{{id: D}}]}}
+preferences:
+  - type: at most one shift per day
+{preferences}""".encode()
+
+
+@pytest.mark.parametrize(
+    ("weight", "shift", "required", "must"),
+    [("-.inf", "D", 1, False), (".inf", "OFF", 1, True), ("-.inf", "OFF", 0, False)],
+    ids=["never-work", "must-be-off", "never-off"],
+)
+def test_a_hard_request_in_the_core_says_which_way_it_binds(weight, shift, required, must):
+    content = _one_day(
+        "{id: ana}",
+        f"  - {{type: shift type requirement, shiftType: D, requiredNumPeople: {required}}}\n"
+        f"  - {{type: shift request, person: ana, date: 2026-11-01, shiftType: {shift}, weight: {weight}}}\n",
+    )
+    _result, [explanation], _phases = _explain(content)
+    [request] = [m for m in explanation["core"]["members"] if m["kind"] == "request"]
+    assert (request["shift"], request["must"]) == ([shift], must)
+
+
+def test_an_over_staffing_clash_sends_the_ceiling():
+    content = _one_day(
+        "{id: a}, {id: b}, {id: c}",
+        "  - {type: shift type requirement, shiftType: D, requiredNumPeople: 1, preferredNumPeople: 2, weight: -1}\n"
+        "  - {type: shift request, person: [a, b, c], date: 2026-11-01, shiftType: D, weight: .inf}\n",
+    )
+    _result, [explanation], _phases = _explain(content)
+    [staffing] = [m for m in explanation["core"]["members"] if m["kind"] == "staffing"]
+    assert (staffing["need"], staffing["max"]) == (1, 2)
+    exact = _read(f"{REPAIR}/onlyRnOnLeave.before.yaml")  # no preferred head count: exactly `need`
+    _result, [explanation], _phases = _explain(exact)
+    [staffing] = [m for m in explanation["core"]["members"] if m["kind"] == "staffing"]
+    assert staffing["need"] == staffing["max"] == 1
+
+
+def test_a_failed_core_solve_keeps_the_proof(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("core solve broke")
+
+    monkeypatch.setattr(explain, "why_infeasible", fail)
+    result, [explanation], _phases = _explain(_read(INFEASIBLE[0]))
+    assert result.solver_status == "INFEASIBLE"
+    assert (explanation["proof"], explanation["core"]) == ("main_run", None)
+
+
+def test_a_failed_ledger_read_keeps_the_roster(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("ledger broke")
+
+    monkeypatch.setattr(explain, "read_ledger", fail)
+    result, out, _phases = _explain(_read(BASICS[0]))
+    assert (result.solver_status, out) == ("OPTIMAL", [])
+    assert result.dataframe is not None
+
+
+def test_a_result_without_an_explanation_omits_the_key():
+    """A web tab that predates `explanation` checks the result's exact key set."""
+    from nurse_scheduling.server.api.schemas import OptimizationResultResponse
+    from nurse_scheduling.server.jobs.controller import JobController
+    from nurse_scheduling.server.jobs.models import OptimizationOutcome, OptimizationResult
+
+    fields = {"outcome": "optimal", "score": 1, "solver_status": "OPTIMAL", "termination_reason": "optimality_proven"}
+    assert "explanation" not in OptimizationResultResponse(**fields).model_dump(mode="json")
+    assert OptimizationResultResponse(**fields, explanation={"kind": "ledger"}).model_dump()["explanation"]
+    job, _output = _run(_read(BASICS[0]), JobPurpose.ASSISTANT_DIAGNOSTIC)
+    result = OptimizationResult(OptimizationOutcome.OPTIMAL, 1, "OPTIMAL", "optimality_proven")
+    event = JobController._result_event(replace(job, result=result), datetime.now(timezone.utc))
+    assert "explanation" not in event.data

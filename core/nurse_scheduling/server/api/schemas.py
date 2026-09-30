@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import quote
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..config import ServerSettings
 from ..jobs.models import Job, JobPurpose, JobState, OptimizationOutcome
@@ -177,8 +177,9 @@ class OptimizationResultResponse(BaseModel):
     """Original solver status."""
     termination_reason: str | None
     """Normalized reason solver execution stopped."""
-    explanation: dict[str, Any] | None = None
-    """v2: penalty ledger (roster) or why a proven-infeasible run has none."""
+    explanation: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    """v2: penalty ledger (roster) or why a proven-infeasible run has none. Omitted when
+    None, so a web client that predates the key still reads results without one."""
 
 
 class JobErrorResponse(BaseModel):

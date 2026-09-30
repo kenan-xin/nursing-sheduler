@@ -133,9 +133,10 @@ WHY_FIRST_TRY_SECONDS = 4.0
 # linearization 2 finds counting cores (hours vs rest) that the plain search misses.
 CORE_TRIES = ({"cp_model_presolve": False}, {"cp_model_presolve": False, "linearization_level": 2})
 
-# Relax cost of each unit kind in the approved remedy order (soften a hard request, relax
-# a cap, run one short, move leave). Kinds not listed are never relaxed, so they are
-# dropped from the core first and the surviving core names the cheapest rules to change.
+# Relax cost of each unit kind, in the approved remedy order (soften a hard request, relax
+# a cap, change a staffing number, move leave). It only orders the core's deletion: kinds
+# not listed are never relaxed, so they are dropped first and the surviving core names
+# the cheapest rules to change. A staffing unit holds both its floor and its ceiling.
 RELAX_COST = {"request": 10, "cap": 20, "staffing": 100, "leave": 1000}
 NEVER = 10**9
 
@@ -176,10 +177,17 @@ def unit_fields(ctx: Context, key, names) -> dict[str, Any]:
         out["date"] = dates[d]
         out["shift"] = [shift_id(s) for s in compiled.shift_type_groups[g]]
         if kind == "staffing":
-            out["need"] = dict(compiled.required_by_date).get(d, ctx.scenario.preferences[i].requiredNumPeople)
+            # The unit is the floor and the ceiling: at least `need` and at most `max`
+            # (the preferred head count, or exactly `need` when there is none).
+            need = dict(compiled.required_by_date).get(d, ctx.scenario.preferences[i].requiredNumPeople)
+            preferred = ctx.scenario.preferences[i].preferredNumPeople
+            out.update(need=need, max=need if preferred is None else preferred)
     elif kind in ("request", "leave"):
         d, p = detail
         out.update(nurse=people[p], date=dates[d], shift=[shift_id(s) for s in compiled.shift_types])
+        if kind == "request":
+            # A hard request is a must (+inf) or a must-not (-inf).
+            out["must"] = ctx.scenario.preferences[i].weight == math.inf
     elif ctx.scenario.preferences[i].type == models.SHIFT_COUNT:
         p, pair = detail
         out.update(nurse=people[p], expression=compiled.expressions[pair], target=compiled.targets[pair])
@@ -320,7 +328,13 @@ def explain_no_roster(ctx: Context, status: SolverStatus, should_stop=None) -> d
             proof = f"feasibility_check:{time.monotonic() - started:.2f}s"
         elif status != SolverStatus.INFEASIBLE:
             return None
-        return {"kind": "infeasible", "proof": proof, "core": why_infeasible(ctx, should_stop)}
     except Exception:
-        logger.exception("Explaining the run without a roster failed")
+        logger.exception("The infeasibility proof check failed")
         return None
+    try:
+        core = why_infeasible(ctx, should_stop)
+    except Exception:
+        # The proof stands without a named clash.
+        logger.exception("The infeasibility core solve failed")
+        core = None
+    return {"kind": "infeasible", "proof": proof, "core": core}

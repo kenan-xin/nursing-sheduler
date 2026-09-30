@@ -203,12 +203,12 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `nurse_scheduling/models.py` | patched | `edcdab1503ea` | `P2-P3-skillmix-overrides.patch` (P2, P3). `99db-D05-head-count-bound.patch`. `99db-C1-required-not-above-preferred.patch` |
 | `nurse_scheduling/preference_types.py` | patched | `51f7cb3570bd` | `P2-P3-skillmix-overrides.patch` (P2, P3). `99db-B1-history-completed-hard-sequence.patch`. `99db-B5-leave-satisfies-hard-off.patch`. `qb5v-why-solve.patch`. `a5pb-ledger.patch` |
 | `nurse_scheduling/report.py` | verbatim | `8cff02666faf` |  |
-| `nurse_scheduling/scheduler.py` | patched | `7867e7d1b159` | `P4-on-roster.patch` (P4). `qb5v-why-solve.patch`. `a5pb-ledger.patch` |
+| `nurse_scheduling/scheduler.py` | patched | `7867e7d1b159` | `P4-on-roster.patch` (P4). `qb5v-why-solve.patch`. `a5pb-ledger.patch`. `qb5v-review-fixes.patch` |
 | `nurse_scheduling/serve.py` | verbatim | `8a844abe3b79` |  |
 | `nurse_scheduling/server/__init__.py` | verbatim | `7b3119b1236e` |  |
 | `nurse_scheduling/server/api/__init__.py` | verbatim | `10c7354468e8` |  |
 | `nurse_scheduling/server/api/optimize.py` | patched | `5da18e2b4951` | `W2-server-api-optimize.patch` (P5, P6, P7, P8, P9) |
-| `nurse_scheduling/server/api/schemas.py` | patched | `c0ed76c4fe7f` | `W2-server-api-schemas.patch` (P8, P9). `qb5v-why-solve.patch`. `a5pb-ledger.patch` |
+| `nurse_scheduling/server/api/schemas.py` | patched | `c0ed76c4fe7f` | `W2-server-api-schemas.patch` (P8, P9). `qb5v-why-solve.patch`. `a5pb-ledger.patch`. `qb5v-review-fixes.patch` |
 | `nurse_scheduling/server/api/sse.py` | verbatim | `7b5e8dfa6fe4` |  |
 | `nurse_scheduling/server/app.py` | patched | `31e62ad1cfc5` | `W2-server-app.patch` (P5, P8, P9, P11). `99db-D01-child-memory-cap.patch`. `99db-D07-per-client-queue-cap.patch` |
 | `nurse_scheduling/server/auth.py` | verbatim | `f292e5c6cae4` |  |
@@ -220,7 +220,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `nurse_scheduling/server/event_cursor.py` | v2-only |  | P6 opaque job-bound event cursors |
 | `nurse_scheduling/server/job_store.py` | patched | `fb656a30e27b` | `W6-server-job_store.patch` (P6, P9) |
 | `nurse_scheduling/server/jobs/__init__.py` | verbatim | `ec33f2782dcb` |  |
-| `nurse_scheduling/server/jobs/controller.py` | patched | `a18fb0bd1a34` | `W6-server-jobs-controller.patch` (P6, P8, P9). `qb5v-why-solve.patch` |
+| `nurse_scheduling/server/jobs/controller.py` | patched | `a18fb0bd1a34` | `W6-server-jobs-controller.patch` (P6, P8, P9). `qb5v-why-solve.patch`. `qb5v-review-fixes.patch` |
 | `nurse_scheduling/server/jobs/models.py` | patched | `1b358ba15342` | `W6-server-jobs-models.patch` (P6, P8, P9). `99db-D07-per-client-queue-cap.patch`. `qb5v-why-solve.patch`. `a5pb-ledger.patch` |
 | `nurse_scheduling/server/jobs/process_executor.py` | patched | `183712393bfc` | `99db-D01-child-memory-cap.patch` |
 | `nurse_scheduling/server/jobs/process_tree.py` | verbatim | `8d5d3687550e` |  |
@@ -754,6 +754,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `upstream-patches/W6-tests-test_serve.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/a5pb-ledger.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/manifest.toml` | v2-only |  | sync patch or manifest |
+| `upstream-patches/qb5v-review-fixes.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/qb5v-why-solve.patch` | v2-only |  | sync patch or manifest |
 <!-- origin-table:end -->
 

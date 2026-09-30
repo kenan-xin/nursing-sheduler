@@ -51,7 +51,11 @@ export interface CoreMember {
   nurse?: string | number;
   date?: string;
   shift?: string[];
+  /** Staffing: at least `need` and at most `max` (equal when the count is exact). */
   need?: number;
+  max?: number;
+  /** Request: true for a must (work it / be off), false for a must-not. */
+  must?: boolean;
   expression?: string;
   target?: number;
 }
@@ -264,11 +268,17 @@ function clause(m: ResolvedCoreMember): string {
   const shift = m.shift?.join("/") ?? "";
   switch (m.kind) {
     case "staffing":
-      return `${m.need} needed on ${shift}`;
+      // The unit holds the floor and the ceiling; the core does not say which side binds.
+      if (m.max === undefined) return `${m.need} needed on ${shift}`;
+      return m.max === m.need
+        ? `exactly ${m.need} on ${shift}`
+        : `${m.need} to ${m.max} on ${shift}`;
     case "leave":
       return `${m.nurse} is on leave`;
-    case "request":
-      return `${m.nurse} must work ${shift}`;
+    case "request": {
+      const must = m.must === false ? "must not" : "must";
+      return shift === "OFF" ? `${m.nurse} ${must} be off` : `${m.nurse} ${must} work ${shift}`;
+    }
     case "skill_mix":
       return `"${m.label}" needs its skill mix on ${shift}`;
     case "qualification":

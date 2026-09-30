@@ -532,7 +532,13 @@ def schedule(
     if on_roster is not None:
         on_roster(_build_roster_payload(ctx, prettify))
     if on_explanation is not None:
-        on_explanation({"kind": "ledger", "ledger": explain.read_ledger(ctx)})
+        try:
+            ledger = explain.read_ledger(ctx)
+        except Exception:
+            # The ledger only explains the roster; never fail a run that has one.
+            logger.exception("Reading the penalty ledger failed")
+        else:
+            on_explanation({"kind": "ledger", "ledger": ledger})
     solution = {}
     for d, s, p in ctx.shifts:
         solution[(d, s, p)] = ctx.solver.get_value(ctx.shifts[(d, s, p)])

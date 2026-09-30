@@ -680,8 +680,9 @@ class JobController:
                 "score": job.result.score,
                 "solver_status": job.result.solver_status,
                 "termination_reason": job.result.termination_reason,
-                "explanation": job.result.explanation,
                 "artifact_name": job.artifact_name,
+                # Omitted when None, so a web client that predates the key keeps working.
+                **({"explanation": job.result.explanation} if job.result.explanation is not None else {}),
             },
             occurred_at=occurred_at,
         )
