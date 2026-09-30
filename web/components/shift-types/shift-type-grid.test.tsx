@@ -676,9 +676,8 @@ describe("ShiftTypeGrid — change highlight", () => {
 });
 
 /** The last `toast(message, { action })` offer, invoked as a user click would. */
-function clickToastAction(): void {
-  const calls = vi.mocked(toast).mock.calls;
-  const options = calls[calls.length - 1]?.[1] as unknown as {
+function clickToastAction(index = vi.mocked(toast).mock.calls.length - 1): void {
+  const options = vi.mocked(toast).mock.calls[index]?.[1] as unknown as {
     action: { onClick: () => void };
   };
   options.action.onClick();
@@ -711,6 +710,25 @@ describe("ShiftTypeGrid — delete confirm + Undo (T1)", () => {
     await settleSave();
     expect((await shifts()).map((s) => s.id)).toEqual(["Day", "Night"]);
     expect(await requirements()).toHaveLength(1);
+  });
+
+  it("Undo after a later edit leaves both the delete and that edit in place", async () => {
+    await seed({ shifts: [{ id: "Day" }, { id: "Night" }], shiftGroups: [] });
+    render(<ShiftTypeGrid />);
+
+    fireEvent.click(screen.getByTestId("shift-delete-string:Day"));
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    await settleSave();
+    const offer = vi.mocked(toast).mock.calls.length;
+    await scenarioCommands.mutate({ rangeStart: "2026-04-01" });
+
+    clickToastAction(offer - 1);
+    await settleSave();
+    expect((await shifts()).map((s) => s.id)).toEqual(["Night"]);
+    expect(useScenarioStore.getState().rangeStart).toBe("2026-04-01");
+    expect(vi.mocked(toast).mock.calls.at(-1)?.[0]).toBe(
+      "Can't undo this delete: the schedule has changed since.",
+    );
   });
 
   it("keeps a shift group when the confirm is cancelled", async () => {

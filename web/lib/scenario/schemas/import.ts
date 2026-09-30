@@ -130,13 +130,7 @@ const zImportRequirement = z
     weight: zImportWeight.optional(),
   })
   .superRefine((req, ctx) => {
-    // Core has no order check: preferred below required is a silent INFEASIBLE.
-    if (req.preferredNumPeople != null && req.preferredNumPeople < req.requiredNumPeople)
-      ctx.addIssue({
-        code: "custom",
-        message: `preferredNumPeople (${req.preferredNumPeople}) must be at least requiredNumPeople (${req.requiredNumPeople}).`,
-        path: ["preferredNumPeople"],
-      });
+    // Preferred below required loads; the producer schema blocks it at Optimize.
     const overrides = req.requiredNumPeopleOverrides;
     if (!overrides?.length) return;
     // The backend's own resolved-dates check (preference_types.shift_type_requirements)

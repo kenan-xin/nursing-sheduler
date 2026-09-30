@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { sanitizePersistedScenario } from "@/lib/store/persistence";
 import type { RequirementCard } from "@/lib/scenario";
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
-import { WEIGHT_RANGE_MESSAGE } from "./schemas/primitives";
 import { serializeScenario } from "./serialize";
 import { importScenarioYaml, importScenarioValue } from "./import-scenario";
 import {
@@ -574,16 +573,15 @@ ${fields}
     );
   });
 
-  it("refuses preferredNumPeople below requiredNumPeople", () => {
-    expect(
-      messages("    requiredNumPeople: 2\n    preferredNumPeople: 1\n    weight: -1"),
-    ).toContain("preferredNumPeople (1) must be at least requiredNumPeople (2).");
+  // Both loaded on main; they load, warn, and block at Optimize (prepare-scenario-load.test).
+  it("loads preferredNumPeople below requiredNumPeople", () => {
+    expect(messages("    requiredNumPeople: 2\n    preferredNumPeople: 1\n    weight: -1")).toEqual(
+      [],
+    );
   });
 
-  it("refuses a weight past 1t and names it", () => {
-    expect(messages("    requiredNumPeople: 1\n    weight: 9000000000000000")).toContain(
-      WEIGHT_RANGE_MESSAGE,
-    );
+  it("loads a weight past 1t", () => {
+    expect(messages("    requiredNumPeople: 1\n    weight: 9000000000000000")).toEqual([]);
     expect(messages("    requiredNumPeople: 1\n    weight: -1000000000000")).toEqual([]);
     expect(messages("    requiredNumPeople: 1\n    weight: -.inf")).toEqual([]);
   });

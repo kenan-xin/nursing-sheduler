@@ -4,8 +4,8 @@
 //
 // One GET to data.gov.sg's datastore_search API (no key required), validated with
 // zod, merged over the bundled snapshot BY YEAR (live wins), cached in server memory
-// for a day. Any failure answers the bundled list with `source: "bundled"`, and is
-// not cached, so the next request retries.
+// for a day. Any failure answers the bundled list with `source: "bundled"`, cached for
+// ten minutes so a data.gov.sg outage does not cost every request a 5 s timeout.
 
 import { z } from "zod";
 import { isValidIso } from "./date-id";
@@ -22,6 +22,7 @@ export const SG_HOLIDAYS_DATASET_ID = "d_8ef23381f9417e4d4254ee8b4dcdb176";
 // fails validation, and pagination can come when that day arrives.
 export const SG_HOLIDAYS_URL = `https://data.gov.sg/api/action/datastore_search?resource_id=${SG_HOLIDAYS_DATASET_ID}&limit=1000`;
 export const SG_HOLIDAYS_TTL_MS = 24 * 60 * 60 * 1000;
+export const SG_HOLIDAYS_FAILURE_TTL_MS = 10 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 5_000;
 
 const upstreamSchema = z
@@ -49,9 +50,9 @@ export function parseUpstreamHolidays(body: unknown): SingaporeHolidayEntry[] {
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-let cache: { entries: SingaporeHolidayEntry[]; expiresAt: number } | null = null;
+let cache: { response: SingaporeHolidaysResponse; expiresAt: number } | null = null;
 
-/** Tests only: forget the cached live list. */
+/** Tests only: forget the cached answer. */
 export function resetSingaporeHolidayCache(): void {
   cache = null;
 }
@@ -61,7 +62,7 @@ const BUNDLED: SingaporeHolidaysResponse = { source: "bundled", entries: [...SIN
 export async function loadSingaporeHolidays(
   now: number = Date.now(),
 ): Promise<SingaporeHolidaysResponse> {
-  if (cache && now < cache.expiresAt) return { source: "live", entries: cache.entries };
+  if (cache && now < cache.expiresAt) return cache.response;
   // E2E and offline deployments: deterministic, no network.
   if (process.env.SG_HOLIDAYS_OFFLINE === "1") return BUNDLED;
   try {
@@ -75,10 +76,11 @@ export async function loadSingaporeHolidays(
       parseUpstreamHolidays(await response.json()),
       SINGAPORE_HOLIDAYS,
     );
-    cache = { entries, expiresAt: now + SG_HOLIDAYS_TTL_MS };
-    return { source: "live", entries };
+    cache = { response: { source: "live", entries }, expiresAt: now + SG_HOLIDAYS_TTL_MS };
+    return cache.response;
   } catch (error) {
     console.error("[api/public-holidays] live fetch failed, answering the bundled list", error);
+    cache = { response: BUNDLED, expiresAt: now + SG_HOLIDAYS_FAILURE_TTL_MS };
     return BUNDLED;
   }
 }

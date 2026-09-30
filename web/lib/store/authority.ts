@@ -1373,15 +1373,18 @@ export class ScenarioAuthority {
    * the 50-entry bound evicted — fails as `history-unavailable` instead of
    * silently restoring the wrong state.
    */
-  undo(): Promise<CommandOutcome> {
-    return this.historyCommand("undo");
+  undo(expectedDocumentRevision?: number): Promise<CommandOutcome> {
+    return this.historyCommand("undo", expectedDocumentRevision);
   }
 
   redo(): Promise<CommandOutcome> {
     return this.historyCommand("redo");
   }
 
-  private historyCommand(kind: "undo" | "redo"): Promise<CommandOutcome> {
+  private historyCommand(
+    kind: "undo" | "redo",
+    expectedDocumentRevision?: number,
+  ): Promise<CommandOutcome> {
     return this.enqueue(async () => {
       const owner = this.owner;
       const state = this.authority.getState();
@@ -1395,6 +1398,14 @@ export class ScenarioAuthority {
       }
       if (!owner || !scenarioId) {
         return { ok: false as const, reason: "not-owner" as const, code: "not_owner" as const };
+      }
+      // A targeted undo (a toast's Undo) whose commit is no longer the latest would
+      // reverse a later edit instead, so it withdraws.
+      if (
+        expectedDocumentRevision !== undefined &&
+        state.documentRevision !== expectedDocumentRevision
+      ) {
+        return { ok: false as const, reason: "superseded" as const, code: "unknown" as const };
       }
       try {
         const input = {
