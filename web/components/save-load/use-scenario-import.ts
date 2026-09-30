@@ -70,14 +70,18 @@ export interface UseScenarioImportResult {
   confirm: PendingImportConfirm | null;
   warnings: string[] | null;
   dismissWarnings: () => void;
-  handleFile: (text: string) => void;
+  /**
+   * Settles once the load does: committed, refused, blocked on issues, or its staged
+   * confirm cancelled. A caller holds its own busy state on it (7vtc).
+   */
+  handleFile: (text: string) => Promise<void>;
   /**
    * Apply an Edit-YAML draft as ONE undoable edit on the current scenario identity
    * (v1 parity, C-06): same validation, warnings and version gate as `handleFile`,
    * but no replacement confirm and no identity switch, so Undo history and the
    * assistant thread survive.
    */
-  handleEdit: (text: string) => void;
+  handleEdit: (text: string) => Promise<void>;
 }
 
 interface StagedTarget {
@@ -98,6 +102,8 @@ interface StagedTarget {
   warnings: string[];
   /** The file's producer-preflight issues, shown after the load (C-22). */
   loadIssues: ScenarioValidationIssue[];
+  /** Settles the `handleFile`/`handleEdit` promise that staged this target. */
+  settle: () => void;
 }
 
 /**
@@ -218,7 +224,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     toast.success("Scenario loaded — this replaces your current setup.");
   };
 
-  const stage = (text: string, edit: boolean, convertV1LeaveShift = false) => {
+  const stage = async (text: string, edit: boolean, convertV1LeaveShift = false): Promise<void> => {
     const result = prepareScenarioLoad(text, { convertV1LeaveShift });
     const plan = result.v1LeaveShift;
     if (plan && !convertV1LeaveShift && plan.convertible) {
@@ -226,21 +232,26 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
       // decline may publish the rename error.
       let accepted = false;
       setIssues(null);
-      setLeaveOffer({
-        ...v1LeaveShiftOfferCopy(plan),
-        confirmLabel: "Convert to paid leave",
-        cancelLabel: "Don't convert",
-        onContinue: async () => {
-          accepted = true;
-          setLeaveOffer(null);
-          stage(text, edit, true);
-        },
-        onCancel: () => {
-          setLeaveOffer(null);
-          if (!accepted) setIssues(result.issues);
-        },
+      return new Promise<void>((settle) => {
+        setLeaveOffer({
+          ...v1LeaveShiftOfferCopy(plan),
+          confirmLabel: "Convert to paid leave",
+          cancelLabel: "Don't convert",
+          onContinue: async () => {
+            accepted = true;
+            setLeaveOffer(null);
+            // Not awaited: this dialog's own busy state must not wait on the next one.
+            void stage(text, edit, true).then(settle, settle);
+          },
+          onCancel: () => {
+            setLeaveOffer(null);
+            if (!accepted) {
+              setIssues(result.issues);
+              settle();
+            }
+          },
+        });
       });
-      return;
     }
     // An Edit-YAML draft stays strict: its issues show in the editor, where they
     // are fixed. Only a loaded FILE may carry them in (C-22). A converted v1 file
@@ -264,17 +275,21 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     // DL12: only a genuinely empty workspace on a matching version commits
     // directly; every other load stages one combined confirmation.
     if (versionStatus === null && !replacement) {
-      void commit(result.target, mergedWarnings, edit, optimizeIssues);
+      await commit(result.target, mergedWarnings, edit, optimizeIssues);
       return;
     }
-    setStaged({
-      versionStatus,
-      replacement,
-      fileVersion: result.target.meta.appVersion,
-      target: result.target,
-      edit,
-      warnings: mergedWarnings,
-      loadIssues: optimizeIssues,
+    const target = result.target;
+    return new Promise<void>((settle) => {
+      setStaged({
+        versionStatus,
+        replacement,
+        fileVersion: target.meta.appVersion,
+        target,
+        edit,
+        warnings: mergedWarnings,
+        loadIssues: optimizeIssues,
+        settle,
+      });
     });
   };
 
@@ -288,8 +303,14 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
             staged.fileVersion,
             currentAppVersion(),
           ),
-          onContinue: () => commit(staged.target, staged.warnings, staged.edit, staged.loadIssues),
-          onCancel: () => setStaged(null),
+          onContinue: () =>
+            commit(staged.target, staged.warnings, staged.edit, staged.loadIssues).finally(
+              staged.settle,
+            ),
+          onCancel: () => {
+            setStaged(null);
+            staged.settle();
+          },
         }
       : null;
 
@@ -298,6 +319,8 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     loadIssues,
     clearIssues: () => setIssues(null),
     clearImportState: () => {
+      leaveOffer?.onCancel();
+      staged?.settle();
       setIssues(null);
       setStaged(null);
       setLeaveOffer(null);

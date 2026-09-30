@@ -173,6 +173,7 @@ file = [
   { path = "tests/test_leave_daystate.py", class = "patched", upstream_blob = "c2367ad6ecfd589bfd584dc37af3a676c79c3d14", patches = ["99db-B5-leave-satisfies-hard-off.patch"] },
   { path = "tests/test_loader.py", class = "verbatim", upstream_blob = "52e8a5289bd25b6a839c19f16eb28816ec7283a9" },
   { path = "tests/test_models_validation.py", class = "verbatim", upstream_blob = "7a3bc9fb4c3f84409d011fa5e46ff9bd1f0acf3d" },
+  { path = "tests/test_negative_succession_score.py", class = "v2-only", note = "negative soft succession score equals hand count (bead 304s)" },
   { path = "tests/test_optimize_basis.py", class = "v2-only", note = "P8 basis" },
   { path = "tests/test_optimize_basis_admission.py", class = "v2-only", note = "P8 basis admission" },
   { path = "tests/test_optimize_job_backends.py", class = "verbatim", upstream_blob = "c6586bafd54abe1c9424d1fa771c6936c3a44f71" },

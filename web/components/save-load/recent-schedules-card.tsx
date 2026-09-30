@@ -88,12 +88,24 @@ export function RecentSchedulesCard({
   const [deleting, setDeleting] = useState<Row | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // A reread still in flight when the card unmounts is dropped, not applied: it would
+  // otherwise set state on a dead tree (in tests, after the jsdom window is gone).
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   const refresh = useCallback(async () => {
+    let next: ScheduleSummary[];
     try {
-      setSummaries(await scenarioCommands.listSchedules());
+      next = await scenarioCommands.listSchedules();
     } catch {
-      setSummaries([]);
+      next = [];
     }
+    if (mounted.current) setSummaries(next);
   }, []);
 
   // Reread whenever this tab's schedule, revision or ownership moves, and at every

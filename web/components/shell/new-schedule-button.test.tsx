@@ -290,6 +290,7 @@ describe("StartOverCard — the 87-person example", () => {
     expect(await screen.findByTestId("new-schedule-example-error")).toHaveTextContent(
       EXAMPLE_SCHEDULE_FAILED_MESSAGE,
     );
+    expect(screen.getByTestId("new-schedule-example")).not.toBeDisabled();
     expect(await snapshot()).toEqual(before);
   });
 
@@ -301,6 +302,7 @@ describe("StartOverCard — the 87-person example", () => {
     fireEvent.click(screen.getByTestId("new-schedule-example"));
 
     expect(await screen.findByTestId("scenario-export-issues")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("new-schedule-example")).not.toBeDisabled());
     expect(await snapshot()).toEqual(before);
   });
 
@@ -316,13 +318,38 @@ describe("StartOverCard — the 87-person example", () => {
     expect(screen.getByTestId("new-schedule-example")).toHaveTextContent("Loading");
 
     resolve(EXAMPLE_YAML);
+    // 7vtc: busy until the load it hands off (the scenario switch) settles,
+    // not merely the fetch — so re-enabling implies the load has finished.
     await waitFor(() => expect(screen.getByTestId("new-schedule-example")).not.toBeDisabled());
-    // The busy state covers the fetch only; the load it hands off (the scenario
-    // switch) is still running. Wait for it, or it lands in the NEXT
-    // test: its Alice/Bob switch turns that test's example load into a staged
-    // replacement confirm, so its roster is never cleared.
     const { toast } = await import("sonner");
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(SCENARIO_LOADED));
+    expect(toast.success).toHaveBeenCalledWith(SCENARIO_LOADED);
+  });
+
+  it("stays busy through the replacement confirm until the load finishes (7vtc)", async () => {
+    await seedDirtyScenario();
+    render(<StartOverCard fetchExampleSchedule={async () => EXAMPLE_YAML} />);
+
+    fireEvent.click(screen.getByTestId("new-schedule-example"));
+    const continueButton = await screen.findByRole("button", { name: "Continue" });
+    // The fetch is done, the load is not: no second click may start a second load.
+    expect(screen.getByTestId("new-schedule-example")).toBeDisabled();
+
+    fireEvent.click(continueButton);
+    await waitFor(() => expect(screen.getByTestId("new-schedule-example")).not.toBeDisabled());
+    const { toast } = await import("sonner");
+    expect(toast.success).toHaveBeenCalledWith(SCENARIO_LOADED);
+  });
+
+  it("re-enables when the replacement confirm is cancelled (7vtc)", async () => {
+    await seedDirtyScenario();
+    const before = await snapshot();
+    render(<StartOverCard fetchExampleSchedule={async () => EXAMPLE_YAML} />);
+
+    fireEvent.click(screen.getByTestId("new-schedule-example"));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.getByTestId("new-schedule-example")).not.toBeDisabled());
+    expect(await snapshot()).toEqual(before);
   });
 
   it("rides the normal import path — the example never shows the previous roster (plq5 P2)", async () => {
