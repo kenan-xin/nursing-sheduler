@@ -63,10 +63,10 @@ describe("loadConfirmCopy — the detail box rides with the version case only", 
 });
 
 describe("loadConfirmCopy — a Load cannot be undone (C-05)", () => {
-  it("says so plainly and never promises Undo", () => {
+  it("never promises Undo, and says the current schedule is kept (plq5 P2)", () => {
     expect(REPLACEMENT_CONFIRM_BODY).toBe(
-      "This replaces your current schedule and cannot be undone. Download a copy first. " +
-        "The current roster will also be cleared.",
+      "This opens the file as a new schedule. Your current schedule stays in Recent schedules, " +
+        "with its roster, where you can open it again.",
     );
     expect(REPLACEMENT_CONFIRM_BODY).not.toMatch(/undo the load/i);
   });
