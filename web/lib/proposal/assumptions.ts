@@ -23,6 +23,7 @@ import { capOf } from "@/lib/rules/shortfalls";
 import type { ScenarioUiState, UiRequestCell } from "@/lib/scenario";
 import type { AssistantCommandV1 } from "./commands";
 import { proposalDigest, stableStringify } from "./digest";
+import { withStoredShiftCodes } from "./operations";
 
 export type AssumptionType =
   /** A leave pin is moving to another date. */
@@ -136,8 +137,9 @@ function finalNames(commands: readonly AssistantCommandV1[]): (personKey: string
 export function deriveAssumptions(
   before: ScenarioUiState,
   after: ScenarioUiState,
-  commands: readonly AssistantCommandV1[],
+  asked: readonly AssistantCommandV1[],
 ): OperationalAssumption[] {
+  const commands = withStoredShiftCodes(asked);
   const assumptions: OperationalAssumption[] = [];
   const claimed = new Set<string>();
 

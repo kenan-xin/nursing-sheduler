@@ -65,7 +65,7 @@ import {
 } from "@/lib/rules/rest-days";
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
-import { rosterDatesBetween } from "./operations";
+import { rosterDatesBetween, withStoredShiftCodes } from "./operations";
 
 /**
  * Where a change lands, named as the capability the user would go to see it.
@@ -1226,8 +1226,11 @@ function directKeys(
 export function deriveProposalDiff(
   before: ScenarioUiState,
   after: ScenarioUiState,
-  commands: readonly AssistantCommandV1[],
+  asked: readonly AssistantCommandV1[],
 ): ProposalDiff {
+  // The ids the batch actually stored (an added shift code is uppercased), so the
+  // highlight names the row the document holds.
+  const commands = withStoredShiftCodes(asked);
   const named = directKeys(commands, before, after);
   const all = diffScenarioDocuments(before, after);
   const direct = [

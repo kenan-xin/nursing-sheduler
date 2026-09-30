@@ -262,18 +262,22 @@ describe("RequestsMatrix — v2 status-ink pairing", () => {
   // substring test — a substring test could not tell the base token from the ink.
   const tokens = (el: HTMLElement) => el.className.split(/\s+/);
 
-  it("a positive preference pairs successtint with successink (not base success)", () => {
+  it("a positive preference pairs its alpha successtint with successink (not base success)", () => {
     render(<RequestsMatrix {...makeProps({ reqData: pairedReqData })} />);
     const cell = screen.getByTestId("cell-Alice-2026-05-01");
-    expect(tokens(cell)).toContain("bg-successtint");
+    // FR-SR-16 alpha fades the tint only; the ink stays opaque (t4tz).
+    expect(cell.style.backgroundColor).toContain("var(--successtint)");
+    expect(cell.style.opacity).toBe("");
     expect(tokens(cell)).toContain("text-successink");
     expect(tokens(cell)).not.toContain("text-success");
   });
 
-  it("a negative preference pairs warntint with warnink (not base warn)", () => {
+  it("a negative preference pairs its alpha warntint with warnink (not base warn)", () => {
     render(<RequestsMatrix {...makeProps({ reqData: pairedReqData })} />);
     const cell = screen.getByTestId("cell-Bob-2026-05-02");
-    expect(tokens(cell)).toContain("bg-warntint");
+    // FR-SR-16 alpha fades the tint only; the ink stays opaque (t4tz).
+    expect(cell.style.backgroundColor).toContain("var(--warntint)");
+    expect(cell.style.opacity).toBe("");
     expect(tokens(cell)).toContain("text-warnink");
     expect(tokens(cell)).not.toContain("text-warn");
   });

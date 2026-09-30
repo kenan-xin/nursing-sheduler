@@ -7,6 +7,7 @@ import {
   isExactJobGoneResponse,
   jobFailureMessage,
   OptimizeApiError,
+  submitRejectionMessage,
 } from "@/lib/bff/errors";
 
 // Helper: the code-first `{ error: { ... } }` envelope every application, cursor,
@@ -43,6 +44,28 @@ describe("classifyOptimizeError — unrouted upstream path", () => {
   });
 });
 
+describe("submitRejectionMessage", () => {
+  it("rewords the per-client cap and keeps its number", () => {
+    const backend =
+      "This client already has 2 optimizations queued or running. Wait for one to finish or cancel one, then try again.";
+    expect(submitRejectionMessage("job_capacity_exceeded", backend)).toBe(
+      "You already have 2 optimisations running. Wait for one to finish or cancel it.",
+    );
+  });
+
+  it("keeps the global queue cap, the size guard and other codes as sent", () => {
+    const size =
+      "This scenario is too large for this server: its model size is 3,000,000 (people x days x shift types, plus pairing-rule combinations) and the limit is 2,000,000. Use fewer people, days, shift types or pairing combinations.";
+    expect(submitRejectionMessage("invalid_scheduling_data", size)).toBe(size);
+    expect(
+      submitRejectionMessage("job_capacity_exceeded", "Too many jobs are queued or running"),
+    ).toBe("Too many jobs are queued or running");
+    expect(submitRejectionMessage(null, "already has 2 optimizations")).toBe(
+      "already has 2 optimizations",
+    );
+  });
+});
+
 describe("classifyOptimizeError — code-first", () => {
   it("classifies the upstream body-size middleware as too-large", () => {
     expect(
@@ -58,6 +81,9 @@ describe("classifyOptimizeError — code-first", () => {
       "The optimisation worker stopped before the job completed.",
     );
     expect(jobFailureMessage("invalid_model", "x")).toMatch(/weight/i);
+    expect(jobFailureMessage("scenario_too_large", "x")).toMatch(
+      /ran out of memory.*fewer people, days, shift types/,
+    );
     expect(jobFailureMessage("some_new_code", "Backend text.")).toBe("Backend text.");
     expect(jobFailureMessage(null, "Backend text.")).toBe("Backend text.");
   });
