@@ -195,3 +195,21 @@ Timings so far are toy-only on a fast desktop. tc1 is slower. Re-run G1, G2, G5 
 4. Staffing guards are per rule, per date and per shift.
 5. Keep the last run's penalty ledger, so the assistant can compare the two most recent runs.
 6. Build the tuning and gate corpus from existing wards: upstream v1 `dev` and `feature/genie`, and this repo's tests and examples.
+
+## Round 2 verdict (2026-09-30)
+
+Reports [06](./06-borrow-beyond-explanations.md), [07](./07-adopt-timefold-community.md) and [08](./08-timefold-spike.md) answer two questions. What else can we borrow from Timefold? Can we use Timefold Solver Community itself?
+
+All three reports say: keep CP-SAT, do not adopt Timefold Community. Timefold cannot prove that a roster is impossible, and the "why no roster" flow depends on that proof. It is Java only, the Python binding is frozen since July 2025, and its explanation features are Enterprise in 2.x. A port costs about 33 to 50 developer-days plus a second copy of every rule. On the October ward at 2 cores, CP-SAT proved the optimum 810 in under 0.5 s. Timefold late acceptance stalled at 600 to 630 after 60 s, and tabu search took 3.5 to 23.5 s to reach 810.
+
+Ideas to borrow, in the recommended order:
+
+1. Per-rule tests in the style of `ConstraintVerifier`, and a score recompute check in the style of `FULL_ASSERT`.
+2. An early stop when the objective stops improving (diminishing returns).
+3. Pinning and "minimise changes from the published roster", done in the web layer as hard and soft shift requests. No core change.
+4. Fairness to the ward mean: our squared shift count ranks rosters the same as Timefold `loadBalance` when the target is the mean.
+5. A size-gated LNS loop (ruin and recreate on CP-SAT). It beat plain CP-SAT on the 87-person ward in 3 of 3 seeds at 2 workers and 15 s. It is worse on small wards, so it must be size-gated. It needs a tc1 and corpus gate run first.
+
+Revisit Timefold only if a real ward gets no roster within its budget after P3, or the host grows to 4 or more dedicated cores and 8 GB or more. A 3 to 5 day spike on `large87` comes first.
+
+Open items: `large87` was not run on Timefold. Report 08 found a possible false violation in `is_match` for negative soft successions by code reading only. It must be reproduced before anyone fixes it.

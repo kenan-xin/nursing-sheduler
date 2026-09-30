@@ -185,9 +185,9 @@ Skipped: recommendations (Timefold `recommendAssignment`). Our repair path alrea
 
 ## Sources
 
-[int-alt]: /home/kenan/work/nursing-sheduler.docs-solver-alternatives-research/docs/research/2026-09-28-solver-alternatives/
-[int-l3m]: /home/kenan/work/nursing-sheduler.docs-l3m-infeasible-core-spec/docs/superpowers/specs/2026-09-27-infeasible-core-design.md
-[int-vjbv]: /home/kenan/work/nursing-sheduler.docs-vjbv-priority-ladder-spec/docs/superpowers/specs/2026-09-29-priority-ladder-design.md
+[int-alt]: ../../research/2026-09-28-solver-alternatives/
+[int-l3m]: ../../superpowers/specs/2026-09-27-infeasible-core-design.md
+[int-vjbv]: ../../superpowers/specs/2026-09-29-priority-ladder-design.md
 [d-uts]: https://docs.timefold.ai/timefold-solver/latest/constraints-and-score/understanding-the-score
 [d-uts1]: https://docs.timefold.ai/timefold-solver/1.x/constraints-and-score/understanding-the-score
 [d-up]: https://docs.timefold.ai/timefold-solver/latest/upgrading-timefold-solver/upgrade-from-v1
