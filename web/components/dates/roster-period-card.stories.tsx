@@ -9,7 +9,7 @@ const meta = {
   title: "Dates/RosterPeriodCard",
   component: RosterPeriodCard,
   parameters: { layout: "padded" },
-  args: { range: COMMITTED, importedHolidaysPresent: false, onCommit: fn() },
+  args: { range: COMMITTED, importApplied: false, onCommit: fn() },
 } satisfies Meta<typeof RosterPeriodCard>;
 
 export default meta;
@@ -38,7 +38,7 @@ export const InvalidRange: Story = {
 };
 
 export const HolidaysImported: Story = {
-  args: { importedHolidaysPresent: true },
+  args: { importApplied: true },
   play: async ({ canvas }) => {
     await expect(canvas.getByTestId("import-toggle")).toHaveAttribute("aria-checked", "true");
     await expect(canvas.getByTestId("import-count")).toBeVisible();
@@ -46,7 +46,7 @@ export const HolidaysImported: Story = {
 };
 
 export const ImportToggleOn: Story = {
-  args: { range: { start: "", end: "" }, importedHolidaysPresent: false },
+  args: { range: { start: "", end: "" }, importApplied: false },
   play: async ({ args, canvas }) => {
     // A fresh roster seeds the import ON; a valid range surfaces it and the commit
     // carries the flag.

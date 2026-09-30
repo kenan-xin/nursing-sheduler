@@ -28,11 +28,9 @@ import {
   applyRangeChange,
   countRangeRemovals,
   hasCompleteRange,
+  holidayImportApplied,
   isDerivedDateGroupId,
   isReservedDateGroupId,
-  SINGAPORE_NONWORKDAY_GROUP_ID,
-  SINGAPORE_PH_GROUP_ID,
-  SINGAPORE_WORKDAY_GROUP_ID,
   type DateRange,
 } from "@/lib/dates";
 import { FaArrowRight } from "@/components/icons";
@@ -44,18 +42,11 @@ import { RosterPeriodCard } from "./roster-period-card";
 import { CalendarView } from "./calendar-view";
 import { DateGroupsCard } from "./date-groups-card";
 
-// The three editable groups the SG holiday import writes; their presence in a
-// loaded scenario is what makes the roster card's import switch honest.
-const SG_HOLIDAY_GROUP_IDS: ReadonlySet<string> = new Set([
-  SINGAPORE_WORKDAY_GROUP_ID,
-  SINGAPORE_NONWORKDAY_GROUP_ID,
-  SINGAPORE_PH_GROUP_ID,
-]);
-
 export function DatesScreen() {
   const rangeStart = useScenarioStore((s) => s.rangeStart);
   const rangeEnd = useScenarioStore((s) => s.rangeEnd);
   const dateGroups = useScenarioStore((s) => s.dateGroups);
+  const importPublicHolidays = useScenarioStore((s) => s.importPublicHolidays);
 
   // Stable identity while the endpoints are unchanged: the calendar/group cards
   // memoize on `range` and re-seed from it, so a fresh object each render would
@@ -71,12 +62,12 @@ export function DatesScreen() {
     [dateGroups],
   );
 
-  // Whether the loaded scenario actually carries the imported SG holiday groups, so
-  // the roster card's import switch shows an honest initial state (no false import).
-  const importedHolidaysPresent = useMemo(
-    () => dateGroups.some((group) => SG_HOLIDAY_GROUP_IDS.has(group.id)),
-    [dateGroups],
-  );
+  const importApplied = holidayImportApplied({
+    importPublicHolidays,
+    rangeStart,
+    rangeEnd,
+    dateGroups,
+  });
 
   const handleCommit = (newRange: DateRange, importHolidays: boolean) => {
     scenarioCommands.mutate((state) =>
@@ -160,7 +151,7 @@ export function DatesScreen() {
       <div className="grid grid-cols-1 items-start gap-4 grid2:grid-cols-2">
         <RosterPeriodCard
           range={range}
-          importedHolidaysPresent={importedHolidaysPresent}
+          importApplied={importApplied}
           onCommit={handleCommit}
           countRemovals={(next) => countRangeRemovals(useScenarioStore.getState(), next)}
         />

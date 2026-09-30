@@ -69,6 +69,13 @@ describe("scenario serialization for the model", () => {
       { ruleKind: "successions", ruleId: "nd", description: "No day after night" },
     ]);
   });
+
+  it("says when the user turned the holiday import off (bead 6975)", () => {
+    const scenario = wardScenario();
+    expect(JSON.parse(stringifyScenario(scenario))).not.toHaveProperty("importPublicHolidays");
+    scenario.importPublicHolidays = false;
+    expect(JSON.parse(stringifyScenario(scenario)).importPublicHolidays).toBe(false);
+  });
 });
 
 describe("the attached turn context", () => {
