@@ -14,7 +14,12 @@
 // actually prove "one mutation, one durable commit" — while staying isolated.
 
 import { NurseSchedulerDb } from "@/lib/repository";
-import { createAuthorityStore, ScenarioAuthority, useAuthorityStore } from "./authority";
+import {
+  createAuthorityStore,
+  ScenarioAuthority,
+  useAuthorityStore,
+  type OwnershipHint,
+} from "./authority";
 import { createHotStore, type HotStore } from "./hot-store";
 import { createScenarioProjection, type ScenarioProjection } from "./scenario-store";
 import {
@@ -39,6 +44,8 @@ export interface TestAuthorityOptions {
   leaseTtlMs?: number;
   /** Bind the app singletons to this authority (default `true`). */
   install?: boolean;
+  /** Capture this tab's cross-tab hints, so a test can deliver them to a peer. */
+  broadcast?: (hint: OwnershipHint) => void;
 }
 
 export interface TestAuthority {
@@ -78,6 +85,7 @@ export async function installTestAuthority(
   const installed = options.install !== false;
   const authorityStore = installed ? useAuthorityStore : createAuthorityStore();
   const clock = {
+    ...(options.broadcast ? { broadcast: options.broadcast } : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.leaseTtlMs === undefined ? {} : { leaseTtlMs: options.leaseTtlMs }),
   };
@@ -156,6 +164,7 @@ export function resetProjection(): void {
     recordRevision: 0,
     ownership: "unknown",
     heldByTabId: null,
+    peerLoadedScenarioId: null,
     canUndo: false,
     canRedo: false,
     writeStatus: "idle",

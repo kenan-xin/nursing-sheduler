@@ -31,7 +31,11 @@ import {
 } from "@/lib/scenario";
 import type { TransferOption } from "@/components/entity-editor/transfer-list";
 import type { DateScopeOption, DateScopeItem } from "@/components/card-editor/date-scope-field";
-import { isValidWeightValue, type WeightFieldValue } from "@/components/card-editor/weight-value";
+import {
+  invalidWeightMessage,
+  isValidWeightValue,
+  type WeightFieldValue,
+} from "@/components/card-editor/weight-value";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
 
 /** Verbatim validation messages (spec 05 "Shift Affinities" validation table). */
@@ -234,7 +238,9 @@ export function validateAffinityForm(form: AffinityFormState): AffinityErrors {
   if (form.people2.length === 0) errors.people2 = AFFINITY_MESSAGES.people2;
   if (form.shiftTypes.length === 0) errors.shiftTypes = AFFINITY_MESSAGES.shiftTypes;
   if (form.date.length === 0) errors.date = AFFINITY_MESSAGES.date;
-  if (!isValidWeightValue(form.weight)) errors.weight = AFFINITY_MESSAGES.weightInvalid;
+  if (!isValidWeightValue(form.weight)) {
+    errors.weight = invalidWeightMessage(form.weight, AFFINITY_MESSAGES.weightInvalid);
+  }
   return errors;
 }
 

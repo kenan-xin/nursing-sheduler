@@ -204,7 +204,8 @@ export function useAssistantProposals(): AssistantProposalController {
     return () => {
       cancelled = true;
     };
-  }, [proposalId, scenarioId, documentRevision, recordRevision, ownership, liveTurnEpoch]);
+    // `active`, not just its id: a revision keeps the id, and each showing must reread it.
+  }, [active, proposalId, scenarioId, documentRevision, recordRevision, ownership, liveTurnEpoch]);
 
   const readiness = useMemo<ProposalReadiness | null>(() => {
     if (!proposal) return null;

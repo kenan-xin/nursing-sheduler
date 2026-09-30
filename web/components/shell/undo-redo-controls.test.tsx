@@ -2,8 +2,18 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { useScenarioStore, scenarioCommands } from "@/lib/store";
-import { UndoRedoControls, useUndoRedoShortcuts } from "./undo-redo-controls";
+import { toast } from "sonner";
+import { useHotStore, useScenarioStore, scenarioCommands } from "@/lib/store";
+import {
+  UNDO_FRESH_NOTE,
+  UndoRedoControls,
+  useUndoFreshNote,
+  useUndoRedoShortcuts,
+} from "./undo-redo-controls";
+
+vi.mock("sonner", () => ({
+  toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), message: vi.fn() }),
+}));
 import { useNavGuardStore } from "./nav-guard-store";
 import { cardEditorDraftId } from "@/components/card-editor/card-editor-shell";
 import { CountsEditor } from "@/components/counts/counts-editor";
@@ -247,5 +257,34 @@ describe("an open Shift Counts / Contracted Hours draft owns the undo keys end-t
     expect(z.defaultPrevented).toBe(false);
     undoSpy.mockRestore();
     expect(await historyLength()).toBe(depthWithDraft);
+  });
+});
+
+describe("useUndoFreshNote — Undo starts fresh after a reload (C-24)", () => {
+  function Note() {
+    useUndoFreshNote();
+    return null;
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.mocked(toast).mockClear();
+    useHotStore.getState().setHydrationStatus("ready");
+  });
+
+  it("says so once when saved work loads, and not again", async () => {
+    await act(async () => {
+      await scenarioCommands.mutate({ staff: [{ _k: "p1", id: 1, description: "Nurse A" }] });
+    });
+    render(<Note />);
+    expect(toast).toHaveBeenCalledExactlyOnceWith(UNDO_FRESH_NOTE);
+    cleanup();
+    render(<Note />);
+    expect(toast).toHaveBeenCalledOnce();
+  });
+
+  it("stays quiet when there is no saved work", () => {
+    render(<Note />);
+    expect(toast).not.toHaveBeenCalled();
   });
 });

@@ -115,6 +115,12 @@ export interface AuthorityState {
   ownership: ScenarioOwnership;
   /** The tab id currently holding the lease, when it is not us. */
   heldByTabId: string | null;
+  /**
+   * Set on a non-owning tab when another tab switched away from its schedule by New or
+   * Load (bug hunt A-02). This tab stays on the old schedule, read-only, until the user
+   * picks Switch: editing on here would silently reclaim the lease the other tab let go.
+   */
+  peerLoadedScenarioId: string | null;
   /** Derived from persisted commit facts, never from a process-memory stack. */
   canUndo: boolean;
   canRedo: boolean;
@@ -134,6 +140,7 @@ const INITIAL_AUTHORITY_STATE: AuthorityState = {
   recordRevision: 0,
   ownership: "unknown",
   heldByTabId: null,
+  peerLoadedScenarioId: null,
   canUndo: false,
   canRedo: false,
   writeStatus: "idle",
@@ -167,7 +174,12 @@ export const useAuthorityStore = createAuthorityStore();
  * work. Nothing but an authoritative reload can clear it.
  */
 export function canMutateScenario(state: AuthorityState = useAuthorityStore.getState()): boolean {
-  return state.ownership === "owner" && state.scenarioId !== null && !state.reloadRequired;
+  return (
+    state.ownership === "owner" &&
+    state.scenarioId !== null &&
+    !state.reloadRequired &&
+    state.peerLoadedScenarioId === null
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -475,6 +487,8 @@ export interface ScenarioAuthorityConfig {
 export interface OwnershipHint {
   kind: "acquired" | "released" | "committed";
   scenarioId: string;
+  /** On the `acquired` hint of a New or Load: the schedule the sender switched away from. */
+  fromScenarioId?: string;
   tabId: string;
   epoch: number;
 }
@@ -670,20 +684,41 @@ export class ScenarioAuthority {
       (await this.repository.latestScenarioId()) ??
       migrated.scenarioId;
 
-    let envelope: ScenarioEnvelopeV3;
+    const envelope = await this.selectExisting(scenarioId!);
+    if (!this.isCurrentEra(era)) return;
+    await this.publishSelected(envelope, era);
+    this.settleWriteStatus();
+
+    // The Optimize basis reaper's lifecycle caller (T08). Boot is the one moment
+    // where the live reference set is empty BY CONSTRUCTION: no Preview is open,
+    // no diagnostic candidate is in flight, and no receipt reconciliation is
+    // running, because none of those survive a page load. That makes the sweep
+    // deterministic rather than dependent on a timer nobody owns.
+    //
+    // Deliberately AFTER publish and NOT awaited into the boot path: retention
+    // hygiene must never delay — or fail — bringing the tab up against durable
+    // truth. `sweepOptimizeBases` swallows its own errors for the same reason.
+    this.basisSweepSettled = this.sweepOptimizeBases();
+  }
+
+  /**
+   * Select an existing scenario for this tab: acquire it when free, else select it
+   * read-only behind the live tab that holds it.
+   */
+  private async selectExisting(scenarioId: string): Promise<ScenarioEnvelopeV3> {
     try {
       const selection = await this.repository.selectOrSwitchScenario({
         tabId: this.tabId,
-        target: { kind: "existing", scenarioId: scenarioId! },
+        target: { kind: "existing", scenarioId },
         // A reload must not offer reversals whose payloads belong to a session that
         // no longer exists. The rollover happens INSIDE the fenced acquisition, so a
         // takeover that lands between acquiring and rolling cannot have its own
         // reversal material expired by this tab's follow-up transaction.
         rollHistorySession: true,
       });
-      envelope = selection.envelope;
       this.owner = selection.owner;
       this.authority.setState({ ownership: "owner", heldByTabId: null });
+      return selection.envelope;
     } catch (error) {
       if (!isRepositoryError(error, "target_owned")) throw error;
       // Another live tab owns this scenario. Select it WITHOUT acquiring, so this
@@ -691,20 +726,21 @@ export class ScenarioAuthority {
       // repository writes no scenario-scoped fact for a non-acquiring selection.
       const selection = await this.repository.selectOrSwitchScenario({
         tabId: this.tabId,
-        target: { kind: "existing", scenarioId: scenarioId! },
+        target: { kind: "existing", scenarioId },
         acquire: false,
       });
-      envelope = selection.envelope;
       const lease = await this.repository.readTabContext(this.tabId);
       this.owner = null;
       this.authority.setState({
         ownership: "read-only",
         heldByTabId: lease.lease?.ownerTabId ?? null,
       });
+      return selection.envelope;
     }
+  }
 
-    if (!this.isCurrentEra(era)) return;
-
+  /** Announce an acquired lease, then publish the selected envelope with its history. */
+  private async publishSelected(envelope: ScenarioEnvelopeV3, era: number): Promise<void> {
     if (this.owner) {
       this.broadcast({
         kind: "acquired",
@@ -726,18 +762,37 @@ export class ScenarioAuthority {
         ? { undo: history.undoAvailable, redo: history.redoAvailable }
         : { undo: false, redo: false },
     );
-    this.settleWriteStatus();
+  }
 
-    // The Optimize basis reaper's lifecycle caller (T08). Boot is the one moment
-    // where the live reference set is empty BY CONSTRUCTION: no Preview is open,
-    // no diagnostic candidate is in flight, and no receipt reconciliation is
-    // running, because none of those survive a page load. That makes the sweep
-    // deterministic rather than dependent on a timer nobody owns.
-    //
-    // Deliberately AFTER publish and NOT awaited into the boot path: retention
-    // hygiene must never delay — or fail — bringing the tab up against durable
-    // truth. `sweepOptimizeBases` swallows its own errors for the same reason.
-    this.basisSweepSettled = this.sweepOptimizeBases();
+  /**
+   * Switch to the schedule another tab loaded (the banner's Switch, bug hunt A-02).
+   * Acquires it when free, else follows the loading tab read-only.
+   */
+  followPeerLoad(): Promise<CommandOutcome> {
+    return this.enqueueLifecycle(async (): Promise<CommandOutcome> => {
+      const target = this.authority.getState().peerLoadedScenarioId;
+      if (!target) return { ok: false, reason: "not-ready", code: "unknown" };
+      let envelope: ScenarioEnvelopeV3;
+      try {
+        envelope = await this.selectExisting(target);
+      } catch (error) {
+        const failure = classify(error);
+        this.authority.setState({ lastErrorCode: failure.code });
+        return { ok: false, ...failure };
+      }
+      const era = this.beginEra();
+      this.authority.setState({ peerLoadedScenarioId: null, lastErrorCode: null });
+      // The old schedule's transient state must not leak into the new one.
+      this.hot.getState().resetEphemeral();
+      this.hot.getState().setHydrationStatus("ready");
+      await this.publishSelected(envelope, era);
+      return {
+        ok: true,
+        committed: false,
+        documentRevision: envelope.documentRevision,
+        commitId: null,
+      };
+    });
   }
 
   /**
@@ -793,6 +848,9 @@ export class ScenarioAuthority {
   }
 
   private async reconcileNow(): Promise<void> {
+    // Held on the old schedule until the user picks Switch: a reread here would
+    // reclaim the lease the loading tab let go (bug hunt A-02).
+    if (this.authority.getState().peerLoadedScenarioId) return;
     const era = this.era;
     const context = await this.repository.readTabContext(this.tabId);
     if (!this.isCurrentEra(era)) return;
@@ -993,8 +1051,26 @@ export class ScenarioAuthority {
   async onHint(hint: OwnershipHint): Promise<void> {
     if (hint.tabId === this.tabId) return;
     const scenarioId = this.authority.getState().scenarioId;
+    if (hint.fromScenarioId === scenarioId && hint.scenarioId !== scenarioId) {
+      await this.enqueueLifecycle(() => this.notePeerLoad(hint));
+      return;
+    }
     if (hint.scenarioId !== scenarioId) return; // a different scenario is none of our business
     await this.reconcile();
+  }
+
+  /**
+   * Another tab left this schedule for a New or Loaded one. Confirmed against that
+   * tab's DURABLE selection, never the hint alone; then a NON-owning tab is held
+   * read-only on the old schedule and offered Switch, instead of its next reconcile
+   * silently taking the lease the other tab let go. An owner keeps its own schedule:
+   * it takes nothing over, and two tabs on two schedules is allowed.
+   */
+  private async notePeerLoad(hint: OwnershipHint): Promise<void> {
+    if (this.owner || this.authority.getState().scenarioId !== hint.fromScenarioId) return;
+    const peer = await this.repository.readTabContext(hint.tabId);
+    if (peer.selection?.scenarioId !== hint.scenarioId) return;
+    this.authority.setState({ peerLoadedScenarioId: hint.scenarioId });
   }
 
   // -------------------------------------------------------------------------
@@ -1338,6 +1414,7 @@ export class ScenarioAuthority {
           code: "unknown" as const,
         };
       }
+      const fromScenarioId = this.authority.getState().scenarioId;
       try {
         const selection = await this.repository.selectOrSwitchScenario({
           tabId: this.tabId,
@@ -1351,6 +1428,7 @@ export class ScenarioAuthority {
         this.authority.setState({
           ownership: selection.owner ? "owner" : "read-only",
           heldByTabId: null,
+          peerLoadedScenarioId: null,
           lastErrorCode: null,
         });
         this.publish(selection.envelope, { undo: false, redo: false });
@@ -1360,6 +1438,8 @@ export class ScenarioAuthority {
         this.broadcast({
           kind: "acquired",
           scenarioId: selection.envelope.scenarioId,
+          // Peers still on the schedule this tab left offer to follow (bug hunt A-02).
+          ...(fromScenarioId ? { fromScenarioId } : {}),
           tabId: this.tabId,
           epoch: selection.owner?.epoch ?? 0,
         });
@@ -1568,6 +1648,18 @@ export class ScenarioAuthority {
             : null;
         const captured = await this.repository.captureGenerations(owner.scenarioId);
         const pair = generationPair(captured);
+        // SET ASIDE AS SOON AS A REVISION IS ASKED FOR (bug hunt S1). A refused revision
+        // returns below without writing, and must not leave the earlier Preview appliable;
+        // a successful one overwrites this row with the new revision.
+        if (previous) {
+          await this.repository.runGuarded(captured, async (db) => {
+            await db.assistantProposals.put({
+              ...previous,
+              status: "stale",
+              updatedAt: new Date().toISOString(),
+            });
+          });
+        }
 
         const prepared = prepareProposal({
           proposalId: previous?.proposalId ?? input.proposalId,
