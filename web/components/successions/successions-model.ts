@@ -22,7 +22,11 @@ import {
 } from "@/lib/scenario";
 import type { TransferOption } from "@/components/entity-editor/transfer-list";
 import type { DateScopeOption, DateScopeItem } from "@/components/card-editor/date-scope-field";
-import { isValidWeightValue, type WeightFieldValue } from "@/components/card-editor/weight-value";
+import {
+  invalidWeightMessage,
+  isValidWeightValue,
+  type WeightFieldValue,
+} from "@/components/card-editor/weight-value";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
 import { makeDates } from "@/lib/rules/requirement-dates";
 
@@ -223,7 +227,9 @@ export function validateSuccessionForm(form: SuccessionFormState): SuccessionErr
   if (form.person.length === 0) errors.person = SUCCESSION_MESSAGES.person;
   if (form.pattern.length < 2) errors.pattern = SUCCESSION_MESSAGES.pattern;
   if (form.date.length === 0) errors.date = SUCCESSION_MESSAGES.date;
-  if (!isValidWeightValue(form.weight)) errors.weight = SUCCESSION_MESSAGES.weightInvalid;
+  if (!isValidWeightValue(form.weight)) {
+    errors.weight = invalidWeightMessage(form.weight, SUCCESSION_MESSAGES.weightInvalid);
+  }
   return errors;
 }
 

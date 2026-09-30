@@ -39,7 +39,7 @@ import { NEW_SCHEDULE_FAILED_MESSAGE, resetToNewSchedule } from "@/lib/roster";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ConfirmDialog } from "./confirm-dialog";
-import { useUndoRedoShortcuts } from "./undo-redo-controls";
+import { useUndoFreshNote, useUndoRedoShortcuts } from "./undo-redo-controls";
 import { usePersistenceStatusController } from "./persistence-status";
 import { useSyncModePersistence } from "@/lib/mode/use-mode";
 import { useRouteValidityGate } from "./use-route-validity-gate";
@@ -77,6 +77,7 @@ export function HydrationGate({ children, resetNewSchedule }: HydrationGateProps
 
   useOwnershipController();
   useUndoRedoShortcuts();
+  useUndoFreshNote();
   usePersistenceStatusController();
   useSyncModePersistence();
   useRouteValidityGate();

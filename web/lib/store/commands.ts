@@ -82,6 +82,11 @@ export const scenarioCommands = {
     return getScenarioAuthority().takeover();
   },
 
+  /** Open the schedule another tab just loaded (the peer-load banner's Switch). */
+  followPeerLoad(): Promise<CommandOutcome> {
+    return getScenarioAuthority().followPeerLoad();
+  },
+
   /** Release the lease so a peer tab need not wait out the expiry. */
   release(): Promise<void> {
     return getScenarioAuthority().release();
