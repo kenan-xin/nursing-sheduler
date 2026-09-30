@@ -43,7 +43,7 @@ type Story = StoryObj<typeof meta>;
 
 const openStartOver = async (canvas: { getByTestId: typeof screen.getByTestId }) => {
   canvas.getByTestId("new-schedule-button").click();
-  const dialog = await screen.findByRole("alertdialog", { name: "Start over?" });
+  const dialog = await screen.findByRole("alertdialog", { name: "Start a new schedule?" });
   await waitFor(() => expect(dialog).toBeVisible());
   return dialog;
 };
@@ -65,7 +65,7 @@ export const ResetConfirmed: Story = {
   play: async ({ args, canvas, userEvent }) => {
     const dialog = await openStartOver(canvas);
     await expect(within(dialog).getAllByRole("listitem")).toHaveLength(4);
-    await userEvent.click(within(dialog).getByRole("button", { name: "Start over" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start new schedule" }));
     const toast = await screen.findByText("New schedule created");
     await waitFor(() => expect(toast).toBeVisible());
     await expect(args.resetNewSchedule).toHaveBeenCalledTimes(1);
@@ -94,7 +94,7 @@ export const ResetNotOwner: Story = {
   },
   play: async ({ args, canvas, userEvent }) => {
     const dialog = await openStartOver(canvas);
-    await userEvent.click(within(dialog).getByRole("button", { name: "Start over" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start new schedule" }));
     const toast = await screen.findByText(
       "This schedule is being edited in another tab. Take over editing, then start over.",
     );

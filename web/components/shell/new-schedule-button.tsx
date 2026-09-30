@@ -143,9 +143,8 @@ export function StartOverCard({
       <div className="flex flex-col gap-1 border-b border-line2 px-5 py-4">
         <h2 className="font-heading text-title font-semibold tracking-[-0.015em]">Start over</h2>
         <p className="max-w-[60ch] text-meta text-ink2">
-          Start a new schedule: begin empty, or load the realistic 87-person November 2025 example.
-          Starting empty removes everything saved in this browser and cannot be undone — download a
-          copy first if you want to keep it.
+          Start a new, empty schedule, or load the realistic 87-person November 2025 example. Your
+          current schedule stays in Recent schedules.
         </p>
       </div>
       <div className="flex flex-col gap-3 px-5 py-4">
@@ -190,16 +189,14 @@ export function StartOverCard({
       <ConfirmDialog
         open={open}
         onOpenChange={setOpen}
-        title="Start over?"
-        description="This clears your entire current schedule and starts a new, empty one. It cannot be undone."
-        confirmLabel="Start over"
+        title="Start a new schedule?"
+        description="Your current schedule stays in Recent schedules, where you can open it again. Starting a new one clears:"
+        confirmLabel="Start new schedule"
         cancelLabel="Cancel"
         variant="destructive"
-        consequences={[
-          "All people, shift types and dates",
-          "Every rule and request",
-          "The saved roster and the last run's result",
-        ]}
+        // plq5 P1: only what is actually cleared. The roster is still one slot per
+        // browser until P2 gives each schedule its own; P2 drops this line.
+        consequences={["The saved roster and the last run's result"]}
         onConfirm={handleConfirm}
       />
       {/* The example's staged replacement/version confirmation — the same modal the

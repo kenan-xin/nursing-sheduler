@@ -76,7 +76,7 @@ test.describe("F07 — the Start-over card's two new-schedule choices", () => {
     await expect(page.getByTestId("new-schedule-example")).toBeVisible();
     await expect(page.getByTestId("new-schedule-example")).toContainText("87-person example");
     // The card says what each choice does before either is clicked.
-    await expect(page.getByTestId("start-over-card")).toContainText("begin empty");
+    await expect(page.getByTestId("start-over-card")).toContainText("empty schedule");
     await expect(page.getByTestId("start-over-card")).toContainText("87-person");
   });
 
