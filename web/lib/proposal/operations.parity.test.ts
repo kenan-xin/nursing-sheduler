@@ -431,7 +431,8 @@ describe("add_shift_type is the Shifts page's Add shift save", () => {
   it("accepts and refuses the same shifts, and produces the same document", async () => {
     const state = proposalScenario();
     for (const [code, name, startTime, endTime, rest] of matrix) {
-      const gate = gridCanSave(state, code, startTime, endTime, rest);
+      // The grid's code input stores what is typed uppercase (`shift-type-grid.tsx`).
+      const gate = gridCanSave(state, code.toUpperCase(), startTime, endTime, rest);
       const assistant = applyAssistantCommand(state, {
         type: "add_shift_type",
         code,
