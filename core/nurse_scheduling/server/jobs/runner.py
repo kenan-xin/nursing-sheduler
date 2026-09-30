@@ -99,7 +99,8 @@ class OptimizationRunner:
         day-state handoff. Expected failures are returned as `JobFailure`.
         """
         roster_payloads: list[dict[str, Any]] = []
-        # v2: why an ordinary run has no roster; diagnostic copies skip the extra solves.
+        # v2 run explanation (penalty ledger, or why there is no roster); ordinary runs only,
+        # so diagnostic copies skip the extra solves.
         explanations: list[dict[str, Any]] = []
         explain = job.request.purpose == JobPurpose.ORDINARY
 
@@ -197,6 +198,7 @@ class OptimizationRunner:
                 score=schedule_result.score,
                 solver_status=normalized_status,
                 termination_reason=termination_reason,
+                explanation=explanations[0] if explanations else None,
             ),
             artifact=StoredArtifact(
                 name=f"nurse-scheduling-{created_at:%Y%m%dT%H%M%SZ}.roster.json",

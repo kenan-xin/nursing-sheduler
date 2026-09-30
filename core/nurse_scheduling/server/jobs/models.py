@@ -92,7 +92,7 @@ class OptimizationResult:
     termination_reason: str | None = None
     """Normalized explanation of why solver execution stopped."""
     explanation: dict[str, Any] | None = None
-    """v2: why a proven-infeasible run has no roster (proof and core), JSON-safe."""
+    """v2: penalty ledger (roster) or why a proven-infeasible run has none, JSON-safe."""
 
 
 @dataclass(frozen=True)

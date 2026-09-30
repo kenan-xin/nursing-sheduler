@@ -1,4 +1,4 @@
-"""v2: a run with no roster gets a proof check and a minimal clash (beads qb5v, a5pb P2)."""
+"""v2 run explanations: the penalty ledger, and a proof check plus a minimal clash for a run with no roster."""
 
 # This file is part of Nurse Scheduling Project, see <https://github.com/j3soon/nurse-scheduling>.
 #
@@ -24,6 +24,7 @@ import os
 import random
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from ortools.sat.python import cp_model
@@ -61,6 +62,63 @@ def _explain(content: bytes, **kwargs):
     kwargs.setdefault("deterministic", True)
     result = nurse_scheduling.schedule(content, on_explanation=out.append, progress_callback=progress, **kwargs)
     return result, out, phases
+
+
+@pytest.mark.parametrize("path", BASICS, ids=os.path.basename)
+def test_ledger_sums_to_the_objective(path):
+    result, out, _phases = _explain(_read(path))
+    if result.solver_status not in ("OPTIMAL", "FEASIBLE"):
+        assert out == []
+        return
+    [explanation] = out
+    ledger = explanation["ledger"]
+    assert explanation["kind"] == "ledger"
+    assert ledger["balanced"], path
+    assert ledger["unattributed"] == 0  # deterministic runs are OPTIMAL here
+    assert ledger["objective"] == result.score
+    assert sum(m["points"] for m in ledger["matches"]) == result.score
+    assert sum(r["points"] for r in ledger["rules"]) == result.score
+    assert all(m["points"] != 0 for m in ledger["matches"])
+
+
+def test_ledger_names_nurse_date_and_shift():
+    result, [explanation], _phases = _explain(_read(f"{TESTCASES}/basics/01_1nurse_1shift_1day_all_prefs.yaml"))
+    keys = {k for m in explanation["ledger"]["matches"] for k in m}
+    assert result.score != 0
+    assert {"rule", "points", "nurse", "date"} <= keys
+
+
+def test_ledger_reads_a_negative_succession_from_the_roster_not_its_bound():
+    """is_match is only bounded below: a non-optimal roster may carry it at 1 with no match."""
+    ctx = SimpleNamespace(
+        scenario=SimpleNamespace(
+            people=SimpleNamespace(items=[SimpleNamespace(id="ana")]),
+            shiftTypes=SimpleNamespace(items=[SimpleNamespace(id="N")]),
+        ),
+        compiled_schedule=SimpleNamespace(dates=["2026-11-01"]),
+        solver=SimpleNamespace(get_value={"is_match": 1, "matched": 1}.get, get_objective_value=lambda: -10),
+        # A two-night pattern with one night worked: is_match = 1 is legal, but no match.
+        objective_terms=[(3, (0, None, 0), -10, "is_match", lambda value: int(value("matched") == 2))],
+    )
+    ledger = explain.read_ledger(ctx)
+    assert (ledger["balanced"], ledger["matches"], ledger["unattributed"]) == (True, [], -10)
+
+
+def test_ledger_reports_a_real_negative_succession_match():
+    content = b"""apiVersion: alpha
+dates: {range: {startDate: 2026-11-01, endDate: 2026-11-02}}
+people: {items: [{id: ana}]}
+shiftTypes: {items: [{id: N}]}
+preferences:
+  - type: at most one shift per day
+  - {type: shift type requirement, shiftType: N, requiredNumPeople: 1}
+  - {type: shift type successions, person: ana, pattern: [N, N], weight: -10}
+"""
+    result, [explanation], _phases = _explain(content, deterministic=False)
+    ledger = explanation["ledger"]
+    assert result.score == -10
+    assert ledger["matches"] == [{"rule": 2, "nurse": "ana", "date": "2026-11-01", "points": -10}]
+    assert ledger["unattributed"] == 0
 
 
 def contract_vs_rest_ward(n_people: int = 58, worked_days: int = 22) -> bytes:
@@ -201,14 +259,14 @@ def test_explanations_leave_the_optimising_model_byte_identical(monkeypatch, pat
     assert (explained.solver_status, explained.score) == (plain.solver_status, plain.score)
 
 
-def test_a_feasible_run_runs_nothing_extra(monkeypatch):
+def test_a_feasible_run_runs_no_proof_check_or_core_solve(monkeypatch):
     def fail(*_args, **_kwargs):
         raise AssertionError("explained a run that has a roster")
 
     monkeypatch.setattr(explain, "explain_no_roster", fail)
     result, out, phases = _explain(_read(BASICS[0]))
     assert result.solver_status == "OPTIMAL"
-    assert out == [] and "explaining_no_roster" not in phases
+    assert [e["kind"] for e in out] == ["ledger"] and "explaining_no_roster" not in phases
 
 
 def _unknown_main_run(monkeypatch):
@@ -250,10 +308,17 @@ def _run(content: bytes, purpose=JobPurpose.ORDINARY):
     return job, output
 
 
-def test_the_runner_puts_the_explanation_on_the_result_and_redis_keeps_it():
-    job, output = _run(_read(f"{REPAIR}/onlyRnOnLeave.before.yaml"))
-    assert output.result.termination_reason == "infeasibility_proven"
-    assert output.result.explanation["core"]["members"]
+@pytest.mark.parametrize(
+    ("path", "kind"),
+    [
+        (f"{TESTCASES}/basics/01_1nurse_1shift_1day_all_prefs.yaml", "ledger"),
+        (f"{REPAIR}/onlyRnOnLeave.before.yaml", "infeasible"),
+    ],
+    ids=["roster", "infeasible"],
+)
+def test_the_runner_puts_the_explanation_on_the_result_and_redis_keeps_it(path, kind):
+    job, output = _run(_read(path))
+    assert output.result.explanation["kind"] == kind
     stored = replace(job, state=JobState.COMPLETED, result=output.result)
     assert RedisJobStore._deserialize_job(RedisJobStore._serialize_job(stored)).result == output.result
 
@@ -265,7 +330,9 @@ def test_the_runner_turns_a_proven_unknown_run_into_infeasibility_proven(monkeyp
     assert output.result.explanation["proof"].startswith("feasibility_check:")
 
 
-def test_diagnostic_copies_get_no_explanation():
-    _job, output = _run(_read(f"{REPAIR}/onlyRnOnLeave.before.yaml"), JobPurpose.ASSISTANT_DIAGNOSTIC)
-    assert output.result.termination_reason == "infeasibility_proven"
+@pytest.mark.parametrize(
+    "path", [f"{TESTCASES}/basics/01_1nurse_1shift_1day_all_prefs.yaml", f"{REPAIR}/onlyRnOnLeave.before.yaml"]
+)
+def test_diagnostic_copies_get_no_explanation(path):
+    _job, output = _run(_read(path), JobPurpose.ASSISTANT_DIAGNOSTIC)
     assert output.result.explanation is None

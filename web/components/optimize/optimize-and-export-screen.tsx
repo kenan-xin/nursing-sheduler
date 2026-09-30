@@ -27,7 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 import { rangeDayCount } from "@/lib/dates";
-import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
+import { preferenceCardUids, toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
 import { withDefaultExportLayout } from "@/lib/scenario/default-export-layout";
 import { applyCovers } from "@/lib/scenario/temporary-cover";
 import { countEnabledRules } from "@/lib/scenario";
@@ -570,6 +570,7 @@ export function OptimizeAndExportScreen({
     const document = withDefaultExportLayout(toCanonicalScenarioDocument(applied.state));
     return {
       document,
+      ruleUids: preferenceCardUids(applied.state),
       cover: {
         // The shared projection, so the entries staged with the submission and the
         // rows the raw download writes are built from ONE reading of the cards.

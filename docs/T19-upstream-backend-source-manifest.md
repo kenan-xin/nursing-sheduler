@@ -193,22 +193,22 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `nurse_scheduling/ai_serve.py` | excluded |  | X5: AI service entry |
 | `nurse_scheduling/cli.py` | verbatim | `8a204b863f7e` |  |
 | `nurse_scheduling/constants.py` | verbatim | `9fdcc4a54b1c` |  |
-| `nurse_scheduling/context.py` | verbatim | `0242cfd9a79b` |  |
-| `nurse_scheduling/explain.py` | v2-only |  | qb5v: why a run has no roster (no-objective proof check, minimal core of hard rule units) |
+| `nurse_scheduling/context.py` | patched | `0242cfd9a79b` | `a5pb-ledger.patch` |
+| `nurse_scheduling/explain.py` | v2-only |  | a5pb/qb5v run explanations: penalty ledger; why a run has no roster (no-objective proof check, minimal core) |
 | `nurse_scheduling/exporter.py` | patched | `1b1eb7f5192a` | `99db-D03-xlsx-text-cells.patch` |
 | `nurse_scheduling/frontend_validation.py` | excluded |  | X5: used only by the v1 AI package |
 | `nurse_scheduling/group_map.py` | verbatim | `c619776c6420` |  |
 | `nurse_scheduling/loader.py` | verbatim | `308e2076a579` |  |
 | `nurse_scheduling/model_build_stats.py` | verbatim | `77640eb47261` |  |
 | `nurse_scheduling/models.py` | patched | `edcdab1503ea` | `P2-P3-skillmix-overrides.patch` (P2, P3). `99db-D05-head-count-bound.patch`. `99db-C1-required-not-above-preferred.patch` |
-| `nurse_scheduling/preference_types.py` | patched | `51f7cb3570bd` | `P2-P3-skillmix-overrides.patch` (P2, P3). `99db-B1-history-completed-hard-sequence.patch`. `99db-B5-leave-satisfies-hard-off.patch`. `qb5v-why-solve.patch` |
+| `nurse_scheduling/preference_types.py` | patched | `51f7cb3570bd` | `P2-P3-skillmix-overrides.patch` (P2, P3). `99db-B1-history-completed-hard-sequence.patch`. `99db-B5-leave-satisfies-hard-off.patch`. `qb5v-why-solve.patch`. `a5pb-ledger.patch` |
 | `nurse_scheduling/report.py` | verbatim | `8cff02666faf` |  |
-| `nurse_scheduling/scheduler.py` | patched | `7867e7d1b159` | `P4-on-roster.patch` (P4). `qb5v-why-solve.patch` |
+| `nurse_scheduling/scheduler.py` | patched | `7867e7d1b159` | `P4-on-roster.patch` (P4). `qb5v-why-solve.patch`. `a5pb-ledger.patch` |
 | `nurse_scheduling/serve.py` | verbatim | `8a844abe3b79` |  |
 | `nurse_scheduling/server/__init__.py` | verbatim | `7b3119b1236e` |  |
 | `nurse_scheduling/server/api/__init__.py` | verbatim | `10c7354468e8` |  |
 | `nurse_scheduling/server/api/optimize.py` | patched | `5da18e2b4951` | `W2-server-api-optimize.patch` (P5, P6, P7, P8, P9) |
-| `nurse_scheduling/server/api/schemas.py` | patched | `c0ed76c4fe7f` | `W2-server-api-schemas.patch` (P8, P9). `qb5v-why-solve.patch` |
+| `nurse_scheduling/server/api/schemas.py` | patched | `c0ed76c4fe7f` | `W2-server-api-schemas.patch` (P8, P9). `qb5v-why-solve.patch`. `a5pb-ledger.patch` |
 | `nurse_scheduling/server/api/sse.py` | verbatim | `7b5e8dfa6fe4` |  |
 | `nurse_scheduling/server/app.py` | patched | `31e62ad1cfc5` | `W2-server-app.patch` (P5, P8, P9, P11). `99db-D01-child-memory-cap.patch`. `99db-D07-per-client-queue-cap.patch` |
 | `nurse_scheduling/server/auth.py` | verbatim | `f292e5c6cae4` |  |
@@ -221,10 +221,10 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `nurse_scheduling/server/job_store.py` | patched | `fb656a30e27b` | `W6-server-job_store.patch` (P6, P9) |
 | `nurse_scheduling/server/jobs/__init__.py` | verbatim | `ec33f2782dcb` |  |
 | `nurse_scheduling/server/jobs/controller.py` | patched | `a18fb0bd1a34` | `W6-server-jobs-controller.patch` (P6, P8, P9). `qb5v-why-solve.patch` |
-| `nurse_scheduling/server/jobs/models.py` | patched | `1b358ba15342` | `W6-server-jobs-models.patch` (P6, P8, P9). `99db-D07-per-client-queue-cap.patch`. `qb5v-why-solve.patch` |
+| `nurse_scheduling/server/jobs/models.py` | patched | `1b358ba15342` | `W6-server-jobs-models.patch` (P6, P8, P9). `99db-D07-per-client-queue-cap.patch`. `qb5v-why-solve.patch`. `a5pb-ledger.patch` |
 | `nurse_scheduling/server/jobs/process_executor.py` | patched | `183712393bfc` | `99db-D01-child-memory-cap.patch` |
 | `nurse_scheduling/server/jobs/process_tree.py` | verbatim | `8d5d3687550e` |  |
-| `nurse_scheduling/server/jobs/runner.py` | patched | `0ebde2edb9c4` | `W2-server-jobs-runner.patch` (P7, P8). `qb5v-why-solve.patch` |
+| `nurse_scheduling/server/jobs/runner.py` | patched | `0ebde2edb9c4` | `W2-server-jobs-runner.patch` (P7, P8). `qb5v-why-solve.patch`. `a5pb-ledger.patch` |
 | `nurse_scheduling/server/jobs/worker.py` | patched | `ff808a06deff` | `W6-server-jobs-worker.patch` (P10). `99db-D01-child-memory-cap.patch` |
 | `nurse_scheduling/server/maintenance.py` | patched | `2adb7af1de57` | `W2-server-maintenance.patch` (P9, P11) |
 | `nurse_scheduling/server/optimize_basis.py` | v2-only |  | P8 optimize basis: the basis fields a job records |
@@ -251,7 +251,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `nurse_scheduling/solver_pulp.py` | verbatim | `a796fcb7e684` |  |
 | `nurse_scheduling/solver_pulp_glpk.py` | verbatim | `1a489f7b6b67` |  |
 | `nurse_scheduling/solver_pulp_python.py` | verbatim | `b3c028f4f84d` |  |
-| `nurse_scheduling/utils.py` | verbatim | `28f99473b6c5` |  |
+| `nurse_scheduling/utils.py` | patched | `28f99473b6c5` | `a5pb-ledger.patch` |
 | `nurse_scheduling/version.py` | verbatim | `8a848d24ced7` |  |
 | `pyproject.toml` | patched | `da988b91d33d` | `W0-pyproject.patch` |
 | `requirements-optional.txt` | patched | `edfeae4e5dcd` | `W0-requirements.patch` (P5, X4, X5) |
@@ -309,7 +309,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `tests/test_catalogue_oracle_g7.py` | v2-only |  | proves web catalogue check G7 is sound |
 | `tests/test_check_upstream_sync.py` | v2-only |  | runs the sync check in the core suite |
 | `tests/test_cli.py` | verbatim | `75d0d16b66dc` |  |
-| `tests/test_explain.py` | v2-only |  | qb5v: proof check, minimal core and byte-identical optimising model tests |
+| `tests/test_explain.py` | v2-only |  | a5pb/qb5v ledger, proof check, minimal core and byte-identical optimising model tests |
 | `tests/test_export_formatting.py` | verbatim | `0c773e90a93d` |  |
 | `tests/test_export_xlsx_ortools_cp_sat.py` | verbatim | `45d8278a04b2` |  |
 | `tests/test_exporter.py` | patched | `f974c0e0018f` | `99db-D03-xlsx-text-cells.patch` |
@@ -752,6 +752,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `upstream-patches/W6-server-stores-memory.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/W6-server-stores-redis.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/W6-tests-test_serve.patch` | v2-only |  | sync patch or manifest |
+| `upstream-patches/a5pb-ledger.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/manifest.toml` | v2-only |  | sync patch or manifest |
 | `upstream-patches/qb5v-why-solve.patch` | v2-only |  | sync patch or manifest |
 <!-- origin-table:end -->

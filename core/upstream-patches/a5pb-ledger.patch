@@ -1,0 +1,221 @@
+# a5pb patch against genie 1bf4b85 (ported from exp/timefold-on-cpsat 2e591c34 and the ledger truth fix in 71ac14e7).
+# hunk: penalty ledger: add_objective records each finite term with its preference and (day, shift, person) key; a term the model only bounds (a negative soft succession) reads its value from the roster; the scheduler hands explain.read_ledger to on_explanation on the roster path and the runner stores it as result.explanation
+
+diff --git a/core/nurse_scheduling/context.py b/core/nurse_scheduling/context.py
+index 0242cfd9..62ce30a8 100644
+--- a/core/nurse_scheduling/context.py
++++ b/core/nurse_scheduling/context.py
+@@ -62,6 +62,11 @@ class Context:
+ 
+     # Optimization objective (expression type varies by solver)
+     objective: Any = 0
++    # v2 penalty ledger: one (preference index, (d, s, p) key, weight, expression, truth)
++    # row per finite objective term, read after the solve by explain.read_ledger.
++    objective_terms: list[tuple[Any, Any, Any, Any, Any]] = field(default_factory=list)
++    # Index of the preference whose handler is running, set by scheduler.schedule.
++    current_preference: int | None = None
+ 
+     def __post_init__(self) -> None:
+         self.compiled_schedule = self.scenario.compiled_schedule
+diff --git a/core/nurse_scheduling/preference_types.py b/core/nurse_scheduling/preference_types.py
+index a16daab1..09aa2bc9 100644
+--- a/core/nurse_scheduling/preference_types.py
++++ b/core/nurse_scheduling/preference_types.py
+@@ -152,7 +152,7 @@ def shift_type_requirements(
+ 
+                 # Add the objective
+                 weight = preference.weight
+-                utils.add_objective(ctx, weight, diff)
++                utils.add_objective(ctx, weight, diff, key=(d, ss[0] if len(ss) == 1 else None, None))
+                 ctx.reports.append(Report(f"shift_type_requirements_{diff_var_name}", diff, lambda x: x == 0))
+ 
+ 
+@@ -187,7 +187,7 @@ def shift_request(
+                 # and LEAVE day-states. sum_s shifts is 0/1 (exactly one
+                 # day-state per day), so it is the worked-day indicator.
+                 worked_sum = sum(ctx.shifts[(d, s, p)] for s in range(ctx.n_shift_types))
+-                utils.add_objective(ctx, weight, worked_sum)
++                utils.add_objective(ctx, weight, worked_sum, key=(d, None, p))
+                 ctx.reports.append(
+                     Report(f"shift_request_pref_{preference_idx}_d_{d}_p_{p}_worked", worked_sum, lambda x: x == 1)
+                 )
+@@ -200,7 +200,7 @@ def shift_request(
+                             # A leave day is also a day off: a hard OFF (e.g. on a group row) plus a
+                             # member's leave pin is not a conflict (bug hunt B5, bead 99db).
+                             off_expr = off_expr + ctx.leaves[(d, p)]
+-                        utils.add_objective(ctx, weight, off_expr)
++                        utils.add_objective(ctx, weight, off_expr, key=(d, s, p))
+                         ctx.reports.append(
+                             Report(
+                                 f"shift_request_pref_{preference_idx}_d_{d}_p_{p}_offs",
+@@ -222,7 +222,7 @@ def shift_request(
+                             )
+                         )
+                     else:
+-                        utils.add_objective(ctx, weight, ctx.shifts[(d, s, p)])
++                        utils.add_objective(ctx, weight, ctx.shifts[(d, s, p)], key=(d, s, p))
+                         ctx.reports.append(
+                             Report(
+                                 f"shift_request_pref_{preference_idx}_d_{d}_s_{s}_p_{p}_shifts",
+@@ -295,7 +295,7 @@ def shift_type_successions(
+                     is_match_var_name = f"{unique_var_prefix}_is_match"
+                     ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
+                     ctx.solver.add_constraint(is_match == 1)
+-                    utils.add_objective(ctx, preference.weight, is_match)
++                    utils.add_objective(ctx, preference.weight, is_match, key=(d_begin, None, p))
+                     ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 1))
+                     continue
+ 
+@@ -323,7 +323,15 @@ def shift_type_successions(
+                     # objective weight makes 0 strictly preferred.
+                     ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
+                     ctx.solver.add_constraint(is_match >= actual_n_matched - target_n_matched + 1)
+-                    utils.add_objective(ctx, weight, is_match)
++                    # is_match is only bounded below, so a non-optimal roster may carry it at 1
++                    # with no real match: the v2 ledger reads the pattern from the roster instead.
++                    utils.add_objective(
++                        ctx,
++                        weight,
++                        is_match,
++                        key=(d_begin, None, p),
++                        truth=lambda value, n=actual_n_matched, t=target_n_matched: int(value(n) == t),
++                    )
+                     ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 0))
+                     continue
+                 if is_literal_pattern and ctx.solver.should_use_bool_and_var(len(pattern_element_matches)):
+@@ -340,7 +348,7 @@ def shift_type_successions(
+                         (0, target_n_matched),
+                     )
+ 
+-                utils.add_objective(ctx, weight, is_match)
++                utils.add_objective(ctx, weight, is_match, key=(d_begin, None, p))
+                 ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 1))
+ 
+ 
+@@ -402,7 +410,7 @@ def shift_count(
+                 # Use abstracted squared equality method
+                 ctx.solver.add_squared_equality(squared, abs_diff, (0, max_abs_diff))
+                 # Add the objective
+-                utils.add_objective(ctx, weight, squared)
++                utils.add_objective(ctx, weight, squared, key=(None, None, p))
+                 ctx.reports.append(Report(f"shift_count_{squared_var_name}", squared, lambda x: x == 0))
+             else:
+                 expr_var_name = f"{unique_var_prefix}_expr"
+@@ -421,7 +429,7 @@ def shift_count(
+                     T,
+                     (0, max_x),
+                 )
+-                utils.add_objective(ctx, weight, expr)
++                utils.add_objective(ctx, weight, expr, key=(None, None, p))
+                 # TODO: Be aware of signs of `weight`?
+                 ctx.reports.append(Report(f"shift_count_{unique_var_prefix}_expr", expr, lambda x: x))
+ 
+@@ -498,7 +506,7 @@ def shift_affinity(
+                         (0, 2),
+                     )
+                     weight = preference.weight
+-                    utils.add_objective(ctx, weight, is_match)
++                    utils.add_objective(ctx, weight, is_match, key=(d, None, None))
+                     ctx.reports.append(
+                         Report(f"shift_affinity_{unique_var_prefix}_is_match", is_match, lambda x: x == 1)
+                     )
+diff --git a/core/nurse_scheduling/scheduler.py b/core/nurse_scheduling/scheduler.py
+index ce80587b..27f7b42d 100644
+--- a/core/nurse_scheduling/scheduler.py
++++ b/core/nurse_scheduling/scheduler.py
+@@ -383,6 +383,7 @@ def schedule(
+     # TODO: Check no duplicated preferences
+     # TODO: Check no overlapping preferences
+     for i, preference in enumerate(ctx.scenario.preferences):
++        ctx.current_preference = i
+         ctx.solver.guard_key = (i, None)
+         step_started_at, start_counts = start_model_build_step(
+             model_build_stats_callback,
+@@ -530,6 +531,8 @@ def schedule(
+     # never fires the callback. The return contract below is unchanged.
+     if on_roster is not None:
+         on_roster(_build_roster_payload(ctx, prettify))
++    if on_explanation is not None:
++        on_explanation({"kind": "ledger", "ledger": explain.read_ledger(ctx)})
+     solution = {}
+     for d, s, p in ctx.shifts:
+         solution[(d, s, p)] = ctx.solver.get_value(ctx.shifts[(d, s, p)])
+diff --git a/core/nurse_scheduling/server/api/schemas.py b/core/nurse_scheduling/server/api/schemas.py
+index d492cb22..77d81a2a 100644
+--- a/core/nurse_scheduling/server/api/schemas.py
++++ b/core/nurse_scheduling/server/api/schemas.py
+@@ -178,7 +178,7 @@ class OptimizationResultResponse(BaseModel):
+     termination_reason: str | None
+     """Normalized reason solver execution stopped."""
+     explanation: dict[str, Any] | None = None
+-    """v2: why a proven-infeasible run has no roster (proof and core)."""
++    """v2: penalty ledger (roster) or why a proven-infeasible run has none."""
+ 
+ 
+ class JobErrorResponse(BaseModel):
+diff --git a/core/nurse_scheduling/server/jobs/models.py b/core/nurse_scheduling/server/jobs/models.py
+index 85bde391..b80c98c1 100644
+--- a/core/nurse_scheduling/server/jobs/models.py
++++ b/core/nurse_scheduling/server/jobs/models.py
+@@ -92,7 +92,7 @@ class OptimizationResult:
+     termination_reason: str | None = None
+     """Normalized explanation of why solver execution stopped."""
+     explanation: dict[str, Any] | None = None
+-    """v2: why a proven-infeasible run has no roster (proof and core), JSON-safe."""
++    """v2: penalty ledger (roster) or why a proven-infeasible run has none, JSON-safe."""
+ 
+ 
+ @dataclass(frozen=True)
+diff --git a/core/nurse_scheduling/server/jobs/runner.py b/core/nurse_scheduling/server/jobs/runner.py
+index 5ac63ff6..93bfaf14 100644
+--- a/core/nurse_scheduling/server/jobs/runner.py
++++ b/core/nurse_scheduling/server/jobs/runner.py
+@@ -99,7 +99,8 @@ class OptimizationRunner:
+         day-state handoff. Expected failures are returned as `JobFailure`.
+         """
+         roster_payloads: list[dict[str, Any]] = []
+-        # v2: why an ordinary run has no roster; diagnostic copies skip the extra solves.
++        # v2 run explanation (penalty ledger, or why there is no roster); ordinary runs only,
++        # so diagnostic copies skip the extra solves.
+         explanations: list[dict[str, Any]] = []
+         explain = job.request.purpose == JobPurpose.ORDINARY
+ 
+@@ -197,6 +198,7 @@ class OptimizationRunner:
+                 score=schedule_result.score,
+                 solver_status=normalized_status,
+                 termination_reason=termination_reason,
++                explanation=explanations[0] if explanations else None,
+             ),
+             artifact=StoredArtifact(
+                 name=f"nurse-scheduling-{created_at:%Y%m%dT%H%M%SZ}.roster.json",
+diff --git a/core/nurse_scheduling/utils.py b/core/nurse_scheduling/utils.py
+index 28f99473..d222329c 100644
+--- a/core/nurse_scheduling/utils.py
++++ b/core/nurse_scheduling/utils.py
+@@ -32,7 +32,7 @@ def ensure_list(val):
+     return [val] if not isinstance(val, list) else val
+ 
+ 
+-def add_objective(ctx, weight, expression):
++def add_objective(ctx, weight, expression, key=None, truth=None):
+     """
+     Add an objective term with the given weight.
+ 
+@@ -40,6 +40,9 @@ def add_objective(ctx, weight, expression):
+         ctx: Context object
+         weight: Weight for the objective term (can be inf/-inf for hard constraints)
+         expression: Expression to add to objective
++        key: Optional (day, shift type, person) indices naming the term in the v2 ledger
++        truth: Optional `truth(value) -> int` giving the term's real value from the roster, for a
++            term the model only bounds (the v2 ledger reports that instead of the variable)
+     """
+     if weight == math.inf:
+         ctx.solver.add_constraint(expression == 1)
+@@ -47,6 +50,7 @@ def add_objective(ctx, weight, expression):
+         ctx.solver.add_constraint(expression == 0)
+     else:
+         ctx.objective += weight * expression
++        ctx.objective_terms.append((ctx.current_preference, key, weight, expression, truth))
+ 
+ 
+ def _parse_single_date(date: str, date_range: "DateRange") -> datetime.date:

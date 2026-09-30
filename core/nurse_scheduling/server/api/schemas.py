@@ -178,7 +178,7 @@ class OptimizationResultResponse(BaseModel):
     termination_reason: str | None
     """Normalized reason solver execution stopped."""
     explanation: dict[str, Any] | None = None
-    """v2: why a proven-infeasible run has no roster (proof and core)."""
+    """v2: penalty ledger (roster) or why a proven-infeasible run has none."""
 
 
 class JobErrorResponse(BaseModel):

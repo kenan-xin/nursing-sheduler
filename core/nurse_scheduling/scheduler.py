@@ -383,6 +383,7 @@ def schedule(
     # TODO: Check no duplicated preferences
     # TODO: Check no overlapping preferences
     for i, preference in enumerate(ctx.scenario.preferences):
+        ctx.current_preference = i
         ctx.solver.guard_key = (i, None)
         step_started_at, start_counts = start_model_build_step(
             model_build_stats_callback,
@@ -530,6 +531,8 @@ def schedule(
     # never fires the callback. The return contract below is unchanged.
     if on_roster is not None:
         on_roster(_build_roster_payload(ctx, prettify))
+    if on_explanation is not None:
+        on_explanation({"kind": "ledger", "ledger": explain.read_ledger(ctx)})
     solution = {}
     for d, s, p in ctx.shifts:
         solution[(d, s, p)] = ctx.solver.get_value(ctx.shifts[(d, s, p)])

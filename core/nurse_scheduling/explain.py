@@ -1,4 +1,4 @@
-"""v2: why a run found no roster, as a proof and a minimal set of clashing hard rules."""
+"""v2 run explanations: the penalty ledger of a solved roster, and why a run found no roster."""
 
 # This file is part of Nurse Scheduling Project, see <https://github.com/j3soon/nurse-scheduling>.
 #
@@ -34,6 +34,90 @@ from .solver_interface import SolverStatus
 
 logger = logging.getLogger(__name__)
 
+# ponytail: the top matches by |points| only; per-rule totals stay exact. Raise if a ward needs more.
+MAX_LEDGER_MATCHES = 1000
+
+_RESERVED_SHIFTS = {constants.OFF_sid: constants.OFF, constants.LEAVE_sid: constants.LEAVE}
+
+
+def _names(ctx: Context):
+    people = [person.id for person in ctx.scenario.people.items]
+    dates = [str(date) for date in ctx.compiled_schedule.dates]
+    shifts = [shift.id for shift in ctx.scenario.shiftTypes.items]
+    return people, dates, shifts
+
+
+def _key_fields(key, names) -> dict[str, Any]:
+    """Map a (d, s, p) index key to {date, shift, nurse} ids, leaving out unknown parts."""
+    if key is None:
+        return {}
+    people, dates, shifts = names
+    d, s, p = key
+    out: dict[str, Any] = {}
+    if p is not None:
+        out["nurse"] = people[p]
+    if d is not None:
+        out["date"] = dates[d]
+    if s is not None:
+        out["shift"] = _RESERVED_SHIFTS.get(s) or shifts[s]
+    return out
+
+
+def read_ledger(ctx: Context) -> dict[str, Any]:
+    """Per-term points of the solved roster, like Timefold's ScoreAnalysis.
+
+    Every finite objective term was recorded by utils.add_objective. A term's
+    points are weight * value. The variables' points sum to the objective exactly;
+    `balanced` is False only if a term bypassed add_objective. A term the model only
+    bounds (a negative soft succession's is_match) is read from the roster instead,
+    so a non-optimal roster never shows a violation that did not happen; the points
+    such a variable still costs are `unattributed`.
+    """
+    started = time.monotonic()
+    names = _names(ctx)
+    solver = ctx.solver
+    value = solver.get_value
+    if isinstance(getattr(solver, "model", None), cp_model.CpModel) and solver._active_solution_callback is None:
+        # One proto read instead of ~50k Value() calls on the 87-person ward (84 ms -> a few ms).
+        solution = list(solver.solver.response_proto.solution)
+        slow = value
+
+        def value(expression):
+            if isinstance(expression, cp_model.IntVar):
+                return solution[expression.index]
+            return slow(expression)
+
+    rules: dict[int, dict[str, int]] = {}
+    matches = []
+    total = counted = 0
+    for rule, key, weight, expression, truth in ctx.objective_terms:
+        points = weight * value(expression)
+        counted += points
+        if truth is not None:
+            points = weight * truth(value)
+        if not points:
+            continue
+        total += points
+        entry = rules.setdefault(rule, {"rule": rule, "points": 0, "matches": 0})
+        entry["points"] += points
+        entry["matches"] += 1
+        matches.append({"rule": rule, **_key_fields(key, names), "points": points})
+    objective = solver.get_objective_value()
+    if counted != objective:
+        logger.error("Ledger total %s differs from objective %s", counted, objective)
+    matches.sort(key=lambda m: -abs(m["points"]))
+    return {
+        "objective": objective,
+        "balanced": counted == objective,
+        "unattributed": objective - total,
+        "terms": len(ctx.objective_terms),
+        "rules": sorted(rules.values(), key=lambda r: r["rule"]),
+        "matches": matches[:MAX_LEDGER_MATCHES],
+        "truncated": len(matches) > MAX_LEDGER_MATCHES,
+        "seconds": round(time.monotonic() - started, 4),
+    }
+
+
 # Each hard rule unit (a request cell, one staffing slot, one nurse's cap, ...) got a
 # guard literal when the model was rebuilt for this explanation, pinned true by its
 # domain. Here the guards are freed and assumed: CP-SAT then runs on one worker,
@@ -55,15 +139,7 @@ CORE_TRIES = ({"cp_model_presolve": False}, {"cp_model_presolve": False, "linear
 RELAX_COST = {"request": 10, "cap": 20, "staffing": 100, "leave": 1000}
 NEVER = 10**9
 
-_RESERVED_SHIFTS = {constants.OFF_sid: constants.OFF, constants.LEAVE_sid: constants.LEAVE}
 _UPPER = {(math.inf, "x <= T"), (math.inf, "x < T"), (-math.inf, "x > T"), (-math.inf, "x >= T")}
-
-
-def _names(ctx: Context):
-    people = [person.id for person in ctx.scenario.people.items]
-    dates = [str(date) for date in ctx.compiled_schedule.dates]
-    shifts = [shift.id for shift in ctx.scenario.shiftTypes.items]
-    return people, dates, shifts
 
 
 def unit_kind(ctx: Context, key) -> str:
