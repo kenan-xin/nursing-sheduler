@@ -1,6 +1,6 @@
 # Priority ladder for rule weights (bead vjbv)
 
-Status: draft for user review, 2026-09-29. No code changes until the user approves.
+Status: approved by the user, 2026-10-01.
 Blocks: uv8n (spare-slot bonuses). Related: msnp (leave repair).
 
 ## 1. Problem
@@ -64,6 +64,7 @@ From highest to lowest. A higher tier must win over any realistic amount of a lo
 | 1 | Strong ward rules | 2 rest days in any 7 days, and the strong rest rules in section 4.1 (a full day off after the sleep day, at most 3 nights in a row) | 1000 |
 | 2 | Ward preferences | avoid a named pattern, keep two nurses apart where possible | 100 to 300 |
 | 3 | Nurse wishes | soft day off, shift wish, "never nights" wish | 20 to 40 (default 20) |
+| 3b | Staffing Preferred | the "ideally" count on a staffing rule, per empty place per date (user ruling 2026-09-29: below nurse wishes, above spare-slot bonuses) | -10 per empty place |
 | 4 | Fairness and balance | balance nights or weekends, `\|x - T\|^2` counts, soft caps | 4 per unit (squared: 4 per squared shift) |
 | 5 | Spare-slot bonuses | optional senior lead, 3rd morning, 3rd afternoon | +1 to +3 per filled shift |
 
@@ -140,9 +141,9 @@ A true lexicographic solve runs one solve per tier and fixes each tier's best va
 
 ## 6. Assistant behaviour
 
-Recommendation: the assistant names a tier, not a number. The host turns the tier into the weight.
+User ruling 2026-10-01: the assistant keeps sending a raw number, because a number is more flexible, but the number must not break the order.
 
-1. Each rule operation (requests, sequences, counts, pairings, staffing "ideally", bonus) takes `priority: "must" | "strong" | "ward" | "wish" | "fairness" | "bonus"` and an optional `rank` 1 to 3 inside the tier. The host maps them to the section 4 ranges. A raw number stays accepted for an edit of an existing rule, and the pre-Run check still reads it. This is the production-API layer from `CLAUDE.md`: an arbitrary number is no longer the easy path.
+1. Each rule operation (requests, sequences, counts, pairings, staffing "ideally", bonus) takes a raw weight, as today. The host finds the card's tier (`tierOf`, section 7) and refuses a weight outside that tier's band in section 4. The refusal names the allowed band, for example "a nurse wish takes 20 to 40". The assistant then picks a number inside the band. This is the production-API layer from `CLAUDE.md`: a number that breaks the order cannot reach the scenario through the assistant.
 2. During setup, the assistant builds a priority plan for the ward. It lists each need with its tier in one message, before it sends the rule changes.
 3. When two needs of the ward can conflict, the assistant asks on one choice card which wins, with the ladder order preselected. Example: "A nurse's day off or a 3rd nurse on mornings: which wins?" It asks only when the ward's answer can differ from the ladder.
 4. Each Preview line says the points in plain words and the reason: "+3 points for each A_sup shift. Lowest priority: a nurse's day off (20 points) always wins."
@@ -182,7 +183,8 @@ Proposed display: the score, then points lost per tier. Example: "Score 1078. Lo
 | Shift counts form | 4 | -1 | -4 | yes |
 | Pairings form, apart where possible | 2 | 1 | -100 | yes |
 | Supervision form | H | 1 | `.inf` | yes, matches the assistant |
-| Requirement "ideally" count | 5 | -50 | 0 with a bonus rule (uv8n) | yes: an empty spare place costs nothing |
+| Requirement Preferred count (a real soft need) | 3b | -50 | -10 | yes: a nurse wish (20) now beats one empty preferred place |
+| Surplus staff spread (extra manpower) | 5 | -50 on "ideally" | 0, with a bonus rule (uv8n) | yes: an empty spare place costs nothing |
 | Surplus staff -300 / -200 / -100 (4h5a) | 5 | penalties | bonuses +3 / +2 / +1 | yes, same roster (uv8n spike e) |
 | Rest rule, 2 in any 7 days | 1 | -1000 | -1000 | no |
 | Legal rest, no 7 days in a row | H | `-.inf` | `-.inf` | no |
@@ -197,11 +199,11 @@ Proposed display: the score, then points lost per tier. Example: "Score 1078. Lo
 
 ## 11. Open questions for the user
 
-1. Nurse-wish default 20 instead of 10? 20 keeps a fairness rule below a wish up to 2 shifts from target. With 10, a bonus of 3 can beat a fairness step.
-2. Should the Requests paint default change from 0 (no effect) to 20?
-3. Should the bonus rule get a points-only editor? Today Edit then Save is refused, because the form needs 2 or more steps (AC-PR-11). The weight quick field already works.
-4. Should the assistant send tier names instead of numbers (section 6, item 1)?
-5. Should the score show points lost per tier (section 8)?
+1. Resolved 2026-09-29: the nurse-wish default is 20.
+2. Resolved 2026-09-29: the Requests paint default is 20 (shipped in 6c1q; weight 0 erases an OFF, xcm3).
+3. Ruled 2026-10-01 (minor, delegated): no points-only editor for the bonus rule. The weight quick field already changes the points.
+4. Resolved 2026-10-01: the assistant sends raw numbers, and the host refuses a number outside the card's tier band (section 6, item 1).
+5. Resolved 2026-10-01: the score shows points lost per tier (section 8).
 6. Resolved 2026-09-29: rest after nights is a safety rule (section 4.1).
 7. Resolved 2026-09-29: the rest rules are on by default, and the assistant explains them during setup and asks whether the ward keeps each one.
 8. Resolved 2026-09-29: PM then AM is allowed. No rule.
