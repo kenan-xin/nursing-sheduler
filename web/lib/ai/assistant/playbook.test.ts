@@ -200,9 +200,15 @@ describe("rest rules are guidance, not law", () => {
     expect(relaxesRestRule([edit("-5")], was(-10))).toBe(true);
     expect(relaxesRestRule([{ ...off, enabled: true }], hard)).toBe(false);
     expect(relaxesRestRule([edit("-infinity")], hard)).toBe(false);
-    // bead 8g1f S2: a stronger penalty or a changed bonus relaxes nothing.
+    // A positive rest rule (day off after nights) cut toward zero or flipped also softens it.
+    expect(relaxesRestRule([edit("5")], was(Infinity))).toBe(true);
+    expect(relaxesRestRule([edit("-50")], was(10))).toBe(true);
+    expect(relaxesRestRule([edit("0")], was(10))).toBe(true);
+    expect(relaxesRestRule([edit("5")], was(10))).toBe(true);
+    // bead 8g1f S2: a stronger penalty or bonus relaxes nothing.
     expect(relaxesRestRule([edit("-20")], was(-10))).toBe(false);
-    expect(relaxesRestRule([edit("5")], was(10))).toBe(false);
+    expect(relaxesRestRule([edit("20")], was(10))).toBe(false);
+    expect(relaxesRestRule([edit("infinity")], was(10))).toBe(false);
     expect(
       relaxesRestRule(
         [{ type: "set_rule_enabled", ruleKind: "counts", ruleId: "r", enabled: false }],

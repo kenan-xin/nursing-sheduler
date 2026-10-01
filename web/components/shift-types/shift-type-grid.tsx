@@ -52,6 +52,7 @@ import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import type { RequirementOverride, ScenarioUiState, UiShiftType } from "@/lib/scenario";
 import { deleteImpact, describeDeleteImpact, RenameCollisionError } from "@/lib/cascade";
 import { ConfirmDialog } from "@/components/shell/confirm-dialog";
+import { undoDeleteAction } from "@/components/entity-editor/delete-with-summary";
 import { formatShortDate } from "@/lib/dates/date-id";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import { cn } from "@/lib/utils";
@@ -294,7 +295,7 @@ export function ShiftTypeGrid() {
     );
     if (outcome.ok && outcome.committed) {
       toast(`Deleted ${kind === "shift" ? "shift" : "group"} “${String(id)}”.`, {
-        action: { label: "Undo", onClick: () => void scenarioCommands.undo() },
+        action: undoDeleteAction(outcome.documentRevision),
       });
     }
   };

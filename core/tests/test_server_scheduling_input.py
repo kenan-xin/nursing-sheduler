@@ -881,9 +881,10 @@ def test_non_string_top_level_key_is_malformed_not_a_server_error(document):
         canonicalize_submission(document)
 
 
-def test_head_count_above_the_bound_is_a_located_422():
-    # D-05: requiredNumPeople 1e30 used to pass admission and crash OR-Tools.
-    document = LEGACY_EQUIVALENT.replace("requiredNumPeople: 1", "requiredNumPeople: 1000000000000000000000000000000")
+@pytest.mark.parametrize("count", ["1000000000000000000000000000000", "-1", "-1000000000000000000000000000000"])
+def test_head_count_outside_the_bound_is_a_located_422(count):
+    # D-05: requiredNumPeople 1e30 or any negative count used to pass admission and crash OR-Tools.
+    document = LEGACY_EQUIVALENT.replace("requiredNumPeople: 1", f"requiredNumPeople: {count}")
     error = _content_error(document)
     assert error.error_code == "invalid_scheduling_data"
     assert ["preferences", 1, "requiredNumPeople"] in [issue.path for issue in error.issues]

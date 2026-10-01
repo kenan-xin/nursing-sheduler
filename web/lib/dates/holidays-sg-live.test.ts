@@ -5,6 +5,7 @@ import {
   loadSingaporeHolidays,
   parseUpstreamHolidays,
   resetSingaporeHolidayCache,
+  SG_HOLIDAYS_FAILURE_TTL_MS,
   SG_HOLIDAYS_TTL_MS,
   SG_HOLIDAYS_URL,
 } from "./holidays-sg-live";
@@ -87,14 +88,16 @@ describe("loadSingaporeHolidays", () => {
     ["a timeout", () => Promise.reject(new DOMException("timed out", "TimeoutError"))],
     ["HTTP 429", () => Promise.resolve(new Response("{}", { status: 429 }))],
     ["an invalid body", () => Promise.resolve(Response.json({ success: true }))],
-  ])("falls back to the bundle on %s, uncached", async (_label, impl) => {
+  ])("falls back to the bundle on %s, cached for ten minutes", async (_label, impl) => {
     fetchMock.mockImplementation(impl);
     expect(await loadSingaporeHolidays(0)).toEqual({
       source: "bundled",
       entries: SINGAPORE_HOLIDAYS,
     });
-    await loadSingaporeHolidays(1);
-    expect(fetchMock).toHaveBeenCalledTimes(2); // a failure is retried next request
+    expect((await loadSingaporeHolidays(SG_HOLIDAYS_FAILURE_TTL_MS - 1)).source).toBe("bundled");
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no 5 s refetch per request during an outage
+    await loadSingaporeHolidays(SG_HOLIDAYS_FAILURE_TTL_MS);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("caches the live list for a day, then refetches", async () => {

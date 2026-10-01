@@ -21,14 +21,20 @@ export const zShiftTypeSelector = z.string();
  * (a float weight may only be `.inf` / `-.inf`). zod 4's `z.number()` rejects
  * non-finite values, so the infinities are matched by explicit literals.
  *
- * Finite weights are capped at 1t (1e12, the weight field's largest suffix and what the
- * shipped large-ward example uses): a bigger weight can overflow CP-SAT's int64 objective
- * and the solve fails as MODEL_INVALID (bug hunt B3).
+ * Uncapped: the import and Workspace schemas use it, so a file that loaded before the
+ * 1t cap still loads; `zSolvableWeight` blocks it at Optimize.
+ */
+export const zWeight = z.union([z.number().int(), z.literal(Infinity), z.literal(-Infinity)]);
+
+/**
+ * The producer (Optimize gate) weight. Finite weights are capped at 1t (1e12, the weight
+ * field's largest suffix and what the shipped large-ward example uses): a bigger weight
+ * can overflow CP-SAT's int64 objective and the solve fails as MODEL_INVALID (bug hunt B3).
  */
 export const MAX_FINITE_WEIGHT = 1e12;
 export const WEIGHT_RANGE_MESSAGE =
   "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity";
-export const zWeight = z.union([
+export const zSolvableWeight = z.union([
   z
     .number()
     .int()

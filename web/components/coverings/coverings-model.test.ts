@@ -149,6 +149,16 @@ describe("validation (FR-CV-13..15)", () => {
     ).toBe(COVERING_MESSAGES.selfSupervised);
   });
 
+  it("says an empty preceptee group names no one, not that all are preceptors", () => {
+    const state = { ...PEOPLE, staffGroups: [...PEOPLE.staffGroups, { id: "Empty", members: [] }] };
+    expect(
+      validateCoveringForm(
+        form({ preceptors: ["Anna"], preceptees: ["Empty"], shiftTypes: ["D"] }),
+        state,
+      ).preceptees,
+    ).toBe(COVERING_MESSAGES.emptyPreceptees);
+  });
+
   it("allows a partial overlap and names the overlapping people", () => {
     const draft = form({ preceptors: ["Seniors"], preceptees: ["ALL"], shiftTypes: ["D"] });
     expect(validateCoveringForm(draft, PEOPLE)).toEqual({});

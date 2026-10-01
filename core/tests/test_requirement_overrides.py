@@ -85,7 +85,7 @@ def test_override_above_preferred_raises():
 
 
 def test_negative_override_raises():
-    with pytest.raises(ValueError, match="must be at least 0"):
+    with pytest.raises(ValueError, match="greater than or equal to 0"):
         _status("    requiredNumPeopleOverrides: [[2026-11-02, -1]]")
 
 

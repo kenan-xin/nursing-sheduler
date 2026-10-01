@@ -12,7 +12,12 @@
 // "Shift Type Coverings" screen.
 
 import type { AppMode } from "@/lib/mode/mode";
-import type { DiffScope, ProposalDiff, ProposalDiffEntry } from "@/lib/proposal/diff";
+import {
+  SCOPE_WITHOUT_CAPABILITY,
+  type DiffScope,
+  type ProposalDiff,
+  type ProposalDiffEntry,
+} from "@/lib/proposal/diff";
 
 const RULE_SCOPES: ReadonlySet<DiffScope> = new Set<DiffScope>([
   "staffing-requirements",
@@ -67,6 +72,7 @@ const VERB: Record<ProposalDiffEntry["kind"], string> = {
 const AFFECTS = /^(binds|narrowed):/;
 
 export function screenForScope(scope: DiffScope, mode: AppMode): string | null {
+  if (scope === SCOPE_WITHOUT_CAPABILITY) return null;
   if (mode === "guided" && RULE_SCOPES.has(scope)) return "rule-library";
   return scope;
 }

@@ -69,6 +69,7 @@ export const COVERING_MESSAGES = {
   // preceptor covers themselves: when every preceptee is one, the rule never binds.
   selfSupervised:
     "Every preceptee is also a preceptor, so this rule never applies. Pick preceptees who are not preceptors",
+  emptyPreceptees: "The preceptees selected name no one, so this rule never applies",
   partialOverlap: (names: readonly string[]) =>
     `Both preceptor and preceptee: ${names.join(", ")}. They count as supervising themselves.`,
 } as const;
@@ -269,7 +270,9 @@ export function validateCoveringForm(
     errors.preceptees = COVERING_MESSAGES.preceptees;
   } else if (form.preceptors.length > 0) {
     const preceptees = expandPersonRefs(form.preceptees as PersonRef[], state);
-    if (supervisorOverlap(form, state).length === preceptees.size) {
+    if (preceptees.size === 0) {
+      errors.preceptees = COVERING_MESSAGES.emptyPreceptees;
+    } else if (supervisorOverlap(form, state).length === preceptees.size) {
       errors.preceptees = COVERING_MESSAGES.selfSupervised;
     }
   }

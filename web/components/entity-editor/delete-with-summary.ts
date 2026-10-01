@@ -42,6 +42,19 @@ export async function deleteWithSummary(
   });
   if (!outcome.ok || !outcome.committed) return;
   toast(`Deleted ${label}${lines.length > 0 ? `: ${lines.join(", ")}` : ""}.`, {
-    action: { label: "Undo", onClick: () => void scenarioCommands.undo() },
+    action: undoDeleteAction(outcome.documentRevision),
   });
+}
+
+/** A delete toast's Undo: reverses that delete only while it is still the latest change. */
+export function undoDeleteAction(documentRevision: number) {
+  return {
+    label: "Undo",
+    onClick: async () => {
+      const undone = await scenarioCommands.undo(documentRevision);
+      if (!undone.ok && undone.reason === "superseded") {
+        toast("Can't undo this delete: the schedule has changed since.");
+      }
+    },
+  };
 }

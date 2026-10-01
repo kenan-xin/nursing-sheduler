@@ -10,6 +10,11 @@ const ROW_2028: SingaporeHolidayEntry = {
   isObserved: false,
 };
 const LIVE = [...SINGAPORE_HOLIDAYS, ROW_2028];
+const saved = (entries: readonly SingaporeHolidayEntry[], bundle = SINGAPORE_HOLIDAYS) =>
+  getRosterDb().keyval.put({
+    key: LAST_GOOD_HOLIDAYS_KEY,
+    value: JSON.stringify({ bundle: JSON.stringify(bundle), entries }),
+  });
 
 const fetchMock = vi.fn();
 
@@ -26,13 +31,20 @@ describe("fetchSingaporeHolidayList: live -> last good -> bundled", () => {
     fetchMock.mockResolvedValue(Response.json({ source: "live", entries: LIVE }));
     expect(await fetchSingaporeHolidayList()).toEqual(LIVE);
     const row = await getRosterDb().keyval.get(LAST_GOOD_HOLIDAYS_KEY);
-    expect(JSON.parse(row!.value)).toEqual(LIVE);
+    expect(JSON.parse(row!.value).entries).toEqual(LIVE);
   });
 
   it("falls back to the last good copy when the server answers the bundle", async () => {
-    await getRosterDb().keyval.put({ key: LAST_GOOD_HOLIDAYS_KEY, value: JSON.stringify(LIVE) });
+    await saved(LIVE);
     fetchMock.mockResolvedValue(Response.json({ source: "bundled", entries: SINGAPORE_HOLIDAYS }));
     expect(await fetchSingaporeHolidayList()).toContainEqual(ROW_2028);
+  });
+
+  it("ignores a last good copy saved under an older bundle", async () => {
+    // The old bundle's 2028 row rode along in the live answer; the new bundle must win.
+    await saved(LIVE, SINGAPORE_HOLIDAYS.slice(1));
+    fetchMock.mockRejectedValue(new TypeError("offline"));
+    expect(await fetchSingaporeHolidayList()).toBe(SINGAPORE_HOLIDAYS);
   });
 
   it("falls back to the bundle with no last good copy, or a corrupt one", async () => {
