@@ -1,7 +1,7 @@
 """Score of negative soft shift-type successions equals a hand count (bead 304s).
 
-The literal negative branch of `shift_type_successions` only lower-bounds
-`is_match`, so the model allows is_match = 1 with no real match. These tests
+The literal negative branch of `shift_type_successions` used to only lower-bound
+`is_match`, so the model allowed is_match = 1 with no real match. These tests
 check that the returned score never carries such a false violation: forced
 rosters (OPTIMAL), a free solve, and first-solution stops (FEASIBLE), with
 history crossing into day 0 and a pattern cut off at month end.
@@ -100,22 +100,7 @@ HARD_PATTERNS = [
 ]
 
 
-@pytest.mark.parametrize(
-    "solver",
-    [
-        pytest.param(
-            "ortools/cp-sat",
-            marks=pytest.mark.xfail(
-                strict=False,
-                reason=(
-                    "bead nursing-sheduler-304s: the negative literal branch only lower-bounds is_match, "
-                    "so an early-stopped CP-SAT solve can report a false violation (fails ~3-7/30)"
-                ),
-            ),
-        ),
-        "ortools/mpsolver/scip",
-    ],
-)
+@pytest.mark.parametrize("solver", ["ortools/cp-sat", "ortools/mpsolver/scip"])
 def test_first_solution_score_matches_hand_count(solver):
     # Stopping at the first solution is where a free is_match could stay 1.
     rng = random.Random(2)
