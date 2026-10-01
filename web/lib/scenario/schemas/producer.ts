@@ -43,7 +43,7 @@ import {
   zRefOrList,
   zShiftSelectorOrList,
   zShiftTypeSelector,
-  zWeight,
+  zSolvableWeight,
 } from "./primitives";
 import { validateWorkingTime } from "./working-time";
 
@@ -125,7 +125,7 @@ const zShiftRequest = z.strictObject({
   person: zRefOrList,
   date: zRefOrList,
   shiftType: zShiftSelectorOrList,
-  weight: zWeight,
+  weight: zSolvableWeight,
 });
 
 const zSuccessions = z.strictObject({
@@ -134,7 +134,7 @@ const zSuccessions = z.strictObject({
   person: zRefOrList,
   pattern: zNestedShiftRefList,
   date: zRefOrList.optional(),
-  weight: zWeight,
+  weight: zSolvableWeight,
 });
 
 const zSkillMixEntry = z.strictObject({
@@ -157,7 +157,7 @@ const zRequirement = z.strictObject({
   skillMix: z.array(zSkillMixEntry).optional(),
   requiredNumPeopleOverrides: z.array(z.tuple([zIsoDate, z.number().int().min(0)])).optional(),
   date: zRefOrList.optional(),
-  weight: zWeight,
+  weight: zSolvableWeight,
 });
 
 const zShiftCount = z.strictObject({
@@ -170,7 +170,7 @@ const zShiftCount = z.strictObject({
   expression: z.union([z.string(), z.array(z.string())]),
   target: z.union([z.number().int(), z.array(z.number().int())]),
   hoursContract: zHoursContract.optional(),
-  weight: zWeight,
+  weight: zSolvableWeight,
 });
 
 const zAffinity = z.strictObject({
@@ -180,7 +180,7 @@ const zAffinity = z.strictObject({
   people1: zNestedRefList,
   people2: zNestedRefList,
   shiftTypes: zNestedShiftRefList,
-  weight: zWeight,
+  weight: zSolvableWeight,
 });
 
 const zCovering = z.strictObject({
@@ -190,7 +190,7 @@ const zCovering = z.strictObject({
   preceptors: zNestedRefList,
   preceptees: zNestedRefList,
   shiftTypes: zNestedShiftRefList,
-  weight: zWeight,
+  weight: zSolvableWeight,
 });
 
 const zPreference = z.discriminatedUnion("type", [

@@ -34,6 +34,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: develop
+          # No token on disk while pnpm install and the refresh script run; only the
+          # push/PR step below gets it.
+          persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
@@ -60,6 +63,7 @@ jobs:
           git switch -C "$BRANCH"
           git add -- "$FILE"
           git commit -m "chore(dates): refresh bundled Singapore holidays"
+          gh auth setup-git # git push authenticates through gh with GH_TOKEN
           git push --force origin "$BRANCH"
 
           title="chore(dates): refresh bundled Singapore holidays"

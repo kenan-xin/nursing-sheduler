@@ -9,6 +9,7 @@ import { toCanonicalScenarioDocument } from "./canonical";
 import { serializeScenario } from "./serialize";
 import { makeValidUiState } from "./test-fixtures";
 import type { CanonicalScenarioDocument } from "./types";
+import { WEIGHT_RANGE_MESSAGE } from "./schemas/primitives";
 import {
   computeScenarioFingerprint,
   useScenarioStore,
@@ -103,6 +104,30 @@ describe("prepareScenarioLoad — blocking issues", () => {
     expect(result.optimizeIssues!.some((issue) => /weight '\.inf'/.test(issue.message))).toBe(true);
     // …but the load itself is not blocked (v1 parity).
     expect(result.issues).toEqual([]);
+  });
+
+  it("a weight past 1t or preferred below required loads, and blocks Optimize", () => {
+    const requirement = (fields: object) =>
+      prepareScenarioLoad(
+        docWithExtraPreference({
+          type: "shift type requirement",
+          shiftType: "D",
+          requiredNumPeople: 1,
+          ...fields,
+        } as CanonicalScenarioDocument["preferences"][number]),
+      );
+    const cases = [
+      [requirement({ weight: 1e13 }), WEIGHT_RANGE_MESSAGE],
+      [
+        requirement({ requiredNumPeople: 2, preferredNumPeople: 1, weight: -1 }),
+        "preferredNumPeople (1) must be at least requiredNumPeople (2).",
+      ],
+    ] as const;
+    for (const [result, message] of cases) {
+      expect(result.issues).toEqual([]);
+      expect(result.target).not.toBeNull();
+      expect(result.optimizeIssues!.some((issue) => issue.message.includes(message))).toBe(true);
+    }
   });
 });
 

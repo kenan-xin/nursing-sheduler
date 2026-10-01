@@ -83,9 +83,9 @@ export const MAX_DAILY_WORKING_MINUTES = 12 * 60;
 
 /**
  * True when a change turns off, deletes or softens a shift sequence (rest) rule.
- * `successions` are the rules before the change: an edit softens one only when it lowers
- * a must or a penalty (a negative weight moved up); a bonus changed or a penalty raised
- * relaxes nothing (bead 8g1f S2).
+ * `successions` are the rules before the change: an edit softens one when it moves the
+ * weight toward zero or past it (a penalty or must lowered, a bonus or must-do cut or
+ * flipped); a penalty or bonus raised relaxes nothing (bead 8g1f S2).
  * ponytail: an edit that narrows a rule but keeps its weight carries no warning.
  */
 export function relaxesRestRule(
@@ -98,7 +98,8 @@ export function relaxesRestRule(
     if (c.type === "edit_shift_sequence_rule") {
       const was = successions.find((card) => card.uid === c.ruleId)?.weight;
       const now = parseWeightInput(c.weight);
-      return was !== undefined && was < 0 && typeof now === "number" && now > was;
+      if (was === undefined || typeof now !== "number") return false;
+      return was > 0 ? now < was : was < 0 && now > was;
     }
     return false;
   });
