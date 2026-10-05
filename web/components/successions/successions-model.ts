@@ -30,7 +30,7 @@ import {
 } from "@/components/card-editor/weight-value";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
 import { makeDates } from "@/lib/rules/requirement-dates";
-import { isSpareSlotBonusCard, TIER_BANDS } from "@/lib/rules/priority-ladder";
+import { isSpareSlotBonusCard } from "@/lib/rules/priority-ladder";
 
 /**
  * The scenario fields the Successions screen reads: the people and shift-type
@@ -346,19 +346,6 @@ export function findSpareSlotBonus(
       String([card.pattern].flat()[0]) === shift &&
       same([card.person].flat(), person) &&
       same([card.date ?? "ALL"].flat(), date),
-  );
-}
-
-/**
- * How a bonus card reads on Preview and the Rules screen (spec section 6 item 4):
- * "+3 points for each A_sup shift. Lowest priority: a nurse's day off (20 points) always
- * wins." `when` names the dates, or is empty for every date.
- */
-export function spareSlotBonusSentence(card: SuccessionCard, when = ""): string {
-  const shift = String([card.pattern].flat()[0]);
-  return (
-    `+${card.weight} points for each ${shift} shift${when ? ` ${when}` : ""}. ` +
-    `Lowest priority: a nurse's day off (${TIER_BANDS.wish.min} points) always wins.`
   );
 }
 

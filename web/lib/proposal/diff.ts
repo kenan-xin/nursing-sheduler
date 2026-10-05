@@ -58,6 +58,7 @@ import { generateDateItems, holidayImportApplied } from "@/lib/dates";
 import { formatShortDate } from "@/lib/dates/date-id";
 import { cardNeedOn, coverStatuses } from "@/lib/scenario/temporary-cover";
 import { requiredOn } from "@/lib/rules/shortfalls";
+import { pointsSentence } from "@/lib/rules/priority-ladder";
 import {
   MAX_WORKED_IN_7,
   REST_DAYS_RULE_DESCRIPTION,
@@ -67,10 +68,7 @@ import {
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
 import { rosterDatesBetween, withStoredShiftCodes } from "./operations";
-import {
-  findSpareSlotBonus,
-  spareSlotBonusSentence,
-} from "@/components/successions/successions-model";
+import { findSpareSlotBonus } from "@/components/successions/successions-model";
 import { isSpareSlotBonusCard } from "@/lib/rules/priority-ladder";
 
 /**
@@ -339,10 +337,9 @@ function describeSuccession(card: SuccessionCard): string {
       Array.isArray(position) ? position.map(String).join(" or ") : String(position),
     )
     .join(" → ");
-  // A spare-slot bonus (uv8n): points per filled shift, and why it is the lowest priority.
+  // A spare-slot bonus (uv8n): who and when; `pointsSentence` adds the points and tier.
   if (isSpareSlotBonusCard(card)) {
-    const when = renderDates(card.date);
-    return spareSlotBonusSentence(card, when === "every date" ? "" : `on ${when}`);
+    return `Each ${pattern} shift worked by ${renderPeople(card.person, "everyone")}, ${renderDates(card.date)}`;
   }
   return `${pattern} on consecutive days for ${renderPeople(card.person, "everyone")}, ${renderDates(card.date)}: ${renderStrength(card.weight)}`;
 }
@@ -816,28 +813,44 @@ export function diffScenarioDocuments(
     // rather than lossy.
     const cardsOf = (state: ScenarioUiState): readonly AnyRuleCard[] =>
       state.cardsByKind[kind] as readonly AnyRuleCard[];
-    entries.push(
-      ...compareKeyed(cardsOf(before), cardsOf(after), {
-        scope: RULE_SCOPE[kind],
-        keyPrefix: `rule:${kind}`,
-        identity: (card) => card.uid,
-        label: (card) => ruleTitle(card, kind),
-        render: (card) => ruleBody(card as unknown as Record<string, unknown>, kind, after),
-        renderChange: (from, to) => {
-          const change =
-            kind === "requirements"
-              ? requirementChange(
-                  from as unknown as RequirementCard,
-                  to as unknown as RequirementCard,
-                )
-              : undefined;
-          // An edit that leaves a rule off changes nothing the next run does (C-13).
-          if (!from.disabled || !to.disabled) return change;
-          const body = change ?? ruleBody(to as unknown as Record<string, unknown>, kind, after);
-          return `${body} · This rule is off. The optimiser ignores it.`;
-        },
-      }),
-    );
+    const ruleEntries = compareKeyed(cardsOf(before), cardsOf(after), {
+      scope: RULE_SCOPE[kind],
+      keyPrefix: `rule:${kind}`,
+      identity: (card) => card.uid,
+      label: (card) => ruleTitle(card, kind),
+      render: (card) => ruleBody(card as unknown as Record<string, unknown>, kind, after),
+      renderChange: (from, to) => {
+        const change =
+          kind === "requirements"
+            ? requirementChange(
+                from as unknown as RequirementCard,
+                to as unknown as RequirementCard,
+              )
+            : undefined;
+        // An edit that leaves a rule off changes nothing the next run does (C-13).
+        if (!from.disabled || !to.disabled) return change;
+        const body = change ?? ruleBody(to as unknown as Record<string, unknown>, kind, after);
+        return `${body} · This rule is off. The optimiser ignores it.`;
+      },
+    });
+    // Each new or changed soft rule says its points and its tier (priority ladder, rnrt).
+    for (const entry of ruleEntries) {
+      const uid = entry.key.slice(`rule:${kind}:`.length);
+      const card = cardsOf(after).find((c) => c.uid === uid);
+      const was = cardsOf(before).find((c) => c.uid === uid);
+      // A changed rule says it only when its weight changed; a new rule always does.
+      const weightNews =
+        entry.kind === "created" ||
+        (entry.kind === "changed" &&
+          (was as { weight?: unknown } | undefined)?.weight !==
+            (card as { weight?: unknown } | undefined)?.weight);
+      const points =
+        entry.after !== null && card && !card.disabled && weightNews
+          ? pointsSentence(kind, card as unknown as Parameters<typeof pointsSentence>[1])
+          : undefined;
+      if (points) entry.after = `${entry.after} · ${points}`;
+    }
+    entries.push(...ruleEntries);
   }
 
   entries.push(...coverRowEntries(before, after));

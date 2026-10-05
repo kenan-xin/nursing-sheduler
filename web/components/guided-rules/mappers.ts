@@ -14,7 +14,7 @@ import {
   type SuccessionCard,
 } from "@/lib/scenario";
 import { formatShortDate } from "@/lib/dates/date-id";
-import { isSpareSlotBonusCard } from "@/lib/rules/priority-ladder";
+import { isSpareSlotBonusCard, spareSlotBonusSentence } from "@/lib/rules/priority-ladder";
 import { isValidWeightValue } from "@/components/card-editor/weight-field";
 import {
   requiredCountError,
@@ -23,7 +23,6 @@ import {
 import {
   SUCCESSION_MESSAGES,
   isEditableSuccessionCard,
-  spareSlotBonusSentence,
   patternPositionsForDisplay,
   summarizeRefs as summarizeSuccessionRefs,
 } from "@/components/successions/successions-model";

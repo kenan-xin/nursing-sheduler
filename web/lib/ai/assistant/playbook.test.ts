@@ -412,7 +412,7 @@ describe("setup hints carry ward defaults, never invented law", () => {
 
 describe("the priority ladder block (rnrt)", () => {
   it("states every tier with the band the host enforces", () => {
-    const text = PRIORITIES.join(" ");
+    const text = PRIORITIES.join(" ").replaceAll("-", "");
     for (const band of Object.values(TIER_BANDS)) {
       const size = band.min === band.max ? String(band.max) : `${band.min} to ${band.max}`;
       expect(text, band.name).toContain(size);

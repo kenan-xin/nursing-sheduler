@@ -50,8 +50,8 @@ describe("deriveProposalDiff", () => {
     expect(diff.direct.some((entry) => entry.key.startsWith("cell:"))).toBe(false);
     const rule = diff.direct.find((entry) => entry.key.startsWith("rule:successions:"));
     expect(rule).toMatchObject({ scope: "shift-successions", kind: "created" });
-    expect(rule?.after).toContain(
-      "+3 points for each Day shift. Lowest priority: a nurse's day off (20 points) always wins.",
+    expect(rule?.after).toBe(
+      "On · “Bonus: +3 for each Day shift (spare places are optional)” · Each Day shift worked by Senior, every date · +3 points for each Day shift. Lowest priority: a nurse's day off (20 points) always wins.",
     );
     const card = diff.direct.find((entry) => entry.key === "rule:requirements:req-day");
     expect(card?.after).toContain("an empty one costs nothing");
@@ -476,7 +476,8 @@ describe("deriveProposalDiff", () => {
     );
     expect(edited?.after).toBe(
       "On · “Night cap” · At most 4 Night shifts for each of ana, across weekends: " +
-        "kept to where possible (weight 4)",
+        "kept to where possible (weight 4) · +4 points for each nurse it holds for. " +
+        "A fairness or balance rule: a Preferred staffing count (8 to 15 points) always wins.",
     );
 
     const removed = after("rule:requirements:req-multi");
@@ -762,6 +763,25 @@ describe("deriveProposalDiff", () => {
 });
 
 describe("rule sentences state what the solver enforces", () => {
+  it("ends a new soft rule's line with its points and tier, and a must's with neither (rnrt)", () => {
+    const before = ruleWardScenario();
+    const add = (card: Record<string, unknown>) => {
+      const after = {
+        ...before,
+        cardsByKind: { ...before.cardsByKind, successions: [card as never] },
+      };
+      const diff = deriveProposalDiff(before, after, []);
+      return [...diff.direct, ...diff.cascade].find(
+        (e) => e.key === `rule:successions:${String(card.uid)}`,
+      )?.after;
+    };
+    const base = { person: ["ALL"], pattern: ["Night", "Day"], date: ["ALL"] };
+    expect(add({ ...base, uid: "soft", weight: -200 })).toMatch(
+      / · -200 points each time the pattern happens\. A ward preference: a strong ward rule \(600 to 1000 points\) always wins\.$/,
+    );
+    expect(add({ ...base, uid: "hard", weight: -Infinity })).not.toMatch(/points/);
+  });
+
   // The Preview is what a ward manager trusts before Apply, so each sentence restates
   // core/nurse_scheduling/preference_types.py, not the rule editor's labels.
   const sentence = (kind: "requirements" | "counts", card: Record<string, unknown>) => {
@@ -774,9 +794,10 @@ describe("rule sentences state what the solver enforces", () => {
       },
     };
     const diff = deriveProposalDiff(before, after, []);
-    return [...diff.direct, ...diff.cascade].find(
-      (entry) => entry.key === `rule:${kind}:${String(card.uid)}`,
-    )?.after;
+    // The rule sentence only; the points line has its own test below.
+    return [...diff.direct, ...diff.cascade]
+      .find((entry) => entry.key === `rule:${kind}:${String(card.uid)}`)
+      ?.after?.replace(/ · (?:[+-]?\d+ points? |A spare place:).*$/, "");
   };
   const requirement = {
     uid: "x",
@@ -1431,7 +1452,7 @@ describe("pairing and supervision rules in the Preview", () => {
       before:
         "On · “Ana and Ben apart on nights” · ana with ben on the same shift on the same day (Night), every date: apart where possible (weight -100)",
       after:
-        "On · “Ana and Ben together on weekends” · ana with ben on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together (Working shifts), weekends: together where possible (weight 200)",
+        "On · “Ana and Ben together on weekends” · ana with ben on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together (Working shifts), weekends: together where possible (weight 200) · +200 points for each shift they share. A ward preference: a strong ward rule (600 to 1000 points) always wins.",
     });
     expect(diff.cascade).toEqual([]);
 

@@ -61,12 +61,14 @@ From highest to lowest. A higher tier must win over any realistic amount of a lo
 | Tier | Name | Examples | Weight |
 |---|---|---|---|
 | H | Hard musts | staffing minimums, leave, contracted hours, supervision, and the hard rest rules in section 4.1 (no 7 days in a row, sleep day after nights, no day shift after a night, at most 4 nights in a row) | `.inf` / `-.inf` |
-| 1 | Strong ward rules | 2 rest days in any 7 days, and the strong rest rules in section 4.1 (a full day off after the sleep day, at most 3 nights in a row) | 1000 |
+| 1 | Strong ward rules | 2 rest days in any 7 days, and the strong rest rules in section 4.1 (a full day off after the sleep day, at most 3 nights in a row) | 600 to 1000 (default 1000) |
 | 2 | Ward preferences | avoid a named pattern, keep two nurses apart where possible | 100 to 300 |
 | 3 | Nurse wishes | soft day off, shift wish, "never nights" wish | 20 to 40 (default 20) |
-| 3b | Staffing Preferred | the "ideally" count on a staffing rule, per empty place per date (user ruling 2026-09-29: below nurse wishes, above spare-slot bonuses) | -10 per empty place |
-| 4 | Fairness and balance | balance nights or weekends, `\|x - T\|^2` counts, soft caps | 4 per unit (squared: 4 per squared shift) |
+| 3b | Staffing Preferred | the "ideally" count on a staffing rule, per empty place per date (user ruling 2026-09-29: below nurse wishes, above spare-slot bonuses) | -8 to -15 per empty place (default -10) |
+| 4 | Fairness and balance | balance nights or weekends, `\|x - T\|^2` counts, soft caps | 4 to 6 per unit (default 4; squared: per squared shift) |
 | 5 | Spare-slot bonuses | optional senior lead, 3rd morning, 3rd afternoon | +1 to +3 per filled shift |
+
+User ruling 2026-10-05: bands, not single values, so the assistant can pick a number. Each band keeps the section 5.2 order: a strong rule's minimum (600) is at least 2 times a ward preference's maximum (300); a Preferred place (8 to 15) sits above fairness and below a wish (20); a fairness unit (4 to 6) stays above a bonus (3), and a squared step from 1 to 2 (3 units, at most 18) stays below a wish.
 
 ### 4.1 Rest and fatigue rules (user ruling and research, 2026-09-29)
 
@@ -125,10 +127,14 @@ Worked example, 28 days, 20 nurses, the ladder values in section 4:
 
 | Step | G of the lower tier | Unit of the higher tier | Holds |
 |---|---|---|---|
-| Bonus to fairness | one extra shift earns at most +3 | squared count, distance 0 to 1, costs 4 | yes, 4 > 3 |
-| Fairness to wishes | one extra shift moves one nurse 1 step: costs 4 (0 to 1), 12 (1 to 2), 20 (2 to 3) | one wish is 20 | yes, up to a distance of 2 from target |
+| Bonus to fairness | one extra shift earns at most +3 | squared count, distance 0 to 1, costs 4 to 6 | yes, 4 > 3 |
+| Fairness to Preferred | one extra shift moves one nurse 1 step: at most 6 (0 to 1) | one empty Preferred place costs 8 to 15 | yes, 8 > 6 |
+| Fairness to wishes | one extra shift moves one nurse 1 step: at a unit of 4 to 6, costs 4 to 6 (0 to 1), 12 to 18 (1 to 2) | one wish is 20 | yes, up to a distance of 2 from target |
+| Preferred to wishes | one person-day fills at most one Preferred place, 15 at most | one wish is 20 | yes |
 | Wishes to ward preferences | one person-day breaks at most one wish, 40 at most | 100 | yes, m = 2.5 |
-| Ward preferences to strong rules | one person-day breaks at most one sequence match, 300 at most | 1000 per window | yes, m = 3.3 |
+| Ward preferences to strong rules | one person-day breaks at most one sequence match, 300 at most | 600 to 1000 per window | yes, m = 2 at the band's floor |
+
+User ruling 2026-10-05: bands, not single values, so the assistant can pick a number. The rows above hold at every value in each band (section 4).
 | Strong rules to hard | not traded | `.inf` | yes |
 
 Largest coefficient: 1000, the same as today's rest rule. The worst objective size is about 20 nurses x 22 windows x 1000 = 440 000. Both are safe for CP-SAT.

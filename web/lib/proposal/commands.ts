@@ -524,11 +524,11 @@ function countWeightSchema() {
     .describe(
       "How strongly, written as you would type it in the Weight box. The solver is " +
         "REWARDED for the expression holding, in proportion to the weight: " +
-        '"infinity" = must always hold (hard rule), "4" = keep to it where possible (a ' +
-        "fairness rule; any other finite size is refused). A negative number works against " +
+        '"infinity" = must always hold (hard rule), "4" to "6" = keep to it where possible ' +
+        "(a fairness rule, usually 4; any other finite size is refused). A negative number works against " +
         'the expression (the solver is paid for breaking it) and "-infinity" forces the ' +
         'opposite, so a soft cap is "x <= T" with a POSITIVE weight. For "|x - T|^2" only 0 ' +
-        'or less is allowed: "-4" pulls the count toward T, "-infinity" makes it ' +
+        'or less is allowed: "-4" to "-6" pulls the count toward T, "-infinity" makes it ' +
         "exactly T. The schedule shows hard weights as .inf / -.inf: send them as " +
         "infinity / -infinity. Ask the user whether a new rule is a must or a preference " +
         "when they did not say.",
@@ -541,7 +541,7 @@ function successionWeightSchema() {
     .describe(
       'How strongly, written as you would type it in the Weight box: "-infinity" = must ' +
         "never happen (hard rule, the usual choice for a forbidden order such as a day " +
-        'straight after a night), "-100" to "-300" discourages (a ward preference), "-1000" ' +
+        'straight after a night), "-100" to "-300" discourages (a ward preference), "-600" to "-1000" ' +
         "strongly discourages (a strong ward rule, such as work straight after the sleep day " +
         "that follows nights); the same sizes without the minus encourage. Any other finite " +
         "size is refused. Avoid " +
@@ -657,8 +657,8 @@ function requirementFields() {
       .string()
       .optional()
       .describe(
-        'How strongly the preferred count is pursued, as typed in the Weight box: "-10" per ' +
-          "empty place for a real soft need (the default for a new requirement, below a nurse " +
+        'How strongly the preferred count is pursued, as typed in the Weight box: "-8" to "-15" per ' +
+          "empty place for a real soft need (-10 is the default for a new requirement, below a nurse " +
           'wish), or "0" for a spare place that costs nothing when empty; other finite ' +
           'weights are refused. "-infinity" makes the preferred count a must. Only used when ' +
           "preferredNumPeople is above requiredNumPeople. On an edit, omitting it keeps the " +
