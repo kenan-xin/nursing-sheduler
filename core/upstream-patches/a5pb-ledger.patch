@@ -18,7 +18,7 @@ index 0242cfd9..62ce30a8 100644
      def __post_init__(self) -> None:
          self.compiled_schedule = self.scenario.compiled_schedule
 diff --git a/core/nurse_scheduling/preference_types.py b/core/nurse_scheduling/preference_types.py
-index a16daab1..09aa2bc9 100644
+index e949652..d0dd296 100644
 --- a/core/nurse_scheduling/preference_types.py
 +++ b/core/nurse_scheduling/preference_types.py
 @@ -152,7 +152,7 @@ def shift_type_requirements(
@@ -66,13 +66,13 @@ index a16daab1..09aa2bc9 100644
                      ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 1))
                      continue
  
-@@ -323,7 +323,15 @@ def shift_type_successions(
-                     # objective weight makes 0 strictly preferred.
+@@ -324,7 +324,15 @@ def shift_type_successions(
                      ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
                      ctx.solver.add_constraint(is_match >= actual_n_matched - target_n_matched + 1)
+                     ctx.solver.add_constraint(actual_n_matched >= target_n_matched * is_match)
 -                    utils.add_objective(ctx, weight, is_match)
-+                    # is_match is only bounded below, so a non-optimal roster may carry it at 1
-+                    # with no real match: the v2 ledger reads the pattern from the roster instead.
++                    # The constraints above make is_match exact; the v2 ledger still reads the
++                    # pattern from the roster, so a term never shows a match the roster lacks.
 +                    utils.add_objective(
 +                        ctx,
 +                        weight,
@@ -83,7 +83,7 @@ index a16daab1..09aa2bc9 100644
                      ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 0))
                      continue
                  if is_literal_pattern and ctx.solver.should_use_bool_and_var(len(pattern_element_matches)):
-@@ -340,7 +348,7 @@ def shift_type_successions(
+@@ -341,7 +349,7 @@ def shift_type_successions(
                          (0, target_n_matched),
                      )
  
@@ -92,7 +92,7 @@ index a16daab1..09aa2bc9 100644
                  ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 1))
  
  
-@@ -402,7 +410,7 @@ def shift_count(
+@@ -403,7 +411,7 @@ def shift_count(
                  # Use abstracted squared equality method
                  ctx.solver.add_squared_equality(squared, abs_diff, (0, max_abs_diff))
                  # Add the objective
@@ -101,7 +101,7 @@ index a16daab1..09aa2bc9 100644
                  ctx.reports.append(Report(f"shift_count_{squared_var_name}", squared, lambda x: x == 0))
              else:
                  expr_var_name = f"{unique_var_prefix}_expr"
-@@ -421,7 +429,7 @@ def shift_count(
+@@ -422,7 +430,7 @@ def shift_count(
                      T,
                      (0, max_x),
                  )
@@ -110,7 +110,7 @@ index a16daab1..09aa2bc9 100644
                  # TODO: Be aware of signs of `weight`?
                  ctx.reports.append(Report(f"shift_count_{unique_var_prefix}_expr", expr, lambda x: x))
  
-@@ -498,7 +506,7 @@ def shift_affinity(
+@@ -499,7 +507,7 @@ def shift_affinity(
                          (0, 2),
                      )
                      weight = preference.weight

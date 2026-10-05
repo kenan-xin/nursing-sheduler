@@ -2,7 +2,7 @@
 # hunk: a run with no roster (INFEASIBLE, or UNKNOWN that a no-objective check proves infeasible) is rebuilt once with one guard literal per hard rule unit and explained by a minimal core (explain.py); the optimising model stays byte-identical; the result carries it as `explanation`
 
 diff --git a/core/nurse_scheduling/preference_types.py b/core/nurse_scheduling/preference_types.py
-index d802114e..a16daab1 100644
+index 12de9ac..e949652 100644
 --- a/core/nurse_scheduling/preference_types.py
 +++ b/core/nurse_scheduling/preference_types.py
 @@ -81,6 +81,7 @@ def shift_type_requirements(
@@ -51,7 +51,7 @@ index d802114e..a16daab1 100644
          history = histories[p]
          for d_begin in range(ctx.n_days - len(compiled_preference.pattern) + 1):
              # Check if all dates in the pattern range are valid
-@@ -352,6 +358,7 @@ def shift_count(
+@@ -353,6 +359,7 @@ def shift_count(
      weight = preference.weight
      for i, (expression, T) in enumerate(zip(compiled_preference.expressions, compiled_preference.targets, strict=True)):
          for p in compiled_preference.people:
@@ -59,7 +59,7 @@ index d802114e..a16daab1 100644
              # Include the expression/target pair index so a multi-pair count
              # (e.g. a contracted-hours Range emitting `x >= T` and `x <= T`)
              # names each boundary's model variable and report distinctly instead
-@@ -516,6 +523,7 @@ def shift_type_covering(
+@@ -517,6 +524,7 @@ def shift_type_covering(
      as a hard constraint the solver cannot violate.
      """
      for d in compiled_preference.dates:

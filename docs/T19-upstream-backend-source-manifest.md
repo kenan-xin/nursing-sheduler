@@ -201,7 +201,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `nurse_scheduling/loader.py` | verbatim | `308e2076a579` |  |
 | `nurse_scheduling/model_build_stats.py` | verbatim | `77640eb47261` |  |
 | `nurse_scheduling/models.py` | patched | `edcdab1503ea` | `P2-P3-skillmix-overrides.patch` (P2, P3). `99db-D05-head-count-bound.patch`. `99db-C1-required-not-above-preferred.patch` |
-| `nurse_scheduling/preference_types.py` | patched | `51f7cb3570bd` | `P2-P3-skillmix-overrides.patch` (P2, P3). `99db-B1-history-completed-hard-sequence.patch`. `99db-B5-leave-satisfies-hard-off.patch`. `qb5v-why-solve.patch`. `a5pb-ledger.patch` |
+| `nurse_scheduling/preference_types.py` | patched | `51f7cb3570bd` | `P2-P3-skillmix-overrides.patch` (P2, P3). `99db-B1-history-completed-hard-sequence.patch`. `99db-B5-leave-satisfies-hard-off.patch`. `304s-exact-negative-is-match.patch`. `qb5v-why-solve.patch`. `a5pb-ledger.patch` |
 | `nurse_scheduling/report.py` | verbatim | `8cff02666faf` |  |
 | `nurse_scheduling/scheduler.py` | patched | `7867e7d1b159` | `P4-on-roster.patch` (P4). `qb5v-why-solve.patch`. `a5pb-ledger.patch`. `qb5v-review-fixes.patch` |
 | `nurse_scheduling/serve.py` | verbatim | `8a844abe3b79` |  |
@@ -720,6 +720,7 @@ Upstream: j3soon/nurse-scheduling feature/genie at `1bf4b85`.
 | `tests/testcases/real/large-ward-with-87-people-2025-11.yaml` | verbatim | `8ec166c666d5` |  |
 | `tests/testcases/real/sg-28day-160h-compliance-14-nurses.yaml` | v2-only |  | SG compliance ward case |
 | `tests/testcases/real/ward-8-shift-patterns-senior-on-every-shift.yaml` | v2-only |  | 8-shift-pattern ward case |
+| `upstream-patches/304s-exact-negative-is-match.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/3c91-solver-max-lp-sym.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/99db-B1-history-completed-hard-sequence.patch` | v2-only |  | sync patch or manifest |
 | `upstream-patches/99db-B5-leave-satisfies-hard-off.patch` | v2-only |  | sync patch or manifest |

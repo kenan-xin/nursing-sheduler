@@ -316,15 +316,16 @@ def shift_type_successions(
                 is_match_var_name = f"{unique_var_prefix}_is_match"
                 is_literal_pattern = all(is_literal for _match_expr, is_literal in pattern_element_matches)
                 if weight < 0 and is_literal_pattern:
-                    # For negative soft successions, is_match only needs to
-                    # mark a violation. If every literal matches, the right
-                    # side becomes 1 and forces is_match to 1. Otherwise, the
-                    # constraint allows is_match to remain 0, and the negative
-                    # objective weight makes 0 strictly preferred.
+                    # For negative soft successions, is_match marks a violation.
+                    # If every literal matches, the first constraint forces
+                    # is_match to 1. The second forces every literal to match
+                    # when is_match is 1, so an early-stopped solve cannot
+                    # report a violation that is not in the roster (bead 304s).
                     ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
                     ctx.solver.add_constraint(is_match >= actual_n_matched - target_n_matched + 1)
-                    # is_match is only bounded below, so a non-optimal roster may carry it at 1
-                    # with no real match: the v2 ledger reads the pattern from the roster instead.
+                    ctx.solver.add_constraint(actual_n_matched >= target_n_matched * is_match)
+                    # The constraints above make is_match exact; the v2 ledger still reads the
+                    # pattern from the roster, so a term never shows a match the roster lacks.
                     utils.add_objective(
                         ctx,
                         weight,
