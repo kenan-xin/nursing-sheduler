@@ -34,11 +34,15 @@ export interface TierBand {
 }
 
 export const TIER_BANDS: Record<SoftTier, TierBand> = {
-  strong: { name: "a strong ward rule", min: 1000, max: 1000 },
+  // Bands, not single values, so the assistant can pick a number (user ruling
+  // 2026-10-05). Each keeps the section 5.2 order: strong >= 2x ward max; Preferred
+  // above fairness and below a wish; a squared fairness step 1 -> 2 (3 units, at most
+  // 18) stays below a wish of 20 and above a bonus of 3.
+  strong: { name: "a strong ward rule", min: 600, max: 1000 },
   ward: { name: "a ward preference", min: 100, max: 300 },
   wish: { name: "a nurse wish", min: 20, max: 40 },
-  preferred: { name: "a Preferred staffing count", min: 10, max: 10 },
-  fairness: { name: "a fairness or balance rule", min: 4, max: 4 },
+  preferred: { name: "a Preferred staffing count", min: 8, max: 15 },
+  fairness: { name: "a fairness or balance rule", min: 4, max: 6 },
   // A spare place (an "ideally" count above the real need) costs nothing when empty;
   // the uv8n bonus will rank which spare place fills first.
   spare: { name: "a spare place", min: 0, max: 0 },
@@ -130,6 +134,48 @@ export function weightBandRefusal<K extends LadderKind>(
   if (!Number.isFinite(card.weight) || tiers.length === 0) return undefined;
   if (tiers.some((tier) => inBand(TIER_BANDS[tier], card.weight))) return undefined;
   return allowedText(kind, tiers);
+}
+
+/** Highest first: the tier above another always wins (section 4). */
+const TIER_ORDER: readonly SoftTier[] = ["strong", "ward", "wish", "preferred", "fairness"];
+
+const bandText = (band: TierBand) =>
+  band.min === band.max ? `${band.max}` : `${band.min} to ${band.max}`;
+
+/** What one point unit is, per rule kind, as the Preview says it. */
+type RuleCard = CardsByKind[keyof CardsByKind][number];
+
+const UNIT: Record<keyof CardsByKind, (card: RuleCard) => string> = {
+  requirements: () => "for each empty Preferred place on each date",
+  successions: () => "each time the pattern happens",
+  counts: (card) =>
+    isRestDaysRuleCard(card)
+      ? "for each 7 days in a row where a nurse works more than 5"
+      : String((card as CountCard).expression).includes("^2")
+        ? "for each squared shift a nurse is away from the target"
+        : "for each nurse it holds for",
+  affinities: () => "for each shift they share",
+  coverings: () => "",
+};
+
+/**
+ * The Preview's points line for a rule (spec section 6 item 4): the points in plain
+ * words, then the tier and what always wins over it. Undefined for a hard rule or a
+ * weight with no effect, whose sentence already says so.
+ */
+export function pointsSentence(kind: keyof CardsByKind, card: RuleCard): string | undefined {
+  const tiers = tiersFor(kind, card);
+  if (!Number.isFinite(card.weight) || tiers.length === 0) return undefined;
+  const tier = tierOf(kind, card) as SoftTier;
+  if (tier === "spare") return "A spare place: no points, so an empty one costs nothing.";
+  const unit = Math.abs(card.weight) === 1 ? "point" : "points";
+  const points = `${card.weight > 0 ? "+" : ""}${card.weight} ${unit} ${UNIT[kind](card)}.`;
+  const name = TIER_BANDS[tier].name;
+  const above = TIER_ORDER[TIER_ORDER.indexOf(tier) - 1];
+  const wins = above
+    ? `${TIER_BANDS[above].name} (${bandText(TIER_BANDS[above])} points) always wins`
+    : "only a must wins over it";
+  return `${points} ${name[0].toUpperCase()}${name.slice(1)}: ${wins}.`;
 }
 
 /** The nearest weight on the ladder, keeping the sign: the fix to offer. */
