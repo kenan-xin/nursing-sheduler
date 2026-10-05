@@ -66,7 +66,7 @@ describe("scoreSplit", () => {
     });
     expect(scoreSplitText(split)).toBe(
       "Lost: 1 strong rule (3,000), 1 ward preference (200), 1 nurse wish (1), " +
-        "1 preferred staffing count (3). Earned: 2 bonus points.",
+        "1 preferred staffing count (3). Earned: 2 points.",
     );
   });
 
@@ -80,7 +80,7 @@ describe("scoreSplit", () => {
       ctx,
     );
     expect(scoreSplitText(split)).toBe(
-      "Lost: 0 strong rules, 0 ward preferences, 0 nurse wishes. Earned: 3 bonus points.",
+      "Lost: 0 strong rules, 0 ward preferences, 0 nurse wishes. Earned: 3 points.",
     );
   });
 });

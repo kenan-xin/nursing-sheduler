@@ -1,5 +1,5 @@
 // The Optimize score split per priority tier (bead 5gz4, priority ladder spec section 8):
-// "Lost: 0 strong rules, 0 ward preferences, 2 nurse wishes (40). Earned: 1118 bonus points."
+// "Lost: 0 strong rules, 0 ward preferences, 2 nurse wishes (40). Earned: 1118 points."
 // Read from the run's penalty ledger; rules count once per card uid, so a rest-days card's
 // 7-day windows and a temporary-cover split card each count as the one rule they came from.
 
@@ -89,14 +89,14 @@ export function scoreSplit(ledger: Ledger, ctx: ExplainContext): ScoreSplit {
   };
 }
 
-/** "Lost: 0 strong rules, 1 nurse wish (20). Earned: 1118 bonus points." */
+/** "Lost: 0 strong rules, 1 nurse wish (20). Earned: 1118 points." */
 export function scoreSplitText(split: ScoreSplit): string {
   const parts = split.lost.map(({ tier, rules, points }) => {
     const names = TIERS.find((t) => t.tier === tier)!;
     const count = `${rules} ${rules === 1 ? names.one : names.many}`;
     return points > 0 ? `${count} (${formatScore(points)})` : count;
   });
-  return `Lost: ${parts.join(", ")}. Earned: ${formatScore(split.earned)} bonus points.`;
+  return `Lost: ${parts.join(", ")}. Earned: ${formatScore(split.earned)} points.`;
 }
 
 /** The split of `view`'s completed run, or null without a ledger (old, infeasible, unread). */

@@ -102,7 +102,7 @@ const completedView = view({
     score: 42,
     solverStatus: "OPTIMAL",
     terminationReason: "optimality_proven",
-    // 82 bonus points earned, two nurse wishes of 20 missed: the per-tier score split.
+    // 82 points earned, two nurse wishes of 20 missed: the per-tier score split.
     explanation: {
       kind: "ledger",
       ledger: {

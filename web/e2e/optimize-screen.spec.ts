@@ -41,7 +41,7 @@ test.describe("Optimize & Export screen — browser coverage", () => {
     ).toBeVisible();
     // Points lost per priority tier under the final score (bead 5gz4).
     await expect(page.getByTestId("fx-completed").getByTestId("optimize-score-split")).toHaveText(
-      "Lost: 0 strong rules, 0 ward preferences, 2 nurse wishes (40). Earned: 82 bonus points.",
+      "Lost: 0 strong rules, 0 ward preferences, 2 nurse wishes (40). Earned: 82 points.",
     );
 
     // No-artifact reason (non-infeasible completed-without-artifact anomaly).

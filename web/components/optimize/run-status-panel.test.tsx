@@ -192,7 +192,7 @@ describe("RunStatusPanel — score split per tier", () => {
     );
     expect(screen.getByTestId("optimize-summary-final-score")).toHaveTextContent("-40");
     expect(screen.getByTestId("optimize-score-split")).toHaveTextContent(
-      "Lost: 0 strong rules, 0 ward preferences, 1 nurse wish (40). Earned: 0 bonus points.",
+      "Lost: 0 strong rules, 0 ward preferences, 1 nurse wish (40). Earned: 0 points.",
     );
   });
 
