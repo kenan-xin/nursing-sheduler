@@ -9,7 +9,8 @@
 import { describe, expect, it } from "vitest";
 import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
-import type { AssistantCommandV1 } from "./commands";
+import { assistantCommandSchema, type AssistantCommandV1 } from "./commands";
+import { checkWeightOrder, tierOf } from "@/lib/rules/priority-ladder";
 import { applyAssistantCommand, applyAssistantCommands } from "./operations";
 import { deriveProposalDiff } from "./diff";
 import {
@@ -1682,6 +1683,112 @@ describe("add_staffing_requirement / edit_staffing_requirement", () => {
     const result = applyAssistantCommand(ruleWardScenario(), edit({ ruleId: "nope" } as never));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
+  });
+});
+
+describe("set_spare_slot_bonus (uv8n)", () => {
+  /** req-day (Day, qualified everyone) as an 'at least 2, ideally 3' count with a shortfall penalty. */
+  const ward = (overrides: Record<string, unknown> = {}) => {
+    const state = ruleWardScenario();
+    state.cardsByKind.requirements[0] = {
+      ...state.cardsByKind.requirements[0],
+      requiredNumPeople: 2,
+      preferredNumPeople: 3,
+      weight: -200,
+      ...overrides,
+    };
+    return state;
+  };
+  const bonus = (rank: number, ruleId = "req-day") => ({
+    type: "set_spare_slot_bonus" as const,
+    ruleId,
+    priority: "bonus" as const,
+    rank,
+  });
+  const bonusCards = (state: ScenarioUiState) =>
+    state.cardsByKind.successions.filter((card) => card.description?.startsWith("Bonus:"));
+
+  it("drops the shortfall penalty and writes ONE one-shift rule for the qualified staff", () => {
+    const result = applyAssistantCommand(
+      ward({ qualifiedPeople: ["Senior"], requiredNumPeople: 0, preferredNumPeople: 1 }),
+      bonus(3),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.cardsByKind.requirements[0]).toMatchObject({
+      preferredNumPeople: 1,
+      weight: 0,
+    });
+    expect(bonusCards(result.next)).toEqual([
+      {
+        uid: expect.any(String),
+        description: "Bonus: +3 for each Day shift (spare places are optional)",
+        person: ["Senior"],
+        pattern: ["Day"],
+        date: ["ALL"],
+        weight: 3,
+      },
+    ]);
+    // Nothing is recorded as a nurse's request.
+    expect(result.next.reqData).toEqual([]);
+  });
+
+  it("leaves every existing request alone", () => {
+    const state = ward();
+    state.reqData = [{ kind: "off", person: "ana", date: "05", weight: 5, uid: "u1" }];
+    const result = applyAssistantCommand(state, bonus(2));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.next.reqData).toEqual(state.reqData);
+  });
+
+  it("a second bonus edits the same rule and keeps the optional ceiling", () => {
+    const first = applyAssistantCommand(ward(), bonus(2));
+    if (!first.ok) throw new Error("bonus refused");
+    const [card] = bonusCards(first.next);
+    expect(card).toMatchObject({ person: ["ALL"], weight: 2 });
+    const edited = applyAssistantCommand(first.next, bonus(1));
+    if (!edited.ok) throw new Error("edit refused");
+    expect(bonusCards(edited.next)).toEqual([
+      {
+        ...card,
+        weight: 1,
+        description: "Bonus: +1 for each Day shift (spare places are optional)",
+      },
+    ]);
+    expect(edited.next.cardsByKind.requirements[0]).toMatchObject({
+      preferredNumPeople: 3,
+      weight: 0,
+    });
+  });
+
+  it("the written card sits in the ladder's bonus tier; a rank outside 1 to 3 never parses", () => {
+    const result = applyAssistantCommand(ward(), bonus(3));
+    if (!result.ok) throw new Error("bonus refused");
+    const [card] = bonusCards(result.next);
+    expect(tierOf("successions", card)).toBe("bonus");
+    expect(tierOf("requirements", result.next.cardsByKind.requirements[0])).toBe("spare");
+    expect(checkWeightOrder(result.next)).toEqual([]);
+    for (const bad of [bonus(0), bonus(4), { ...bonus(3), priority: "wish" }]) {
+      expect(assistantCommandSchema.safeParse(bad).success).toBe(false);
+    }
+    expect(assistantCommandSchema.safeParse(bonus(3)).success).toBe(true);
+  });
+
+  it("refuses a requirement with no spare places, pointing at preferredNumPeople", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), bonus(2));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain("preferredNumPeople");
+  });
+
+  it("refuses a requirement that is gone, and a bonus already in place", () => {
+    const gone = applyAssistantCommand(ward(), bonus(2, "nope"));
+    expect(!gone.ok && gone.rejection.code).toBe("unknown_target");
+    const first = applyAssistantCommand(ward(), bonus(2));
+    if (!first.ok) throw new Error("bonus refused");
+    const again = applyAssistantCommand(first.next, bonus(2));
+    expect(!again.ok && again.rejection.code).toBe("no_effect");
   });
 });
 

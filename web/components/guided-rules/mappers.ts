@@ -14,6 +14,7 @@ import {
   type SuccessionCard,
 } from "@/lib/scenario";
 import { formatShortDate } from "@/lib/dates/date-id";
+import { isSpareSlotBonusCard } from "@/lib/rules/priority-ladder";
 import { isValidWeightValue } from "@/components/card-editor/weight-field";
 import {
   requiredCountError,
@@ -22,6 +23,7 @@ import {
 import {
   SUCCESSION_MESSAGES,
   isEditableSuccessionCard,
+  spareSlotBonusSentence,
   patternPositionsForDisplay,
   summarizeRefs as summarizeSuccessionRefs,
 } from "@/components/successions/successions-model";
@@ -136,6 +138,11 @@ export const successionsMapper: GuidedRuleMapper<SuccessionCard> = {
     const who = summarizeSuccessionRefs(card.person);
     const pattern = patternPositionsForDisplay(card.pattern).join(" → ");
     const when = card.date === undefined ? "every date" : summarizeSuccessionRefs(card.date);
+    // A spare-slot bonus (uv8n) reads as points per shift, the same sentence as Preview.
+    if (isSpareSlotBonusCard(card)) {
+      const everyDate = [card.date ?? "ALL"].flat().every((d) => String(d).toUpperCase() === "ALL");
+      return `${who}: ${spareSlotBonusSentence(card, everyDate ? "" : `on ${when}`)}`;
+    }
     return `${who}: ${pattern} on ${when}.`;
   },
   quickFields(card): GuidedQuickField[] {

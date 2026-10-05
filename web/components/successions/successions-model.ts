@@ -16,6 +16,7 @@ import {
   RESERVED_SHIFT_TYPE,
   type DateRef,
   type PersonRef,
+  type RequirementCard,
   type ScenarioUiState,
   type ShiftTypeRef,
   type SuccessionCard,
@@ -29,6 +30,7 @@ import {
 } from "@/components/card-editor/weight-value";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
 import { makeDates } from "@/lib/rules/requirement-dates";
+import { isSpareSlotBonusCard, TIER_BANDS } from "@/lib/rules/priority-ladder";
 
 /**
  * The scenario fields the Successions screen reads: the people and shift-type
@@ -312,6 +314,52 @@ export function isAdvancedSuccessionCard(card: SuccessionCard): boolean {
  *  guard `openEdit` with this so an advanced card never reaches `flattenPattern`. */
 export function isEditableSuccessionCard(card: SuccessionCard): boolean {
   return !isAdvancedSuccessionCard(card);
+}
+
+/**
+ * The spare-slot bonus card a requirement implies (uv8n): "each <shift> shift" for the
+ * requirement's qualified staff on its dates. `shift` is null for a requirement over
+ * several shifts, which one card cannot say. Core accepts a one-step pattern; this form's
+ * Save needs 2+ steps (AC-PR-11), the Rules weight quick field does not.
+ */
+export function spareSlotBonusShape(card: RequirementCard) {
+  const shifts = ([card.shiftType] as unknown[]).flat(Infinity).map(String);
+  const dates = [card.date ?? "ALL"].flat();
+  return {
+    shift: shifts.length === 1 ? shifts[0] : null,
+    person: [card.qualifiedPeople ?? "ALL"].flat(),
+    date: dates.length > 0 ? dates : ["ALL"],
+  };
+}
+
+/** The bonus card already written for this requirement, matched by its shape. */
+export function findSpareSlotBonus(
+  successions: readonly SuccessionCard[],
+  requirement: RequirementCard,
+): SuccessionCard | undefined {
+  const { shift, person, date } = spareSlotBonusShape(requirement);
+  if (shift === null) return undefined;
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  return successions.find(
+    (card) =>
+      isSpareSlotBonusCard(card) &&
+      String([card.pattern].flat()[0]) === shift &&
+      same([card.person].flat(), person) &&
+      same([card.date ?? "ALL"].flat(), date),
+  );
+}
+
+/**
+ * How a bonus card reads on Preview and the Rules screen (spec section 6 item 4):
+ * "+3 points for each A_sup shift. Lowest priority: a nurse's day off (20 points) always
+ * wins." `when` names the dates, or is empty for every date.
+ */
+export function spareSlotBonusSentence(card: SuccessionCard, when = ""): string {
+  const shift = String([card.pattern].flat()[0]);
+  return (
+    `+${card.weight} points for each ${shift} shift${when ? ` ${when}` : ""}. ` +
+    `Lowest priority: a nurse's day off (${TIER_BANDS.wish.min} points) always wins.`
+  );
 }
 
 /**

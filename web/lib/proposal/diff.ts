@@ -67,6 +67,11 @@ import {
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
 import { rosterDatesBetween, withStoredShiftCodes } from "./operations";
+import {
+  findSpareSlotBonus,
+  spareSlotBonusSentence,
+} from "@/components/successions/successions-model";
+import { isSpareSlotBonusCard } from "@/lib/rules/priority-ladder";
 
 /**
  * Where a change lands, named as the capability the user would go to see it.
@@ -279,6 +284,10 @@ function describeRequirement(card: RequirementCard): string {
   if (card.weight < 0) {
     return `${n} to ${p} people on ${shifts}, ${dates}${exceptions}, aiming for ${p} (weight ${card.weight})${ban}${mix}`;
   }
+  // Weight 0 (uv8n): the places above n are optional; no shortfall term in the score.
+  if (card.weight === 0) {
+    return `At least ${n}, up to ${p} people on ${shifts}, ${dates}${exceptions}; places above ${n} are optional spare slots, an empty one costs nothing${ban}${mix}`;
+  }
   const lean = card.weight > 0 ? `${n} preferred` : "no preference";
   return `${n} to ${p} people on ${shifts}, ${dates}${exceptions} (${lean}, weight ${card.weight})${ban}${mix}`;
 }
@@ -330,6 +339,11 @@ function describeSuccession(card: SuccessionCard): string {
       Array.isArray(position) ? position.map(String).join(" or ") : String(position),
     )
     .join(" → ");
+  // A spare-slot bonus (uv8n): points per filled shift, and why it is the lowest priority.
+  if (isSpareSlotBonusCard(card)) {
+    const when = renderDates(card.date);
+    return spareSlotBonusSentence(card, when === "every date" ? "" : `on ${when}`);
+  }
   return `${pattern} on consecutive days for ${renderPeople(card.person, "everyone")}, ${renderDates(card.date)}: ${renderStrength(card.weight)}`;
 }
 
@@ -1171,6 +1185,18 @@ function directKeys(
       case "set_skill_mix":
       case "set_staffing_requirement_on_date":
         keys.add(`rule:requirements:${command.ruleId}`);
+        break;
+      case "set_spare_slot_bonus":
+        keys.add(`rule:requirements:${command.ruleId}`);
+        // The bonus rule it writes, edits or removes, in whichever document holds it.
+        for (const state of [before, after]) {
+          const requirement = state.cardsByKind.requirements.find(
+            (card) => card.uid === command.ruleId,
+          );
+          const bonus =
+            requirement && findSpareSlotBonus(state.cardsByKind.successions, requirement);
+          if (bonus) keys.add(`rule:successions:${bonus.uid}`);
+        }
         break;
       case "remove_rule":
         keys.add(`rule:${command.ruleKind}:${command.ruleId}`);

@@ -259,6 +259,13 @@ export type AssistantCommandV1 =
       weight?: string;
     }
   /**
+   * Make one staffing requirement's spare places (above its required count, up to its
+   * preferred count) a bonus, never a penalty (bead uv8n, priority ladder tier 5): its
+   * weight becomes 0 and one one-shift Shift sequences rule pays `rank` points (3 / 2 / 1)
+   * for each shift of that type its qualified staff work on its dates. No request is touched.
+   */
+  | { type: "set_spare_slot_bonus"; ruleId: string; priority: "bonus"; rank: number }
+  /**
    * Replace one staffing requirement's skill mix -- that screen's Edit form "Skill mix"
    * rows. Each entry: at least `minNumPeople` of `people` among the shift's staff. It
    * bans nobody (unlike qualifiedPeople). An empty list clears it.
@@ -404,6 +411,7 @@ export const ASSISTANT_COMMAND_TYPES = [
   "add_staffing_requirement",
   "edit_staffing_requirement",
   "set_skill_mix",
+  "set_spare_slot_bonus",
   "set_staffing_requirement_on_date",
   "remove_rule",
   "add_person",
@@ -968,6 +976,32 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
         "so to add a group include the existing entries too. [] removes it.",
     ),
   }),
+  z
+    .strictObject({
+      type: z.enum(["set_spare_slot_bonus"]),
+      ruleId: ruleIdSchema(),
+      priority: z
+        .enum(["bonus"])
+        .describe('The priority tier: always "bonus", the lowest (below every nurse wish).'),
+      rank: z
+        .number()
+        .int()
+        .min(1)
+        .max(3)
+        .describe(
+          "Which spare place fills first, and the points per filled shift: 3 for the " +
+            "ward's first choice (usually the optional senior lead), 2 for the next (a 3rd " +
+            "nurse on mornings), 1 for the last (a 3rd on afternoons).",
+        ),
+    })
+    .describe(
+      "Turn one requirement's spare places (above requiredNumPeople, up to its " +
+        "preferredNumPeople) into a bonus: filling one earns points, an empty spare slot " +
+        "costs nothing, so the score never goes negative for optional places. Sets the " +
+        "requirement's weight to 0 and writes one bonus rule on the Rules screen (a " +
+        "one-shift Shift sequences card), or updates the one already there; remove_rule " +
+        "on that card removes the bonus. The requirement needs a preferred count first.",
+    ),
   z.strictObject({
     type: z.enum(["set_staffing_requirement_on_date"]),
     ruleId: ruleIdSchema(),

@@ -116,6 +116,7 @@ const PROPOSAL_OPERATIONS = [
   "add_staffing_requirement",
   "edit_staffing_requirement",
   "set_skill_mix",
+  "set_spare_slot_bonus",
   "set_staffing_requirement_on_date",
   "remove_rule",
   "add_person",

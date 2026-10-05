@@ -434,6 +434,12 @@ describe("the command arms the provider is actually shown", () => {
         preferredNumPeople: 5,
         weight: "-50",
       },
+      set_spare_slot_bonus: {
+        type: "set_spare_slot_bonus",
+        ruleId: "r1",
+        priority: "bonus",
+        rank: 3,
+      },
       set_skill_mix: {
         type: "set_skill_mix",
         ruleId: "r1",

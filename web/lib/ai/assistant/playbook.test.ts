@@ -396,12 +396,17 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(ask).toMatch(/preferredNumPeople/);
     expect(ask).toMatch(/required count alone is exact/);
     expect(ask).toMatch(/0 alone forbids the shift/);
+    // uv8n: the places above the minimum are optional, so no shortfall penalty.
+    expect(ask).toMatch(/weight "0"/);
+    expect(SETUP_STEPS.find((s) => s.id === "rules")!.proposeWith).toContain(
+      "set_spare_slot_bonus",
+    );
   });
   it("holds every summary to what its operations do (hg9v)", () => {
     expect(SETUP_INSTRUCTIONS).toContain(TRUTHFUL_SUMMARY_RULE);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-10-05.2");
+    expect(PLAYBOOK_VERSION).toBe("2026-10-05.4");
   });
 });
 
@@ -413,6 +418,9 @@ describe("the priority ladder block (rnrt)", () => {
       expect(text, band.name).toContain(size);
     }
     expect(text).toMatch(/refuses a weight outside its tier's band/);
+    // uv8n: the spare-slot bonus sentence lives here, ranked 3 / 2 / 1.
+    expect(text).toMatch(/set_spare_slot_bonus with priority "bonus" and rank 3, 2 and 1/);
+    expect(text).toMatch(/day off or shift wish always wins over a spare place/);
     expect(text).toMatch(/priority plan/);
   });
   it("wishes and softened requests default to 20", () => {

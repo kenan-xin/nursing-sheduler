@@ -40,7 +40,7 @@ import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/co
 import type { SuccessionCard } from "@/lib/scenario";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 
-export const PLAYBOOK_VERSION = "2026-10-05.2";
+export const PLAYBOOK_VERSION = "2026-10-05.4";
 
 /**
  * The priority ladder (spec docs/superpowers/specs/2026-09-29-priority-ladder-design.md,
@@ -49,6 +49,8 @@ export const PLAYBOOK_VERSION = "2026-10-05.2";
  */
 export const PRIORITIES: readonly string[] = [
   "Every soft rule's weight sits in one tier, and a higher tier always wins. From the top: must (infinity) for staffing minimums, leave, contracted hours, supervision and the hard rest rules; 1000 for a strong ward rule (2 rest days in any 7 days, a full day off after the sleep day, at most 3 nights in a row); 100 to 300 for a ward preference (avoid a pattern, two nurses apart where possible); 20 to 40 for a nurse wish (a day off or a shift wish, usually 20); -10 for each empty Preferred staffing place; 4 for fairness and balance counts; 0 for a spare place.",
+  // Bead uv8n: spike e in the bead notes (3/2/1 gives the same roster as -300/-200/-100, a positive score, and a soft day off beats it).
+  "Spare places are a bonus, the lowest tier: 1 to 3 points for each filled spare shift, never a penalty for an empty one. Set the 'ideally' count with weight 0, then set_spare_slot_bonus with priority \"bonus\" and rank 3, 2 and 1 in the ward's order (by default the optional senior lead, then a 3rd nurse on mornings, then a 3rd on afternoons). So the score never goes negative for optional places, and a nurse's leave, day off or shift wish always wins over a spare place.",
   "Send the raw number. The app refuses a weight outside its tier's band and names the band: pick a number inside it.",
   "In setup, before the rule changes, list the ward's needs with their tiers in one message: the ward's priority plan.",
   "When two of the ward's needs can conflict and the ward might rank them against the ladder, ask on one choice card which wins, with the ladder's order first, for example 'A nurse's day off or a 3rd nurse on mornings: which wins?'.",
@@ -183,10 +185,10 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     capabilityId: "staffing-requirements",
     ask: [
       "How many nurses each shift needs, and any skill mix: a minimum from a group among them, such as at least 2 RNs of the 4 on nights. Set it with set_skill_mix or skillMix on add_staffing_requirement; never approximate it by naming who may work the whole shift.",
-      "'Optional, ideally N' (or 'at least R, ideally N') is requiredNumPeople R, often 0, plus preferredNumPeople N on add_staffing_requirement. A required count alone is exact, and a required count of 0 alone forbids the shift.",
+      "'Optional, ideally N' (or 'at least R, ideally N') is requiredNumPeople R, often 0, plus preferredNumPeople N on add_staffing_requirement, with weight \"0\": the places above R are optional, so an empty one costs nothing. A required count alone is exact, and a required count of 0 alone forbids the shift.",
       "Ask about every worked shift the step's detail lists with no staffing requirement, on a choice card with the usual numbers, such as '1 senior every night' and 'Optional: 0 required, ideally 1 senior'; never guess it.",
       // Bead 4h5a: spike numbers in the bead notes (13 nurses, 31 days: exact counts left 12 days off each and A_sup empty; these weights filled A_sup every day, then 7 third mornings).
-      "After the staffing numbers, read staffingBalance from get_setup_progress and say its sentence in plain words; when staffingBalance.estimated is true, say 'about' and the assumption, and ask each nurse's contract before treating the numbers as fact. When spareShifts is above 0 the staff can work more than the minimums need: on one offer_choices card ask where the spare shifts go, by default first an optional senior lead slot (ideally 1 senior), then a 3rd nurse on mornings, then a 3rd on afternoons, and ask each nurse's contracted working days (default shiftsEach, 5 in every 7 days). Then set preferredNumPeople on those requirements with weight 0 (a spare place costs nothing when empty; a negative weight there would beat the nurses' wishes), and add_contracted_hours for the staff, one day either side of the contract (hoursPerShift 8 for a contract in days). The contract's fewest days times the staff must not exceed mostShifts once the 'ideally' counts are set, or no roster is possible.",
+      "After the staffing numbers, read staffingBalance from get_setup_progress and say its sentence in plain words; when staffingBalance.estimated is true, say 'about' and the assumption, and ask each nurse's contract before treating the numbers as fact. When spareShifts is above 0 the staff can work more than the minimums need: on one offer_choices card ask where the spare shifts go, by default first an optional senior lead slot (ideally 1 senior), then a 3rd nurse on mornings, then a 3rd on afternoons, and ask each nurse's contracted working days (default shiftsEach, 5 in every 7 days). Then set preferredNumPeople on those requirements with weight 0 and a spare-slot bonus in that order (see the priorities: a negative weight there would beat the nurses' wishes), and add_contracted_hours for the staff, one day either side of the contract (hoursPerShift 8 for a contract in days). The contract's fewest days times the staff must not exceed mostShifts once the 'ideally' counts are set, or no roster is possible.",
       "Prefer a contracted working target over a cap on days off: a cap cannot make anyone work a shift the staffing numbers do not allow. Never propose a days-off cap below staffingBalance.fewestOffDaysEach; show the arithmetic from its sentence instead.",
       "Never say a rule over any 7 days in a row is impossible: add_rest_days_rule is one.",
       "Rest rules are on by default for every ward: rest after nights is a safety rule, so nurses stay sharp. Propose all five, explain each in one line, and ask on one choice card whether the ward keeps each one: at most 6 work days in a row (add_shift_sequence_rule of ALL 7 days in a row at -infinity, a pattern, not a total over the period; label it a must on the card: it gives the 1 rest day a week, which the Employment Act sets); a sleep day after the last night (the night shift then each day shift at -infinity: no day shift straight after a night); at most 4 nights in a row (the night shift 5 times at -infinity); a full day off after the sleep day (night, OFF, ALL at -1000); at most 3 nights in a row (the night shift 4 times at -1000). Map night, morning and afternoon to the ward's own shift codes, and ask when that is unclear. An afternoon shift followed by a morning shift is allowed: never propose a rule against it.",
@@ -197,6 +199,7 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     proposeWith: [
       "add_staffing_requirement",
       "set_skill_mix",
+      "set_spare_slot_bonus",
       "add_shift_sequence_rule",
       "add_rest_days_rule",
       "add_contracted_hours",

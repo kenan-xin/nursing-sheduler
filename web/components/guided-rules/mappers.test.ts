@@ -145,6 +145,24 @@ describe("successionsMapper", () => {
     expect(successionsMapper.quickFields(advanced)).toEqual([]);
   });
 
+  it("a bonus rule reads as Preview does, its weight quick-editable (uv8n)", () => {
+    const bonus: SuccessionCard = {
+      uid: "s3",
+      person: ["Seniors"],
+      pattern: ["A_sup"],
+      date: ["ALL"],
+      weight: 3,
+    };
+    expect(successionsMapper.summary(bonus)).toBe(
+      "Seniors: +3 points for each A_sup shift. Lowest priority: a nurse's day off (20 points) always wins.",
+    );
+    expect(successionsMapper.summary({ ...bonus, date: ["WEEKEND"] })).toBe(
+      "Seniors: +3 points for each A_sup shift on WEEKEND. Lowest priority: a nurse's day off (20 points) always wins.",
+    );
+    expect(successionsMapper.unsupportedReason(bonus)).toBeUndefined();
+    expect(successionsMapper.quickFields(bonus).map((f) => f.key)).toEqual(["weight"]);
+  });
+
   it("summary renders the pattern arrow sequence", () => {
     expect(successionsMapper.summary(supported)).toContain("N → D");
   });
