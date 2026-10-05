@@ -68,6 +68,7 @@ import {
   type OptimizeRunView,
   type RunStatusTone,
 } from "@/lib/optimize";
+import { scoreSplitOf, scoreSplitText } from "@/lib/optimize/score-split";
 import { cn } from "@/lib/utils";
 import { Callout } from "./callout";
 
@@ -193,6 +194,8 @@ export function RunStatusPanel({
   // non-idle state EXCEPT the terminal success/infeasible outcomes, which present a
   // dedicated outcome block instead.
   const showLiveHeader = !isSuccess && !isInfeasible && !isInconclusive;
+  // Points lost per priority tier; absent without a ledger, leaving the plain score.
+  const split = isSuccess ? scoreSplitOf(view) : null;
   const heading = terminalHeading(view);
   const isTerminalError =
     view.lifecycle === "failed" || view.lifecycle === "cancelled" || isSubmitPre;
@@ -256,6 +259,11 @@ export function RunStatusPanel({
             {elapsedLabel(view)}
           </SummaryCell>
         </div>
+      ) : null}
+      {split !== null ? (
+        <p className="-mt-2 text-meta text-ink2" data-testid="optimize-score-split">
+          {scoreSplitText(split)}
+        </p>
       ) : null}
 
       {/* Infeasible dedicated panel: explanation + the solver verdict as a compact

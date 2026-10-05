@@ -152,6 +152,57 @@ describe("RunStatusPanel — controls", () => {
   });
 });
 
+describe("RunStatusPanel — score split per tier", () => {
+  const done = (over: Partial<OptimizeRunView>) =>
+    view({
+      lifecycle: "completed",
+      jobId: "opt_1",
+      result: { outcome: "optimal", score: -40, solverStatus: "OPTIMAL", terminationReason: null },
+      ...over,
+    });
+
+  it("shows the points lost per tier under the final score", () => {
+    setup(
+      done({
+        result: {
+          outcome: "optimal",
+          score: -40,
+          solverStatus: "OPTIMAL",
+          terminationReason: null,
+          explanation: {
+            kind: "ledger",
+            ledger: {
+              objective: -40,
+              balanced: true,
+              terms: 2,
+              rules: [{ rule: 0, points: -40, matches: 2 }],
+              matches: [],
+              truncated: false,
+              seconds: 0,
+            },
+          },
+        },
+        explainContext: {
+          sources: [
+            { ruleId: "r1", type: "shift request", label: "wish", hard: false, weight: -20 },
+          ],
+          people: [],
+        },
+      }),
+    );
+    expect(screen.getByTestId("optimize-summary-final-score")).toHaveTextContent("-40");
+    expect(screen.getByTestId("optimize-score-split")).toHaveTextContent(
+      "Lost: 0 strong rules, 0 ward preferences, 1 nurse wish (40). Earned: 0 bonus points.",
+    );
+  });
+
+  it("shows the plain score when the run has no ledger", () => {
+    setup(done({}));
+    expect(screen.getByTestId("optimize-summary-final-score")).toHaveTextContent("-40");
+    expect(screen.queryByTestId("optimize-score-split")).not.toBeInTheDocument();
+  });
+});
+
 describe("RunStatusPanel — terminal outcomes", () => {
   it("row 1: completed with a downloaded artifact shows success and Download Again", () => {
     setup(
