@@ -1239,7 +1239,7 @@ describe("review fixes (2026-09-24)", () => {
         personId: "rn1",
         startDate: "2026-11-03",
         endDate: "2026-11-03",
-        weight: 10,
+        weight: 20,
       },
     ]);
     expect(soften && isSafeOption(state, soften)).toBe(true);
@@ -2260,7 +2260,7 @@ describe("unexplained-path guesses (bead nursing-sheduler-spdk, l3m fixtures)", 
         shiftType: "N",
         startDate: "2026-11-01",
         endDate: "2026-11-07",
-        weight: -10,
+        weight: -20,
       },
     ]);
     expect(soften?.title).toMatch(/Nov 1, 2026.*Nov 7, 2026/);
@@ -2287,7 +2287,7 @@ describe("unexplained-path guesses (bead nursing-sheduler-spdk, l3m fixtures)", 
         personId: "n1",
         startDate: "2026-11-02",
         endDate: "2026-11-03",
-        weight: 10,
+        weight: 20,
       },
     ]);
     expect(soften && isSafeOption(state, soften)).toBe(true);

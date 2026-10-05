@@ -154,7 +154,7 @@ test.describe.serial("T13 shift-type coverings editor (rebuild)", () => {
     await expect(page.getByTestId("covering-card-0")).toContainText(
       "A preceptor on the same shift on the same day",
     );
-    expect(cards[0].weight).toBe(1); // inert enforced weight
+    expect(cards[0].weight).toBe(Infinity); // inert, always enforced
     expect(cards[0].disabled).toBeUndefined();
     // The compound add is exactly ONE tracked mutation (one undo entry).
     expect((await pastCount(page)) - before).toBe(1);

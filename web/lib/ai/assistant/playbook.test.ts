@@ -277,15 +277,22 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(ask("shiftTypes")).toMatch(/three 8-hour shifts/);
     expect(ask("shiftTypes")).toMatch(/12-hour/);
   });
-  it("suggests the usual rest and fairness rules, with off-after-nights as a preference", () => {
+  it("proposes the section 4.1 rest rules by default, at their ladder weights (12z8)", () => {
     const text = ask("rules");
-    expect(text).toMatch(/no day shift straight after a night as a must/);
-    expect(text).toMatch(/day off after nights as a preference/);
+    expect(text).toMatch(/Rest rules are on by default/);
+    expect(text).toMatch(/ask on one choice card whether the ward keeps each one/);
+    expect(text).toMatch(
+      /sleep day after the last night \(the night shift then each day shift at -infinity/,
+    );
+    expect(text).toMatch(/at most 4 nights in a row \(the night shift 5 times at -infinity\)/);
+    expect(text).toMatch(/full day off after the sleep day \(night, OFF, ALL at -1000\)/);
+    expect(text).toMatch(/at most 3 nights in a row \(the night shift 4 times at -1000\)/);
+    expect(text).toMatch(/afternoon shift followed by a morning shift is allowed/);
     expect(text).toMatch(/balance/);
   });
-  it("frames ward habits as habits; the only law named is the Employment Act rest day", () => {
+  it("frames rest as safety, not law; the only law named is the Employment Act rest day", () => {
     const text = ask("rules");
-    expect(text).toMatch(/many wards/i);
+    expect(text).toMatch(/safety rule/);
     expect(text).not.toMatch(/\b(law|MOH|MOM|required by)\b/);
     expect(text).toMatch(/1 rest day a week, which the Employment Act sets/);
   });
@@ -350,7 +357,9 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(text).toMatch(/spareShifts/);
     // Senior lead slot first, then a 3rd morning, then a 3rd afternoon, by weight.
     expect(text).toMatch(/optional senior lead slot.*3rd nurse on mornings.*3rd on afternoons/);
-    expect(text).toMatch(/-300, -200 and -100/);
+    // A spare place costs nothing when empty (priority ladder, 12z8); uv8n bonuses rank them.
+    expect(text).toMatch(/with weight 0/);
+    expect(text).not.toMatch(/-300/);
     expect(text).toMatch(/add_contracted_hours/);
     expect(rules.proposeWith).toContain("add_contracted_hours");
   });
@@ -389,7 +398,7 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS).toContain(TRUTHFUL_SUMMARY_RULE);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-30.1");
+    expect(PLAYBOOK_VERSION).toBe("2026-10-05.1");
   });
 });
 

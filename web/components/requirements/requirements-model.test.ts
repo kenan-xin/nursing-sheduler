@@ -57,7 +57,7 @@ describe("emptyRequirementForm defaults (spec 05 FR-PR-20)", () => {
       qualifiedPeople: [],
       preferredNumPeople: "",
       date: [],
-      weight: -50,
+      weight: -10,
       skillMix: [],
       requiredNumPeopleOverrides: [],
     });

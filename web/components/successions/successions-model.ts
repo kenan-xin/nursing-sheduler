@@ -74,9 +74,9 @@ export interface SuccessionFormState {
   weight: WeightFieldValue;
 }
 
-/** A fresh, empty draft (spec 05 FR-PR-30). */
+/** A fresh, empty draft (spec 05 FR-PR-30). -100: a ward preference on the priority ladder (12z8). */
 export function emptySuccessionForm(): SuccessionFormState {
-  return { description: "", person: [], pattern: [], date: [], weight: -1 };
+  return { description: "", person: [], pattern: [], date: [], weight: -100 };
 }
 
 // --- Selection helpers (exact Object.is identity, per T09 sameEntityId) ----

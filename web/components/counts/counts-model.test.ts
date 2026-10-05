@@ -46,7 +46,7 @@ describe("emptyCountForm defaults (spec 05 FR-PR-50)", () => {
       expression: "x >= T",
       target: 0,
       // C1: a linear rule is rewarded when it holds, so the default is +1.
-      weight: 1,
+      weight: 4,
     });
   });
 });
@@ -219,7 +219,7 @@ describe("buildCountCard (spec 05 FR-PR-50..55, FR-PR-54 canonical ordering)", (
     expect(card.tag).toBeUndefined();
     expect(card.expression).toBe("x >= T");
     expect(card.target).toBe(5);
-    expect(card.weight).toBe(1);
+    expect(card.weight).toBe(4);
   });
 
   it("re-sorts countShiftTypes to canonical entry order on save", () => {

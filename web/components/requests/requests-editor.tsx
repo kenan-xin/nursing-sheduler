@@ -72,7 +72,7 @@ export function RequestsEditor() {
   const state = useScenarioStore(useShallow(pickRequestsScenario));
   const [mode, setMode] = useState<"normal" | "quick">("normal");
   const [quickSelectedIds, setQuickSelectedIds] = useState<string[]>([]);
-  const [quickWeightText, setQuickWeightText] = useState("0");
+  const [quickWeightText, setQuickWeightText] = useState("20");
   const [clearOpen, setClearOpen] = useState(false);
   const [csvOpen, setCsvOpen] = useState<CsvKind>(null);
   const [confirm, setConfirm] = useState<ConfirmState>(null);

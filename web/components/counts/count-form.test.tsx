@@ -21,11 +21,11 @@ function renderForm(initialForm: CountFormState) {
 }
 
 describe("Count weight sentence (C1)", () => {
-  it("a new linear rule defaults to +1 and reads as the Preview does", () => {
+  it("a new linear rule defaults to +4 and reads as the Preview does", () => {
     renderForm({ ...emptyCountForm(), target: 5 });
-    expect(screen.getByTestId("weight-field-input")).toHaveValue("1");
+    expect(screen.getByTestId("weight-field-input")).toHaveValue("4");
     expect(screen.getByTestId("count-strength")).toHaveTextContent(
-      "At least 5: kept to where possible (weight 1).",
+      "At least 5: kept to where possible (weight 4).",
     );
     expect(screen.queryByTestId("count-negative-weight-warning")).toBeNull();
   });
@@ -38,12 +38,12 @@ describe("Count weight sentence (C1)", () => {
     expect(screen.getByTestId("count-negative-weight-warning")).toBeInTheDocument();
   });
 
-  it("switching an untouched default to the squared form keeps -1", async () => {
+  it("switching an untouched default to the squared form gives -4", async () => {
     renderForm({ ...emptyCountForm(), target: 5 });
     await userEvent.click(screen.getByTestId("expression-field-op-sq"));
-    expect(screen.getByTestId("weight-field-input")).toHaveValue("-1");
+    expect(screen.getByTestId("weight-field-input")).toHaveValue("-4");
     expect(screen.getByTestId("count-strength")).toHaveTextContent(
-      "Close to 5: pulled toward 5 (weight -1).",
+      "Close to 5: pulled toward 5 (weight -4).",
     );
     expect(screen.queryByTestId("count-negative-weight-warning")).toBeNull();
   });

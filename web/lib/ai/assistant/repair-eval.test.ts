@@ -319,7 +319,7 @@ describe("the scripted wards read as real ward situations", () => {
         people: ["Nurses"],
         pattern: ["N", "D"],
         dates: ["ALL"],
-        weight: "-10",
+        weight: "-20",
       },
     ]);
     expect(soften).toMatchObject({
@@ -333,7 +333,7 @@ describe("the scripted wards read as real ward situations", () => {
     if (!result.ok) throw new Error(result.rejection.message);
     const card = result.next.cardsByKind.successions.find((c) => c.uid === "no-day-after-night");
     // Softened, never deleted or switched off.
-    expect(card).toMatchObject({ weight: -10 });
+    expect(card).toMatchObject({ weight: -20 });
     expect(card?.disabled).toBeFalsy();
     expect(buildFeasibilityReport(state, false).options).toEqual([]);
   });

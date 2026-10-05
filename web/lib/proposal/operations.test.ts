@@ -2499,7 +2499,7 @@ describe("add_supervision_rule / edit_supervision_rule", () => {
       preceptors: [["Senior"]],
       preceptees: [["ana"]],
       shiftTypes: ["Day", "Night"],
-      weight: 1,
+      weight: Infinity,
     });
   });
 
@@ -2547,7 +2547,7 @@ describe("add_supervision_rule / edit_supervision_rule", () => {
           preceptees: [["ben"]],
           shiftTypes: ["Day"],
           date: ["WEEKEND"],
-          weight: 1,
+          weight: Infinity,
         },
       ]);
     }

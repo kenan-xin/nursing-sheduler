@@ -9,9 +9,9 @@
 //   • ALL FOUR selectors are required — People 1, People 2, Shift Types, AND
 //     Dates each set their own verbatim empty-selection message (FR-PR-61,
 //     unlike Coverings' optional `date`);
-//   • the weight defaults to +1 (encourage) — the odd one out among the four
-//     card editors, which otherwise default to -1 (EDGE-PR-06/EDGE-PR-15) —
-//     and is validity-only (no sign restriction, unlike Counts' squared rule);
+//   • the weight defaults to -100 (apart where possible, a ward preference on the
+//     priority ladder, bead 12z8) and is validity-only (no sign restriction,
+//     unlike Counts' squared rule);
 //   • OFF/LEAVE/ALL are INCLUDED (not excluded) in the shift-type picker, same
 //     as Counts and unlike Requirements/Coverings (EDGE-PR-07);
 //   • `people1`/`people2`/`shiftTypes` persist as FLAT lists, v1's shape: core
@@ -66,11 +66,10 @@ export interface AffinityFormState {
   weight: WeightFieldValue;
 }
 
-/** A fresh, empty affinity draft (spec 05 FR-PR-60). Note `weight` defaults to
- *  `+1` (encourage) — the other three card editors default to `-1`
- *  (EDGE-PR-06/EDGE-PR-15). */
+/** A fresh, empty affinity draft (spec 05 FR-PR-60). `weight` defaults to -100,
+ *  apart where possible (priority ladder tier 2, bead 12z8). */
 export function emptyAffinityForm(): AffinityFormState {
-  return { description: "", people1: [], people2: [], shiftTypes: [], date: [], weight: 1 };
+  return { description: "", people1: [], people2: [], shiftTypes: [], date: [], weight: -100 };
 }
 
 // --- Selection helpers (exact Object.is identity, per T09 sameEntityId) ----

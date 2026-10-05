@@ -190,7 +190,7 @@ export function pairingWardScenario(): ScenarioUiState {
           preceptors: [["Senior"]],
           preceptees: [["ben"]],
           shiftTypes: ["Day"],
-          weight: 1,
+          weight: Infinity,
         },
       ],
     },
