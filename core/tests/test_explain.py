@@ -177,6 +177,8 @@ def _two_workers(monkeypatch):
 
 def test_the_check_proves_a_counting_clash_the_optimising_run_cannot(monkeypatch):
     _two_workers(monkeypatch)
+    # The minimality proof takes ~7 s locally; slower CI runners need more than the 10 s default.
+    monkeypatch.setattr(explain, "WHY_BUDGET_SECONDS", 60.0)
     content = contract_vs_rest_ward()
     # Measured on 2 cores: the optimising run needs 5-8 s to prove this; the check 0.2-0.3 s.
     plain = nurse_scheduling.schedule(content, timeout=2)
