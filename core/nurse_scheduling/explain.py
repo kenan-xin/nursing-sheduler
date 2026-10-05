@@ -124,9 +124,10 @@ def read_ledger(ctx: Context) -> dict[str, Any]:
 # returns a sufficient core, and a deletion loop shrinks it to a minimal one.
 
 # Budgets (seconds). The no-objective check proved the counting-type synthetic wards
-# (58-116 people) infeasible in 1.6-4.1 s on 2 workers; the core solve p95 was 10 s.
+# (58-116 people) infeasible in 1.6-4.1 s on 2 workers; the core solve p95 was 10 s on a fast desktop,
+# so the core gets 30 s for slower 2-vCPU hosts (check + core stay inside the 90 s watchdog grace).
 PROOF_SECONDS = float(os.getenv("OPTIMIZE_INFEASIBILITY_CHECK_SECONDS", "10"))
-WHY_BUDGET_SECONDS = float(os.getenv("OPTIMIZE_INFEASIBILITY_WHY_SECONDS", "10"))
+WHY_BUDGET_SECONDS = float(os.getenv("OPTIMIZE_INFEASIBILITY_WHY_SECONDS", "30"))
 WHY_SOLVE_SECONDS = 3.0
 WHY_FIRST_TRY_SECONDS = 4.0
 # Presolve off made the one-worker core solve 8-10x faster on 36-100 person wards;
