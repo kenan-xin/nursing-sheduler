@@ -362,6 +362,36 @@ export function toCanonicalScenarioDocument(state: ScenarioUiState): CanonicalSc
   return document;
 }
 
+/** A temporary-cover split card keeps its source card's uid plus `#d<iso>` / `#s<n>`. */
+const COVER_SPLIT_SUFFIX = /(#d\d{4}-\d{2}-\d{2}|#s\d+)+$/;
+
+/**
+ * The card (or request cell) uid behind each preference `toCanonicalScenarioDocument(state)`
+ * emits, index-aligned; null for the built-in max-one-shift-per-day and a cell without a
+ * uid. Mirrors the emission order above, which a lockstep test pins. A rest-days card
+ * owns every window it expands to, and a temporary-cover split its source card's uid.
+ */
+export function preferenceCardUids(state: ScenarioUiState): (string | null)[] {
+  const cards = state.cardsByKind;
+  const enabled = <T extends { uid: string; disabled?: boolean }>(list: readonly T[]) =>
+    list.filter((card) => !card.disabled).map((card) => card.uid.replace(COVER_SPLIT_SUFFIX, ""));
+  const counts = cards.counts.filter((card) => !isRestDaysRuleCard(card));
+  const uids: (string | null)[] = [
+    null,
+    ...enabled(cards.requirements),
+    ...enabled(cards.successions),
+    ...enabled(counts),
+    ...enabled(cards.affinities),
+    ...enabled(cards.coverings),
+    ...state.reqData.map((cell) => cell.uid ?? null),
+  ];
+  for (const card of cards.counts.filter(isRestDaysRuleCard)) {
+    if (card.disabled) continue;
+    uids.push(...expandRestDaysRule(card, state).map(() => card.uid));
+  }
+  return uids;
+}
+
 /**
  * Construct an empty durable scenario state — the zero value the import path and
  * "New scenario" reset build from. `apiVersion` defaults to the backend's

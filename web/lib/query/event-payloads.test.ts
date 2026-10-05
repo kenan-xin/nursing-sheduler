@@ -365,6 +365,39 @@ function validStateResponse(state: JobResponse["state"]): JobResponse {
   };
 }
 
+describe("explanation on a result", () => {
+  const completed = validStateResponse("completed");
+  const withExplanation = (explanation: unknown) =>
+    ({ ...completed, result: { ...completed.result!, explanation } }) as unknown;
+
+  it("accepts an object or null, and a result without one", () => {
+    const why = { kind: "infeasible", proof: "main_run", core: null };
+    expect(parseJobResponse(withExplanation(why))?.result?.explanation).toEqual(why);
+    expect(parseJobResponse(withExplanation(null))).not.toBeNull();
+    expect(parseJobResponse(completed)).not.toBeNull();
+  });
+
+  it("rejects an explanation that is not an object", () => {
+    expect(parseJobResponse(withExplanation("infeasible"))).toBeNull();
+  });
+
+  it("accepts it on result_available", () => {
+    const frame = {
+      occurred_at: "2026-07-20T00:01:00+00:00",
+      outcome: "infeasible",
+      score: null,
+      solver_status: "INFEASIBLE",
+      termination_reason: "infeasibility_proven",
+      artifact_name: null,
+    };
+    expect(
+      parseResultAvailablePayload({ ...frame, explanation: { kind: "infeasible" } }),
+    ).not.toBeNull();
+    expect(parseResultAvailablePayload({ ...frame, explanation: null })).not.toBeNull();
+    expect(parseResultAvailablePayload({ ...frame, explanation: [] })).toBeNull();
+  });
+});
+
 describe("parseJobResponse", () => {
   it("accepts every backend lifecycle boundary, including queued cancellation", () => {
     for (const state of [

@@ -164,6 +164,7 @@ Frozen dataclass (`solver_interface.py:58-69). Wire serialization serialize_sche
 | 7 | `adding_preferences` | `Adding preferences and constraints` | `:264-269` |
 | 8 | `solving` | `Solving schedule` | `:306` |
 | 9 | `exporting` | `Preparing schedule output` | `:358 (only when a solution was found)` |
+| 9' | `explaining_no_roster` | `Checking why no roster was found` | v2 (qb5v): instead of `exporting`, only when a CP-SAT run with `on_explanation` ends INFEASIBLE or UNKNOWN (not stopped). A no-objective check (`OPTIMIZE_INFEASIBILITY_CHECK_SECONDS`, default 10) can turn UNKNOWN into INFEASIBLE; a minimal-core solve (`OPTIMIZE_INFEASIBILITY_WHY_SECONDS`, default 10) names the clash. |
 
 The `exporting phase is emitted only on the found path (after the if not found: return ... early return at :355-356).`
 

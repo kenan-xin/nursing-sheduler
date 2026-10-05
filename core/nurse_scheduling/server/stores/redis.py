@@ -1139,6 +1139,7 @@ class RedisJobStore:
                     "score": job.result.score,
                     "solver_status": job.result.solver_status,
                     "termination_reason": job.result.termination_reason,
+                    "explanation": job.result.explanation,
                 }
                 if job.result is not None
                 else None
@@ -1186,6 +1187,7 @@ class RedisJobStore:
                     score=result.get("score"),
                     solver_status=result["solver_status"],
                     termination_reason=result.get("termination_reason"),
+                    explanation=result.get("explanation"),
                 )
                 if result is not None
                 else None

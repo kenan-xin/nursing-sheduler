@@ -1,0 +1,343 @@
+# qb5v patch against genie 1bf4b85 (bead nursing-sheduler-qb5v, ported from a5pb exp/timefold-on-cpsat dc1e0f4f + 345c109b).
+# hunk: a run with no roster (INFEASIBLE, or UNKNOWN that a no-objective check proves infeasible) is rebuilt once with one guard literal per hard rule unit and explained by a minimal core (explain.py); the optimising model stays byte-identical; the result carries it as `explanation`
+
+diff --git a/core/nurse_scheduling/preference_types.py b/core/nurse_scheduling/preference_types.py
+index 12de9ac..e949652 100644
+--- a/core/nurse_scheduling/preference_types.py
++++ b/core/nurse_scheduling/preference_types.py
+@@ -81,6 +81,7 @@ def shift_type_requirements(
+     for d in compiled_preference.dates:
+         required = required_by_date.get(d, preference.requiredNumPeople)
+         for group_idx, ss in enumerate(compiled_preference.shift_type_groups):
++            ctx.solver.guard_key = (preference_idx, ("who", d, group_idx))  # a5pb guard unit
+             for s in ss:
+                 # A requirement expands through date and shift type groups into
+                 # concrete (date, shift type) pairs. Duplicates are allowed
+@@ -118,11 +119,13 @@ def shift_type_requirements(
+             # per-shift constraint; for aggregate groups this sums across all
+             # shift types in the group.
+             actual_n_people = sum(coefficients[s] * ctx.shifts[(d, s, p)] for s in ss for p in qualified_ps_by_s[s])
++            ctx.solver.guard_key = (preference_idx, ("staff", d, group_idx))  # a5pb: headcount first
+             if preference.preferredNumPeople is not None:
+                 ctx.solver.add_constraint(actual_n_people >= required)
+             else:
+                 ctx.solver.add_constraint(actual_n_people == required)
+ 
++            ctx.solver.guard_key = (preference_idx, ("mix", d, group_idx))  # a5pb guard unit
+             # Skill mix: at least k of the named people among this group's staff.
+             # Nobody is banned; the headcount above still fixes the total, so the
+             # rest of the places go to anyone eligible. A person in two entries'
+@@ -138,6 +141,7 @@ def shift_type_requirements(
+ 
+             # Add soft constraint for preferred number of people if specified
+             if preference.preferredNumPeople is not None:
++                ctx.solver.guard_key = (preference_idx, ("staff", d, group_idx))  # a5pb guard unit
+                 ctx.solver.add_constraint(actual_n_people <= preference.preferredNumPeople)
+                 # Create a variable to track the difference between actual and preferred number of people
+                 diff_var_name = f"pref_{preference_idx}_d_{d}_g_{group_idx}_diff"
+@@ -176,6 +180,7 @@ def shift_request(
+     for d in compiled_preference.dates:
+         # Note that the order of p and s is inverted deliberately
+         for p in compiled_preference.people:
++            ctx.solver.guard_key = (preference_idx, (d, p))  # a5pb guard unit
+             weight = preference.weight
+             if utils.is_ss_equivalent_to_all(compiled_preference.shift_types, ctx.n_shift_types):
+                 # "Work any shift": a worked day, which excludes both the OFF
+@@ -254,6 +259,7 @@ def shift_type_successions(
+     # for every selected person and pattern start date.
+     histories = ctx.compiled_schedule.histories
+     for p in compiled_preference.people:
++        ctx.solver.guard_key = (preference_idx, (p,))  # a5pb guard unit
+         history = histories[p]
+         for d_begin in range(ctx.n_days - len(compiled_preference.pattern) + 1):
+             # Check if all dates in the pattern range are valid
+@@ -353,6 +359,7 @@ def shift_count(
+     weight = preference.weight
+     for i, (expression, T) in enumerate(zip(compiled_preference.expressions, compiled_preference.targets, strict=True)):
+         for p in compiled_preference.people:
++            ctx.solver.guard_key = (preference_idx, (p, i))  # a5pb guard unit
+             # Include the expression/target pair index so a multi-pair count
+             # (e.g. a contracted-hours Range emitting `x >= T` and `x <= T`)
+             # names each boundary's model variable and report distinctly instead
+@@ -517,6 +524,7 @@ def shift_type_covering(
+     as a hard constraint the solver cannot violate.
+     """
+     for d in compiled_preference.dates:
++        ctx.solver.guard_key = (preference_idx, (d,))  # a5pb guard unit
+         for k, ss in enumerate(compiled_preference.shift_type_groups):
+             # Cross-product: a covering constraint is added for every (preceptor
+             # group, preceptee group, shift type group) tuple. Each preceptor
+diff --git a/core/nurse_scheduling/scheduler.py b/core/nurse_scheduling/scheduler.py
+index 5d588935..ce80587b 100644
+--- a/core/nurse_scheduling/scheduler.py
++++ b/core/nurse_scheduling/scheduler.py
+@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
+ from dataclasses import dataclass, replace
+ from typing import Any, NamedTuple
+ 
+-from . import exporter, preference_types
++from . import exporter, explain, preference_types
+ from .context import Context
+ from .loader import load_data
+ from .model_build_stats import ModelBuildStats, emit_model_build_stats, start_model_build_step
+@@ -204,6 +204,8 @@ def schedule(
+     forced_solution: Mapping[tuple[int, int, int], int] | None = None,
+     *,
+     on_roster: Callable[[dict], None] | None = None,
++    on_explanation: Callable[[dict], None] | None = None,
++    _explain_status: SolverStatus | None = None,
+ ) -> ScheduleResult:
+     progress_started_at = time.monotonic()
+     _emit_phase_progress(
+@@ -275,6 +277,9 @@ def schedule(
+     else:
+         raise ValueError(f"Unsupported solver configuration: {solver!r}")
+ 
++    if _explain_status is not None:
++        ctx.solver.enable_guards()  # this build only explains a run that found no roster
++
+     _emit_phase_progress(progress_callback, "creating_shift_variables", "Creating shift variables", progress_started_at)
+     logger.info("Creating shift variables...")
+     step_started_at, start_counts = start_model_build_step(model_build_stats_callback, ctx)
+@@ -378,6 +383,7 @@ def schedule(
+     # TODO: Check no duplicated preferences
+     # TODO: Check no overlapping preferences
+     for i, preference in enumerate(ctx.scenario.preferences):
++        ctx.solver.guard_key = (i, None)
+         step_started_at, start_counts = start_model_build_step(
+             model_build_stats_callback,
+             ctx,
+@@ -398,6 +404,8 @@ def schedule(
+             preference_type=preference.type,
+         )
+ 
++    ctx.solver.guard_key = None  # background from here on: never guarded
++
+     # Leave is input-only: it is 1 exactly where a LEAVE shift request pinned
+     # it (recorded in ctx.pinned_leaves while processing shift requests), and 0
+     # everywhere else. This makes leave a fixed input the solver cannot invent
+@@ -427,12 +435,16 @@ def schedule(
+ 
+     _emit_phase_progress(progress_callback, "solving", "Solving schedule", progress_started_at)
+     logger.info("Solving and showing partial results...")
+-    status = ctx.solver.solve(
+-        timeout=timeout,
+-        deterministic=deterministic,
+-        progress_callback=progress_callback_with_export,
+-        should_stop=should_stop,
+-    )
++    if _explain_status is not None:
++        # The optimising run already ended without a roster; keep its status.
++        status = ctx.solver.solver_status = _explain_status
++    else:
++        status = ctx.solver.solve(
++            timeout=timeout,
++            deterministic=deterministic,
++            progress_callback=progress_callback_with_export,
++            should_stop=should_stop,
++        )
+ 
+     # Get status name
+     ctx.solver_status = ctx.solver.get_status_name()
+@@ -456,11 +468,42 @@ def schedule(
+         raise ValueError(f"Unexpected solver status: {ctx.solver_status}")
+ 
+     logger.info("Statistics:")
+-    stats = ctx.solver.get_statistics()
++    stats = ctx.solver.get_statistics() if _explain_status is None else {}  # no solve ran
+     for key, value in stats.items():
+         logger.info(f"  - {key}: {value}")
+ 
+     if not found:
++        if (
++            on_explanation is not None
++            and _explain_status is None
++            and forced_solution is None
++            and solver_selector.canonical == ORTOOLS_CP_SAT_SOLVER
++            and status in (SolverStatus.INFEASIBLE, SolverStatus.UNKNOWN)
++            and not (should_stop is not None and should_stop())
++        ):
++            # Rebuild with guard literals only now, so the optimising run's model stays
++            # byte-identical to one without explanations.
++            _emit_phase_progress(
++                progress_callback,
++                "explaining_no_roster",
++                "Checking why no roster was found",
++                progress_started_at,
++            )
++            return schedule(
++                file_content,
++                avoid_solution=avoid_solution,
++                timeout=timeout,
++                solver=solver,
++                should_stop=should_stop,
++                on_explanation=on_explanation,
++                _explain_status=status,
++            )
++        if _explain_status is not None:
++            explanation = explain.explain_no_roster(ctx, status, should_stop)
++            if explanation is not None:
++                # An UNKNOWN run whose no-objective check proved INFEASIBLE is INFEASIBLE.
++                ctx.solver_status = SolverStatus.INFEASIBLE.value
++                on_explanation(explanation)
+         logger.info("Done.")
+         return ScheduleResult(None, None, None, ctx.solver_status, None)
+ 
+diff --git a/core/nurse_scheduling/server/api/schemas.py b/core/nurse_scheduling/server/api/schemas.py
+index 63a1a4e1..d492cb22 100644
+--- a/core/nurse_scheduling/server/api/schemas.py
++++ b/core/nurse_scheduling/server/api/schemas.py
+@@ -18,7 +18,7 @@
+ # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ 
+ from datetime import datetime
+-from typing import Literal
++from typing import Any, Literal
+ from urllib.parse import quote
+ 
+ from pydantic import BaseModel
+@@ -177,6 +177,8 @@ class OptimizationResultResponse(BaseModel):
+     """Original solver status."""
+     termination_reason: str | None
+     """Normalized reason solver execution stopped."""
++    explanation: dict[str, Any] | None = None
++    """v2: why a proven-infeasible run has no roster (proof and core)."""
+ 
+ 
+ class JobErrorResponse(BaseModel):
+@@ -307,6 +309,7 @@ class JobResponse(BaseModel):
+                     score=job.result.score,
+                     solver_status=job.result.solver_status,
+                     termination_reason=job.result.termination_reason,
++                    explanation=job.result.explanation,
+                 )
+                 if job.result is not None
+                 else None
+diff --git a/core/nurse_scheduling/server/jobs/controller.py b/core/nurse_scheduling/server/jobs/controller.py
+index 04d9df54..eb721de7 100644
+--- a/core/nurse_scheduling/server/jobs/controller.py
++++ b/core/nurse_scheduling/server/jobs/controller.py
+@@ -680,6 +680,7 @@ class JobController:
+                 "score": job.result.score,
+                 "solver_status": job.result.solver_status,
+                 "termination_reason": job.result.termination_reason,
++                "explanation": job.result.explanation,
+                 "artifact_name": job.artifact_name,
+             },
+             occurred_at=occurred_at,
+diff --git a/core/nurse_scheduling/server/jobs/models.py b/core/nurse_scheduling/server/jobs/models.py
+index 63f70f2f..85bde391 100644
+--- a/core/nurse_scheduling/server/jobs/models.py
++++ b/core/nurse_scheduling/server/jobs/models.py
+@@ -91,6 +91,8 @@ class OptimizationResult:
+     """Original status reported by the selected solver."""
+     termination_reason: str | None = None
+     """Normalized explanation of why solver execution stopped."""
++    explanation: dict[str, Any] | None = None
++    """v2: why a proven-infeasible run has no roster (proof and core), JSON-safe."""
+ 
+ 
+ @dataclass(frozen=True)
+diff --git a/core/nurse_scheduling/server/jobs/runner.py b/core/nurse_scheduling/server/jobs/runner.py
+index 2863844e..5ac63ff6 100644
+--- a/core/nurse_scheduling/server/jobs/runner.py
++++ b/core/nurse_scheduling/server/jobs/runner.py
+@@ -36,7 +36,7 @@ from ..roster_container import (
+     OptimizationExecutionError,
+     build_roster_container,
+ )
+-from .models import Job, JobFailure, OptimizationOutcome, OptimizationResult, StoredArtifact
++from .models import Job, JobFailure, JobPurpose, OptimizationOutcome, OptimizationResult, StoredArtifact
+ 
+ EventCallback = Callable[[str, dict[str, Any], int | None], None]
+ StopCallback = Callable[[], bool]
+@@ -99,6 +99,9 @@ class OptimizationRunner:
+         day-state handoff. Expected failures are returned as `JobFailure`.
+         """
+         roster_payloads: list[dict[str, Any]] = []
++        # v2: why an ordinary run has no roster; diagnostic copies skip the extra solves.
++        explanations: list[dict[str, Any]] = []
++        explain = job.request.purpose == JobPurpose.ORDINARY
+ 
+         def publish_progress(payload: ScheduleProgress) -> None:
+             """Normalize scheduler progress into job-domain events."""
+@@ -117,6 +120,7 @@ class OptimizationRunner:
+             progress_callback=publish_progress,
+             should_stop=should_stop,
+             on_roster=roster_payloads.append,
++            on_explanation=explanations.append if explain else None,
+         )
+         stop_requested_when_solver_returned = should_stop is not None and should_stop()
+ 
+@@ -128,6 +132,7 @@ class OptimizationRunner:
+                     score=None,
+                     solver_status=normalized_status,
+                     termination_reason="infeasibility_proven",
++                    explanation=explanations[0] if explanations else None,
+                 ),
+                 artifact=None,
+             )
+diff --git a/core/nurse_scheduling/server/stores/redis.py b/core/nurse_scheduling/server/stores/redis.py
+index 96576733..5bf876b9 100644
+--- a/core/nurse_scheduling/server/stores/redis.py
++++ b/core/nurse_scheduling/server/stores/redis.py
+@@ -1139,6 +1139,7 @@ class RedisJobStore:
+                     "score": job.result.score,
+                     "solver_status": job.result.solver_status,
+                     "termination_reason": job.result.termination_reason,
++                    "explanation": job.result.explanation,
+                 }
+                 if job.result is not None
+                 else None
+@@ -1186,6 +1187,7 @@ class RedisJobStore:
+                     score=result.get("score"),
+                     solver_status=result["solver_status"],
+                     termination_reason=result.get("termination_reason"),
++                    explanation=result.get("explanation"),
+                 )
+                 if result is not None
+                 else None
+diff --git a/core/nurse_scheduling/solver_ortools_cp_sat.py b/core/nurse_scheduling/solver_ortools_cp_sat.py
+index 2b2c9c63..8fb421f4 100644
+--- a/core/nurse_scheduling/solver_ortools_cp_sat.py
++++ b/core/nurse_scheduling/solver_ortools_cp_sat.py
+@@ -44,6 +44,25 @@ class ORToolsSolver(SolverInterface):
+         self.status = None
+         self.solver_status = SolverStatus.UNKNOWN
+         self._active_solution_callback = None
++        # v2 (qb5v): guard literals for the infeasibility explanation, one per rule unit
++        # (`guard_key`, set by the scheduler and handlers). None = off.
++        self.guards: dict[Any, cp_model.IntVar] | None = None
++        self.guard_key: Any = None
++
++    def enable_guards(self) -> None:
++        """v2 (qb5v): give every constraint added under `guard_key` that unit's guard literal."""
++        self.guards = {}
++
++    def _guarded(self, constraint: cp_model.Constraint) -> None:
++        if self.guards is None or self.guard_key is None:
++            return
++        literal = self.guards.get(self.guard_key)
++        if literal is None:
++            literal = self.guards[self.guard_key] = self.model.NewBoolVar(f"guard_{len(self.guards)}")
++            # Pinned true by its domain, so presolve drops it and the no-objective check keeps
++            # every worker (assumptions would force one). explain.py frees it for the core.
++            self.model.proto.variables[literal.index].domain[0] = 1
++        constraint.OnlyEnforceIf(literal)
+ 
+     def new_bool_var(self, name: str) -> cp_model.IntVar:
+         """Create a new boolean variable."""
+@@ -55,11 +74,11 @@ class ORToolsSolver(SolverInterface):
+ 
+     def add_constraint(self, constraint) -> None:
+         """Add a constraint to the model."""
+-        self.model.Add(constraint)
++        self._guarded(self.model.Add(constraint))
+ 
+     def add_bool_or(self, literals: list[Any]) -> None:
+         """Add a boolean OR constraint."""
+-        self.model.AddBoolOr(literals)
++        self._guarded(self.model.AddBoolOr(literals))
+ 
+     def create_bool_and_var(self, name: str, literals: list[Any]) -> Any:
+         """Create a boolean variable equivalent to the AND of the literals."""

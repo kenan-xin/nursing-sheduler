@@ -81,6 +81,7 @@ def shift_type_requirements(
     for d in compiled_preference.dates:
         required = required_by_date.get(d, preference.requiredNumPeople)
         for group_idx, ss in enumerate(compiled_preference.shift_type_groups):
+            ctx.solver.guard_key = (preference_idx, ("who", d, group_idx))  # a5pb guard unit
             for s in ss:
                 # A requirement expands through date and shift type groups into
                 # concrete (date, shift type) pairs. Duplicates are allowed
@@ -118,11 +119,13 @@ def shift_type_requirements(
             # per-shift constraint; for aggregate groups this sums across all
             # shift types in the group.
             actual_n_people = sum(coefficients[s] * ctx.shifts[(d, s, p)] for s in ss for p in qualified_ps_by_s[s])
+            ctx.solver.guard_key = (preference_idx, ("staff", d, group_idx))  # a5pb: headcount first
             if preference.preferredNumPeople is not None:
                 ctx.solver.add_constraint(actual_n_people >= required)
             else:
                 ctx.solver.add_constraint(actual_n_people == required)
 
+            ctx.solver.guard_key = (preference_idx, ("mix", d, group_idx))  # a5pb guard unit
             # Skill mix: at least k of the named people among this group's staff.
             # Nobody is banned; the headcount above still fixes the total, so the
             # rest of the places go to anyone eligible. A person in two entries'
@@ -138,6 +141,7 @@ def shift_type_requirements(
 
             # Add soft constraint for preferred number of people if specified
             if preference.preferredNumPeople is not None:
+                ctx.solver.guard_key = (preference_idx, ("staff", d, group_idx))  # a5pb guard unit
                 ctx.solver.add_constraint(actual_n_people <= preference.preferredNumPeople)
                 # Create a variable to track the difference between actual and preferred number of people
                 diff_var_name = f"pref_{preference_idx}_d_{d}_g_{group_idx}_diff"
@@ -148,7 +152,7 @@ def shift_type_requirements(
 
                 # Add the objective
                 weight = preference.weight
-                utils.add_objective(ctx, weight, diff)
+                utils.add_objective(ctx, weight, diff, key=(d, ss[0] if len(ss) == 1 else None, None))
                 ctx.reports.append(Report(f"shift_type_requirements_{diff_var_name}", diff, lambda x: x == 0))
 
 
@@ -176,13 +180,14 @@ def shift_request(
     for d in compiled_preference.dates:
         # Note that the order of p and s is inverted deliberately
         for p in compiled_preference.people:
+            ctx.solver.guard_key = (preference_idx, (d, p))  # a5pb guard unit
             weight = preference.weight
             if utils.is_ss_equivalent_to_all(compiled_preference.shift_types, ctx.n_shift_types):
                 # "Work any shift": a worked day, which excludes both the OFF
                 # and LEAVE day-states. sum_s shifts is 0/1 (exactly one
                 # day-state per day), so it is the worked-day indicator.
                 worked_sum = sum(ctx.shifts[(d, s, p)] for s in range(ctx.n_shift_types))
-                utils.add_objective(ctx, weight, worked_sum)
+                utils.add_objective(ctx, weight, worked_sum, key=(d, None, p))
                 ctx.reports.append(
                     Report(f"shift_request_pref_{preference_idx}_d_{d}_p_{p}_worked", worked_sum, lambda x: x == 1)
                 )
@@ -195,7 +200,7 @@ def shift_request(
                             # A leave day is also a day off: a hard OFF (e.g. on a group row) plus a
                             # member's leave pin is not a conflict (bug hunt B5, bead 99db).
                             off_expr = off_expr + ctx.leaves[(d, p)]
-                        utils.add_objective(ctx, weight, off_expr)
+                        utils.add_objective(ctx, weight, off_expr, key=(d, s, p))
                         ctx.reports.append(
                             Report(
                                 f"shift_request_pref_{preference_idx}_d_{d}_p_{p}_offs",
@@ -217,7 +222,7 @@ def shift_request(
                             )
                         )
                     else:
-                        utils.add_objective(ctx, weight, ctx.shifts[(d, s, p)])
+                        utils.add_objective(ctx, weight, ctx.shifts[(d, s, p)], key=(d, s, p))
                         ctx.reports.append(
                             Report(
                                 f"shift_request_pref_{preference_idx}_d_{d}_s_{s}_p_{p}_shifts",
@@ -254,6 +259,7 @@ def shift_type_successions(
     # for every selected person and pattern start date.
     histories = ctx.compiled_schedule.histories
     for p in compiled_preference.people:
+        ctx.solver.guard_key = (preference_idx, (p,))  # a5pb guard unit
         history = histories[p]
         for d_begin in range(ctx.n_days - len(compiled_preference.pattern) + 1):
             # Check if all dates in the pattern range are valid
@@ -289,7 +295,7 @@ def shift_type_successions(
                     is_match_var_name = f"{unique_var_prefix}_is_match"
                     ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
                     ctx.solver.add_constraint(is_match == 1)
-                    utils.add_objective(ctx, preference.weight, is_match)
+                    utils.add_objective(ctx, preference.weight, is_match, key=(d_begin, None, p))
                     ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 1))
                     continue
 
@@ -318,7 +324,15 @@ def shift_type_successions(
                     ctx.model_vars[is_match_var_name] = is_match = ctx.solver.new_bool_var(is_match_var_name)
                     ctx.solver.add_constraint(is_match >= actual_n_matched - target_n_matched + 1)
                     ctx.solver.add_constraint(actual_n_matched >= target_n_matched * is_match)
-                    utils.add_objective(ctx, weight, is_match)
+                    # The constraints above make is_match exact; the v2 ledger still reads the
+                    # pattern from the roster, so a term never shows a match the roster lacks.
+                    utils.add_objective(
+                        ctx,
+                        weight,
+                        is_match,
+                        key=(d_begin, None, p),
+                        truth=lambda value, n=actual_n_matched, t=target_n_matched: int(value(n) == t),
+                    )
                     ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 0))
                     continue
                 if is_literal_pattern and ctx.solver.should_use_bool_and_var(len(pattern_element_matches)):
@@ -335,7 +349,7 @@ def shift_type_successions(
                         (0, target_n_matched),
                     )
 
-                utils.add_objective(ctx, weight, is_match)
+                utils.add_objective(ctx, weight, is_match, key=(d_begin, None, p))
                 ctx.reports.append(Report(unique_var_prefix, is_match, lambda x: x == 1))
 
 
@@ -353,6 +367,7 @@ def shift_count(
     weight = preference.weight
     for i, (expression, T) in enumerate(zip(compiled_preference.expressions, compiled_preference.targets, strict=True)):
         for p in compiled_preference.people:
+            ctx.solver.guard_key = (preference_idx, (p, i))  # a5pb guard unit
             # Include the expression/target pair index so a multi-pair count
             # (e.g. a contracted-hours Range emitting `x >= T` and `x <= T`)
             # names each boundary's model variable and report distinctly instead
@@ -396,7 +411,7 @@ def shift_count(
                 # Use abstracted squared equality method
                 ctx.solver.add_squared_equality(squared, abs_diff, (0, max_abs_diff))
                 # Add the objective
-                utils.add_objective(ctx, weight, squared)
+                utils.add_objective(ctx, weight, squared, key=(None, None, p))
                 ctx.reports.append(Report(f"shift_count_{squared_var_name}", squared, lambda x: x == 0))
             else:
                 expr_var_name = f"{unique_var_prefix}_expr"
@@ -415,7 +430,7 @@ def shift_count(
                     T,
                     (0, max_x),
                 )
-                utils.add_objective(ctx, weight, expr)
+                utils.add_objective(ctx, weight, expr, key=(None, None, p))
                 # TODO: Be aware of signs of `weight`?
                 ctx.reports.append(Report(f"shift_count_{unique_var_prefix}_expr", expr, lambda x: x))
 
@@ -492,7 +507,7 @@ def shift_affinity(
                         (0, 2),
                     )
                     weight = preference.weight
-                    utils.add_objective(ctx, weight, is_match)
+                    utils.add_objective(ctx, weight, is_match, key=(d, None, None))
                     ctx.reports.append(
                         Report(f"shift_affinity_{unique_var_prefix}_is_match", is_match, lambda x: x == 1)
                     )
@@ -517,6 +532,7 @@ def shift_type_covering(
     as a hard constraint the solver cannot violate.
     """
     for d in compiled_preference.dates:
+        ctx.solver.guard_key = (preference_idx, (d,))  # a5pb guard unit
         for k, ss in enumerate(compiled_preference.shift_type_groups):
             # Cross-product: a covering constraint is added for every (preceptor
             # group, preceptee group, shift type group) tuple. Each preceptor

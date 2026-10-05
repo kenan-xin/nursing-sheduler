@@ -370,10 +370,18 @@ export function parseControlChangedPayload(data: unknown): ControlChangedPayload
   return { early_completion_requested: true };
 }
 
+/** `explanation` is optional (older backends omit it) and, when present, an object or null. */
+function withoutExplanation(value: Record<string, unknown>): Record<string, unknown> | null {
+  const { explanation, ...rest } = value;
+  return explanation === undefined || explanation === null || isRecord(explanation) ? rest : null;
+}
+
 export function parseResultAvailablePayload(data: unknown): ResultAvailablePayload | null {
+  const fields = isRecord(data) ? withoutExplanation(data) : null;
   if (
     !isRecord(data) ||
-    !hasExactKeys(data, RESULT_AVAILABLE_KEYS) ||
+    fields === null ||
+    !hasExactKeys(fields, RESULT_AVAILABLE_KEYS) ||
     !isIsoDateTimeValue(data.occurred_at) ||
     !isOptimizationOutcome(data.outcome) ||
     !isNonEmptyString(data.solver_status) ||
@@ -613,7 +621,9 @@ export function parseJobResponse(value: unknown, expectedId?: string): JobRespon
   }
 
   if (value.result !== null) {
-    if (!isRecord(value.result) || !hasExactKeys(value.result, RESULT_KEYS)) return null;
+    if (!isRecord(value.result)) return null;
+    const result = withoutExplanation(value.result);
+    if (result === null || !hasExactKeys(result, RESULT_KEYS)) return null;
     if (
       !isOptimizationOutcome(value.result.outcome) ||
       !isScore(value.result.score) ||
