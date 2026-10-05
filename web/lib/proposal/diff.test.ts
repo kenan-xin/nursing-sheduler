@@ -25,6 +25,39 @@ import type { ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
 import type { AssistantCommandV1 } from "./commands";
 
 describe("deriveProposalDiff", () => {
+  it("says a spare-slot bonus as points per shift and why it is the lowest priority (uv8n)", () => {
+    const before = ruleWardScenario();
+    before.cardsByKind.requirements[0] = {
+      ...before.cardsByKind.requirements[0],
+      qualifiedPeople: ["Senior"],
+      requiredNumPeople: 0,
+      preferredNumPeople: 1,
+      weight: -300,
+    };
+    const commands = [
+      {
+        type: "set_spare_slot_bonus" as const,
+        ruleId: "req-day",
+        priority: "bonus" as const,
+        rank: 3,
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    const diff = deriveProposalDiff(before, applied.next, commands);
+    expect(diff.cascade).toEqual([]);
+    expect(diff.direct.some((entry) => entry.key.startsWith("cell:"))).toBe(false);
+    const rule = diff.direct.find((entry) => entry.key.startsWith("rule:successions:"));
+    expect(rule).toMatchObject({ scope: "shift-successions", kind: "created" });
+    expect(rule?.after).toBe(
+      "On · “Bonus: +3 for each Day shift (spare places are optional)” · Each Day shift worked by Senior, every date · +3 points for each Day shift. Lowest priority: a nurse's day off (20 points) always wins.",
+    );
+    const card = diff.direct.find((entry) => entry.key === "rule:requirements:req-day");
+    expect(card?.after).toContain("an empty one costs nothing");
+    expect(card?.after).not.toMatch(/weight -/);
+  });
+
   it("separates what was asked for from what the app will do as a result", () => {
     const before = proposalScenario();
     const commands = [
@@ -825,6 +858,18 @@ describe("rule sentences state what the solver enforces", () => {
       /^Off · At most 4 Night shifts.* · This rule is off\. The optimiser ignores it\.$/,
     );
     expect(entry.before).not.toContain("optimiser ignores");
+  });
+
+  it("weight 0 makes the places above the minimum optional spare slots, never a penalty (uv8n)", () => {
+    expect(
+      sentence("requirements", {
+        ...requirement,
+        preferredNumPeople: 3,
+        weight: 0,
+      }),
+    ).toBe(
+      "On · At least 2, up to 3 people on Night, every date; places above 2 are optional spare slots, an empty one costs nothing",
+    );
   });
 
   it("an aggregate group is one combined count, and qualified people ban everyone else", () => {

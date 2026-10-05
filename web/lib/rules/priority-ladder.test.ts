@@ -193,3 +193,30 @@ describe("checkWeightOrder", () => {
     expect(checkWeightOrder(SCENARIOS.ruleTooStrict())).toEqual([]);
   });
 });
+
+describe("spare-slot bonuses (uv8n)", () => {
+  const bonus = (weight: number) => ({ uid: "b", person: ["ALL"], pattern: ["A_sup"], weight });
+
+  it("a one-shift card with 1 to 3 points sits in the bonus tier", () => {
+    for (const weight of [1, 2, 3]) {
+      expect(tierOf("successions", bonus(weight))).toBe("bonus");
+      expect(weightBandRefusal("successions", bonus(weight))).toBeUndefined();
+    }
+  });
+
+  it("refuses a bonus that would outweigh fairness or a wish, naming the positive band", () => {
+    expect(weightBandRefusal("successions", bonus(4))).toBe("a shift sequence rule takes 1 to 3");
+    expect(weightBandRefusal("successions", bonus(20))).toBe("a shift sequence rule takes 1 to 3");
+  });
+
+  it("the Preview points line says the bonus is the lowest priority", () => {
+    expect(pointsSentence("successions", bonus(3))).toBe(
+      "+3 points for each A_sup shift. Lowest priority: a nurse's day off (20 points) always wins.",
+    );
+  });
+
+  it("a negative one-shift card is still a ward preference, not a bonus", () => {
+    expect(tierOf("successions", bonus(-100))).toBe("ward");
+    expect(weightBandRefusal("successions", bonus(-3))).toMatch(/100 to 300/);
+  });
+});

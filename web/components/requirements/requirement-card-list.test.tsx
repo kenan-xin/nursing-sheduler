@@ -10,6 +10,7 @@ import type { ScenarioUiState } from "@/lib/scenario";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import { scenarioCommands } from "@/lib/store";
 import { drainScenarioCommands, resetScenarioForTest } from "@/lib/store/test-authority";
+import { applyAssistantCommand } from "@/lib/proposal/operations";
 import { RequirementCardList } from "./requirement-card-list";
 
 vi.mock("next/navigation", () => ({
@@ -81,5 +82,51 @@ describe("Requirement card list — cover effects", () => {
     expect(screen.getByRole("link", { name: /staff/i })).toHaveAttribute("href", "/people");
     // Read-only: the field carries no control.
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("weight 0 over a preferred count reads as optional spare places, not a penalty (uv8n)", () => {
+    render(
+      <RequirementCardList
+        requirements={[
+          { ...CARD, requiredNumPeople: 2, preferredNumPeople: 3, weight: 0 } as never,
+        ]}
+        onEdit={noop}
+        onDuplicate={noop}
+        onDelete={noop}
+        onSetDisabled={noop}
+        onReorder={noop}
+      />,
+    );
+    expect(
+      screen.getByText("3 · spare places are optional, an empty one costs nothing"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/WEIGHT/)).toBeNull();
+  });
+
+  it("after the assistant's set_spare_slot_bonus, extra places read as a bonus (uv8n)", async () => {
+    const before = state();
+    before.cardsByKind.requirements = [{ ...CARD, requiredNumPeople: 2, preferredNumPeople: 3 }];
+    const result = applyAssistantCommand(before, {
+      type: "set_spare_slot_bonus",
+      ruleId: "r-all",
+      priority: "bonus",
+      rank: 2,
+    });
+    if (!result.ok) throw new Error(result.rejection.message);
+    await act(async () => {
+      await scenarioCommands.mutate(result.next);
+    });
+    render(
+      <RequirementCardList
+        requirements={result.next.cardsByKind.requirements}
+        onEdit={noop}
+        onDuplicate={noop}
+        onDelete={noop}
+        onSetDisabled={noop}
+        onReorder={noop}
+      />,
+    );
+    expect(screen.getByText("3 · extra places are a bonus, +2 points each")).toBeInTheDocument();
+    expect(screen.queryByText(/WEIGHT/)).toBeNull();
   });
 });

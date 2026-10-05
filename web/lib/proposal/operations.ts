@@ -82,6 +82,8 @@ import {
   buildPeopleTransferOptions as successionPeopleOptions,
   buildSuccessionCard,
   isEditableSuccessionCard,
+  findSpareSlotBonus,
+  spareSlotBonusShape,
   validateSuccessionForm,
   type SuccessionFormState,
 } from "@/components/successions/successions-model";
@@ -1104,6 +1106,74 @@ function applySetSkillMix(
     ok: true,
     next: applyRequirementPatch(state, { type: "update", uid: source.uid, form: draft }),
   };
+}
+
+/**
+ * Spare places as a bonus (uv8n, priority ladder tier 5): the requirement's weight goes to
+ * 0 (its Preferred count stays the ceiling, an empty spare place costs nothing) and one
+ * one-shift Shift sequences card pays `rank` points (3 / 2 / 1) for each shift of that type
+ * its qualified staff work on its dates. Re-sending updates the card already there.
+ */
+function applySetSpareSlotBonus(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "set_spare_slot_bonus" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.requirements.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      `That staffing requirement is not in this schedule any more. ${ruleChoices(state, "requirements")}`,
+    );
+  }
+  const name = ruleName("requirements", source.description?.trim() || source.uid);
+  const domain = buildRequirementShiftTypeDomain(state);
+  // Weight 0: an empty spare place costs nothing; the bonus below pays for a filled one.
+  const draft = { ...requirementToForm(source, domain), weight: 0 };
+  if (!preferredDiffersFromRequired(draft)) {
+    return reject(
+      index,
+      "invalid_value",
+      `${name}: it has no spare places, because no preferredNumPeople above ` +
+        "requiredNumPeople is set. Set one first with edit_staffing_requirement.",
+    );
+  }
+  const error = firstFormError(validateRequirementForm(draft, domain));
+  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  const { shift, person, date } = spareSlotBonusShape(source);
+  if (shift === null) {
+    return reject(
+      index,
+      "unsupported_shape",
+      `${name}: it covers several shifts, so one bonus rule cannot say which to reward.`,
+    );
+  }
+  const withCard = applyRequirementPatch(state, { type: "update", uid: source.uid, form: draft });
+  const existing = findSpareSlotBonus(state.cardsByKind.successions, source);
+  // The Shift sequences screen's own builder. Its form's 2+ step check (AC-PR-11) is not
+  // core's; the Rules screen shows the card and its weight stays quick-editable.
+  const built = buildSuccessionCard(
+    {
+      description: `Bonus: +${command.rank} for each ${shift} shift (spare places are optional)`,
+      person,
+      pattern: [shift],
+      date,
+      weight: command.rank,
+    },
+    existing?.uid ?? newRuleUid(state, "successions", command),
+  );
+  const card = existing ? keepMarkers(existing, built) : built;
+  const offLadder = ladderRejection("successions", card, name, index);
+  if (offLadder) return offLadder;
+  const successions = existing
+    ? withCard.cardsByKind.successions.map((entry) => (entry === existing ? card : entry))
+    : [...withCard.cardsByKind.successions, card];
+  const next = withCards(withCard, "successions", successions);
+  if (stableStringify(next) === stableStringify(state)) {
+    return reject(index, "no_effect", `${name} already has that spare-slot bonus.`);
+  }
+  return { ok: true, next };
 }
 
 function applySetRequirementOnDate(
@@ -2347,6 +2417,8 @@ export function applyAssistantCommand(
       return applyEditStaffingRequirement(state, command, index);
     case "set_skill_mix":
       return applySetSkillMix(state, command, index);
+    case "set_spare_slot_bonus":
+      return applySetSpareSlotBonus(state, command, index);
     case "set_staffing_requirement_on_date":
       return applySetRequirementOnDate(state, command, index);
     case "remove_rule":

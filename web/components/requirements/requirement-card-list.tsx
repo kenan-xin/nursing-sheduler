@@ -36,6 +36,7 @@ import {
   coverStatuses,
 } from "@/lib/scenario/temporary-cover";
 import { summarizeRefs } from "./requirements-model";
+import { findSpareSlotBonus } from "@/components/successions/successions-model";
 
 interface RequirementCardListProps {
   requirements: RequirementCard[];
@@ -81,6 +82,8 @@ export function RequirementCardList({
   // narrow subscriptions, so a card kind the cover maths never reads cannot re-render.
   const coverSlices = useScenarioStore(useShallow(coverSlicesOf));
   const coverRequirements = useScenarioStore(coverCardsOf);
+  // The spare-slot bonus rules (uv8n) live on Shift sequences; the Preferred cell names them.
+  const successions = useScenarioStore((state) => state.cardsByKind.successions);
   const coverLines = useMemo(() => {
     const coverState = coverInputFrom(coverSlices, coverRequirements);
     const lines = new Map<string, string[]>();
@@ -107,9 +110,14 @@ export function RequirementCardList({
         ];
         // FR-PR-29: the weight pill is shown ONLY when a distinct preferred value
         // makes the weight meaningful (mirrors the form's conditional dial).
-        const showWeight =
+        const hasSpare =
           card.preferredNumPeople !== undefined &&
           card.preferredNumPeople !== card.requiredNumPeople;
+        // Weight 0 (uv8n): the spare places are optional bonuses, so no weight pill that
+        // reads as a penalty; the Preferred field says it in words instead.
+        const optionalSpare = hasSpare && card.weight === 0;
+        const bonus = optionalSpare ? findSpareSlotBonus(successions, card) : undefined;
+        const showWeight = hasSpare && !optionalSpare;
 
         return (
           <CardListItem
@@ -177,7 +185,14 @@ export function RequirementCardList({
                 : []),
               {
                 label: "Preferred",
-                value: card.preferredNumPeople != null ? String(card.preferredNumPeople) : "—",
+                value:
+                  card.preferredNumPeople == null
+                    ? "—"
+                    : bonus
+                      ? `${card.preferredNumPeople} · extra places are a bonus, +${bonus.weight} points each`
+                      : optionalSpare
+                        ? `${card.preferredNumPeople} · spare places are optional, an empty one costs nothing`
+                        : String(card.preferredNumPeople),
               },
               { label: "Qualified", value: summarizeRefs(card.qualifiedPeople ?? "ALL") },
               { label: "Dates", value: summarizeRefs(card.date ?? "ALL") },

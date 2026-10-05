@@ -9,13 +9,15 @@
 //   for get_setup_progress and the Optimize screen's pre-Run warning. Neither blocks:
 //   the UI editors still accept any number.
 //
-// Tier 5 (spare-slot bonuses) has no card kind yet; uv8n adds it here.
+// Tier 5 (spare-slot bonuses, uv8n) is a one-shift Shift sequences card with a
+// positive weight: `isSpareSlotBonusCard`.
 
 import type {
   CardsByKind,
   CountCard,
   RequirementCard,
   ScenarioUiState,
+  SuccessionCard,
   UiOffRequestCell,
   UiShiftRequestCell,
   Weight,
@@ -23,7 +25,7 @@ import type {
 import { isRestDaysRuleCard } from "./rest-days";
 
 /** A finite tier. Infinite weights are the hard tier and are never refused. */
-export type SoftTier = "strong" | "ward" | "wish" | "preferred" | "fairness" | "spare";
+export type SoftTier = "strong" | "ward" | "wish" | "preferred" | "fairness" | "spare" | "bonus";
 export type TierId = "hard" | SoftTier;
 
 /** The allowed size of a weight in one tier, without its sign (section 4). */
@@ -31,6 +33,8 @@ export interface TierBand {
   name: string;
   min: number;
   max: number;
+  /** Only a positive weight belongs here (a bonus); the kind's sign rule is ignored. */
+  positiveOnly?: true;
 }
 
 export const TIER_BANDS: Record<SoftTier, TierBand> = {
@@ -44,8 +48,10 @@ export const TIER_BANDS: Record<SoftTier, TierBand> = {
   preferred: { name: "a Preferred staffing count", min: 8, max: 15 },
   fairness: { name: "a fairness or balance rule", min: 4, max: 6 },
   // A spare place (an "ideally" count above the real need) costs nothing when empty;
-  // the uv8n bonus will rank which spare place fills first.
+  // the uv8n bonus ranks which spare place fills first.
   spare: { name: "a spare place", min: 0, max: 0 },
+  // Points per filled spare shift, rank 3 / 2 / 1 (spec section 10): below a fairness unit.
+  bonus: { name: "a spare-slot bonus", min: 1, max: 3, positiveOnly: true },
 };
 
 /** One weighted thing the ladder can place: a rule card, or one request cell. */
@@ -71,6 +77,34 @@ export type LadderRules = { [K in LadderKind]: KindRule<K> };
 const hasPreferred = (card: RequirementCard) =>
   card.preferredNumPeople !== undefined && card.preferredNumPeople !== card.requiredNumPeople;
 
+/**
+ * A spare-slot bonus (uv8n): a one-shift Shift sequences card ("each A_sup shift") with a
+ * positive finite weight. In core it adds weight x shift per person-date, so each filled
+ * place earns the weight and an empty one costs nothing.
+ */
+export function isSpareSlotBonusCard(card: SuccessionCard): boolean {
+  const positions = Array.isArray(card.pattern) ? card.pattern : [card.pattern];
+  return (
+    positions.length === 1 &&
+    !Array.isArray(positions[0]) &&
+    card.weight > 0 &&
+    Number.isFinite(card.weight)
+  );
+}
+
+/**
+ * How a bonus reads on Preview and the Rules screen (spec section 6 item 4): "+3 points
+ * for each A_sup shift. Lowest priority: a nurse's day off (20 points) always wins."
+ * `when` names the dates, or is empty for every date.
+ */
+export function spareSlotBonusSentence(card: SuccessionCard, when = ""): string {
+  const shift = String([card.pattern].flat()[0]);
+  return (
+    `+${card.weight} points for each ${shift} shift${when ? ` ${when}` : ""}. ` +
+    `Lowest priority: a nurse's day off (${TIER_BANDS.wish.min} points) always wins.`
+  );
+}
+
 const countTiers = (card: CountCard): readonly SoftTier[] => {
   if (card.tag === "contracted_hours") return [];
   return isRestDaysRuleCard(card) ? ["strong"] : ["fairness"];
@@ -78,7 +112,11 @@ const countTiers = (card: CountCard): readonly SoftTier[] => {
 
 export const LADDER: LadderRules = {
   requests: { label: "a nurse wish", bothSigns: true, tiers: () => ["wish"] },
-  successions: { label: "a shift sequence rule", bothSigns: true, tiers: () => ["ward", "strong"] },
+  successions: {
+    label: "a shift sequence rule",
+    bothSigns: true,
+    tiers: (card) => (isSpareSlotBonusCard(card) ? ["bonus"] : ["ward", "strong"]),
+  },
   counts: { label: "a shift count rule", bothSigns: true, tiers: countTiers },
   affinities: { label: "a pairing rule", bothSigns: true, tiers: () => ["ward"] },
   requirements: {
@@ -111,6 +149,7 @@ function range(band: TierBand, bothSigns: boolean): string {
   const span = (sign: string) =>
     band.min === band.max ? `${sign}${band.max}` : `${sign}${band.min} to ${sign}${band.max}`;
   if (band.max === 0) return "0";
+  if (band.positiveOnly) return span("");
   return bothSigns ? `${span("")} (or ${span("-")})` : span("-");
 }
 
@@ -167,6 +206,7 @@ export function pointsSentence(kind: keyof CardsByKind, card: RuleCard): string 
   const tiers = tiersFor(kind, card);
   if (!Number.isFinite(card.weight) || tiers.length === 0) return undefined;
   const tier = tierOf(kind, card) as SoftTier;
+  if (tier === "bonus") return spareSlotBonusSentence(card as SuccessionCard);
   if (tier === "spare") return "A spare place: no points, so an empty one costs nothing.";
   const unit = Math.abs(card.weight) === 1 ? "point" : "points";
   const points = `${card.weight > 0 ? "+" : ""}${card.weight} ${unit} ${UNIT[kind](card)}.`;
