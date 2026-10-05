@@ -77,6 +77,7 @@ import { useNavGuardStore } from "@/components/shell/nav-guard-store";
 import { CaptureNotice } from "./capture-notice";
 import { Callout } from "./callout";
 import { CoverPreflight } from "./cover-preflight";
+import { LadderPreflight } from "./ladder-preflight";
 import { ReadinessBanner } from "./readiness-banner";
 import { RunEventLog } from "./run-event-log";
 import { RunOptionsForm } from "./run-options-form";
@@ -784,6 +785,7 @@ export function OptimizeAndExportScreen({
 
       <ReadinessBanner issues={readiness.issues} />
       <CoverPreflight />
+      <LadderPreflight />
       {startFailed !== null ? (
         <Callout tone="error" placement="page" data-testid="optimize-start-failed" alert>
           {startFailedCopy(startFailed)}

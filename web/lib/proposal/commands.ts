@@ -516,11 +516,11 @@ function countWeightSchema() {
     .describe(
       "How strongly, written as you would type it in the Weight box. The solver is " +
         "REWARDED for the expression holding, in proportion to the weight: " +
-        '"infinity" = must always hold (hard rule), a positive number such as "10" = keep ' +
-        "to it where possible. A negative number works against the expression (the solver " +
-        'is paid for breaking it) and "-infinity" forces the opposite, so a soft cap is ' +
-        '"x <= T" with a POSITIVE weight. For "|x - T|^2" only 0 or less is allowed: a ' +
-        'negative number such as "-5" pulls the count toward T, "-infinity" makes it ' +
+        '"infinity" = must always hold (hard rule), "4" = keep to it where possible (a ' +
+        "fairness rule; any other finite size is refused). A negative number works against " +
+        'the expression (the solver is paid for breaking it) and "-infinity" forces the ' +
+        'opposite, so a soft cap is "x <= T" with a POSITIVE weight. For "|x - T|^2" only 0 ' +
+        'or less is allowed: "-4" pulls the count toward T, "-infinity" makes it ' +
         "exactly T. The schedule shows hard weights as .inf / -.inf: send them as " +
         "infinity / -infinity. Ask the user whether a new rule is a must or a preference " +
         "when they did not say.",
@@ -533,8 +533,10 @@ function successionWeightSchema() {
     .describe(
       'How strongly, written as you would type it in the Weight box: "-infinity" = must ' +
         "never happen (hard rule, the usual choice for a forbidden order such as a day " +
-        'straight after a night), a negative number such as "-50" discourages, a positive ' +
-        'number such as "10" encourages (for example a day off after nights). Avoid ' +
+        'straight after a night), "-100" to "-300" discourages (a ward preference), "-1000" ' +
+        "strongly discourages (a strong ward rule, such as work straight after the sleep day " +
+        "that follows nights); the same sizes without the minus encourage. Any other finite " +
+        "size is refused. Avoid " +
         '"infinity" (must always follow): with other hard rules it can make a roster ' +
         "impossible that would otherwise work; use a positive number instead. The schedule " +
         "shows hard weights as .inf / -.inf: send them as infinity / -infinity. Ask the user " +
@@ -647,9 +649,10 @@ function requirementFields() {
       .string()
       .optional()
       .describe(
-        "How strongly the preferred count is pursued, as typed in the Weight box: 0 or " +
-          'less, e.g. "-50" (the default for a new requirement); the more negative, the ' +
-          'stronger. "-infinity" makes the preferred count a must. Only used when ' +
+        'How strongly the preferred count is pursued, as typed in the Weight box: "-10" per ' +
+          "empty place for a real soft need (the default for a new requirement, below a nurse " +
+          'wish), or "0" for a spare place that costs nothing when empty; other finite ' +
+          'weights are refused. "-infinity" makes the preferred count a must. Only used when ' +
           "preferredNumPeople is above requiredNumPeople. On an edit, omitting it keeps the " +
           "stored weight.",
       ),
@@ -681,9 +684,9 @@ function pairingFields() {
       .describe(
         "How strongly, written as you would type it in the Weight box. On each date, for " +
           "each id in people, each id in withPeople and each listed shift where both work " +
-          'that same shift, the solver gains the weight: a positive number such as "5" = ' +
-          "together where possible, " +
-          'a negative number such as "-10" = apart where possible, "-infinity" = keep apart ' +
+          'that same shift, the solver gains the weight: "100" to "300" = together where ' +
+          'possible, "-100" to "-300" = apart where possible (a ward preference; other finite ' +
+          'sizes are refused), "-infinity" = keep apart ' +
           'always (hard rule). Soft weights are finite numbers; "+infinity" is refused, ' +
           "because it forces both sides onto those shifts on every date. The schedule shows " +
           "a hard weight as -.inf: send it as -infinity. Ask the user whether a new rule is " +
@@ -870,8 +873,8 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     startDate: startDateSchema,
     endDate: endDateSchema,
     weight: requestWeightSchema.describe(
-      "How much they want those days off: a positive number wants them (e.g. 5), a negative " +
-        'number would rather not be off; 0 is refused. "must" makes it a hard ' +
+      "How much they want those days off, a nurse wish: 20 to 40 wants them (20 is usual), " +
+        '-20 to -40 would rather not be off; other numbers are refused. "must" makes it a hard ' +
         "rule; use it only when the user says it is not negotiable. Replaces anything already " +
         "on those dates, including leave.",
     ),
@@ -885,8 +888,8 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     startDate: startDateSchema,
     endDate: endDateSchema,
     weight: requestWeightSchema.describe(
-      "Positive wants that shift (e.g. 5), negative does not want it (e.g. -5); larger is " +
-        'stronger. "must" / "never" make it a hard rule; use them only when the user says it ' +
+      "A nurse wish: 20 to 40 wants that shift (20 is usual), -20 to -40 does not want it; " +
+        'other numbers are refused. "must" / "never" make it a hard rule; use them only when the user says it ' +
         "is not negotiable. 0 removes their existing request for that shift. Dates with leave " +
         "or a day off are left as they are.",
     ),

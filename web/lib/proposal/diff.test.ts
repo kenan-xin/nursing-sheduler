@@ -192,7 +192,7 @@ describe("deriveProposalDiff", () => {
         shiftType: "N",
         startDate: "2026-10-19",
         endDate: "2026-10-25",
-        weight: -5,
+        weight: -20,
       },
       {
         type: "set_shift_request" as const,
@@ -200,7 +200,7 @@ describe("deriveProposalDiff", () => {
         shiftType: "L",
         startDate: "2026-10-20",
         endDate: "2026-10-20",
-        weight: 5,
+        weight: 20,
       },
     ];
     const applied = applyAssistantCommands(before, commands);
@@ -234,10 +234,10 @@ describe("deriveProposalDiff", () => {
     });
     expect(entry('cell:"Ben"|"22"')).toMatchObject({
       before: "Wants D (weight 3)",
-      after: "Wants D (weight 3), Would rather not work N (weight -5)",
+      after: "Wants D (weight 3), Would rather not work N (weight -20)",
       kind: "changed",
     });
-    expect(entry('cell:"Chris"|"20"')?.after).toBe("Wants D (weight 2), Wants L (weight 5)");
+    expect(entry('cell:"Chris"|"20"')?.after).toBe("Wants D (weight 2), Wants L (weight 20)");
     expect(diff.capabilityIds).toEqual(["leave-and-requests"]);
     expect(diff.needsReview).toEqual([]);
   });
@@ -396,7 +396,7 @@ describe("deriveProposalDiff", () => {
         dates: ["WEEKEND"],
         expression: "x <= T" as const,
         target: 4,
-        weight: "50",
+        weight: "4",
       },
       {
         type: "remove_rule" as const,
@@ -443,7 +443,7 @@ describe("deriveProposalDiff", () => {
     );
     expect(edited?.after).toBe(
       "On · “Night cap” · At most 4 Night shifts for each of ana, across weekends: " +
-        "kept to where possible (weight 50)",
+        "kept to where possible (weight 4)",
     );
 
     const removed = after("rule:requirements:req-multi");
@@ -595,7 +595,7 @@ describe("deriveProposalDiff", () => {
         personId: 7,
         startDate: "2026-10-10",
         endDate: "2026-10-12",
-        weight: 3,
+        weight: 30,
       },
     ];
     const applied = applyAssistantCommands(before, commands);
@@ -1360,7 +1360,7 @@ describe("pairing and supervision rules in the Preview", () => {
         withPeople: ["ben"],
         shiftTypes: ["Working shifts"],
         dates: ["WEEKEND"],
-        weight: "5",
+        weight: "200",
       },
     ];
     const applied = applyAssistantCommands(before, commands);
@@ -1384,9 +1384,9 @@ describe("pairing and supervision rules in the Preview", () => {
     expect(edited).toMatchObject({
       kind: "changed",
       before:
-        "On · “Ana and Ben apart on nights” · ana with ben on the same shift on the same day (Night), every date: apart where possible (weight -10)",
+        "On · “Ana and Ben apart on nights” · ana with ben on the same shift on the same day (Night), every date: apart where possible (weight -100)",
       after:
-        "On · “Ana and Ben together on weekends” · ana with ben on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together (Working shifts), weekends: together where possible (weight 5)",
+        "On · “Ana and Ben together on weekends” · ana with ben on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together (Working shifts), weekends: together where possible (weight 200)",
     });
     expect(diff.cascade).toEqual([]);
 

@@ -88,6 +88,7 @@ describe("guided setup from an empty scenario", () => {
       uncoveredShifts: [],
       knownGaps: findStaffingShortfalls(state).length,
       staffingBalance: null,
+      weightFindings: [],
     });
     expect(progress.nextStep?.id).toBe("dates");
     expect(progress.nextStep?.ask).toContain("The first and last day of the roster.");
@@ -103,6 +104,7 @@ describe("guided setup from an empty scenario", () => {
       uncoveredShifts: [],
       knownGaps: findStaffingShortfalls(state).length,
       staffingBalance: null,
+      weightFindings: [],
     });
     expect(progress.readyToRun).toBe(true);
     expect(findStaffingShortfalls(state)).toHaveLength(1);
@@ -319,7 +321,7 @@ describe("the scripted wards read as real ward situations", () => {
         people: ["Nurses"],
         pattern: ["N", "D"],
         dates: ["ALL"],
-        weight: "-20",
+        weight: "-1000",
       },
     ]);
     expect(soften).toMatchObject({
@@ -333,7 +335,7 @@ describe("the scripted wards read as real ward situations", () => {
     if (!result.ok) throw new Error(result.rejection.message);
     const card = result.next.cardsByKind.successions.find((c) => c.uid === "no-day-after-night");
     // Softened, never deleted or switched off.
-    expect(card).toMatchObject({ weight: -20 });
+    expect(card).toMatchObject({ weight: -1000 });
     expect(card?.disabled).toBeFalsy();
     expect(buildFeasibilityReport(state, false).options).toEqual([]);
   });

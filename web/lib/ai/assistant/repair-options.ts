@@ -78,6 +78,7 @@ import {
   type RepairId,
   type Situation,
 } from "./playbook";
+import { TIER_BANDS } from "@/lib/rules/priority-ladder";
 
 export interface RepairOption {
   repairId: RepairId;
@@ -1008,7 +1009,8 @@ function softenedRest(
     people: asList(card.person),
     pattern: pattern.map(String),
     dates: card.date == null ? ["ALL"] : asList(card.date).map((d) => formDate(ctx, d)),
-    weight: String(card.weight > 0 ? SOFT_REQUEST_WEIGHT : -SOFT_REQUEST_WEIGHT),
+    // A strong ward rule on the priority ladder, the tier the hard rest rules soften to.
+    weight: String(card.weight > 0 ? TIER_BANDS.strong.max : -TIER_BANDS.strong.max),
   };
 }
 

@@ -7,8 +7,10 @@
 // Requests is optional ("nobody has leave" is a real answer).
 
 import type { ScenarioSummary } from "@/components/home/scenario-summary";
+import type { LadderFinding } from "@/lib/rules/priority-ladder";
 import {
   PLAYBOOK_VERSION,
+  PRIORITIES,
   SETUP_INSTRUCTIONS,
   SETUP_STEPS,
   type SetupStepGuide,
@@ -36,6 +38,8 @@ export interface SetupProgressInput {
   knownGaps: number;
   /** Capacity vs demand (computeStaffingBalance), null before dates, staff and numbers. */
   staffingBalance: StaffingBalance | null;
+  /** Weights off the priority ladder (checkWeightOrder). Explained before a run, never blocking. */
+  weightFindings: readonly LadderFinding[];
 }
 
 export interface SetupStepStatus {
@@ -53,6 +57,8 @@ export interface SetupProgress {
   readyToRun: boolean;
   knownGaps: number;
   staffingBalance: StaffingBalance | null;
+  weightFindings: readonly LadderFinding[];
+  priorities: readonly string[];
   instructions: readonly string[];
 }
 
@@ -116,6 +122,8 @@ export function deriveSetupProgress(input: SetupProgressInput): SetupProgress {
     readyToRun,
     knownGaps: input.knownGaps,
     staffingBalance: input.staffingBalance,
+    weightFindings: input.weightFindings,
+    priorities: PRIORITIES,
     instructions: SETUP_INSTRUCTIONS,
   };
 }

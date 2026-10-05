@@ -180,7 +180,7 @@ export function pairingWardScenario(): ScenarioUiState {
           people2: ["ben"],
           shiftTypes: ["Night"],
           date: ["ALL"],
-          weight: -10,
+          weight: -100,
         },
       ],
       coverings: [

@@ -155,6 +155,7 @@ import {
   type CoveringFormState,
 } from "@/components/coverings/coverings-model";
 import { skillMixOverflow, skillMixOverflowMessage } from "@/lib/rules/shortfalls";
+import { weightBandRefusal, type LadderCards, type LadderKind } from "@/lib/rules/priority-ladder";
 import { RenameCollisionError } from "@/lib/cascade";
 import { foldPaintIntents, type MintCellUid } from "@/lib/store/paint-fold";
 import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
@@ -437,6 +438,26 @@ function dateScopeRejection(
   };
 }
 
+/**
+ * The priority-ladder guard (bead rnrt, spec section 6 item 1): a raw weight outside the
+ * card's tier band never reaches the scenario through the assistant. The refusal names
+ * the band, so one retry inside it succeeds. The manual editors are not guarded.
+ */
+function ladderRejection<K extends LadderKind>(
+  kind: K,
+  card: LadderCards[K][number],
+  name: string,
+  index: number,
+): OperationResult | undefined {
+  const allowed = weightBandRefusal(kind, card);
+  if (!allowed) return undefined;
+  return reject(
+    index,
+    "invalid_value",
+    `${name}: weight ${card.weight} breaks the priority order: ${allowed}. Pick a weight inside that band.`,
+  );
+}
+
 /** The first message a form validator reported, in the validator's own field order. */
 function firstFormError(errors: object): string | undefined {
   return Object.values(errors).find((value): value is string => typeof value === "string");
@@ -512,6 +533,13 @@ function applyAddSuccessionRule(
     successionDraft(command),
     newRuleUid(state, "successions", command),
   );
+  const offLadder = ladderRejection(
+    "successions",
+    card,
+    ruleName("successions", command.description),
+    index,
+  );
+  if (offLadder) return offLadder;
   return {
     ok: true,
     next: withCards(state, "successions", [...state.cardsByKind.successions, card]),
@@ -543,6 +571,8 @@ function applyEditSuccessionRule(
   const refused = successionRejection(state, command, name, index, source.person);
   if (refused) return refused;
   const next = keepMarkers(source, buildSuccessionCard(successionDraft(command), source.uid));
+  const offLadder = ladderRejection("successions", next, name, index);
+  if (offLadder) return offLadder;
   if (stableStringify(next) === stableStringify(source)) {
     return reject(index, "no_effect", `${name} already says exactly that.`);
   }
@@ -633,6 +663,8 @@ function applyAddCountRule(
     buildCountShiftTypeDomain(state),
     newRuleUid(state, "counts", command),
   );
+  const offLadder = ladderRejection("counts", card, ruleName("counts", command.description), index);
+  if (offLadder) return offLadder;
   return {
     ok: true,
     next: withCards(state, "counts", [...state.cardsByKind.counts, card]),
@@ -809,6 +841,8 @@ function applyEditCountRule(
   const refused = countRejection(state, command, draft, name, index, source.person);
   if (refused) return refused;
   const next = keepMarkers(source, buildCountCard(draft, domain, source.uid));
+  const offLadder = ladderRejection("counts", next, name, index);
+  if (offLadder) return offLadder;
   if (stableStringify(next) === stableStringify(source)) {
     return reject(index, "no_effect", `${name} already says exactly that.`);
   }
@@ -847,7 +881,7 @@ function requirementDraft(
     requiredNumPeople: fields.requiredNumPeople,
     qualifiedPeople: [...fields.qualifiedPeople],
     date: [...fields.dates],
-    // Omitted, the form's own value stays: blank/-50 on add, the stored one on edit.
+    // Omitted, the form's own value stays: blank/-10 on add, the stored one on edit.
     preferredNumPeople: fields.preferredNumPeople ?? base.preferredNumPeople,
     weight: fields.weight === undefined ? base.weight : parseWeightInput(fields.weight),
     // The edit arm carries no skill mix, so `base` (loaded from the card) keeps it.
@@ -978,14 +1012,23 @@ function applyAddStaffingRequirement(
     index,
   );
   if (refused) return refused;
-  return {
-    ok: true,
-    next: applyRequirementPatch(state, {
-      type: "add",
-      form: draft,
-      uid: newRuleUid(state, "requirements", command),
-    }),
-  };
+  const uid = newRuleUid(state, "requirements", command);
+  const next = applyRequirementPatch(state, { type: "add", form: draft, uid });
+  const offLadder = requirementLadderRejection(command, next, uid, draft.description, index);
+  return offLadder ?? { ok: true, next };
+}
+
+/** Only a weight the assistant sent is checked: an omitted one keeps the form's or the card's. */
+function requirementLadderRejection(
+  fields: RequirementFields,
+  next: ScenarioUiState,
+  uid: string,
+  title: string,
+  index: number,
+): OperationResult | undefined {
+  const card = next.cardsByKind.requirements.find((c) => c.uid === uid);
+  if (fields.weight === undefined || !card) return undefined;
+  return ladderRejection("requirements", card, ruleName("requirements", title), index);
 }
 
 function applyEditStaffingRequirement(
@@ -1014,6 +1057,14 @@ function applyEditStaffingRequirement(
     uid: source.uid,
     form: draft,
   });
+  const offLadder = requirementLadderRejection(
+    command,
+    next,
+    source.uid,
+    source.description?.trim() || source.uid,
+    index,
+  );
+  if (offLadder) return offLadder;
   const after = next.cardsByKind.requirements.find((card) => card.uid === source.uid);
   if (stableStringify(after) === stableStringify(source)) {
     return reject(index, "no_effect", `${name} already says exactly that.`);
@@ -1244,6 +1295,13 @@ function applyAddPairingRule(
   if (refused) return refused;
   // `use-affinities.ts` `add`: append `buildAffinityCard(form)`.
   const card = buildAffinityCard(pairingDraft(command), newRuleUid(state, "affinities", command));
+  const offLadder = ladderRejection(
+    "affinities",
+    card,
+    ruleName("affinities", command.description),
+    index,
+  );
+  if (offLadder) return offLadder;
   return {
     ok: true,
     next: withCards(state, "affinities", [...state.cardsByKind.affinities, card]),
@@ -1275,6 +1333,8 @@ function applyEditPairingRule(
   const refused = pairingRejection(state, command, name, index, source);
   if (refused) return refused;
   const next = keepMarkers(source, buildAffinityCard(pairingDraft(command), source.uid));
+  const offLadder = ladderRejection("affinities", next, name, index);
+  if (offLadder) return offLadder;
   if (stableStringify(next) === stableStringify(source)) {
     return reject(index, "no_effect", `${name} already says exactly that.`);
   }
@@ -1804,6 +1864,16 @@ function paintIntent(
           ),
         };
       }
+      if (typeof command.weight === "number") {
+        const cell = { kind: "off" as const, person: command.personId, date: "" };
+        const offLadder = ladderRejection(
+          "requests",
+          { ...cell, weight: command.weight },
+          "That day off",
+          index,
+        );
+        if (offLadder) return { ok: false, refusal: offLadder };
+      }
       return {
         ok: true,
         intent: {
@@ -1842,6 +1912,17 @@ function paintIntent(
             )}`,
           ),
         };
+      }
+      // 0 removes their request for that shift, so it is not a weight to place.
+      if (typeof command.weight === "number" && command.weight !== 0) {
+        const cell = { kind: "request" as const, person: command.personId, date: "", shiftType };
+        const offLadder = ladderRejection(
+          "requests",
+          { ...cell, weight: command.weight },
+          "That shift request",
+          index,
+        );
+        if (offLadder) return { ok: false, refusal: offLadder };
       }
       return {
         ok: true,

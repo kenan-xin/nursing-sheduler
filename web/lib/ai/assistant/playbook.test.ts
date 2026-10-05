@@ -12,6 +12,8 @@ import {
   FEASIBILITY_INSTRUCTIONS,
   MAX_DAILY_WORKING_MINUTES,
   PLAYBOOK_VERSION,
+  PRIORITIES,
+  SOFT_REQUEST_WEIGHT,
   REPAIRS,
   REPAIR_ORDER,
   BALANCE_RULE_NOTE,
@@ -24,6 +26,7 @@ import {
   setsBalanceRule,
 } from "./playbook";
 import type { AssistantCommandV1 } from "@/lib/proposal/commands";
+import { TIER_BANDS } from "@/lib/rules/priority-ladder";
 
 describe("setup steps", () => {
   it("follow the Home guided order, then review", () => {
@@ -398,7 +401,22 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS).toContain(TRUTHFUL_SUMMARY_RULE);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-10-05.1");
+    expect(PLAYBOOK_VERSION).toBe("2026-10-05.2");
+  });
+});
+
+describe("the priority ladder block (rnrt)", () => {
+  it("states every tier with the band the host enforces", () => {
+    const text = PRIORITIES.join(" ");
+    for (const band of Object.values(TIER_BANDS)) {
+      const size = band.min === band.max ? String(band.max) : `${band.min} to ${band.max}`;
+      expect(text, band.name).toContain(size);
+    }
+    expect(text).toMatch(/refuses a weight outside its tier's band/);
+    expect(text).toMatch(/priority plan/);
+  });
+  it("wishes and softened requests default to 20", () => {
+    expect(SOFT_REQUEST_WEIGHT).toBe(20);
   });
 });
 

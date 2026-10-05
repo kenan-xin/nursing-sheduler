@@ -40,7 +40,19 @@ import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/co
 import type { SuccessionCard } from "@/lib/scenario";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 
-export const PLAYBOOK_VERSION = "2026-10-05.1";
+export const PLAYBOOK_VERSION = "2026-10-05.2";
+
+/**
+ * The priority ladder (spec docs/superpowers/specs/2026-09-29-priority-ladder-design.md,
+ * section 6): the tier table the assistant plans weights by. The bands match
+ * `TIER_BANDS` in `lib/rules/priority-ladder.ts`, which the host enforces.
+ */
+export const PRIORITIES: readonly string[] = [
+  "Every soft rule's weight sits in one tier, and a higher tier always wins. From the top: must (infinity) for staffing minimums, leave, contracted hours, supervision and the hard rest rules; 1000 for a strong ward rule (2 rest days in any 7 days, a full day off after the sleep day, at most 3 nights in a row); 100 to 300 for a ward preference (avoid a pattern, two nurses apart where possible); 20 to 40 for a nurse wish (a day off or a shift wish, usually 20); -10 for each empty Preferred staffing place; 4 for fairness and balance counts; 0 for a spare place.",
+  "Send the raw number. The app refuses a weight outside its tier's band and names the band: pick a number inside it.",
+  "In setup, before the rule changes, list the ward's needs with their tiers in one message: the ward's priority plan.",
+  "When two of the ward's needs can conflict and the ward might rank them against the ladder, ask on one choice card which wins, with the ladder's order first, for example 'A nurse's day off or a 3rd nurse on mornings: which wins?'.",
+];
 
 /**
  * How every `offer_choices` option must read (bead tpt2). The card is a pick, not a prompt:
@@ -232,6 +244,7 @@ export const SETUP_INSTRUCTIONS: readonly string[] = [
   "After the user applies, call get_setup_progress again and continue with the new nextStep.",
   "If the user says an optional step does not apply (for example nobody has leave), move on to the step after it.",
   "If knownGaps is above 0, call suggest_feasibility_options before offering to run Optimize.",
+  "If weightFindings is not empty, explain each finding in plain words and offer its fix (its suggestedWeight) before offering to run Optimize.",
   TRUTHFUL_SUMMARY_RULE,
 ];
 
