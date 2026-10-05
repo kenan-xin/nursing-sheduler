@@ -102,6 +102,31 @@ const completedView = view({
     score: 42,
     solverStatus: "OPTIMAL",
     terminationReason: "optimality_proven",
+    // 82 points earned, two nurse wishes of 20 missed: the per-tier score split.
+    explanation: {
+      kind: "ledger",
+      ledger: {
+        objective: 42,
+        balanced: true,
+        terms: 43,
+        rules: [
+          { rule: 0, points: 82, matches: 41 },
+          { rule: 1, points: -20, matches: 1 },
+          { rule: 2, points: -20, matches: 1 },
+        ],
+        matches: [],
+        truncated: false,
+        seconds: 0,
+      },
+    },
+  },
+  explainContext: {
+    sources: [
+      { ruleId: "bonus", type: "shift type requirement", label: "bonus", hard: false, weight: 2 },
+      { ruleId: "w1", type: "shift request", label: "wish", hard: false, weight: -20 },
+      { ruleId: "w2", type: "shift request", label: "wish", hard: false, weight: -20 },
+    ],
+    people: [],
   },
   download: { status: "downloaded", artifactAvailable: true, filename: "schedule.xlsx" },
 });

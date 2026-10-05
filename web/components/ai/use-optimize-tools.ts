@@ -20,6 +20,7 @@ import {
 import { deriveOptimizeReadiness } from "@/lib/optimize/optimize-readiness";
 import { terminalHeading } from "@/lib/optimize/run-display";
 import { resolvedLedgerOf, type OptimizeRunView } from "@/lib/optimize/run-view";
+import { scoreSplitOf, scoreSplitText } from "@/lib/optimize/score-split";
 import {
   diffLedgers,
   summarizeCore,
@@ -172,6 +173,8 @@ function guidanceFor(
 export interface RunExplanationSummary {
   /** Points per rule (lost first), and the nurses and dates that lost the most. */
   score?: LedgerSummary;
+  /** Points lost per priority tier, the sentence the Optimize screen shows under the score. */
+  byTier?: string;
   /** Change against the previous run on this screen, by rule id; null for the first run. */
   sinceLastRun?: LedgerDiff | null;
   /** Infeasible run: the hard rules the solver proved cannot all hold together. */
@@ -185,9 +188,11 @@ function summarizeExplanation(view: OptimizeRunView): RunExplanationSummary | nu
     return why === null ? null : { why };
   }
   const ledger = resolvedLedgerOf(view);
-  if (ledger === null) return null;
+  const split = scoreSplitOf(view);
+  if (ledger === null || split === null) return null;
   return {
     score: summarizeLedger(ledger),
+    byTier: scoreSplitText(split),
     sinceLastRun: view.previousLedger ? diffLedgers(view.previousLedger, ledger) : null,
   };
 }
