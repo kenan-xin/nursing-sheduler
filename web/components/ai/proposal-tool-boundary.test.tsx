@@ -213,7 +213,7 @@ describe("the model's arguments, at the shipped tool boundary", () => {
             dates: ["ALL"],
             expression: "|x - T|^2",
             target: 1,
-            weight: "-5",
+            weight: "-4",
           },
         ],
       },
@@ -222,6 +222,27 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     expect(text(answer)).toContain("preview of this change is now shown");
     expect(text(answer)).toContain(BALANCE_RULE_NOTE);
     expect(text(answer)).not.toContain(REST_PRACTICE_WARNING);
+  });
+
+  it("refuses a raw weight off the priority ladder and names the band (rnrt)", async () => {
+    await mount(SCENARIOS.restRuleTooTight());
+    const answer = await proposalTool().handler(
+      {
+        summary: "Ana would like 3 Nov off.",
+        operations: [
+          {
+            type: "set_off_request",
+            personId: "ana",
+            startDate: "2026-11-03",
+            endDate: "2026-11-03",
+            weight: 10,
+          },
+        ],
+      },
+      {},
+    );
+    expect(text(answer)).toContain("The app refused that change");
+    expect(text(answer)).toContain("a nurse wish takes 20 to 40 (or -20 to -40)");
   });
 
   it("names the screen Apply will open, so the model never guesses one", async () => {

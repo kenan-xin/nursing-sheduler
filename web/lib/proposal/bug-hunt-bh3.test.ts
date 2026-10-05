@@ -113,7 +113,7 @@ describe("C3 a person id containing '|'", () => {
         personId: "Float | Ward 3",
         startDate: "2026-10-01",
         endDate: "2026-10-01",
-        weight: 5,
+        weight: 20,
       },
     ];
     const result = prep(octoberWard(), commands);

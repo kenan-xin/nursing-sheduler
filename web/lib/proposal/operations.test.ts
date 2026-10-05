@@ -888,7 +888,7 @@ describe("leave and request arms", () => {
   it("Ben requests no nights next week", () => {
     const result = applyAssistantCommand(
       octoberWard(),
-      wants("Ben", "N", "2026-10-19", "2026-10-25", -5),
+      wants("Ben", "N", "2026-10-19", "2026-10-25", -20),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -897,7 +897,7 @@ describe("leave and request arms", () => {
     );
     // The 21st is his day off: skipped, as quick paint skips it.
     expect(nights.map((cell) => cell.date).sort()).toEqual(["19", "20", "22", "23", "24", "25"]);
-    expect(nights.every((cell) => cell.kind === "request" && cell.weight === -5)).toBe(true);
+    expect(nights.every((cell) => cell.kind === "request" && cell.weight === -20)).toBe(true);
     expect(at(result.next, "Ben", "21")).toEqual([
       { kind: "off", person: "Ben", date: "21", weight: 5 },
     ]);
@@ -908,7 +908,7 @@ describe("leave and request arms", () => {
   it("Chris would like the long day on 20 Oct", () => {
     const result = applyAssistantCommand(
       octoberWard(),
-      wants("Chris", "L", "2026-10-20", "2026-10-20", 5),
+      wants("Chris", "L", "2026-10-20", "2026-10-20", 20),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -925,7 +925,7 @@ describe("leave and request arms", () => {
         person: "Chris",
         date: "20",
         shiftType: "L",
-        weight: 5,
+        weight: 20,
       },
     ]);
   });
@@ -985,13 +985,32 @@ describe("leave and request arms", () => {
   });
 
   it("replaces leave with a day-off request, as painting OFF does", () => {
-    const result = applyAssistantCommand(octoberWard(), off("Ana", "2026-10-14", "2026-10-14", 5));
+    const result = applyAssistantCommand(octoberWard(), off("Ana", "2026-10-14", "2026-10-14", 20));
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(at(result.next, "Ana", "14")).toEqual([
-        { kind: "off", person: "Ana", date: "14", weight: 5 },
+        { kind: "off", person: "Ana", date: "14", weight: 20 },
       ]);
     }
+  });
+
+  it("refuses a raw wish off the priority ladder, naming the band (rnrt)", () => {
+    for (const command of [
+      off("Ana", "2026-10-14", "2026-10-14", 10),
+      off("Ana", "2026-10-14", "2026-10-14", 41),
+      wants("Ben", "N", "2026-10-19", "2026-10-19", -5),
+    ]) {
+      const result = applyAssistantCommand(octoberWard(), command);
+      expect(result.ok, JSON.stringify(command)).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.code).toBe("invalid_value");
+      expect(result.rejection.message).toContain("a nurse wish takes 20 to 40 (or -20 to -40)");
+    }
+    // A pin is a must, not a weight: never refused by the ladder.
+    expect(
+      applyAssistantCommand(octoberWard(), wants("Ben", "N", "2026-10-19", "2026-10-19", "never"))
+        .ok,
+    ).toBe(true);
   });
 
   it("refuses a day off at weight 0, which would have no effect", () => {
@@ -1002,8 +1021,8 @@ describe("leave and request arms", () => {
 
   it("accepts a staff group row, a shift group and ALL", () => {
     const result = applyAssistantCommands(octoberWard(), [
-      wants("Seniors", "Nights", "2026-10-05", "2026-10-05", -3),
-      wants("Ben", "ALL", "2026-10-01", "2026-10-03", 1),
+      wants("Seniors", "Nights", "2026-10-05", "2026-10-05", -20),
+      wants("Ben", "ALL", "2026-10-01", "2026-10-03", 20),
     ]);
     expect(result.ok).toBe(true);
   });
@@ -1125,7 +1144,7 @@ describe("add_shift_sequence_rule / edit_shift_sequence_rule", () => {
     const result = applyAssistantCommand(ruleWardScenario(), {
       ...noDayAfterNight,
       people: ["RN"],
-      weight: "-50",
+      weight: "-200",
       dates: ["2026-04-06", "2026-04-07"],
     });
     expect(result.ok).toBe(true);
@@ -1133,7 +1152,7 @@ describe("add_shift_sequence_rule / edit_shift_sequence_rule", () => {
       expect(result.next.cardsByKind.successions.at(-1)).toMatchObject({
         person: ["RN"],
         date: ["2026-04-06", "2026-04-07"],
-        weight: -50,
+        weight: -200,
       });
     }
   });
@@ -1206,12 +1225,12 @@ describe("add_shift_sequence_rule / edit_shift_sequence_rule", () => {
       ...state.cardsByKind.successions[0],
       person: "ALL",
     };
-    const result = applyAssistantCommand(state, edit({ people: ["ALL"], weight: "-50" }));
+    const result = applyAssistantCommand(state, edit({ people: ["ALL"], weight: "-200" }));
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.next.cardsByKind.successions[0]).toMatchObject({
         person: ["ALL"],
-        weight: -50,
+        weight: -200,
       });
     }
   });
@@ -1303,7 +1322,7 @@ describe("add_shift_sequence_rule / edit_shift_sequence_rule", () => {
       ...state.cardsByKind.successions[0],
       disabled: true,
     };
-    const result = applyAssistantCommand(state, edit({ weight: "-50" }));
+    const result = applyAssistantCommand(state, edit({ weight: "-200" }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.next.cardsByKind.successions).toEqual([
@@ -1313,7 +1332,7 @@ describe("add_shift_sequence_rule / edit_shift_sequence_rule", () => {
         person: ["ana", "ben"],
         pattern: ["Night", "Day"],
         date: ["ALL"],
-        weight: -50,
+        weight: -200,
         disabled: true,
       },
     ]);
@@ -1688,7 +1707,7 @@ describe("remove_rule", () => {
       people: ["ana"],
       pattern: ["Night", "Day"],
       dates: ["ALL"],
-      weight: "-1",
+      weight: "-100",
     };
     const added = applyAssistantCommand(ruleWardScenario(), add);
     if (!added.ok) throw new Error("fixture should apply");
@@ -2366,7 +2385,7 @@ describe("add_pairing_rule / edit_pairing_rule", () => {
     type: "edit_pairing_rule" as const,
     ruleId: "aff-apart",
     description: "Ana and Ben apart on nights",
-    weight: "-10",
+    weight: "-100",
     ...overrides,
   });
 
@@ -2387,7 +2406,8 @@ describe("add_pairing_rule / edit_pairing_rule", () => {
 
   it("reads a thousands separator and refuses unclear weight text (bug hunt C6)", () => {
     const thousand = applyAssistantCommand(pairingWardScenario(), { ...apart, weight: "1,000" });
-    expect(thousand.ok && thousand.next.cardsByKind.affinities.at(-1)?.weight).toBe(1000);
+    // Read as 1000, which the priority ladder then refuses for a pairing rule.
+    expect(!thousand.ok && thousand.rejection.message).toContain("weight 1000 breaks");
     for (const weight of ["10abc", "1e3", "1.2.3", "10.5"]) {
       const result = applyAssistantCommand(pairingWardScenario(), { ...apart, weight });
       expect(result.ok).toBe(false);
@@ -2499,7 +2519,7 @@ describe("add_supervision_rule / edit_supervision_rule", () => {
       preceptors: [["Senior"]],
       preceptees: [["ana"]],
       shiftTypes: ["Day", "Night"],
-      weight: 1,
+      weight: Infinity,
     });
   });
 
@@ -2547,7 +2567,7 @@ describe("add_supervision_rule / edit_supervision_rule", () => {
           preceptees: [["ben"]],
           shiftTypes: ["Day"],
           date: ["WEEKEND"],
-          weight: 1,
+          weight: Infinity,
         },
       ]);
     }

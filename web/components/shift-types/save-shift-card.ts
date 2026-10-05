@@ -474,7 +474,6 @@ export async function saveShiftTypeCard(
         shiftType: [effectiveId],
         qualifiedPeople: [RESERVED_SHIFT_TYPE.all],
         date: [RESERVED_SHIFT_TYPE.all],
-        weight: -50,
       };
       patch = { type: "add", form };
     }

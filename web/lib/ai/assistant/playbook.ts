@@ -40,7 +40,19 @@ import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/co
 import type { SuccessionCard } from "@/lib/scenario";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 
-export const PLAYBOOK_VERSION = "2026-09-30.1";
+export const PLAYBOOK_VERSION = "2026-10-05.3";
+
+/**
+ * The priority ladder (spec docs/superpowers/specs/2026-09-29-priority-ladder-design.md,
+ * section 6): the tier table the assistant plans weights by. The bands match
+ * `TIER_BANDS` in `lib/rules/priority-ladder.ts`, which the host enforces.
+ */
+export const PRIORITIES: readonly string[] = [
+  "Every soft rule's weight sits in one tier, and a higher tier always wins. From the top: must (infinity) for staffing minimums, leave, contracted hours, supervision and the hard rest rules; 600 to 1000 for a strong ward rule (2 rest days in any 7 days, a full day off after the sleep day, at most 3 nights in a row; usually 1000); 100 to 300 for a ward preference (avoid a pattern, two nurses apart where possible); 20 to 40 for a nurse wish (a day off or a shift wish, usually 20); -8 to -15 for each empty Preferred staffing place (usually -10); 4 to 6 for fairness and balance counts (usually 4); 0 for a spare place.",
+  "Send the raw number. The app refuses a weight outside its tier's band and names the band: pick a number inside it.",
+  "In setup, before the rule changes, list the ward's needs with their tiers in one message: the ward's priority plan.",
+  "When two of the ward's needs can conflict and the ward might rank them against the ladder, ask on one choice card which wins, with the ladder's order first, for example 'A nurse's day off or a 3rd nurse on mornings: which wins?'.",
+];
 
 /**
  * How every `offer_choices` option must read (bead tpt2). The card is a pick, not a prompt:
@@ -174,14 +186,13 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
       "'Optional, ideally N' (or 'at least R, ideally N') is requiredNumPeople R, often 0, plus preferredNumPeople N on add_staffing_requirement. A required count alone is exact, and a required count of 0 alone forbids the shift.",
       "Ask about every worked shift the step's detail lists with no staffing requirement, on a choice card with the usual numbers, such as '1 senior every night' and 'Optional: 0 required, ideally 1 senior'; never guess it.",
       // Bead 4h5a: spike numbers in the bead notes (13 nurses, 31 days: exact counts left 12 days off each and A_sup empty; these weights filled A_sup every day, then 7 third mornings).
-      "After the staffing numbers, read staffingBalance from get_setup_progress and say its sentence in plain words; when staffingBalance.estimated is true, say 'about' and the assumption, and ask each nurse's contract before treating the numbers as fact. When spareShifts is above 0 the staff can work more than the minimums need: on one offer_choices card ask where the spare shifts go, by default first an optional senior lead slot (ideally 1 senior), then a 3rd nurse on mornings, then a 3rd on afternoons, and ask each nurse's contracted working days (default shiftsEach, 5 in every 7 days). Then set preferredNumPeople on those requirements with weights -300, -200 and -100 in that order, and add_contracted_hours for the staff, one day either side of the contract (hoursPerShift 8 for a contract in days). The contract's fewest days times the staff must not exceed mostShifts once the 'ideally' counts are set, or no roster is possible.",
+      "After the staffing numbers, read staffingBalance from get_setup_progress and say its sentence in plain words; when staffingBalance.estimated is true, say 'about' and the assumption, and ask each nurse's contract before treating the numbers as fact. When spareShifts is above 0 the staff can work more than the minimums need: on one offer_choices card ask where the spare shifts go, by default first an optional senior lead slot (ideally 1 senior), then a 3rd nurse on mornings, then a 3rd on afternoons, and ask each nurse's contracted working days (default shiftsEach, 5 in every 7 days). Then set preferredNumPeople on those requirements with weight 0 (a spare place costs nothing when empty; a negative weight there would beat the nurses' wishes), and add_contracted_hours for the staff, one day either side of the contract (hoursPerShift 8 for a contract in days). The contract's fewest days times the staff must not exceed mostShifts once the 'ideally' counts are set, or no roster is possible.",
       "Prefer a contracted working target over a cap on days off: a cap cannot make anyone work a shift the staffing numbers do not allow. Never propose a days-off cap below staffingBalance.fewestOffDaysEach; show the arithmetic from its sentence instead.",
       "Never say a rule over any 7 days in a row is impossible: add_rest_days_rule is one.",
-      "The rest rules the ward uses. Many wards use no day shift straight after a night as a must, and a day off after nights as a preference.",
+      "Rest rules are on by default for every ward: rest after nights is a safety rule, so nurses stay sharp. Propose all five, explain each in one line, and ask on one choice card whether the ward keeps each one: at most 6 work days in a row (add_shift_sequence_rule of ALL 7 days in a row at -infinity, a pattern, not a total over the period; label it a must on the card: it gives the 1 rest day a week, which the Employment Act sets); a sleep day after the last night (the night shift then each day shift at -infinity: no day shift straight after a night); at most 4 nights in a row (the night shift 5 times at -infinity); a full day off after the sleep day (night, OFF, ALL at -1000); at most 3 nights in a row (the night shift 4 times at -1000). Map night, morning and afternoon to the ward's own shift codes, and ask when that is unclear. An afternoon shift followed by a morning shift is allowed: never propose a rule against it.",
       "Limits such as the most nights one nurse may work in the period, and whether to balance nights and weekends across the team.",
-      "Suggest a rule giving each nurse at least 1 rest day a week, which the Employment Act sets: a shift sequence rule of ALL 7 days in a row at -infinity (no 7 working days in a row), not a total over the period. On any card that offers it, label it a must.",
       "For every ward, also suggest 2 rest days in any 7 days in a row, the usual ward practice, as a strong preference: add_rest_days_rule, one rule for everyone. A week here is any 7 days in a row, not Monday to Sunday. It counts back into the days before the roster from each nurse's history, so when the staff have no history, ask for each nurse's shifts on the last 6 days of the previous month before relying on it.",
-      "Anyone who should work together or apart, such as two nurses never on the same night: add_pairing_rule, -infinity for never, a negative number for apart where possible. And any new nurse or student who must always have a named senior or group on shift with them: add_supervision_rule, always a must.",
+      "Anyone who should work together or apart, such as two nurses never on the same night: add_pairing_rule, -infinity for never, -100 for apart where possible. And any new nurse or student who must always have a named senior or group on shift with them: add_supervision_rule, always a must.",
     ],
     proposeWith: [
       "add_staffing_requirement",
@@ -233,6 +244,7 @@ export const SETUP_INSTRUCTIONS: readonly string[] = [
   "After the user applies, call get_setup_progress again and continue with the new nextStep.",
   "If the user says an optional step does not apply (for example nobody has leave), move on to the step after it.",
   "If knownGaps is above 0, call suggest_feasibility_options before offering to run Optimize.",
+  "If weightFindings is not empty, explain each finding in plain words and offer its fix (its suggestedWeight) before offering to run Optimize.",
   TRUTHFUL_SUMMARY_RULE,
 ];
 
@@ -451,8 +463,8 @@ export const MAX_OPTIONS = 3;
 export const MAX_BORROWED = 3;
 export const MAX_NEW_STAFF = 2;
 export const MAX_EXPLAINED_FINDINGS = 5;
-/** The strength a softened request gets (a finite weight the solver may break only if it must). */
-export const SOFT_REQUEST_WEIGHT = 10;
+/** The strength a softened request gets: a nurse wish on the priority ladder (20 to 40). */
+export const SOFT_REQUEST_WEIGHT = 20;
 export const LONG_SHIFT_MINUTES = 660;
 
 export const SAFETY_FLOOR: readonly string[] = [

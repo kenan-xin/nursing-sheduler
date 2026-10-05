@@ -23,6 +23,7 @@ import {
 import { z } from "zod";
 import { useScenarioStore, useAuthorityStore, useHotStore, pickScenario } from "@/lib/store";
 import { summarizeScenario } from "@/lib/ai/assistant/scenario-context";
+import { checkWeightOrder } from "@/lib/rules/priority-ladder";
 import { useHelpTools } from "./use-help-tools";
 import { useProposalTools } from "./use-proposal-tools";
 import { useDiagnosticTools } from "./use-diagnostic-tools";
@@ -117,7 +118,9 @@ export function useModelVisibleTools(agentId: string, turnEpoch: number): void {
         "Check which set-up steps of this schedule are finished and what to do next. Call it " +
         "when the user wants to set up a schedule, asks what is left, or after they apply a " +
         "set-up change. Follow nextStep: ask only its questions, prepare that one step as one " +
-        "change, and wait for the user to apply it before moving on.",
+        "change, and wait for the user to apply it before moving on. Plan weights by " +
+        "priorities, and before offering Optimize explain each weightFindings entry and " +
+        "offer its fix.",
       handler: async () => readSetupProgress(),
     },
     [agentId, turnEpoch],
@@ -153,6 +156,7 @@ export function readSetupProgress(): SetupProgress {
     uncoveredShifts: coverage.undefinedSection?.items ?? [],
     knownGaps: findStaffingShortfalls(scenario).length,
     staffingBalance: computeStaffingBalance(scenario),
+    weightFindings: checkWeightOrder(scenario),
   });
 }
 

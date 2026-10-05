@@ -128,7 +128,7 @@ describe("saveShiftTypeCard", () => {
       date: ["ALL"],
       requiredNumPeople: 4,
       preferredNumPeople: 5,
-      weight: -50,
+      weight: -10,
     });
   });
 

@@ -39,11 +39,11 @@ import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 /**
  * The single, non-editable weight every covering card serializes with. A covering
  * is a hard OR reification the backend applies regardless of weight (spec 11
- * EDGE-CV-04), so the editor hides the weight field and stamps this constant. `1`
- * matches the prototype's `DEFAULT_WEIGHT` (spec 11 FR-CV-06) and is always
- * producer-valid (a finite integer).
+ * EDGE-CV-04), so the editor hides the weight field and stamps this constant.
+ * Infinity says what the rule is, a must, and matches the assistant (priority
+ * ladder spec section 9, bead 12z8).
  */
-export const COVERING_WEIGHT = 1;
+export const COVERING_WEIGHT = Infinity;
 
 /** A person / shift-type / date reference as authored (the backend `int | str`). */
 export type CoveringRef = PersonRef | ShiftTypeRef | DateRef;

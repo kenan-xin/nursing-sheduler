@@ -57,7 +57,7 @@ describe("empty-dates → OMITTED via the T05 serialization boundary (FR-CV-12, 
     expect(covering.preceptees).toEqual([["Lil"]]);
     expect(covering.shiftTypes).toEqual(["D"]);
     // The inert weight is stamped and serialized.
-    expect(covering.weight).toBe(1);
+    expect(covering.weight).toBe(Infinity);
   });
 
   it("a covering with selected dates serializes an explicit flat date array", () => {

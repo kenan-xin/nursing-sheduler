@@ -99,7 +99,8 @@ describe("the rule arms' text states what the solver enforces", () => {
     const weight = arm("add_shift_sequence_rule").weight.description ?? "";
     expect(weight).toContain('"-infinity" = must never happen');
     expect(weight).toContain("impossible");
-    expect(weight).toMatch(/"10"/);
+    expect(weight).toMatch(/"-100" to "-300"/);
+    expect(weight).toMatch(/"-1000"/);
     expect(arm("add_count_rule").weight.description).not.toContain("impossible");
   });
 

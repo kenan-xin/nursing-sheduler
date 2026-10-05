@@ -75,6 +75,7 @@ import {
   type CoveringFormState,
 } from "@/components/coverings/coverings-model";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
+import { weightBandRefusal } from "@/lib/rules/priority-ladder";
 import {
   buildSuccessionCard,
   validateSuccessionForm,
@@ -648,10 +649,10 @@ describe("leave and request arms are the Requests page's quick paint", () => {
         personId: "Ben",
         startDate: iso(21),
         endDate: iso(23),
-        weight: -5,
+        weight: -20,
       },
       ["OFF"],
-      -5,
+      -20,
       days(21, 23),
     ],
     [
@@ -674,10 +675,10 @@ describe("leave and request arms are the Requests page's quick paint", () => {
         shiftType: "N",
         startDate: iso(19),
         endDate: iso(25),
-        weight: -5,
+        weight: -20,
       },
       ["N"],
-      -5,
+      -20,
       days(19, 25),
     ],
     [
@@ -713,10 +714,10 @@ describe("leave and request arms are the Requests page's quick paint", () => {
         shiftType: "Nights",
         startDate: iso(5),
         endDate: iso(5),
-        weight: 3,
+        weight: 30,
       },
       ["Nights"],
-      3,
+      30,
       days(5, 5),
     ],
     [
@@ -726,10 +727,10 @@ describe("leave and request arms are the Requests page's quick paint", () => {
         shiftType: "ALL",
         startDate: iso(1),
         endDate: iso(3),
-        weight: 1,
+        weight: 20,
       },
       ["ALL"],
-      1,
+      20,
       days(1, 3),
     ],
     [
@@ -805,6 +806,11 @@ function carryMarkers<T extends { disabled?: boolean; applied?: boolean }>(
 
 const valid = (errors: object) => Object.keys(errors).length === 0;
 
+// The one deliberate deviation from the forms (bead rnrt): the assistant also refuses a
+// weight off the priority ladder, which the screens still accept.
+const onLadder = (...args: Parameters<typeof weightBandRefusal>) =>
+  weightBandRefusal(...args) === undefined;
+
 describe("succession arms are the Shift sequences form's Save", () => {
   const rows: {
     people: PersonRef[];
@@ -822,8 +828,9 @@ describe("succession arms are the Shift sequences form's Save", () => {
       people: ["RN"],
       pattern: ["Night", "OFF", "Day"],
       dates: ["WEEKEND"],
-      weight: "-50",
+      weight: "-200",
     },
+    { people: ["RN"], pattern: ["Night", "Day"], dates: ["ALL"], weight: "-50" }, // off the ladder
     {
       people: ["ana"],
       pattern: ["Day", "Day"],
@@ -857,7 +864,10 @@ describe("succession arms are the Shift sequences form's Save", () => {
         description: `row ${i}`,
         ...row,
       });
-      expect(assistant.ok, `row ${i}`).toBe(valid(validateSuccessionForm(draft)));
+      expect(assistant.ok, `row ${i}`).toBe(
+        valid(validateSuccessionForm(draft)) &&
+          onLadder("successions", buildSuccessionCard(draft, "x")),
+      );
       if (!assistant.ok) continue;
       const uid = assistant.next.cardsByKind.successions.at(-1)!.uid;
       // `use-successions.ts` add: append `buildSuccessionCard(form)`.
@@ -888,7 +898,9 @@ describe("succession arms are the Shift sequences form's Save", () => {
       });
       const manual = carryMarkers(source, buildSuccessionCard(draft, "suc-nd"));
       const changes = JSON.stringify(manual) !== JSON.stringify(source);
-      expect(assistant.ok, `row ${i}`).toBe(valid(validateSuccessionForm(draft)) && changes);
+      expect(assistant.ok, `row ${i}`).toBe(
+        valid(validateSuccessionForm(draft)) && changes && onLadder("successions", manual),
+      );
       if (assistant.ok) expect(assistant.next.cardsByKind.successions).toEqual([manual]);
     }
   });
@@ -911,14 +923,15 @@ describe("count arms are the Shift counts form's Save", () => {
       shiftTypes: ["Working shifts", "OFF"],
       expression: "x >= T",
       target: 3,
-      weight: "10",
+      weight: "4",
     },
     {
       shiftTypes: ["Night"],
       expression: "|x - T|^2",
       target: 8,
-      weight: "-10",
+      weight: "-4",
     },
+    { shiftTypes: ["Night"], expression: "|x - T|^2", target: 8, weight: "-10" }, // off the ladder
     {
       shiftTypes: ["Night"],
       expression: "|x - T|^2",
@@ -951,7 +964,10 @@ describe("count arms are the Shift counts form's Save", () => {
         dates: ["ALL"],
         ...row,
       });
-      expect(assistant.ok, `row ${i}`).toBe(valid(validateCountForm(draft, domain)));
+      const ok = valid(validateCountForm(draft, domain));
+      expect(assistant.ok, `row ${i}`).toBe(
+        ok && onLadder("counts", buildCountCard(draft, domain, "x")),
+      );
       if (!assistant.ok) continue;
       const uid = assistant.next.cardsByKind.counts.at(-1)!.uid;
       expect(assistant.next.cardsByKind.counts).toEqual([
@@ -983,7 +999,7 @@ describe("count arms are the Shift counts form's Save", () => {
       const ok = valid(validateCountForm(draft, domain));
       const manual = ok ? carryMarkers(source, buildCountCard(draft, domain, "cnt-nights")) : null;
       const changes = manual !== null && JSON.stringify(manual) !== JSON.stringify(source);
-      expect(assistant.ok, `row ${i}`).toBe(ok && changes);
+      expect(assistant.ok, `row ${i}`).toBe(ok && changes && onLadder("counts", manual!));
       if (assistant.ok) expect(assistant.next.cardsByKind.counts).toEqual([manual]);
     }
   });
@@ -1099,7 +1115,8 @@ describe("requirement arms are the Staffing requirements screen's commit", () =>
 
 describe("a requirement's preferred count and weight are the form's (hg9v)", () => {
   const rows: { requiredNumPeople: number; preferredNumPeople?: number; weight?: string }[] = [
-    { requiredNumPeople: 0, preferredNumPeople: 1, weight: "-50" }, // optional, ideally 1
+    { requiredNumPeople: 0, preferredNumPeople: 1, weight: "-10" }, // optional, ideally 1
+    { requiredNumPeople: 0, preferredNumPeople: 1, weight: "0" }, // a spare place
     { requiredNumPeople: 2, preferredNumPeople: 3, weight: "-infinity" },
     { requiredNumPeople: 1, preferredNumPeople: 2 }, // the form's own weight
     { requiredNumPeople: 2, preferredNumPeople: 2, weight: "10" }, // equal: weight inert
@@ -1188,13 +1205,13 @@ describe("a requirement's preferred count and weight are the form's (hg9v)", () 
       ...fields,
       requiredNumPeople: 0,
       preferredNumPeople: 1,
-      weight: "-50",
+      weight: "-10",
     });
     if (!assistant.ok) throw new Error(assistant.rejection.message);
     expect(assistant.next.cardsByKind.requirements.at(-1)).toMatchObject({
       requiredNumPeople: 0,
       preferredNumPeople: 1,
-      weight: -50,
+      weight: -10,
     });
   });
 });
@@ -1307,13 +1324,13 @@ describe("pairing arms are the Affinities form's Save", () => {
     dates: string[];
     weight: string;
   }[] = [
-    { people: ["ana"], withPeople: ["ben"], shiftTypes: ["Night"], dates: ["ALL"], weight: "-10" },
+    { people: ["ana"], withPeople: ["ben"], shiftTypes: ["Night"], dates: ["ALL"], weight: "-100" },
     {
       people: ["RN"],
       withPeople: ["Senior"],
       shiftTypes: ["Working shifts"],
       dates: ["WEEKEND"],
-      weight: "5",
+      weight: "200",
     },
     {
       people: ["ana"],

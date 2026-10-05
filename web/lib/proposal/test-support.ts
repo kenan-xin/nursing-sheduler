@@ -180,7 +180,7 @@ export function pairingWardScenario(): ScenarioUiState {
           people2: ["ben"],
           shiftTypes: ["Night"],
           date: ["ALL"],
-          weight: -10,
+          weight: -100,
         },
       ],
       coverings: [
@@ -190,7 +190,7 @@ export function pairingWardScenario(): ScenarioUiState {
           preceptors: [["Senior"]],
           preceptees: [["ben"]],
           shiftTypes: ["Day"],
-          weight: 1,
+          weight: Infinity,
         },
       ],
     },

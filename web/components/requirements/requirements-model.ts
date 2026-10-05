@@ -161,9 +161,10 @@ export interface RequirementFormState {
   requiredNumPeopleOverrides: OverrideRow[];
 }
 
-/** A fresh, empty draft (spec 05 FR-PR-20, in-form weight default per the current
- *  prototype default `−50` — distinct from the `-1` FORCED save value when the
- *  weight is inert; see `buildRequirementCard`). */
+/** A fresh, empty draft (spec 05 FR-PR-20). The in-form weight default is -10 per
+ *  empty preferred place, below a nurse wish on the priority ladder (bead 12z8) —
+ *  distinct from the `-1` FORCED save value when the weight is inert; see
+ *  `buildRequirementCard`. */
 export function emptyRequirementForm(): RequirementFormState {
   return {
     description: "",
@@ -173,7 +174,7 @@ export function emptyRequirementForm(): RequirementFormState {
     qualifiedPeople: [],
     preferredNumPeople: "",
     date: [],
-    weight: -50,
+    weight: -10,
     skillMix: [],
     requiredNumPeopleOverrides: [],
   };

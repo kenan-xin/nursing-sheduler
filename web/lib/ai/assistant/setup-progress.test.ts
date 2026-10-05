@@ -3,6 +3,7 @@ import { computeScenarioSummary } from "@/components/home/scenario-summary";
 import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import { deriveSetupProgress } from "./setup-progress";
 import { computeStaffingBalance } from "./staffing-balance";
+import { checkWeightOrder, type LadderFinding } from "@/lib/rules/priority-ladder";
 
 const input = (scenario = SCENARIOS.empty()) => ({
   summary: computeScenarioSummary(scenario),
@@ -10,6 +11,7 @@ const input = (scenario = SCENARIOS.empty()) => ({
   uncoveredShifts: [] as string[],
   knownGaps: 0,
   staffingBalance: null,
+  weightFindings: [] as LadderFinding[],
 });
 
 describe("deriveSetupProgress", () => {
@@ -72,6 +74,17 @@ describe("deriveSetupProgress", () => {
     expect(
       deriveSetupProgress({ ...input(SCENARIOS.ruleTooStrict()), staffingBalance }).staffingBalance,
     ).toBe(staffingBalance);
+  });
+
+  it("returns the weights off the priority ladder, with the tier table to explain them", () => {
+    const scenario = SCENARIOS.ruleTooStrict();
+    scenario.reqData.push({ kind: "off", person: "x", date: "01", weight: 1 });
+    const weightFindings = checkWeightOrder(scenario);
+    expect(weightFindings.length).toBeGreaterThan(0);
+    const progress = deriveSetupProgress({ ...input(scenario), weightFindings });
+    expect(progress.weightFindings).toBe(weightFindings);
+    expect(progress.priorities.join(" ")).toMatch(/20 to 40/);
+    expect(progress.instructions.join(" ")).toMatch(/weightFindings/);
   });
 
   it("carries the playbook version and instructions", () => {

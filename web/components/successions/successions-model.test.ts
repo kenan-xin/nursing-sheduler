@@ -46,7 +46,7 @@ describe("emptySuccessionForm defaults (spec 05 FR-PR-30)", () => {
       person: [],
       pattern: [],
       date: [],
-      weight: -1,
+      weight: -100,
     });
   });
 });

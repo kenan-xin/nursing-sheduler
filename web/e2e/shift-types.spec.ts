@@ -391,7 +391,7 @@ test.describe.serial("DR-3 Shifts card-grid", () => {
       date: ["ALL"],
       requiredNumPeople: 2,
       preferredNumPeople: 3,
-      weight: -50,
+      weight: -10,
     });
 
     const before = await readHistoryLength(page);

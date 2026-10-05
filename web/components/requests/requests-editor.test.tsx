@@ -474,8 +474,8 @@ describe("RequestsEditor — Requests CSV import round trip (F1)", () => {
   it("asks before removing cells, says how many, and removes nothing on Cancel", async () => {
     await seed({ ...BASE_SEED, reqData: MATRIX });
     await openImport();
-    // Bare entries at the default quick-paint weight 0 delete their selector.
-    uploadCsv(["person,01,02,03", "Aisha,AM,,", "Chloe,,OFF,"].join("\n"));
+    // Entries at weight 0 delete their selector (the quick-paint default is 20).
+    uploadCsv(["person,01,02,03", "Aisha,AM:0,,", "Chloe,,OFF:0,"].join("\n"));
 
     const dialog = await screen.findByTestId("clear-confirm-dialog");
     expect(dialog).toHaveTextContent("This import will remove 2 existing requests. Import anyway?");
@@ -489,7 +489,7 @@ describe("RequestsEditor — Requests CSV import round trip (F1)", () => {
   it("removes and reports the count once confirmed", async () => {
     await seed({ ...BASE_SEED, reqData: MATRIX });
     await openImport();
-    uploadCsv(["person,01,02,03", "Aisha,AM,,", "Chloe,,OFF,"].join("\n"));
+    uploadCsv(["person,01,02,03", "Aisha,AM:0,,", "Chloe,,OFF:0,"].join("\n"));
     fireEvent.click(await screen.findByTestId("clear-confirm-confirm"));
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith("CSV imported: 0 added, 0 changed, 2 removed."),

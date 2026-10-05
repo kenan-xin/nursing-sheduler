@@ -42,14 +42,14 @@ const BASE = scenario({
 });
 
 describe("emptyAffinityForm defaults (spec 05 FR-PR-60)", () => {
-  it("matches the documented affinity defaults — weight defaults to +1 (EDGE-PR-06)", () => {
+  it("matches the documented affinity defaults — weight defaults to -100, apart where possible (12z8)", () => {
     expect(emptyAffinityForm()).toEqual({
       description: "",
       people1: [],
       people2: [],
       shiftTypes: [],
       date: [],
-      weight: 1,
+      weight: -100,
     });
   });
 });
@@ -133,7 +133,7 @@ describe("buildAffinityCard (spec 05 FR-PR-60/61)", () => {
     expect(card.people2).toEqual(["Aisha"]);
     expect(card.shiftTypes).toEqual(["D"]);
     expect(card.date).toEqual(["2026-01-01"]);
-    expect(card.weight).toBe(1);
+    expect(card.weight).toBe(-100);
   });
 
   it("preserves the authored description verbatim, even empty (FR-PR-04 — shared with Counts)", () => {

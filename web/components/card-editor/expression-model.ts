@@ -72,10 +72,11 @@ export function isSquaredExpression(expression: string): boolean {
   return expression === "|x - T|^2";
 }
 
-/** A new count's weight: `+1` rewards a linear expression holding; the squared
- *  form only accepts a weight of 0 or less, so it pulls toward T with `-1`. */
+/** A new count's weight, the fairness tier of the priority ladder (bead 12z8): `+4`
+ *  rewards a linear expression holding; the squared form only accepts a weight of 0
+ *  or less, so it pulls toward T with `-4`. */
 export function defaultCountWeight(expression: string): number {
-  return isSquaredExpression(expression) ? -1 : 1;
+  return isSquaredExpression(expression) ? -4 : 4;
 }
 
 /**
