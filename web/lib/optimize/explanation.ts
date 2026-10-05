@@ -86,6 +86,8 @@ export interface RuleSource {
   type: CanonicalPreference["type"];
   label: string;
   hard: boolean;
+  /** The submitted weight (`Infinity` for a hard rule); read for the per-tier score split. */
+  weight?: number;
 }
 
 /** Captured at submit: the rule map and the anonymised-to-real people map. */
@@ -151,6 +153,7 @@ export function preferenceSources(
       type: pref.type,
       label,
       hard: !Number.isFinite(weight),
+      weight,
     };
   });
 }
