@@ -19,8 +19,10 @@ import { StartOverCard } from "@/components/shell/new-schedule-button";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { AnonymiseCard } from "./anonymise-card";
 import { ImportWarningsBanner } from "./import-warnings-banner";
+import { RecentSchedulesCard } from "./recent-schedules-card";
 import { buildSampleScenarioYaml } from "./load-controls-core";
 import { ScenarioFileCard } from "./scenario-file-card";
+import { ScenarioIssuesList } from "./scenario-issues-list";
 import { ScenarioYamlPreview } from "./scenario-yaml-preview";
 import { UploadModal } from "./upload-modal";
 import { useScenarioImport } from "./use-scenario-import";
@@ -40,8 +42,17 @@ export function SaveLoadWorkspace() {
   const [draft, setDraft] = useState("");
   // FR-PR-06: register the open Edit-YAML draft as a losable draft (T08a).
   useLosableDraft("save-load:edit-yaml", editing, "Edit YAML");
-  const { issues, clearIssues, clearImportState, confirm, warnings, dismissWarnings, handleFile } =
-    useScenarioImport({ onCommitted: () => setEditing(false) });
+  const {
+    issues,
+    loadIssues,
+    clearIssues,
+    clearImportState,
+    confirm,
+    warnings,
+    dismissWarnings,
+    handleFile,
+    handleEdit,
+  } = useScenarioImport({ onCommitted: () => setEditing(false) });
 
   const openUpload = () => {
     clearIssues();
@@ -49,7 +60,7 @@ export function SaveLoadWorkspace() {
   };
 
   const handleUploadedFile = (text: string) => {
-    handleFile(text);
+    void handleFile(text);
     setUploadOpen(false);
   };
 
@@ -80,11 +91,20 @@ export function SaveLoadWorkspace() {
     clearImportState();
   };
 
-  const applyEdit = () => handleFile(draft);
+  // One undoable edit on the same identity, not a Load (C-06).
+  const applyEdit = () => handleEdit(draft);
 
   return (
     <>
       {warnings ? <ImportWarningsBanner warnings={warnings} onDismiss={dismissWarnings} /> : null}
+      {/* C-22: an older file with issues still loads; they block Optimize only. */}
+      {loadIssues ? (
+        <ScenarioIssuesList
+          issues={loadIssues}
+          action="Optimize can run"
+          hint="The file has loaded. Fix these on the screens they name, or in Edit YAML."
+        />
+      ) : null}
 
       {/* `.ns-grid2` — two-up at 900px with a `--space-4` gap (ScreenSaveLoad.dc.html:37).
           `lg` (1024px) held this at one column for 124px more than the design does, and
@@ -104,6 +124,7 @@ export function SaveLoadWorkspace() {
             onUpload={openUpload}
             onStartEdit={startEdit}
           />
+          <RecentSchedulesCard onOpened={handleScenarioReplaced} />
           <StartOverCard
             onResetComplete={handleScenarioReplaced}
             onExampleLoaded={handleScenarioReplaced}
@@ -138,6 +159,9 @@ export function SaveLoadWorkspace() {
           title={confirm.title}
           description={confirm.description}
           detail={confirm.detail}
+          destructive={confirm.destructive}
+          confirmLabel={confirm.confirmLabel}
+          cancelLabel={confirm.cancelLabel}
           onContinue={confirm.onContinue}
         />
       ) : null}

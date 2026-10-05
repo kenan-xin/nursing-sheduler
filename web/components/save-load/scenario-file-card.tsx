@@ -25,7 +25,7 @@ import { FaCheck, FaCopy, FaDownload, FaPen, FaUpload } from "@/components/icons
 import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
 import { SAVE_LOAD_DOWNLOAD_ANCHOR } from "./capability-anchors";
 import { BackupStatusBadge } from "./backup-status-badge";
-import { performCopy, performDownload, SCENARIO_DOWNLOAD_FILENAME } from "./scenario-file-export";
+import { performCopy, performDownload, scenarioDownloadFilename } from "./scenario-file-export";
 import { ScenarioIssuesList } from "./scenario-issues-list";
 
 /** Trigger a browser file download for the given text via a throwaway `<a>`. */
@@ -89,7 +89,7 @@ export function ScenarioFileCard({
       return;
     }
     setIssues(null);
-    toast.success(`Downloaded ${SCENARIO_DOWNLOAD_FILENAME}`);
+    toast.success(`Downloaded ${scenarioDownloadFilename()}`);
   };
 
   const handleCopy = () => {
@@ -115,6 +115,7 @@ export function ScenarioFileCard({
       })
       .catch((err) => {
         console.error("Failed to copy to clipboard:", err);
+        toast.error("Could not copy to the clipboard. Use Download instead.");
       });
   };
 
@@ -171,7 +172,13 @@ export function ScenarioFileCard({
           </Button>
         </div>
         {issues ? <ScenarioIssuesList issues={issues} /> : null}
-        {importIssues ? <ScenarioIssuesList issues={importIssues} /> : null}
+        {importIssues ? (
+          <ScenarioIssuesList
+            issues={importIssues}
+            action="this file can load"
+            hint="Paste the file into Edit YAML to fix it."
+          />
+        ) : null}
       </div>
     </section>
   );

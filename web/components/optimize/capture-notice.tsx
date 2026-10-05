@@ -18,6 +18,8 @@
 // it. Retry is offered only where a retry could actually succeed: never for a
 // structurally terminal cause.
 
+import { useState } from "react";
+import { ConfirmDialog } from "@/components/shell/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import type { RosterCaptureState } from "@/lib/optimize";
 import { Callout } from "./callout";
@@ -31,22 +33,36 @@ export interface CaptureNoticeProps {
 }
 
 export function CaptureNotice({ state, onRetry, onDismiss, dismissPending }: CaptureNoticeProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   if (state.status === "committed") {
+    // C-18 — deleting removes only the saved result. A roster already on the
+    // Roster screen (even one loaded from this result) stays, so the dialog says so.
     return (
       <Callout
         tone="info"
         placement="page"
         data-testid="optimize-capture-committed"
         actions={
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onDismiss}
-            disabled={dismissPending}
-            data-testid="optimize-capture-dismiss"
-          >
-            Discard the saved roster
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setConfirmDelete(true)}
+              disabled={dismissPending}
+              data-testid="optimize-capture-dismiss"
+            >
+              Delete this result
+            </Button>
+            <ConfirmDialog
+              open={confirmDelete}
+              onOpenChange={setConfirmDelete}
+              title="Delete this result?"
+              description="This deletes the saved result from this browser. The roster on the Roster screen stays as it is, and your downloaded XLSX is unaffected."
+              confirmLabel="Delete this result"
+              variant="destructive"
+              onConfirm={onDismiss}
+            />
+          </>
         }
       >
         The roster for this run was saved in this browser.
@@ -160,7 +176,7 @@ export function CaptureNotice({ state, onRetry, onDismiss, dismissPending }: Cap
         tone="warn"
         placement="page"
         data-testid="optimize-capture-dismiss-failed"
-        title="The saved roster could not be discarded"
+        title="The saved result could not be deleted"
         actions={
           <Button
             variant="secondary"
@@ -169,7 +185,7 @@ export function CaptureNotice({ state, onRetry, onDismiss, dismissPending }: Cap
             disabled={dismissPending}
             data-testid="optimize-capture-dismiss"
           >
-            Try discarding again
+            Try deleting again
           </Button>
         }
         alert

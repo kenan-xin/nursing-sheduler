@@ -28,7 +28,7 @@ import {
   type AssistantCommandV1,
 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
-import { assistantProposalCommands } from "@/lib/store";
+import { assistantProposalCommands, useScenarioStore } from "@/lib/store";
 import {
   BALANCE_RULE_NOTE,
   REST_PRACTICE_WARNING,
@@ -155,6 +155,8 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
           outcome: "untested",
         });
 
+        // A refused revision set the earlier Preview aside durably; show it that way.
+        if (live && !outcome.ok) assistantActions.rereadProposal();
         // RE-CHECKED AFTER THE AWAIT. Preparation is durable work with a real gap in
         // it, and a Preview published into an interrupted turn is a live Apply
         // control for a conversation the user already stopped.
@@ -173,6 +175,10 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
             // goes back to the user.
             return (
               `The app refused that change: ${outcome.rejection.message} ` +
+              (live
+                ? "The earlier preview was set aside and can no longer be applied; tell the user " +
+                  "why this revision was refused. "
+                : "") +
               "If the refusal lists the valid choices or names the right format, and what the " +
               "user asked for clearly matches one of them, correct that operation and prepare " +
               "the change again, once. When the list is cut short, read the full list with " +
@@ -232,7 +238,10 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
           (screen
             ? `Apply opens the "${screen}" screen; call it by that name, never another. `
             : "") +
-          (relaxesRestRule(outcome.proposal.commands)
+          (relaxesRestRule(
+            outcome.proposal.commands,
+            useScenarioStore.getState().cardsByKind.successions,
+          )
             ? `This change relaxes a rest rule, so also say, in one short line: "${REST_PRACTICE_WARNING}" `
             : "") +
           (setsBalanceRule(outcome.proposal.commands)

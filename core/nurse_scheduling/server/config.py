@@ -66,6 +66,20 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def default_child_memory_limit_mb(cpu_count: int | None = None) -> int:
+    """Default solver-child RLIMIT_DATA in MiB, scaled by CP-SAT's worker count (bead x2gy).
+
+    CP-SAT with num_workers unset runs one worker per online CPU, which is
+    `os.cpu_count()`: taskset and container CPU quotas change neither. The 87-person
+    ward's peak VmData over 300 s grows about 350-410 MiB per worker (2: 1.11-1.34 GiB,
+    4: 1.94, 8: 3.53, 16: 5.93, 32: 12.9). 704 + 448 per worker gives 1600 on 2-CPU tc1
+    (the old fixed 1536 plus room for a why-solve rebuild), 16-25% headroom at 4-16 and
+    12% at 32.
+    """
+    workers = cpu_count if cpu_count is not None else (os.cpu_count() or 1)
+    return 704 + 448 * workers
+
+
 def _non_negative_int(name: str, default: int) -> int:
     """Read a non-negative integer environment setting.
 
@@ -199,6 +213,12 @@ class ServerSettings:
     `ServerSettings(max_pending_jobs=1)` stay valid. `from_env` and the compose file
     supply the shipped value of 1.
     """
+    max_pending_per_client: int = 0
+    """Queued, running, or cancelling jobs one `client_id` may hold, 0 for no cap (bead 99db D-07).
+
+    Zero for direct construction; `from_env` supplies the shipped 2 from JOB_MAX_PENDING_PER_CLIENT.
+    The client controls its `client_id` cookie, so this guards accidents, not abuse.
+    """
     max_retained_jobs: int = DEFAULT_MAX_RETAINED_JOBS
     """Maximum total jobs retained, including terminal history."""
     job_retention_seconds: int = DEFAULT_JOB_RETENTION_SECONDS
@@ -243,6 +263,13 @@ class ServerSettings:
     """Namespace and schema version prepended to telemetry keys."""
     usage_metrics_retention_days: int = DEFAULT_USAGE_METRICS_RETENTION_DAYS
     """Retention period for every telemetry row."""
+    child_memory_limit_mb: int = 0
+    """Data-segment cap (RLIMIT_DATA) in MiB on each solver child, 0 for none (bead 99db).
+
+    Zero for direct construction. `from_env` reads OPTIMIZE_CHILD_MEMORY_LIMIT_MB as an exact
+    cap, and when it is unset uses `default_child_memory_limit_mb()`, which scales with the
+    CP-SAT worker count (bead x2gy).
+    """
     cookie_secure: bool = False
     """Whether the client correlation cookie is always marked secure.
 
@@ -342,6 +369,7 @@ class ServerSettings:
             redis_key_prefix=os.getenv("JOB_REDIS_KEY_PREFIX", "nurse_scheduling:jobs:v2"),
             max_pending_jobs=_positive_int("JOB_MAX_PENDING", 32),
             ordinary_reserved_slots=_non_negative_int("JOB_ORDINARY_RESERVED_SLOTS", 1),
+            max_pending_per_client=_non_negative_int("JOB_MAX_PENDING_PER_CLIENT", 2),
             max_retained_jobs=_positive_int("JOB_MAX_RETAINED", DEFAULT_MAX_RETAINED_JOBS),
             job_retention_seconds=_positive_int("JOB_RETENTION_SECONDS", DEFAULT_JOB_RETENTION_SECONDS),
             max_events_per_job=_positive_int("JOB_MAX_EVENTS_PER_JOB", DEFAULT_MAX_EVENTS_PER_JOB),
@@ -364,6 +392,7 @@ class ServerSettings:
             auth_token=os.getenv(AUTH_TOKEN_ENV_NAME),
             auth_tokens=parse_auth_credentials(os.getenv(AUTH_TOKENS_ENV_NAME)),
             auth_required=_boolean(AUTH_REQUIRED_ENV_NAME, False),
+            child_memory_limit_mb=_non_negative_int("OPTIMIZE_CHILD_MEMORY_LIMIT_MB", default_child_memory_limit_mb()),
             cookie_secure=_boolean("API_COOKIE_SECURE", False),
             usage_metrics_enabled=_boolean("USAGE_METRICS_ENABLED", False),
             usage_metrics_key_prefix=os.getenv(

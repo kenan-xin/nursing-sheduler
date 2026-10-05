@@ -12,7 +12,12 @@
 // "Shift Type Coverings" screen.
 
 import type { AppMode } from "@/lib/mode/mode";
-import type { DiffScope, ProposalDiff, ProposalDiffEntry } from "@/lib/proposal/diff";
+import {
+  SCOPE_WITHOUT_CAPABILITY,
+  type DiffScope,
+  type ProposalDiff,
+  type ProposalDiffEntry,
+} from "@/lib/proposal/diff";
 
 const RULE_SCOPES: ReadonlySet<DiffScope> = new Set<DiffScope>([
   "staffing-requirements",
@@ -39,6 +44,7 @@ const SCREEN_ORDER: readonly string[] = [
 /** [key prefix, singular, plural]. `available:` is absent: it restates an added person. */
 const NOUNS: readonly (readonly [string, string, string])[] = [
   ["dates:range", "roster period", "roster periods"],
+  ["dates:holiday-import", "holiday import switch", "holiday import switches"],
   ["dategroup:", "date group", "date groups"],
   ["peoplegroup:", "staff group", "staff groups"],
   ["person:", "person", "people"],
@@ -66,7 +72,7 @@ const VERB: Record<ProposalDiffEntry["kind"], string> = {
 const AFFECTS = /^(binds|narrowed):/;
 
 export function screenForScope(scope: DiffScope, mode: AppMode): string | null {
-  if (scope === "export-layout") return null;
+  if (scope === SCOPE_WITHOUT_CAPABILITY) return null;
   if (mode === "guided" && RULE_SCOPES.has(scope)) return "rule-library";
   return scope;
 }
@@ -75,12 +81,12 @@ export function screenForScope(scope: DiffScope, mode: AppMode): string | null {
 export function targetKeyFor(entry: ProposalDiffEntry): string | null {
   if (entry.kind === "removed") return null;
   const { key } = entry;
-  if (key === "export:layout") return null;
   // A cover warning restates the count line above it; the count line is the thing to
   // outline, and the warning has no row of its own to point at.
   if (key.startsWith("cover-note:")) return null;
-  // offrun:<person>|<start>|<end>; the person is already stableStringified and may hold "|".
-  const offrun = /^offrun:(.*)\|[^|]*\|[^|]*$/.exec(key);
+  // offrun:<person>|<start>|<end> (groupleave: likewise, for a staff-group row); the
+  // person is already stableStringified and may hold "|".
+  const offrun = /^(?:offrun|groupleave):(.*)\|[^|]*\|[^|]*$/.exec(key);
   if (offrun) return `person:${offrun[1]}`;
   if (key.startsWith("available:")) return `person:${key.slice("available:".length)}`;
   // binds:<uid>|<person>; a uid never holds "|".

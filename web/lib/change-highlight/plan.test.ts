@@ -25,9 +25,6 @@ describe("screenForScope", () => {
     }
     expect(screenForScope("staff-list", "guided")).toBe("staff-list");
   });
-  it("export layout has no screen", () => {
-    expect(screenForScope("export-layout", "advanced")).toBeNull();
-  });
 });
 
 describe("targetKeyFor", () => {
@@ -41,13 +38,13 @@ describe("targetKeyFor", () => {
   it("points a folded days-off run and an availability line at the person's row", () => {
     expect(targetKeyFor(entry('offrun:"cy"|01|14', "leave-and-requests"))).toBe('person:"cy"');
     expect(targetKeyFor(entry('available:"cy"', "leave-and-requests"))).toBe('person:"cy"');
+    expect(
+      targetKeyFor(entry('groupleave:"Seniors"|2026-10-05|2026-10-07', "leave-and-requests")),
+    ).toBe('person:"Seniors"');
   });
   it("points a binds/narrowed consequence at its count rule", () => {
     expect(targetKeyFor(entry('binds:u1|"cy"', "shift-counts"))).toBe("rule:counts:u1");
     expect(targetKeyFor(entry("narrowed:u1", "shift-counts", "changed"))).toBe("rule:counts:u1");
-  });
-  it("has no target for the export layout", () => {
-    expect(targetKeyFor(entry("export:layout", "export-layout", "changed"))).toBeNull();
   });
   it("points a cover row at itself, and leaves its warnings untargeted", () => {
     // The row key is the Staff row's own change key (d582).
@@ -135,14 +132,6 @@ describe("planChangeHighlight", () => {
       directCount: 2,
     });
     expect(plan.others).toEqual([]);
-  });
-
-  it("returns no screen for an export-only change", () => {
-    const plan = planChangeHighlight(
-      { direct: [entry("export:layout", "export-layout", "changed")], cascade: [] },
-      "advanced",
-    );
-    expect(plan).toEqual({ primary: null, others: [] });
   });
 
   it("announces a booked cover on the Staff screen, and its warnings as consequences", () => {

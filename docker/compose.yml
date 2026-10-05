@@ -72,6 +72,14 @@ services:
       # to the backend's own 90s (config.py) — override via docker/.env only if
       # needed. Does not change the private one-worker topology.
       OPTIMIZE_TIMEOUT_GRACE_SECONDS: ${OPTIMIZE_TIMEOUT_GRACE_SECONDS:-90}
+      # Unset = the backend defaults (config.py); uncomment to override via docker/.env.
+      # Data-segment cap (RLIMIT_DATA) per solver child in MiB, 0 = none. Unset = 704 + 448 per CPU
+      # (CP-SAT runs one worker per host CPU): 1600 on 2-CPU tc1. A set value is exact, not scaled.
+      # A child that hits it fails as scenario_too_large instead of OOM-killing the box.
+      # OPTIMIZE_CHILD_MEMORY_LIMIT_MB: ${OPTIMIZE_CHILD_MEMORY_LIMIT_MB}
+      # Queued/running jobs one client_id (a cookie) may hold, 0 = none; stops one browser
+      # filling the queue by accident (429 job_capacity_exceeded), not deliberate abuse.
+      # JOB_MAX_PENDING_PER_CLIENT: ${JOB_MAX_PENDING_PER_CLIENT:-2}
     networks:
       - app
       - data
@@ -79,6 +87,9 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    # Container memory cap, e.g. BACKEND_MEM_LIMIT=2g in the host's env; unset or 0 = none.
+    # tc1 runs dev and prod on 3.6 GB, so a cap keeps a burst of runs from starving the host.
+    mem_limit: ${BACKEND_MEM_LIMIT:-0}
     # `depends_on: service_healthy` only orders STARTUP — Compose does not route or
     # gate runtime traffic on it (docker.com/reference/compose-file/services/#depends_on).
     # When Redis fails, `/ready` and `/health` return a bounded 503 (fail closed),

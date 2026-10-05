@@ -1,5 +1,5 @@
-// The hot ephemeral store (T04): run state, SSE progress, UI scratch, editor
-// drafts, and the in-flight paint gesture. It has NO persist middleware, so
+// The hot ephemeral store (T04): run state, SSE progress, UI scratch, and the
+// in-flight paint gesture. (Open-form drafts live in the nav-guard registry.) It has NO persist middleware, so
 // nothing here ever writes to IndexedDB — 100 SSE progress frames cause zero
 // scenario persist writes (a required acceptance). It also holds the durable
 // store's hydration status, since that is transient UI, not scenario data;
@@ -45,8 +45,6 @@ export interface HotStoreState {
    * T04 provides the slot; the concrete shape is owned by the editor tickets.
    */
   ui: Record<string, unknown>;
-  /** In-progress editor form drafts, keyed by an editor-defined draft id. */
-  drafts: Record<string, unknown>;
   /**
    * Staged paint intents during a drag, keyed by person×date. Each value is a
    * per-coordinate transaction (`erase` / `day-state` / `requests`), not a
@@ -63,8 +61,6 @@ export interface HotStoreState {
   /** Reset the run view to its zero value (New / Load / explicit clear). */
   resetRunView(): void;
   setUi(patch: Record<string, unknown>): void;
-  setDraft(id: string, draft: unknown): void;
-  clearDraft(id: string): void;
 
   /** Start a paint gesture (fresh empty staging buffer). */
   beginPaint(): void;
@@ -90,7 +86,7 @@ export interface HotStoreState {
   cancelPaint(): void;
 
   /**
-   * Reset all ephemeral slices — run, run view, ui, drafts, and any
+   * Reset all ephemeral slices — run, run view, ui, and any
    * in-flight paint — WITHOUT touching `hydrationStatus`. Load / New call this so
    * scenario A's transient state (a staged paint especially) cannot leak into
    * scenario B.
@@ -109,7 +105,6 @@ export function createHotStore() {
     runView: INITIAL_OPTIMIZE_RUN_VIEW,
     runGeneration: 0,
     ui: {},
-    drafts: {},
     paint: null,
 
     setHydrationStatus: (hydrationStatus) => set({ hydrationStatus }),
@@ -132,15 +127,6 @@ export function createHotStore() {
       })),
 
     setUi: (patch) => set((state) => ({ ui: { ...state.ui, ...patch } })),
-
-    setDraft: (id, draft) => set((state) => ({ drafts: { ...state.drafts, [id]: draft } })),
-
-    clearDraft: (id) =>
-      set((state) => {
-        if (!(id in state.drafts)) return state;
-        const { [id]: _removed, ...rest } = state.drafts;
-        return { drafts: rest };
-      }),
 
     beginPaint: () => set({ paint: new Map<PaintCellKey, StagedCoordinate>() }),
 
@@ -184,7 +170,6 @@ export function createHotStore() {
         run: INITIAL_RUN_STATE,
         runView: INITIAL_OPTIMIZE_RUN_VIEW,
         ui: {},
-        drafts: {},
         paint: null,
         runGeneration: state.runGeneration + 1,
       })),

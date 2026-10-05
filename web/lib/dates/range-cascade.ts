@@ -9,8 +9,10 @@
 //   • a date that STAYS but is re-keyed → MIGRATE its references old-id → new-id
 //     (`remapDateReferences`) so matrix cells, date-group members, and export-
 //     layout date rows/columns follow the new format instead of being destroyed.
-// (Full-ISO preference-card date fields are not span ids, so neither the delete
-// nor the migrate ever matches them — they are out of scope by construction.)
+// Preference cards store full ISO dates, never span ids, so the migrate never
+// touches them; a date that LEFT is purged under its ISO form too, so a card
+// date outside the new range is pruned (and the card dropped if emptied,
+// AC-RI-14) exactly like a span-id reference.
 // Requirement overrides are the exception: each is a single ISO date, so one
 // whose date left the range is dropped, or it would reach the solver as an
 // out-of-range date.
@@ -27,8 +29,11 @@ import { isRangeSupported } from "./holidays-sg";
 /** Options for {@link applyRangeChange}. */
 export interface RangeChangeOptions {
   /**
-   * When `true` and the new range is within the supported window, (re)build and
-   * overwrite the WORKDAY/NON-WORKDAY/PH groups from the new date items.
+   * The import switch for this commit, remembered on the scenario
+   * (`importPublicHolidays`). `true`: when the new range is within the supported
+   * window, (re)build and overwrite the WORKDAY/NON-WORKDAY/PH groups. `false`: leave
+   * those groups untouched. Omitted: import nothing and leave the remembered switch
+   * as it is.
    */
   importSingaporeHolidays?: boolean;
 }
@@ -57,6 +62,7 @@ export function applyRangeChange(
     const newId = newIdByIso.get(item.iso);
     if (newId === undefined) {
       removed.push(item.id);
+      if (item.iso !== item.id) removed.push(item.iso);
     } else if (newId !== item.id) {
       migration.set(item.id, newId);
     }
@@ -88,12 +94,30 @@ export function applyRangeChange(
     rangeEnd: newRange.end as IsoDate,
   };
 
+  if (options.importSingaporeHolidays !== undefined) {
+    next = { ...next, importPublicHolidays: options.importSingaporeHolidays };
+  }
   if (options.importSingaporeHolidays && isRangeSupported(newRange)) {
     const imported = buildSingaporeHolidayGroups(generateDateItems(newRange));
     next = { ...next, dateGroups: replaceDateGroups(next.dateGroups, imported) };
   }
 
   return next;
+}
+
+/**
+ * How many request-matrix cells {@link applyRangeChange} would drop for
+ * `newRange`, split into leave pins and every other request (OFF included).
+ * Counted by running the real cascade, so the warning can never disagree with it.
+ */
+export function countRangeRemovals(
+  state: ScenarioUiState,
+  newRange: DateRange,
+): { requests: number; leaveDays: number } {
+  const after = applyRangeChange(state, newRange).reqData;
+  const leave = (cells: typeof after) => cells.filter((c) => c.kind === "leave").length;
+  const leaveDays = leave(state.reqData) - leave(after);
+  return { requests: state.reqData.length - after.length - leaveDays, leaveDays };
 }
 
 /** New-range date items as `[iso, id]` entries for the ISO→new-id lookup. */

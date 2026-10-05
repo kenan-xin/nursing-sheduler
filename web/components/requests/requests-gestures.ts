@@ -23,7 +23,8 @@ export type PaintCellIntent =
  * coordinate transaction (mirrors the prototype's `_computeCell`):
  *   - no targets selected → erase the coordinate.
  *   - `LEAVE` selected (alone or with anything else) → LEAVE wins, day-state leave.
- *   - selection is exactly `[OFF]` → day-state off at `weight`.
+ *   - selection is exactly `[OFF]` → day-state off at `weight` (at `0` the fold
+ *     removes an existing OFF instead, `lib/store/paint-fold.ts`).
  *   - otherwise → additive request deltas for every selected id that is NOT
  *     OFF/LEAVE (OFF mixed with worked targets is dropped — only a *sole* OFF
  *     selection is a day-state, matching the old app's `_computeCell`).
@@ -86,7 +87,6 @@ export function markCellVisited(
 export type HistoryPaintSelection =
   | { kind: "clear" }
   | { kind: "set"; shiftType: string }
-  | { kind: "skip" }
   | { kind: "error"; message: string };
 
 /**
@@ -95,8 +95,8 @@ export type HistoryPaintSelection =
  * shift-type item or the reserved OFF/LEAVE (history may hold OFF/LEAVE,
  * matching the normal history editor and the old app's `shiftTypeData.items`,
  * which includes the AUTO_GENERATED_ITEMS OFF/LEAVE); an id outside
- * `validItemIds` (e.g. a shift-type group) is silently skipped (a history slot
- * cannot hold a group); more than one selection is a user error (verbatim
+ * `validItemIds` (e.g. a shift-type group or ALL) is a user error, since a history
+ * slot cannot hold a group; more than one selection is a user error (verbatim
  * old-app message).
  */
 export function resolveHistoryPaintSelection(
@@ -108,7 +108,9 @@ export function resolveHistoryPaintSelection(
     return { kind: "error", message: "Cannot set history to multiple shift types." };
   }
   const [id] = selectedIds;
-  if (!validItemIds.has(id)) return { kind: "skip" };
+  if (!validItemIds.has(id)) {
+    return { kind: "error", message: "History needs one shift type, not a group." };
+  }
   return { kind: "set", shiftType: id };
 }
 

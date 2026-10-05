@@ -3,7 +3,7 @@
 //   • the DURABLE scenario store holds `ScenarioUiState` (T18) + the persisted
 //     dirty baseline; it is the only store that writes to IndexedDB.
 //   • the HOT store holds everything ephemeral — run state, SSE progress, UI
-//     scratch, editor drafts, and the in-flight paint gesture — and never
+//     scratch, and the in-flight paint gesture — and never
 //     triggers a scenario persist write.
 //
 // This module carries only the hot-store value shapes and the persistence

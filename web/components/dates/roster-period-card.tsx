@@ -14,27 +14,30 @@
 // Fields, the switch and the format chip are the shared v2 primitives, so their
 // radius, focus treatment and coarse-pointer sizing are decided once.
 //
-// The card owns an isolated `{start,end}` draft seeded from the committed range and
-// re-seeded whenever the committed range changes underneath it (undo/redo, external
-// cascade). A change that produces a COMPLETE, valid range commits immediately as
-// ONE tracked mutation (the range cascade + optional holiday overwrite); an
-// incomplete edit is held locally so a half-typed range never runs the destructive
-// cascade. The holiday dataset is bundled offline (ENGLISH-ONLY, no network), so the
-// switch is gated only by the supported-window check (spec 02 FR-DC-29/30).
+// The card owns an isolated `{start,end}` + import-switch draft seeded from the
+// committed range and re-seeded whenever the committed range changes underneath it
+// (undo/redo, external cascade). Nothing commits while the user types (v1 parity):
+// Apply commits the draft as ONE tracked mutation (the range cascade + optional
+// holiday overwrite), Cancel restores the committed values. The switch position is
+// stored on the scenario (bead 6975): off leaves WORKDAY / NON-WORKDAY / PH as they
+// are on every later range change, and the switch still reads off on the next visit. Before Apply the card
+// warns how many requests and leave days the cascade will remove. The switch is gated by
+// holiday-data coverage (spec 02 FR-DC-29/30; bead si4j): a draft touching a year the
+// loaded list does not cover disables it and says which year has no data.
 
 import { useEffect, useId, useMemo, useState } from "react";
 import {
   getDateIdForRange,
   getHolidaysInRange,
-  getSupportLabel,
   hasCompleteRange,
-  isRangeSupported,
+  holidayCoverageWarning,
   rangeDayCount,
   type DateRange,
 } from "@/lib/dates";
 import { FaHashtag } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
@@ -43,20 +46,25 @@ import { changeKeys } from "@/lib/change-highlight/keys";
 import { useChangeTarget } from "@/lib/change-highlight/store";
 import { DATES_ROSTER_PERIOD_ANCHOR } from "./capability-anchors";
 import { Switch } from "@/components/ui/switch";
+import { useSingaporeHolidayList } from "@/lib/query/singapore-holidays";
 import { rangeSpanLabel } from "./range-span-label";
 
 export interface RosterPeriodCardProps {
   /** The committed roster range (`""` endpoints when unset). */
   range: DateRange;
   /**
-   * Whether the loaded scenario ACTUALLY carries the imported Singapore holiday
-   * groups (WORKDAY / NON-WORKDAY / PH). Seeds the import switch's initial state so
-   * a loaded scenario without those groups never shows the switch ON / a false
-   * "N marked" (spec 02 FR-DC-40).
+   * The committed import switch (see `holidayImportApplied`). Seeds the draft switch
+   * and re-seeds it when the committed value changes (undo/redo, assistant Apply).
    */
-  importedHolidaysPresent: boolean;
-  /** Commit a confirmed range + the effective import flag (one tracked mutation). */
+  importApplied: boolean;
+  /** Commit a confirmed range + the switch position (one tracked mutation). */
   onCommit: (range: DateRange, importHolidays: boolean) => void;
+  /** Requests and leave days the cascade would remove for a draft range. */
+  countRemovals?: (range: DateRange) => { requests: number; leaveDays: number };
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 const HOLIDAY_DAY = new Intl.DateTimeFormat("en-GB", {
@@ -106,18 +114,13 @@ function dateIdInfo(range: DateRange): { format: string; example: string; note: 
 
 export function RosterPeriodCard({
   range,
-  importedHolidaysPresent,
+  importApplied: appliedImport,
   onCommit,
+  countRemovals,
 }: RosterPeriodCardProps) {
   const changeTarget = useChangeTarget(changeKeys.rosterRange());
   const [draft, setDraft] = useState<DateRange>(range);
-  // Honest initial state. A LOADED scenario (complete committed range at mount)
-  // reflects whether the SG holiday groups are actually present, so it never shows
-  // a false "N marked". A FRESH roster (no committed range yet) keeps auto-import
-  // ON so a brand-new scenario imports SG holidays on its first commit.
-  const [importHolidays, setImportHolidays] = useState(
-    hasCompleteRange(range) ? importedHolidaysPresent : true,
-  );
+  const [importHolidays, setImportHolidays] = useState(appliedImport);
   const startId = useId();
   const endId = useId();
 
@@ -126,33 +129,43 @@ export function RosterPeriodCard({
   useEffect(() => {
     setDraft({ start: range.start, end: range.end });
   }, [range.start, range.end]);
+  useEffect(() => {
+    setImportHolidays(appliedImport);
+  }, [appliedImport]);
 
   const complete = hasCompleteRange(draft);
   // A no-commit draft is INVALID (not merely incomplete) when both endpoints are
   // present but out of order. `type="date"` inputs only emit valid ISO or "", so a
   // non-empty pair that isn't `complete` can only be `start > end`.
   const invalid = Boolean(draft.start && draft.end) && draft.start > draft.end;
-  const supported = useMemo(
-    () => Boolean(draft.start && draft.end) && isRangeSupported(draft),
-    [draft],
-  );
+  // Subscribed so the card re-renders when the live holiday list replaces the bundle;
+  // the two reads below are cheap scans of ~100 rows, so they are not memoised.
+  useSingaporeHolidayList();
+  const coverageWarning = complete ? holidayCoverageWarning(draft) : null;
+  const supported = complete && coverageWarning === null;
   const effectiveImport = importHolidays && supported;
-  const holidays = useMemo(() => (complete ? getHolidaysInRange(draft) : []), [draft, complete]);
+  const holidays = complete ? getHolidaysInRange(draft) : [];
   const ids = useMemo(() => dateIdInfo(draft), [draft]);
   const duration = complete ? rangeDayCount(draft) : 0;
   const monthLabel = rangeSpanLabel(draft);
 
-  /** Update one endpoint; commit immediately once the draft is a valid range. */
-  const editEndpoint = (side: "start" | "end", value: string) => {
-    const next = { ...draft, [side]: value };
-    setDraft(next);
-    if (hasCompleteRange(next)) onCommit(next, importHolidays && isRangeSupported(next));
-  };
+  const rangeDirty = draft.start !== range.start || draft.end !== range.end;
+  const dirty = rangeDirty || importHolidays !== appliedImport;
+  const removal = useMemo(
+    () => (complete && rangeDirty && countRemovals ? countRemovals(draft) : null),
+    [complete, rangeDirty, countRemovals, draft],
+  );
 
-  const toggleImport = () => {
-    const next = !importHolidays;
-    setImportHolidays(next);
-    if (complete) onCommit(draft, next && supported);
+  const editEndpoint = (side: "start" | "end", value: string) =>
+    setDraft({ ...draft, [side]: value });
+
+  // The switch position is what the scenario remembers; the cascade itself skips the
+  // import for a range the holiday list does not cover.
+  const apply = () => onCommit(draft, importHolidays);
+
+  const cancel = () => {
+    setDraft({ start: range.start, end: range.end });
+    setImportHolidays(appliedImport);
   };
 
   return (
@@ -217,6 +230,31 @@ export function RosterPeriodCard({
             End date must be on or after the start date.
           </p>
         ) : null}
+        {removal && removal.requests + removal.leaveDays > 0 ? (
+          <p className="mt-3 text-meta text-warnink" data-testid="range-removal-warning">
+            {plural(removal.requests, "request")} and {plural(removal.leaveDays, "leave day")} fall
+            outside the new range and will be removed.
+          </p>
+        ) : null}
+        <div className="mt-3.5 flex justify-end gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            data-testid="range-cancel"
+            disabled={!dirty}
+            onClick={cancel}
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            data-testid="range-apply"
+            disabled={!dirty || !complete}
+            onClick={apply}
+          >
+            Apply
+          </Button>
+        </div>
 
         {/* An inset island inside the card, so it is the `well` level: `--panel`
             with the inset cast and no border of its own (DESIGN.md §4 rule 1). */}
@@ -252,7 +290,8 @@ export function RosterPeriodCard({
           <div>
             <div className="text-body font-semibold">Import Singapore public holidays</div>
             <div className="mt-[3px] max-w-[38ch] text-meta text-ink2">
-              Marks gazetted holidays as non-work days so the roster staffs them like weekends.
+              Adds WORKDAY, NON-WORKDAY and PH date groups. They change nothing until a staffing
+              rule uses them.
             </div>
           </div>
           {/* The shared Base UI Switch: the pressable root IS the 44x44 coarse
@@ -263,13 +302,13 @@ export function RosterPeriodCard({
             data-testid="import-toggle"
             checked={effectiveImport}
             disabled={!supported}
-            onCheckedChange={toggleImport}
+            onCheckedChange={() => setImportHolidays(!importHolidays)}
           />
         </div>
 
-        {!supported ? (
+        {coverageWarning ? (
           <p className="mt-3 text-meta text-warnink" data-testid="import-unsupported">
-            Available only when the roster range stays within {getSupportLabel()}.
+            {coverageWarning}
           </p>
         ) : effectiveImport ? (
           // A small bordered list, so the heading band it clips is FULL-BLEED and

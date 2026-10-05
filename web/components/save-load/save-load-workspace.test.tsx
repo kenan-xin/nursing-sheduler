@@ -2,7 +2,7 @@
 import "fake-indexeddb/auto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import {
   currentAppVersion,
   prepareWorkspaceExport,
@@ -15,6 +15,7 @@ import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import {
   loadScenario,
   pickScenario,
+  scenarioCommands,
   selectBackupStatus,
   useAuthorityStore,
   useScenarioStore,
@@ -172,6 +173,9 @@ describe("SaveLoadWorkspace — Upload flow", () => {
 
     await screen.findByTestId("confirm-dialog-confirm");
     expect(screen.getByText(/replace your current workspace/i)).toBeInTheDocument();
+    // C-05 + plq5 P2: truthful copy — no Undo promised; the current schedule is kept.
+    expect(screen.getByText(/stays in Recent schedules, with its roster/)).toBeInTheDocument();
+    expect(screen.queryByText(/undo the load/i)).not.toBeInTheDocument();
 
     // Continue commits the replacement, as another atomic switch.
     fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
@@ -288,6 +292,98 @@ describe("SaveLoadWorkspace — Upload flow", () => {
   });
 });
 
+/** A v1-style file with its own worked shift type "Leave" (clashes with v2 LEAVE). */
+function v1LeaveShiftYaml(): string {
+  const doc = toCanonicalScenarioDocument(makeValidUiState());
+  doc.appVersion = currentAppVersion();
+  doc.shiftTypes.items.push({ id: "Leave" });
+  doc.people.items[1].history = ["Leave"];
+  doc.preferences.push(
+    { type: "shift request", person: "Bob", date: "2026-05-17", shiftType: "Leave", weight: 1 },
+    { type: "shift request", person: "Bob", date: "2026-05-18", shiftType: "Leave", weight: -1 },
+  );
+  return stringify(doc, YAML_OPTIONS);
+}
+
+describe("SaveLoadWorkspace — v1 Leave shift (objg)", () => {
+  async function uploadV1LeaveFile() {
+    render(<SaveLoadWorkspace />);
+    fireEvent.click(screen.getByTestId("scenario-upload-button"));
+    await screen.findByTestId("upload-modal");
+    uploadTextFile(v1LeaveShiftYaml());
+    await screen.findByText('Convert "Leave" to paid leave?');
+  }
+
+  it("offers the conversion, naming the requests, history and dropped counts", async () => {
+    await uploadV1LeaveFile();
+    expect(screen.getByTestId("confirm-dialog-detail")).toHaveTextContent(
+      /become paid leave: 1[^]*become LEAVE: 1[^]*negative weight\): 1/,
+    );
+    expect(screen.getByTestId("confirm-dialog-confirm")).toHaveTextContent("Convert to paid leave");
+    // The fixture's requirement counts ALL qualified people but names shift D, so no ALL line.
+    expect(screen.getByTestId("confirm-dialog-detail")).not.toHaveTextContent(/count ALL shifts/);
+  });
+
+  it("names how many rules count ALL shifts", async () => {
+    const doc = parse(v1LeaveShiftYaml());
+    doc.preferences.push(
+      {
+        type: "shift count",
+        person: "ALL",
+        countDates: "ALL",
+        countShiftTypes: "ALL",
+        expression: "x",
+        target: 5,
+      },
+      {
+        type: "shift count",
+        person: "Bob",
+        countDates: "ALL",
+        countShiftTypes: ["ALL"],
+        expression: "x",
+        target: 3,
+      },
+    );
+    render(<SaveLoadWorkspace />);
+    fireEvent.click(screen.getByTestId("scenario-upload-button"));
+    await screen.findByTestId("upload-modal");
+    uploadTextFile(stringify(doc, YAML_OPTIONS));
+    await screen.findByText('Convert "Leave" to paid leave?');
+    expect(screen.getByTestId("confirm-dialog-detail")).toHaveTextContent(
+      "2 rules that count ALL shifts will no longer count leave days after conversion.",
+    );
+  });
+
+  it("accept converts the shift to leave pins and loads", async () => {
+    await uploadV1LeaveFile();
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+
+    await waitFor(async () => expect((await currentState()).rangeStart).toBe("2026-05-14"));
+    const state = await currentState();
+    expect(state.shifts.map((s) => s.id)).toEqual(["D", "E", "N"]);
+    expect(state.reqData.filter((c) => c.kind === "leave").map((c) => c.date)).toEqual([
+      "14",
+      "17",
+    ]);
+    expect(state.staff[1].history).toEqual(["LEAVE"]);
+    expect(screen.queryByTestId("scenario-export-issues")).not.toBeInTheDocument();
+  });
+
+  it("decline leaves the store untouched and shows the rename error", async () => {
+    const before = await stateSnapshot();
+    await uploadV1LeaveFile();
+    fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+
+    const issues = await within(screen.getByTestId("scenario-file-card")).findByTestId(
+      "scenario-export-issues",
+    );
+    expect(issues).toHaveTextContent(/Shift type "Leave" clashes with the built-in LEAVE/);
+    expect(issues).toHaveTextContent(/open Edit YAML/);
+    expect(screen.queryByTestId("confirm-dialog")).not.toBeInTheDocument();
+    expect(await stateSnapshot()).toBe(before);
+  });
+});
+
 describe("SaveLoadWorkspace — Edit YAML flow", async () => {
   /** Seeds a valid baseline scenario through the real import pipeline, so the
    *  preview starts from an exportable draft (and Edit YAML is enabled) rather
@@ -321,23 +417,28 @@ describe("SaveLoadWorkspace — Edit YAML flow", async () => {
     expect(screen.queryByTestId("scenario-yaml-content")).not.toBeInTheDocument();
   });
 
-  it("Apply on a valid edit replaces state through the same staged load pipeline as Upload", async () => {
+  it("Apply on a valid edit is ONE undoable edit on the same scenario identity (C-06)", async () => {
     render(<SaveLoadWorkspace />);
+    const identity = useAuthorityStore.getState().scenarioId;
+    const before = await stateSnapshot();
 
     fireEvent.click(screen.getByTestId("scenario-edit-yaml-button"));
-    editYaml(serializeScenario(makeValidUiState()));
+    const edited = (await currentYaml()).replace("Alice", "Alicia");
+    editYaml(edited);
     fireEvent.click(screen.getByTestId("yaml-apply-button"));
 
-    // Apply into the seeded (non-empty) workspace stages the same combined
-    // replacement confirmation as Upload rather than committing directly (T17r P0).
-    fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
-
-    await waitFor(async () => expect((await currentState()).rangeStart).toBe("2026-05-14"));
-    expect((await currentState()).staff.map((p) => p.id)).toEqual(["Alice", "Bob"]);
-    // An applied edit goes through the same atomic switch as Upload: a fresh
-    // identity with its own empty history, and no fresh local backup (T17r P0).
-    expect(await undoDepth()).toBe(0);
-    expect((await currentState()).backupFingerprint).toBeNull();
+    // No replacement confirm: an undoable edit overwrites nothing for good.
+    await waitFor(async () =>
+      expect((await currentState()).staff.map((p) => p.id)).toContain("Alicia"),
+    );
+    expect(screen.queryByTestId("confirm-dialog-confirm")).not.toBeInTheDocument();
+    // Same identity (so the assistant thread stays), one history step, and Undo
+    // restores the pre-edit document.
+    expect(useAuthorityStore.getState().scenarioId).toBe(identity);
+    expect(await undoDepth()).toBe(1);
+    await waitFor(() => expect(useAuthorityStore.getState().canUndo).toBe(true));
+    await scenarioCommands.undo();
+    expect(await stateSnapshot()).toBe(before);
 
     // Editing mode closes back to the read-only preview once the replace commits.
     await waitFor(() =>
@@ -371,7 +472,7 @@ describe("SaveLoadWorkspace — Edit YAML flow", async () => {
 
     await screen.findByRole("button", { name: "Continue" });
     fireEvent.click(screen.getByTestId("new-schedule-button"));
-    fireEvent.click(screen.getByRole("button", { name: "Start over" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start new schedule" }));
 
     await waitFor(async () => expect((await currentState()).rangeStart).toBe(""));
     // The editor closes one render *after* the store commit: StartOverCard awaits

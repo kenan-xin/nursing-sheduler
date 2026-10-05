@@ -157,6 +157,6 @@ export function resetRosterCaptureGate(): void {
  * It reaches the gate directly rather than through a mounted component, so a Clear
  * triggered while the Optimize route is unmounted still takes effect.
  */
-export async function notifyRosterCaptureCleared(): Promise<void> {
-  await appGate?.notifyCleared();
+export async function notifyRosterCaptureCleared(scenarioId?: string | null): Promise<void> {
+  await appGate?.notifyCleared(scenarioId);
 }

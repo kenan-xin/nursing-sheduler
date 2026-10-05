@@ -877,6 +877,62 @@ def test_returned_invalid_model_failure_becomes_a_structured_failed_result():
     )
 
 
+class MemoryHungryRunner:
+    def run(self, job, input_bytes, *, event_callback, should_stop):
+        return bytearray(2 * 1024 * 1024 * 1024)
+
+
+class SigkilledRunner:
+    def run(self, job, input_bytes, *, event_callback, should_stop):
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="RLIMIT_DATA and the OOM-kill signal are Linux behaviour")
+@pytest.mark.parametrize("runner", [MemoryHungryRunner(), SigkilledRunner()], ids=["memory_error", "sigkill"])
+def test_child_out_of_memory_fails_as_scenario_too_large(runner):
+    # D-01: the capped child's MemoryError, or a kernel OOM kill, is a plain result, not a crash.
+    result = run_optimization_process(
+        runner,
+        _control_job("job_out_of_memory"),
+        b"apiVersion: alpha\n",
+        event_callback=lambda *_args: None,
+        control=lambda: None,
+        hard_timeout_seconds=61,
+        finish_now_enabled=False,
+        memory_limit_bytes=512 * 1024 * 1024,
+    )
+    assert result.status is ProcessStatus.FAILED
+    assert result.failure.code == "scenario_too_large"
+    assert "too large for this server" in result.failure.message
+
+
+def test_default_child_memory_cap_scales_with_cpu_count(monkeypatch):
+    # x2gy: CP-SAT memory grows per worker, so a fixed 1536 aborted the 87-person ward on >2-CPU hosts.
+    from nurse_scheduling.server import config
+
+    monkeypatch.delenv("OPTIMIZE_CHILD_MEMORY_LIMIT_MB", raising=False)
+    for cpus, expected in [(2, 1600), (4, 2496), (8, 4288), (32, 15040)]:
+        monkeypatch.setattr(config.os, "cpu_count", lambda cpus=cpus: cpus)
+        assert config.ServerSettings.from_env().child_memory_limit_mb == expected
+    monkeypatch.setenv("OPTIMIZE_CHILD_MEMORY_LIMIT_MB", "1536")
+    assert config.ServerSettings.from_env().child_memory_limit_mb == 1536
+
+
+def test_cp_sat_default_worker_count_is_os_cpu_count():
+    # The scaled memory cap assumes this; affinity (taskset) and cgroup CPU quotas change neither.
+    from ortools.sat.python import cp_model
+
+    model = cp_model.CpModel()
+    model.maximize(model.new_int_var(0, 1, "x"))
+    solver = cp_model.CpSolver()
+    solver.parameters.log_search_progress = True
+    solver.parameters.log_to_stdout = False
+    lines = []
+    solver.log_callback = lines.append
+    solver.solve(model)
+    assert f"Setting number of workers to {os.cpu_count()}" in lines
+
+
 def test_unexpected_child_exception_raises_child_optimization_error():
     with pytest.raises(ChildOptimizationError, match="solver exploded"):
         run_optimization_process(

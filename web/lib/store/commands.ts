@@ -26,8 +26,10 @@ import type {
   PrepareAssistantProposalInput,
   PrepareAssistantProposalOutcome,
   ReceiptStanding,
+  ScheduleActionOutcome,
+  ScheduleSummary,
 } from "./authority";
-import { getScenarioAuthority, useHotStore } from "./spine";
+import { getScenarioAuthority } from "./spine";
 
 /**
  * The typed scenario command surface. Named for the manual operations they
@@ -68,9 +70,13 @@ export const scenarioCommands = {
     return getScenarioAuthority().recordBackup(backupFingerprint);
   },
 
-  /** Undo/Redo as monotonic repository commits (the former zundo `temporal`). */
-  undo(): Promise<CommandOutcome> {
-    return getScenarioAuthority().undo();
+  /**
+   * Undo/Redo as monotonic repository commits (the former zundo `temporal`). Given the
+   * revision a commit produced, Undo reverses only that commit: once a later edit has
+   * landed it withdraws as `superseded` rather than undo the wrong one.
+   */
+  undo(expectedDocumentRevision?: number): Promise<CommandOutcome> {
+    return getScenarioAuthority().undo(expectedDocumentRevision);
   },
 
   redo(): Promise<CommandOutcome> {
@@ -82,6 +88,11 @@ export const scenarioCommands = {
     return getScenarioAuthority().takeover();
   },
 
+  /** Open the schedule another tab just loaded (the peer-load banner's Switch). */
+  followPeerLoad(): Promise<CommandOutcome> {
+    return getScenarioAuthority().followPeerLoad();
+  },
+
   /** Release the lease so a peer tab need not wait out the expiry. */
   release(): Promise<void> {
     return getScenarioAuthority().release();
@@ -90,6 +101,29 @@ export const scenarioCommands = {
   /** Reread persisted selection/envelope/lease and reconcile ownership. */
   reconcile(): Promise<void> {
     return getScenarioAuthority().reconcile();
+  },
+
+  /** Recent schedules (plq5), newest first. */
+  listSchedules(): Promise<ScheduleSummary[]> {
+    return getScenarioAuthority().listSchedules();
+  },
+
+  /** Switch this tab to a past schedule — read-only when another tab is editing it. */
+  openSchedule(scenarioId: string): Promise<CommandOutcome> {
+    return getScenarioAuthority().openSchedule(scenarioId);
+  },
+
+  /** Name a schedule; an empty name brings back the auto-name. */
+  renameSchedule(scenarioId: string, title: string): Promise<ScheduleActionOutcome> {
+    return getScenarioAuthority().renameSchedule(scenarioId, title);
+  },
+
+  setSchedulePinned(scenarioId: string, pinned: boolean): Promise<ScheduleActionOutcome> {
+    return getScenarioAuthority().setSchedulePinned(scenarioId, pinned);
+  },
+
+  deleteSchedule(scenarioId: string): Promise<ScheduleActionOutcome> {
+    return getScenarioAuthority().deleteSchedule(scenarioId);
   },
 } as const;
 
@@ -159,19 +193,6 @@ export const assistantProposalCommands = {
     return getScenarioAuthority().describeAssistantReceipts();
   },
 } as const;
-
-/**
- * The open editor draft that blocks Apply, or `null`.
- *
- * An unsaved form draft over the same document is a change the user has started and
- * not committed; applying over it would either lose it or produce a document neither
- * the form nor the Preview describes. The panel names it and asks for a decision --
- * which is why this returns the draft's key rather than a boolean.
- */
-export function readConflictingEditorDraft(): string | null {
-  const drafts = Object.keys(useHotStore.getState().drafts);
-  return drafts.length > 0 ? drafts[0] : null;
-}
 
 /** Resolve once every queued command has settled. */
 export function drainScenarioCommands(): Promise<void> {

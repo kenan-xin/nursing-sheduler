@@ -55,6 +55,16 @@ export interface ScenarioEnvelopeV3 extends ScenarioSnapshot {
   historyCursor: number;
   createdAt: string;
   updatedAt: string;
+  // Recent schedules (plq5). Optional, unindexed metadata: rows written before them
+  // read back without them, so no Dexie version bump. Written by metadata-only
+  // commits (`recordRevision` moves, `documentRevision` does not), never exported,
+  // never undoable.
+  /** The user's name for the schedule. Absent ⇒ the list shows the auto-name. */
+  title?: string;
+  /** A pinned schedule is never removed by the Recent schedules limit. */
+  pinned?: boolean;
+  /** Set by "new period from a past schedule" (P3). Declared now so the row shape is settled. */
+  derivedFrom?: { scenarioId: string; title: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -473,6 +483,20 @@ export interface KeyValueRow {
 // their original specifier.
 
 /**
+ * Roster row and pointer keys (plq5 P2). With a `scenarioId` they are that
+ * schedule's own; without one they are the single pre-P2 origin-wide slot, which
+ * only the boot migration and unscoped test storage still name.
+ */
+export const rosterKeys = {
+  working: (scenarioId?: string) =>
+    scenarioId === undefined ? "working" : `working:${scenarioId}`,
+  candidate: (jobId: string, scenarioId?: string) =>
+    scenarioId === undefined ? `candidate:${jobId}` : `candidate:${scenarioId}:${jobId}`,
+  currentCandidate: (scenarioId?: string) =>
+    scenarioId === undefined ? "currentCandidate" : `currentCandidate:${scenarioId}`,
+};
+
+/**
  * A stored roster document. F1 owns durability, not shape: the payload is an
  * opaque structured-cloneable value (it may embed a `Blob` such as `frozenXlsx`)
  * whose schema and validation belong to F3. `TDocument` defaults to `unknown` so
@@ -480,7 +504,7 @@ export interface KeyValueRow {
  * one.
  */
 export interface RosterRow<TDocument = unknown> {
-  /** `working` or `candidate:<jobId>`. */
+  /** `working[:<scenarioId>]` or `candidate:[<scenarioId>:]<jobId>` (see {@link rosterKeys}). */
   key: string;
   document: TDocument;
   /**
@@ -507,6 +531,11 @@ export interface RosterRow<TDocument = unknown> {
    * store, so rows written before it existed read back with it simply absent.
    */
   candidateSource?: { jobId: string; candidateVersion: number };
+  /**
+   * Set by the plq5 P2 migration when the pre-P2 roster matched no schedule's dates
+   * and people and was given to the most recent one instead. The next write drops it.
+   */
+  possiblyOtherSchedule?: true;
 }
 
 /** An immutable submission snapshot row, keyed and authorized by `ownerId`. */
@@ -516,6 +545,8 @@ export interface SnapshotRow<TPayload = unknown> {
   ownerId: string;
   submissionOrdinal: number;
   payload: TPayload;
+  /** The schedule the run was submitted from; its capture lands there (plq5 P2). */
+  scenarioId?: string;
 }
 
 /** One typed metadata row (origin-wide counters and pointers). */

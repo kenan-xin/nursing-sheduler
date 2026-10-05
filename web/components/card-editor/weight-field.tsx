@@ -19,10 +19,12 @@ import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { FaCircleExclamation } from "@/components/icons";
+import { FieldWarning } from "./field-shell";
 import { formatWeight, parseWeightInput, type WeightFieldValue } from "./weight-value";
 
 export {
   formatWeight,
+  invalidWeightMessage,
   isValidWeightValue,
   isWeightNonPositive,
   parseWeightInput,
@@ -39,6 +41,8 @@ export interface WeightFieldProps {
   /** Default: generic soft/hard explainer. */
   help?: string;
   error?: string;
+  /** Shown under the help while the value is exactly `+∞` — the editor's own +∞ caution. */
+  plusInfWarning?: string;
   /**
    * When set, renders this italic note INSTEAD of the dial — the seam Requirements
    * needs for "Weight is not needed when the preferred number of people equals the
@@ -48,6 +52,8 @@ export interface WeightFieldProps {
   note?: string;
   /** Root `data-testid` prefix (`<testId>-input`/`-plus-inf`/`-minus-inf`). */
   testId?: string;
+  /** `false` hides the ±∞ buttons where core refuses an infinite weight. Default `true`. */
+  allowInfinity?: boolean;
 }
 
 const DEFAULT_HELP = "Positive encourages · negative discourages · ±∞ makes it a hard rule.";
@@ -59,8 +65,10 @@ export function WeightField({
   placeholder = "e.g. −50, +∞",
   help = DEFAULT_HELP,
   error,
+  plusInfWarning,
   note,
   testId = "weight-field",
+  allowInfinity = true,
 }: WeightFieldProps) {
   if (note) {
     return (
@@ -86,26 +94,31 @@ export function WeightField({
           placeholder={placeholder}
           className="font-mono"
         />
-        <Button
-          variant="outline"
-          data-testid={`${testId}-plus-inf`}
-          title="Set to positive infinity (∞)"
-          onClick={() => onChange(Infinity)}
-          className="font-mono"
-        >
-          +∞
-        </Button>
-        <Button
-          variant="outline"
-          data-testid={`${testId}-minus-inf`}
-          title="Set to negative infinity (-∞)"
-          onClick={() => onChange(-Infinity)}
-          className="font-mono"
-        >
-          −∞
-        </Button>
+        {allowInfinity && (
+          <>
+            <Button
+              variant="outline"
+              data-testid={`${testId}-plus-inf`}
+              title="Set to positive infinity (∞)"
+              onClick={() => onChange(Infinity)}
+              className="font-mono"
+            >
+              +∞
+            </Button>
+            <Button
+              variant="outline"
+              data-testid={`${testId}-minus-inf`}
+              title="Set to negative infinity (-∞)"
+              onClick={() => onChange(-Infinity)}
+              className="font-mono"
+            >
+              −∞
+            </Button>
+          </>
+        )}
       </div>
       <p className="text-meta text-ink3">{help}</p>
+      {plusInfWarning && value === Infinity && <FieldWarning>{plusInfWarning}</FieldWarning>}
       {error && (
         <p className="flex items-center gap-1.5 text-meta font-semibold text-error" role="alert">
           <FaCircleExclamation className="size-3 flex-none" /> {error}

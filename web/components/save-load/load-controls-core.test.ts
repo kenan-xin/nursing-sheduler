@@ -62,6 +62,22 @@ describe("loadConfirmCopy — the detail box rides with the version case only", 
   });
 });
 
+describe("loadConfirmCopy — a Load cannot be undone (C-05)", () => {
+  it("never promises Undo, and says the current schedule is kept (plq5 P2)", () => {
+    expect(REPLACEMENT_CONFIRM_BODY).toBe(
+      "This opens the file as a new schedule. Your current schedule stays in Recent schedules, " +
+        "with its roster, where you can open it again.",
+    );
+    expect(REPLACEMENT_CONFIRM_BODY).not.toMatch(/undo the load/i);
+  });
+
+  it("is destructive whenever it replaces a workspace, and only then", () => {
+    expect(loadConfirmCopy(null, true, undefined, "1.4.0").destructive).toBe(true);
+    expect(loadConfirmCopy("incompatible", true, "1.0.0", "1.4.0").destructive).toBe(true);
+    expect(loadConfirmCopy("incompatible", false, "1.0.0", "1.4.0").destructive).toBeUndefined();
+  });
+});
+
 describe("buildSampleScenarioYaml", () => {
   it("produces YAML that prepareScenarioLoad accepts with no issues", () => {
     const result = prepareScenarioLoad(buildSampleScenarioYaml());

@@ -23,8 +23,10 @@ import { surfaceVariants } from "@/components/ui/surface";
 import { MonthGrids } from "./month-grids";
 import type { DayCellInfo } from "./month-calendar";
 import { rangeSpanLabel } from "./range-span-label";
+import { useSingaporeHolidayList } from "@/lib/query/singapore-holidays";
 
 export function CalendarView({ range }: { range: DateRange }) {
+  useSingaporeHolidayList(); // re-render when the live holiday list arrives
   const headerLabel = useMemo(() => rangeSpanLabel(range), [range]);
 
   const inRange = (iso: string) => iso >= range.start && iso <= range.end;

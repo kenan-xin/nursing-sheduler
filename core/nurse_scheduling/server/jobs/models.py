@@ -91,6 +91,8 @@ class OptimizationResult:
     """Original status reported by the selected solver."""
     termination_reason: str | None = None
     """Normalized explanation of why solver execution stopped."""
+    explanation: dict[str, Any] | None = None
+    """v2: penalty ledger (roster) or why a proven-infeasible run has none, JSON-safe."""
 
 
 @dataclass(frozen=True)
@@ -190,7 +192,15 @@ class StoreLimits:
     compose file supply the shipped value of 1.
     """
 
+    max_pending_per_client: int = 0
+    """Pending jobs one `client_id` may hold, 0 for no cap (bead 99db D-07).
+
+    Zero for direct construction; `ServerSettings.from_env()` supplies the shipped 2.
+    """
+
     def __post_init__(self) -> None:
+        if self.max_pending_per_client < 0:
+            raise ValueError("max_pending_per_client must be at least 0")
         if not 0 <= self.ordinary_reserved_slots < self.max_pending:
             raise ValueError("ordinary_reserved_slots must satisfy 0 <= reserve < max_pending")
 

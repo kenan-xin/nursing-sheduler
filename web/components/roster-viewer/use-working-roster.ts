@@ -13,7 +13,7 @@
 // and dismissal go through the F1/F2 APIs the screen already holds.
 
 import { useCallback, useEffect, useState } from "react";
-import { rosterStorage } from "@/lib/store";
+import { rosterStorageFor, useAuthorityStore } from "@/lib/store";
 import { upgradeStoredRosterDocument, type RosterDocument } from "@/lib/roster";
 import type { CurrentCandidatePointer, WorkingCandidateSource } from "@/lib/store";
 
@@ -31,6 +31,11 @@ export interface WorkingRosterState {
    * answer “is the roster on screen this candidate?” and the row can.
    */
   candidateSource: WorkingCandidateSource | null;
+  /**
+   * The working roster came from before each schedule kept its own, and matched no
+   * schedule's dates and people, so it may belong to a different one (plq5 P2).
+   */
+  possiblyOtherSchedule: boolean;
   /** The durable candidate pointer, or null when no candidate exists. */
   candidate: CurrentCandidatePointer | null;
   /** The candidate's document, or null when not yet read / absent. */
@@ -59,29 +64,37 @@ export function useWorkingRoster(): WorkingRosterState {
   const [document, setDocument] = useState<RosterDocument | null>(null);
   const [revision, setRevision] = useState<number | null>(null);
   const [candidateSource, setCandidateSource] = useState<WorkingCandidateSource | null>(null);
+  const [possiblyOtherSchedule, setPossiblyOtherSchedule] = useState(false);
   const [candidate, setCandidate] = useState<CurrentCandidatePointer | null>(null);
   const [candidateDocument, setCandidateDocument] = useState<RosterDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
 
+  // Each schedule keeps its own roster (plq5 P2): switching schedule re-reads.
+  const scenarioId = useAuthorityStore((state) => state.scenarioId);
   const readAll = useCallback(async () => {
+    const storage = rosterStorageFor(scenarioId);
     const [workingRow, pointer] = await Promise.all([
-      rosterStorage.readWorking<RosterDocument>(),
-      rosterStorage.readCurrentCandidate(),
+      storage.readWorking<RosterDocument>(),
+      storage.readCurrentCandidate(),
     ]);
+    // A read begun before a switch describes the schedule this tab has left.
+    if (useAuthorityStore.getState().scenarioId !== scenarioId) return;
     // A roster saved by an older build is upgraded on read. The next
     // autosave writes it back at the current version.
     setDocument(workingRow ? upgradeStoredRosterDocument(workingRow.document) : null);
     setRevision(workingRow?.revision ?? null);
     setCandidateSource(workingRow?.candidateSource ?? null);
+    setPossiblyOtherSchedule(workingRow?.possiblyOtherSchedule === true);
     setCandidate(pointer);
     if (pointer !== null) {
-      const row = await rosterStorage.readCandidate<RosterDocument>(pointer.jobId);
+      const row = await storage.readCandidate<RosterDocument>(pointer.jobId);
+      if (useAuthorityStore.getState().scenarioId !== scenarioId) return;
       setCandidateDocument(row ? upgradeStoredRosterDocument(row.document) : null);
     } else {
       setCandidateDocument(null);
     }
-  }, []);
+  }, [scenarioId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +120,7 @@ export function useWorkingRoster(): WorkingRosterState {
     document,
     revision,
     candidateSource,
+    possiblyOtherSchedule,
     candidate,
     candidateDocument,
     loading,

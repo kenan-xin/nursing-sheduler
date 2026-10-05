@@ -299,6 +299,7 @@ export {
   formatElapsedSeconds,
   formatRunStatus,
   formatScore,
+  inconclusiveMessage,
   jobDetailLine,
   scoreLabel,
   terminalHeading,
@@ -310,6 +311,7 @@ export {
 export {
   RUN_REQUEST_TTL_MS,
   isRunLive,
+  isRunStale,
   noteOptimizeRunStarted,
   publishSolverTimeoutSeconds,
   reportOptimizeRunRequest,

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { toast } from "sonner";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import type { EntityId } from "@/components/entity-editor/core";
@@ -16,7 +17,9 @@ import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/st
 // plus the load-bearing DR-2 rules — inline name→id with description PRESERVED, the
 // reserved-`ALL` rejection, typed-id identity, reorder gating, and the empty state.
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({
+  toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }),
+}));
 
 // Next router is pulled in transitively by GuardedLink's navigation guard.
 vi.mock("next/navigation", () => ({
@@ -113,6 +116,29 @@ describe("PeopleTable — read + toolbar", () => {
 });
 
 describe("PeopleTable — add / duplicate / delete", () => {
+  it("llmu: says 'saved' only once the write lands; a refusal toasts and keeps the row open", async () => {
+    await seed({ staff: [{ id: "Alice", history: [] }], staffGroups: [] });
+    render(<PeopleTable />);
+    fireEvent.click(screen.getByTestId(`people-edit-${sk("Alice")}`));
+    const refuse = vi
+      .spyOn(scenarioCommands, "mutate")
+      .mockResolvedValueOnce({ ok: false, reason: "not-owner", code: "not_owner" });
+    fireEvent.click(screen.getByTestId(`people-save-${sk("Alice")}`));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "This schedule is being edited in another tab. Take over editing, then save again.",
+      ),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.getByTestId(`people-edit-row-${sk("Alice")}`)).toBeInTheDocument();
+    refuse.mockRestore();
+
+    fireEvent.click(screen.getByTestId(`people-save-${sk("Alice")}`));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Nurse “Alice” saved."));
+    expect(screen.queryByTestId(`people-edit-row-${sk("Alice")}`)).toBeNull();
+  });
+
   it("adds a nurse via the inline draft row (history stamped, one undo entry)", async () => {
     await seed({ staff: [], staffGroups: [] });
     render(<PeopleTable />);
@@ -166,6 +192,45 @@ describe("PeopleTable — add / duplicate / delete", () => {
     render(<PeopleTable />);
     fireEvent.click(screen.getByTestId(`people-delete-${sk("Alice")}`));
     expect((await staff()).map((p) => p.id)).toEqual(["Bob"]);
+  });
+
+  it("F10: toasts what the delete took (requests, leave pins) with Undo", async () => {
+    await seed({
+      staff: [
+        { id: "Kevin", history: [] },
+        { id: "Bob", history: [] },
+      ],
+      staffGroups: [],
+      rangeStart: "2026-01-01",
+      rangeEnd: "2026-01-07",
+      reqData: [
+        { kind: "leave", person: "Kevin", date: "2026-01-01" },
+        { kind: "off", person: "Kevin", date: "2026-01-02", weight: 1 },
+      ] as ScenarioUiState["reqData"],
+    });
+    render(<PeopleTable />);
+    fireEvent.click(screen.getByTestId(`people-delete-${sk("Kevin")}`));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        "Deleted “Kevin”: 1 request, 1 leave pin.",
+        expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }),
+      ),
+    );
+  });
+
+  it("F11: shows the description as a subtitle, so a description search hit is visible", async () => {
+    await seed({
+      staff: [
+        { id: "Ann", description: "Night lead", history: [] },
+        { id: "Bob", history: [] },
+      ],
+      staffGroups: [],
+    });
+    render(<PeopleTable />);
+    fireEvent.change(screen.getByTestId("people-search"), { target: { value: "night" } });
+    expect(screen.getByTestId(`people-desc-${sk("Ann")}`)).toHaveTextContent("Night lead");
+    expect(screen.queryByTestId(`people-row-${sk("Bob")}`)).toBeNull();
   });
 });
 

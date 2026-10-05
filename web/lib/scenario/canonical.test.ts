@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createEmptyScenarioUiState, toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
+import { buildRestDaysRuleCard } from "@/lib/rules/rest-days";
+import {
+  createEmptyScenarioUiState,
+  preferenceCardUids,
+  toCanonicalScenarioDocument,
+} from "@/lib/scenario/canonical";
 import { PREFERENCE_TYPE, type ScenarioUiState, type UiPerson } from "@/lib/scenario/types";
 
 // A representative durable UI state exercising every slice and every F2 marker.
@@ -292,5 +297,45 @@ describe("createEmptyScenarioUiState", () => {
 
   it("honours a custom apiVersion", () => {
     expect(createEmptyScenarioUiState("v2").meta.apiVersion).toBe("v2");
+  });
+});
+
+describe("preferenceCardUids", () => {
+  it("names the card behind every submitted preference, in step with the projection", () => {
+    const state = makeUiState();
+    // A temporary-cover split (`#d<iso>`, `#s<n>`) and the rest-days card, which
+    // expands to one shift count per 7-day window, are both traced to their card.
+    state.cardsByKind.requirements.push(
+      { uid: "cu7#s0", shiftType: "AM1", requiredNumPeople: 1, weight: -1 },
+      { uid: "cu7#s1#d2026-02-03", shiftType: "LD", requiredNumPeople: 1, weight: -1 },
+    );
+    state.cardsByKind.counts.unshift(buildRestDaysRuleCard("x"));
+    state.reqData.push({ person: 1, date: 14, kind: "off", weight: 1 });
+
+    const doc = toCanonicalScenarioDocument(state);
+    const uids = preferenceCardUids(state);
+    expect(uids).toHaveLength(doc.preferences.length);
+
+    const typeOf = new Map<string, string>([
+      ["cu1", PREFERENCE_TYPE.shiftTypeRequirement],
+      ["cu7", PREFERENCE_TYPE.shiftTypeRequirement],
+      ["cu3", PREFERENCE_TYPE.shiftTypeSuccessions],
+      ["cu4", PREFERENCE_TYPE.shiftCount],
+      ["rest-days-in-7:x", PREFERENCE_TYPE.shiftCount],
+      ["cu5", PREFERENCE_TYPE.shiftAffinity],
+      ["cu6", PREFERENCE_TYPE.shiftTypeCovering],
+      ...["r1", "r2", "r3", "r4"].map(
+        (uid) => [uid, PREFERENCE_TYPE.shiftRequest] as [string, string],
+      ),
+    ]);
+    uids.forEach((uid, i) => {
+      if (uid !== null) expect([uid, doc.preferences[i]!.type]).toEqual([uid, typeOf.get(uid)]);
+    });
+    expect(uids[0]).toBeNull();
+    expect(uids).not.toContain("cu2"); // disabled: not submitted
+    expect(uids.filter((uid) => uid === "cu7")).toHaveLength(2);
+    // 22 in-roster windows plus one carried from nurse 0's worked history.
+    expect(uids.filter((uid) => uid === "rest-days-in-7:x")).toHaveLength(28 - 6 + 1);
+    expect(uids.at(-24)).toBeNull(); // the request cell without a uid
   });
 });

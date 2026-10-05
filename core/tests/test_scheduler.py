@@ -40,6 +40,30 @@ def _load_valid_yaml_bytes() -> bytes:
     return VALID_YAML_PATH.read_bytes()
 
 
+def test_hard_forbidden_sequence_already_completed_by_history_is_not_infeasible():
+    # B1: last month's history cannot change, so a -inf pattern it already completes binds nothing.
+    content = textwrap.dedent(
+        """
+        apiVersion: alpha
+        dates:
+          range: {startDate: 2026-10-01, endDate: 2026-10-03}
+        people:
+          items:
+            - {id: 0, history: [N, D]}
+            - {id: 1}
+        shiftTypes:
+          items: [{id: D}, {id: N}]
+        preferences:
+          - type: at most one shift per day
+          - type: shift type successions
+            person: ALL
+            pattern: [N, D]
+            weight: -.inf
+        """
+    ).encode()
+    assert scheduler.schedule(content).solver_status == "OPTIMAL"
+
+
 def test_scheduler_rejects_unsupported_api_version():
     content = _load_valid_yaml_bytes().replace(b"apiVersion: alpha", b"apiVersion: beta")
 

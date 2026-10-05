@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { useScenarioStore } from "@/lib/store";
+import { Callout } from "@/components/optimize/callout";
 import {
   deriveCurrentDays,
   deriveEditedSinceSolve,
@@ -46,10 +47,13 @@ import {
   summariseRequirements,
   writeViewPreference,
 } from "@/lib/roster-viewer";
+import { checkRosterChange, deriveRuleModel } from "@/lib/roster-viewer/rule-check";
 import { RosterGrid } from "./roster-grid";
 import { RosterCoverage } from "./roster-coverage";
 import { RosterDay } from "./roster-day";
 import { RosterEditBar } from "./roster-edit-bar";
+import { RosterRecordOffer } from "./roster-record-offer";
+import type { RecordableEdit } from "./record-as-request";
 import { useRosterContentWidth } from "./roster-content-width";
 import { MOBILE_DEFAULT_LENS_VIEWPORT } from "./use-container-width";
 
@@ -108,9 +112,26 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
   // scenario's covers right now lower it, so adding or removing a cover after the
   // solve changes coverage at once.
   const liveCover = useScenarioStore((state) => state.temporaryCover);
+  // The roster is frozen at solve time: a person or shift added, renamed or
+  // removed in Setup since then is not on it. Say so rather than look current.
+  const setupChanged = useScenarioStore(
+    (state) =>
+      state.staff.length > 0 &&
+      (!sameIds(document.context.people, state.staff) ||
+        !sameIds(document.context.shiftTypes, state.shifts)),
+  );
   const model = useMemo(
     () =>
       deriveRequirementModel(document.submission, {
+        decrements: document.cover.decrements,
+        live: liveCover,
+      }),
+    [document.submission, document.cover.decrements, liveCover],
+  );
+  // C-19: the rule check the assistant runs on a swap, run on hand edits too.
+  const ruleModel = useMemo(
+    () =>
+      deriveRuleModel(document.submission, {
         decrements: document.cover.decrements,
         live: liveCover,
       }),
@@ -189,6 +210,59 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
     [editing],
   );
 
+  // kyh3: the LV/OFF cells set through the edit bar this session, offered for
+  // recording in Requests. Keyed to the solved grid so a new roster starts empty,
+  // and filtered against the live cell so an undone or overwritten edit drops out.
+  const [recordable, setRecordable] = useState<{
+    solved: RosterDocument["solvedDays"];
+    edits: readonly RecordableEdit[];
+  }>({ solved: document.solvedDays, edits: [] });
+  const liveRecordable = useMemo(
+    () =>
+      recordable.solved !== document.solvedDays
+        ? []
+        : recordable.edits.filter((e) => currentDays[e.personIdx]?.[e.dateIdx]?.kind === e.kind),
+    [recordable, document.solvedDays, currentDays],
+  );
+  // Rules the last hand edit broke, shown on the edit bar while that same selection
+  // is open. A warning only: the edit is kept.
+  const [editIssues, setEditIssues] = useState<{
+    at: EditCoordinate;
+    messages: readonly string[];
+  } | null>(null);
+  const setCell = useCallback(
+    (coordinate: EditCoordinate, day: RosterDayState) => {
+      editing?.setCell(coordinate, day);
+      if (ruleModel !== null) {
+        const after = currentDays.map((row) => [...row]);
+        after[coordinate.personIdx][coordinate.dateIdx] = day;
+        const check = checkRosterChange(ruleModel, document.context, currentDays, after, {
+          people: [coordinate.personIdx],
+          dates: [coordinate.dateIdx],
+        });
+        const messages = [...check.hard, ...check.soft].map((issue) => issue.message);
+        setEditIssues(messages.length > 0 ? { at: coordinate, messages } : null);
+      }
+      setRecordable((prev) => {
+        const kept =
+          prev.solved === document.solvedDays
+            ? prev.edits.filter(
+                (e) => e.personIdx !== coordinate.personIdx || e.dateIdx !== coordinate.dateIdx,
+              )
+            : [];
+        return {
+          solved: document.solvedDays,
+          edits: day.kind === "shift" ? kept : [...kept, { ...coordinate, kind: day.kind }],
+        };
+      });
+    },
+    [editing, document.solvedDays, document.context, ruleModel, currentDays],
+  );
+  const clearRecordable = useCallback(
+    () => setRecordable({ solved: document.solvedDays, edits: [] }),
+    [document.solvedDays],
+  );
+
   // The editing callbacks the grid consumes, memoized so the grid does not
   // re-render on every viewer state change.
   const gridEditing = useMemo(
@@ -205,6 +279,11 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-testid="roster-viewer">
+      {setupChanged ? (
+        <Callout tone="warn" placement="page" data-testid="roster-setup-changed">
+          Setup changed since this roster was solved. Run Optimize again to include the changes.
+        </Callout>
+      ) : null}
       {/* Header: lens toggle + provenance + undo (editing only). */}
       <div className="flex flex-wrap items-end gap-4">
         <div className="min-w-0 flex-1" style={{ flexBasis: "440px" }}>
@@ -226,7 +305,10 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
               variant="ghost"
               size="sm"
               className="h-auto border border-line"
-              onClick={editing.undo}
+              onClick={() => {
+                setEditIssues(null);
+                editing.undo();
+              }}
               disabled={!editing.canUndo}
               title={editing.canUndo ? "Undo last edit" : "Nothing to undo"}
               data-testid="roster-undo"
@@ -244,8 +326,16 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
           context={document.context}
           selected={editing.selectedCell}
           current={currentDays[editing.selectedCell.personIdx]?.[editing.selectedCell.dateIdx]}
-          onSetCell={editing.setCell}
+          onSetCell={setCell}
+          warnings={editIssues?.at === editing.selectedCell ? editIssues.messages : undefined}
           onCancel={() => editing.selectCell(null)}
+        />
+      ) : null}
+      {editing !== undefined && liveRecordable.length > 0 ? (
+        <RosterRecordOffer
+          context={document.context}
+          edits={liveRecordable}
+          onDone={clearRecordable}
         />
       ) : null}
 
@@ -285,6 +375,12 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
       ) : null}
     </div>
   );
+}
+
+/** Whether two lists carry the same ids (as a set; a numeric 7 is not "7"). */
+function sameIds(a: readonly { id: unknown }[], b: readonly { id: unknown }[]): boolean {
+  const ids = new Set(b.map((item) => item.id));
+  return a.length === ids.size && a.every((item) => ids.has(item.id));
 }
 
 // ---------------------------------------------------------------------------

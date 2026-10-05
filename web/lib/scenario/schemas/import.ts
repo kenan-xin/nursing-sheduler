@@ -117,15 +117,20 @@ const zImportRequirement = z
     description: z.string().nullish(),
     shiftType: z.union([z.string(), zNestedShiftRefList]),
     shiftTypeCoefficients: z.array(zCoefficientEntry).nullish(),
-    requiredNumPeople: z.number().int(),
+    requiredNumPeople: z.number().int().min(0, { error: "requiredNumPeople must be 0 or more." }),
     qualifiedPeople: zRefOrList.nullish(),
-    preferredNumPeople: z.number().int().nullish(),
+    preferredNumPeople: z
+      .number()
+      .int()
+      .min(0, { error: "preferredNumPeople must be 0 or more." })
+      .nullish(),
     skillMix: z.array(zImportSkillMixEntry).nullish(),
     requiredNumPeopleOverrides: z.array(z.tuple([zImportDate, z.number().int()])).nullish(),
     date: zDateRefOrList.nullish(),
     weight: zImportWeight.optional(),
   })
   .superRefine((req, ctx) => {
+    // Preferred below required loads; the producer schema blocks it at Optimize.
     const overrides = req.requiredNumPeopleOverrides;
     if (!overrides?.length) return;
     // The backend's own resolved-dates check (preference_types.shift_type_requirements)
@@ -326,7 +331,21 @@ export const importScenarioSchema = z.strictObject({
     items: z.array(zImportShiftType),
     groups: z.array(zImportShiftTypeGroup).optional(),
   }),
-  preferences: z.array(zImportPreference),
+  // Core reads `date: []` as "no dates" while the UI stores an omitted date as "all",
+  // so an explicit empty scope is refused rather than widened on load (bug hunt A-09).
+  preferences: z.array(zImportPreference).superRefine((preferences, ctx) => {
+    preferences.forEach((pref, i) => {
+      const field = "countDates" in pref ? "countDates" : "date";
+      const dates = (pref as { [key: string]: unknown })[field];
+      if (!Array.isArray(dates) || dates.length > 0) return;
+      const rule = pref.description?.trim() ? `Rule '${pref.description.trim()}'` : `Rule ${i + 1}`;
+      ctx.addIssue({
+        code: "custom",
+        message: `${rule}: This rule has no dates. Remove it or add dates.`,
+        path: [i, field],
+      });
+    });
+  }),
   export: z
     .strictObject({
       formatting: z.array(zImportExportFormattingRule).optional(),

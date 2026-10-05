@@ -313,6 +313,11 @@ export type DurableDismissOutcome =
 export interface DurableCandidateRef {
   jobId: string;
   candidateVersion: number;
+  /**
+   * The schedule whose roster displays it (plq5 P2). Needed after a reload, when no
+   * in-session capture names the schedule; `null`/absent is the unscoped slot.
+   */
+  scenarioId?: string | null;
 }
 
 /** What the terminal orchestration knows about one completed job. */
@@ -442,15 +447,22 @@ export interface RosterCaptureGate {
   abandon(jobId: string): void;
   /** Whether `abandon` has been called for this job (retirement lane only). */
   isAbandoned(jobId: string): boolean;
-  /** A verified Clear happened: invalidate every entry it could still affect. */
-  notifyCleared(): Promise<void>;
+  /**
+   * A verified Clear happened: invalidate every entry it could still affect — only
+   * that schedule's when `scenarioId` is given (plq5 P2), else every entry.
+   */
+  notifyCleared(scenarioId?: string | null): Promise<void>;
   subscribe(listener: () => void): () => void;
 }
 
 type CaptureStore = SubmissionSnapshotStore &
   Pick<
     RosterStorage,
-    "commitCandidate" | "dismissCandidate" | "readCandidate" | "readCurrentCandidate"
+    | "commitCandidate"
+    | "dismissCandidate"
+    | "readCandidate"
+    | "readCurrentCandidate"
+    | "forScenario"
   >;
 
 export interface RosterCaptureDeps {
@@ -487,6 +499,12 @@ interface JobEntry {
   epoch: number;
   /** The staging snapshot owner, remembered so a later dismissal can purge it. */
   ownerId: string | null;
+  /**
+   * The schedule the run was submitted from, read off its snapshot (plq5 P2). Its
+   * candidate, pointer and working slot are that schedule's, whichever one this tab
+   * has open by the time the capture lands.
+   */
+  scenarioId: string | null;
   /**
    * Whether a `/roster` fetch was attempted for this job (regardless of outcome).
    * This is the roster-attempt-before-DELETE evidence stamped onto every token.
@@ -537,11 +555,17 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       abandoned: false,
       epoch: -1,
       ownerId: null,
+      scenarioId: null,
       rosterAttempted: false,
       committed: null,
     };
     entries.set(jobId, entry);
     return entry;
+  }
+
+  /** The candidate side of the store, in the entry's schedule when it has one. */
+  function scoped(entry: JobEntry): CaptureStore {
+    return entry.scenarioId === null ? store : store.forScenario(entry.scenarioId);
   }
 
   function setState(entry: JobEntry, state: RosterCaptureState): void {
@@ -809,6 +833,7 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       );
     }
     const snapshot = read.snapshot;
+    entry.scenarioId = snapshot.scenarioId;
 
     if (request.frozenXlsx === null) {
       // Completed with no artifact: there is nothing to freeze, so the staging
@@ -958,7 +983,7 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
     // --- 4. Commit -----------------------------------------------------------
     let outcome;
     try {
-      outcome = await store.commitCandidate({
+      outcome = await scoped(entry).commitCandidate({
         jobId: entry.jobId,
         submissionOrdinal: snapshot.submissionOrdinal,
         document: built.document,
@@ -1037,7 +1062,7 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
   ): Promise<{ ok: true } | { ok: false; message: string }> {
     let outcome;
     try {
-      outcome = await store.dismissCandidate({
+      outcome = await scoped(entry).dismissCandidate({
         jobId: entry.jobId,
         candidateVersion: pointer.candidateVersion,
         expectedClearEpoch: entry.epoch,
@@ -1055,8 +1080,8 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       // verified evidence may settle the dismissal — a `stale-epoch` reply on its
       // own says the write was refused, not that the payload is gone.
       try {
-        const row = await store.readCandidate(entry.jobId);
-        const current = await store.readCurrentCandidate();
+        const row = await scoped(entry).readCandidate(entry.jobId);
+        const current = await scoped(entry).readCurrentCandidate();
         const pointerMoved = !(
           current?.jobId === entry.jobId && current.candidateVersion === pointer.candidateVersion
         );
@@ -1268,8 +1293,14 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       return { status: "dismissed", token };
     },
 
-    async dismissDurableCandidate({ jobId, candidateVersion }): Promise<DurableDismissOutcome> {
+    async dismissDurableCandidate({
+      jobId,
+      candidateVersion,
+      scenarioId = null,
+    }): Promise<DurableDismissOutcome> {
       const entry = ensure(jobId);
+      // An in-session capture already knows its schedule; otherwise the surface says.
+      entry.scenarioId ??= scenarioId;
 
       // Idempotent: an entry already settled as dismissed keeps its token.
       const already = readToken(entry);
@@ -1356,15 +1387,19 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       return entries.get(jobId)?.abandoned ?? false;
     },
 
-    async notifyCleared() {
+    async notifyCleared(scenarioId = null) {
+      // plq5 P2: a Clear of one schedule settles only that schedule's captures.
+      const affected = [...entries.values()].filter(
+        (entry) => scenarioId === null || entry.scenarioId === scenarioId,
+      );
       const flights: Promise<unknown>[] = [];
-      for (const entry of entries.values()) {
+      for (const entry of affected) {
         if (entry.token !== null) continue;
         entry.invalidated = "cleared";
         if (entry.inFlight !== null) flights.push(entry.inFlight);
       }
       await Promise.all(flights);
-      for (const entry of entries.values()) {
+      for (const entry of affected) {
         if (entry.state.status === "dismissed" && entry.state.reason === "cleared") continue;
 
         // A COMMITTED entry must not keep claiming "saved in this browser" once F1

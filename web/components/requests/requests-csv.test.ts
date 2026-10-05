@@ -42,7 +42,8 @@ describe("validateShiftRequestCsv", () => {
     const result = validateShiftRequestCsv("garbage", shiftRequestOptions({ weight: "abc" }));
     expect(result).toEqual({
       ok: false,
-      error: "Weight must be a valid number, Infinity, or -Infinity.",
+      error:
+        "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity.",
     });
   });
 
@@ -329,6 +330,28 @@ describe("validateShiftRequestCsv — export format (several entries + day-state
   });
 });
 
+describe("validateShiftRequestCsv — per-entry weights", () => {
+  it("reads SELECTOR:WEIGHT, keeping bare entries weightless (caller's weight applies)", () => {
+    const csv = ["alice,DAY:+5 | NIGHT,OFF:-2", "bob,NIGHT:10k,", "carol,DAY:-inf,"].join("\n");
+    const result = validateShiftRequestCsv(csv, shiftRequestOptions());
+    expect(result.ok && result.data).toStrictEqual([
+      { personId: "alice", dateId: "d1", shiftType: "DAY", weight: 5 },
+      { personId: "alice", dateId: "d1", shiftType: "NIGHT" },
+      { personId: "alice", dateId: "d2", shiftType: "OFF", weight: -2 },
+      { personId: "bob", dateId: "d1", shiftType: "NIGHT", weight: 10000 },
+      { personId: "carol", dateId: "d1", shiftType: "DAY", weight: -Infinity },
+    ]);
+  });
+
+  it("rejects an unreadable weight, naming the cell", () => {
+    const csv = ["alice,DAY:lots,", "bob,,", "carol,,"].join("\n");
+    expect(validateShiftRequestCsv(csv, shiftRequestOptions())).toEqual({
+      ok: false,
+      error: 'Invalid weight "lots" at row 1, column 2. Use a number, Infinity, or -Infinity.',
+    });
+  });
+});
+
 describe("serializeShiftRequestCsv", () => {
   const people = ["alice", "bob"] as const;
   const dateItemIds = ["d1", "d2"] as const;
@@ -347,7 +370,7 @@ describe("serializeShiftRequestCsv", () => {
       people: [...people],
       dateItemIds: [...dateItemIds],
     });
-    expect(csv).toBe(["person,d1,d2", "alice,DAY | NIGHT,LEAVE", "bob,OFF,"].join("\n"));
+    expect(csv).toBe(["person,d1,d2", "alice,DAY:+5 | NIGHT:-3,LEAVE", "bob,OFF:-2,"].join("\n"));
   });
 
   it("resolves day-state precedence (leave wins over a coexisting request)", () => {
@@ -361,7 +384,18 @@ describe("serializeShiftRequestCsv", () => {
     expect(csv).toBe(["person,d1", "alice,LEAVE"].join("\n"));
   });
 
-  it("round-trips: an exported matrix re-imports to the same (person, date, selector) cells", () => {
+  it("writes infinite weights in a form the parser reads back", () => {
+    const csv = serializeShiftRequestCsv(
+      [
+        { kind: "request", person: "alice", date: "d1", shiftType: "DAY", weight: Infinity },
+        { kind: "off", person: "alice", date: "d2", weight: -Infinity },
+      ],
+      { people: ["alice"], dateItemIds: ["d1", "d2"] },
+    );
+    expect(csv).toBe(["person,d1,d2", "alice,DAY:+inf,OFF:-inf"].join("\n"));
+  });
+
+  it("round-trips: an exported matrix re-imports to the same (person, date, selector, weight) cells", () => {
     const csv = serializeShiftRequestCsv(cells(), {
       people: [...people],
       dateItemIds: [...dateItemIds],
@@ -375,10 +409,10 @@ describe("serializeShiftRequestCsv", () => {
     expect(result).toEqual({
       ok: true,
       data: [
-        { personId: "alice", dateId: "d1", shiftType: "DAY" },
-        { personId: "alice", dateId: "d1", shiftType: "NIGHT" },
+        { personId: "alice", dateId: "d1", shiftType: "DAY", weight: 5 },
+        { personId: "alice", dateId: "d1", shiftType: "NIGHT", weight: -3 },
         { personId: "alice", dateId: "d2", shiftType: "LEAVE" },
-        { personId: "bob", dateId: "d1", shiftType: "OFF" },
+        { personId: "bob", dateId: "d1", shiftType: "OFF", weight: -2 },
       ],
     });
   });

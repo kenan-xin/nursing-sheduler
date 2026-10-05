@@ -4,6 +4,11 @@ import type { RequirementCard } from "@/lib/scenario";
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
 import { serializeScenario } from "./serialize";
 import { importScenarioYaml, importScenarioValue } from "./import-scenario";
+import {
+  affinityToForm,
+  buildAffinityCard,
+  isEditableAffinityCard,
+} from "@/components/affinities/affinities-model";
 
 const BACKEND_YAML = `apiVersion: alpha
 description: imported
@@ -58,6 +63,27 @@ preferences:
 `;
 
 describe("importScenarioYaml (lenient Load path)", () => {
+  it("loads a v1 flat-list pairing as an editable card that saves back unchanged (rqfx)", () => {
+    const yaml = BACKEND_YAML.replace(
+      "preferences:\n",
+      "preferences:\n  - type: shift affinity\n    date: ALL\n    people1: [Alice]\n    people2: [Bob, Seniors]\n    shiftTypes: [D, E]\n    weight: 3\n",
+    );
+    const result = importScenarioYaml(yaml);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const card = { ...result.target.cardsByKind.affinities[0], uid: "v1-pairing" };
+    expect(card).toMatchObject({
+      people1: ["Alice"],
+      people2: ["Bob", "Seniors"],
+      shiftTypes: ["D", "E"],
+    });
+    expect(isEditableAffinityCard(card)).toBe(true);
+    const saved = buildAffinityCard(affinityToForm(card), card.uid);
+    expect(saved.people1).toEqual(card.people1);
+    expect(saved.people2).toEqual(card.people2);
+    expect(saved.shiftTypes).toEqual(card.shiftTypes);
+  });
+
   it("imports date objects as ISO", () => {
     // `yaml` 1.2 keeps ISO dates as strings. A loader that makes Date objects must not leak them.
     const yaml = `apiVersion: alpha
@@ -521,5 +547,77 @@ preferences:
       );
       expect(r.ok).toBe(false);
     });
+  });
+});
+
+// Bug hunt BH2 (6ysj): loaded files core would solve as a silent INFEASIBLE or MODEL_INVALID.
+describe("importScenarioYaml — counts and weights core cannot solve", () => {
+  const requirementYaml = (fields: string) => `apiVersion: alpha
+dates: {range: {startDate: 2026-11-01, endDate: 2026-11-03}}
+people: {items: [{id: a}, {id: b}]}
+shiftTypes: {items: [{id: D}]}
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    shiftType: D
+${fields}
+`;
+  const messages = (fields: string) => {
+    const r = importScenarioYaml(requirementYaml(fields));
+    return r.ok ? [] : r.issues.map((i) => i.message);
+  };
+
+  it("refuses a negative requiredNumPeople", () => {
+    expect(messages("    requiredNumPeople: -1\n    weight: -1")).toContain(
+      "requiredNumPeople must be 0 or more.",
+    );
+  });
+
+  // Both loaded on main; they load, warn, and block at Optimize (prepare-scenario-load.test).
+  it("loads preferredNumPeople below requiredNumPeople", () => {
+    expect(messages("    requiredNumPeople: 2\n    preferredNumPeople: 1\n    weight: -1")).toEqual(
+      [],
+    );
+  });
+
+  it("loads a weight past 1t", () => {
+    expect(messages("    requiredNumPeople: 1\n    weight: 9000000000000000")).toEqual([]);
+    expect(messages("    requiredNumPeople: 1\n    weight: -1000000000000")).toEqual([]);
+    expect(messages("    requiredNumPeople: 1\n    weight: -.inf")).toEqual([]);
+  });
+});
+
+// Bug hunt A-09: core reads `date: []` as "no dates", the UI as "all dates", so a load
+// would silently turn a no-op rule into one that holds every day.
+describe("importScenarioYaml — a rule with no dates", () => {
+  const yaml = (rule: string) => `apiVersion: alpha
+dates: {range: {startDate: 2026-11-01, endDate: 2026-11-03}}
+people: {items: [{id: a}]}
+shiftTypes: {items: [{id: N}, {id: D}]}
+preferences:
+${rule}
+`;
+  const messages = (rule: string) => {
+    const r = importScenarioYaml(yaml(rule));
+    return r.ok ? [] : r.issues.map((i) => i.message);
+  };
+
+  it("refuses date: [] and names the rule", () => {
+    expect(
+      messages(
+        "  - {type: shift type successions, description: No day after night, person: a, pattern: [N, D], date: [], weight: -.inf}",
+      ),
+    ).toEqual(["Rule 'No day after night': This rule has no dates. Remove it or add dates."]);
+    expect(
+      messages(
+        "  - {type: shift count, person: a, countDates: [], countShiftTypes: N, expression: x, target: 1}",
+      ),
+    ).toEqual(["Rule 1: This rule has no dates. Remove it or add dates."]);
+  });
+
+  it("still loads an omitted date", () => {
+    expect(
+      messages("  - {type: shift type successions, person: a, pattern: [N, D], weight: -.inf}"),
+    ).toEqual([]);
   });
 });

@@ -264,6 +264,15 @@ describe("sanitizePersistedScenario", () => {
     expect(sanitizePersistedScenario(payload)).toEqual(payload);
   });
 
+  it("keeps the holiday-import switch and refuses a non-boolean one (6975)", () => {
+    expect(sanitizePersistedScenario({ importPublicHolidays: false })).toEqual({
+      importPublicHolidays: false,
+    });
+    expect(() => sanitizePersistedScenario({ importPublicHolidays: "off" })).toThrow(
+      /importPublicHolidays/,
+    );
+  });
+
   it("silently drops a removed key (guidedRulePins) instead of validating or spreading it", () => {
     // The no-migration decision behind RP-2 rests on this: an unknown key is not an
     // error, however malformed — it simply never reaches live state.

@@ -9,6 +9,7 @@ import { toCanonicalScenarioDocument } from "./canonical";
 import { serializeScenario } from "./serialize";
 import { makeValidUiState } from "./test-fixtures";
 import type { CanonicalScenarioDocument } from "./types";
+import { WEIGHT_RANGE_MESSAGE } from "./schemas/primitives";
 import {
   computeScenarioFingerprint,
   useScenarioStore,
@@ -81,7 +82,7 @@ describe("prepareScenarioLoad — blocking issues", () => {
     expect(result.issues.length).toBeGreaterThan(0);
   });
 
-  it("a bad marked contract passes import but fails producer preflight", async () => {
+  it("a bad marked contract passes import; its preflight issue does not block the load (C-22)", async () => {
     const raw = docWithExtraPreference({
       type: "shift count",
       person: "Alice",
@@ -99,9 +100,34 @@ describe("prepareScenarioLoad — blocking issues", () => {
 
     // Import succeeded (we got a target + a projected doc)…
     expect(result.target).not.toBeNull();
-    // …but the producer contracted-hours validator rejects it.
-    expect(result.issues.length).toBeGreaterThan(0);
-    expect(result.issues.some((issue) => /weight '\.inf'/.test(issue.message))).toBe(true);
+    // …the producer contracted-hours validator flags it, for Optimize to block on…
+    expect(result.optimizeIssues!.some((issue) => /weight '\.inf'/.test(issue.message))).toBe(true);
+    // …but the load itself is not blocked (v1 parity).
+    expect(result.issues).toEqual([]);
+  });
+
+  it("a weight past 1t or preferred below required loads, and blocks Optimize", () => {
+    const requirement = (fields: object) =>
+      prepareScenarioLoad(
+        docWithExtraPreference({
+          type: "shift type requirement",
+          shiftType: "D",
+          requiredNumPeople: 1,
+          ...fields,
+        } as CanonicalScenarioDocument["preferences"][number]),
+      );
+    const cases = [
+      [requirement({ weight: 1e13 }), WEIGHT_RANGE_MESSAGE],
+      [
+        requirement({ requiredNumPeople: 2, preferredNumPeople: 1, weight: -1 }),
+        "preferredNumPeople (1) must be at least requiredNumPeople (2).",
+      ],
+    ] as const;
+    for (const [result, message] of cases) {
+      expect(result.issues).toEqual([]);
+      expect(result.target).not.toBeNull();
+      expect(result.optimizeIssues!.some((issue) => issue.message.includes(message))).toBe(true);
+    }
   });
 });
 
@@ -254,7 +280,7 @@ describe("prepareScenarioLoad — the no-mutation lock", () => {
     await readyStore();
     const before = await snapshot();
 
-    // A blocking bad-marked-contract AND a syntax error — neither may touch the store.
+    // A bad-marked-contract AND a syntax error — preparing neither may touch the store.
     const badContract = (() => {
       const doc = toCanonicalScenarioDocument(makeValidUiState());
       doc.preferences.push({
@@ -274,11 +300,43 @@ describe("prepareScenarioLoad — the no-mutation lock", () => {
     const contractResult = prepareScenarioLoad(badContract);
     const syntaxResult = prepareScenarioLoad("preferences: [unterminated");
 
-    // Both are blocking…
-    expect(contractResult.issues.length).toBeGreaterThan(0);
+    // Both carry issues…
+    expect(contractResult.optimizeIssues!.length).toBeGreaterThan(0);
     expect(syntaxResult.issues.length).toBeGreaterThan(0);
 
     // …and the store is untouched.
     expect(await snapshot()).toEqual(before);
+  });
+});
+
+describe("legacy D / MM-DD shift-request dates (A-07)", () => {
+  it("re-keys core's shorthand dates onto the matrix span ids", () => {
+    const yaml = `apiVersion: alpha
+dates:
+  range:
+    startDate: 2023-09-02
+    endDate: 2023-09-08
+people:
+  items:
+    - id: 0
+shiftTypes:
+  items:
+    - id: D
+preferences:
+  - type: at most one shift per day
+  - type: shift request
+    person: 0
+    date: 5
+    shiftType: D
+    weight: 100
+  - type: shift request
+    person: 0
+    date: 09-06
+    shiftType: D
+    weight: 100
+`;
+    const result = prepareScenarioLoad(yaml);
+    expect(result.issues).toEqual([]);
+    expect(result.target!.reqData.map((cell) => cell.date)).toEqual(["05", "06"]);
   });
 });

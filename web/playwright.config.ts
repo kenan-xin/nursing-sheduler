@@ -110,6 +110,9 @@ export default defineConfig({
       // and no runtime flag can resurrect it; the suite still opts in per page via
       // `addInitScript`, so both the build and the page must agree.
       NEXT_PUBLIC_NS_TEST_BRIDGE: "1",
+      // `/api/public-holidays` answers the bundled list without calling data.gov.sg,
+      // so no spec depends on the network or on the live dataset's current years.
+      SG_HOLIDAYS_OFFLINE: "1",
     },
     timeout: 120_000,
     reuseExistingServer: !process.env.CI,

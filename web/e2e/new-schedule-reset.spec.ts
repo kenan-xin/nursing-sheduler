@@ -5,6 +5,10 @@
 // downloaded XLSX is unaffected.` because the reset only replaced the SCENARIO and
 // left every roster/session surface of the previous run in the browser.
 //
+// plq5 P2: New no longer purges the saved roster. Each schedule keeps its own, so the
+// previous run's roster stays with the schedule being left (reopened from Recent
+// schedules), the new schedule has none, and only the session residue goes.
+//
 // These are the browser half of that closure. The seeding and the read-back both go
 // through the roster fixture's controls, which drive PRODUCTION `rosterStorage` and
 // the real sessionStorage/localStorage keys — so what is asserted is stored state in
@@ -27,16 +31,6 @@ interface ResidueProbe {
   retireMarker: boolean;
   viewMetadata: boolean;
 }
-
-const NOTHING_LEFT: ResidueProbe = {
-  working: false,
-  pointer: false,
-  candidate: false,
-  snapshot: false,
-  session: false,
-  retireMarker: false,
-  viewMetadata: false,
-};
 
 async function probeResidue(page: Page): Promise<ResidueProbe> {
   await page.goto(FIXTURE_URL);
@@ -77,24 +71,38 @@ async function gotoSaveAndLoad(page: Page): Promise<void> {
 }
 
 test.describe("G4 — New schedule leaves the previous run behind", () => {
-  test("a confirmed New schedule clears the roster, candidate, snapshot and session residue", async ({
+  test("a confirmed New schedule clears the session residue; the roster stays with its schedule", async ({
     page,
   }) => {
     await seedPreviousRun(page);
+    // Bring-up hands the fixture's (pre-P2, unscoped) roster slot to the open schedule.
     await gotoSaveAndLoad(page);
 
-    // The confirmation has to NAME the roster consequence, not just the verb.
     await page.getByTestId("new-schedule-button").click();
-    await expect(page.getByTestId("confirm-dialog-consequences")).toContainText(
-      "The saved roster and the last run's result",
+    await expect(page.getByRole("alertdialog")).toContainText(
+      "Your current schedule stays in Recent schedules, with its roster",
     );
     await page.getByTestId("confirm-dialog-confirm").click();
     await expect(page.getByText("New schedule created")).toBeVisible();
 
-    expect(await probeResidue(page)).toEqual(NOTHING_LEFT);
-    // And the dedicated route agrees: a genuinely empty roster, not a stale one.
+    expect(await probeResidue(page)).toMatchObject({
+      session: false,
+      retireMarker: false,
+      viewMetadata: false,
+    });
+    // The new schedule has no roster of its own: nothing stale is shown.
     await page.goto("/roster");
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
+
+    // The schedule it left still has its saved result.
+    await gotoSaveAndLoad(page);
+    // Filtered, not positional: opening it moves it to the top of the list.
+    const previous = page.getByTestId("recent-schedule-row").filter({ hasText: "Has roster" });
+    await expect(previous).toContainText("Has roster");
+    await previous.getByRole("button", { name: /^Open / }).click();
+    await expect(previous).toContainText("Open here");
+    await page.goto("/roster");
+    await expect(page.getByTestId("roster-candidate-available")).toBeVisible();
   });
 
   test("cancelling changes nothing at all", async ({ page }) => {
@@ -105,9 +113,9 @@ test.describe("G4 — New schedule leaves the previous run behind", () => {
     await page.getByTestId("confirm-dialog-cancel").click();
     await expect(page.getByText("New schedule created")).toHaveCount(0);
 
+    // The candidate and pointer have moved into the open schedule's own slot at
+    // bring-up (plq5 P2); everything the fixture probes by its old keys is intact.
     expect(await probeResidue(page)).toMatchObject({
-      pointer: true,
-      candidate: true,
       snapshot: true,
       session: true,
       retireMarker: true,

@@ -37,10 +37,19 @@ vi.mock("@/lib/store", async (orig) => {
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+// plq5 P2 (replaces C-23): a Load clears no roster. A spy, so its absence is provable.
+vi.mock("@/lib/roster", async (orig) => {
+  const actual = await orig<typeof import("@/lib/roster")>();
+  return { ...actual, clearRosterDataAndNotify: vi.fn() };
+});
+
 import { prepareScenarioLoad } from "@/lib/scenario";
 import { loadScenario, isScenarioSliceEmpty } from "@/lib/store";
+import { clearRosterDataAndNotify } from "@/lib/roster";
 import { toast } from "sonner";
 import { useScenarioImport } from "./use-scenario-import";
+
+const clearRosterMock = clearRosterDataAndNotify as unknown as Mock;
 
 const prepareMock = prepareScenarioLoad as unknown as Mock;
 const loadScenarioMock = loadScenario as unknown as Mock;
@@ -92,6 +101,7 @@ beforeEach(() => {
   // reported as a successful load (see the refusal test at the end).
   loadScenarioMock.mockReset().mockResolvedValue(LOADED);
   isEmptyMock.mockReset().mockReturnValue(true);
+  clearRosterMock.mockReset().mockResolvedValue({ status: "cleared" });
   (toast.success as unknown as Mock).mockReset();
   (toast.error as unknown as Mock).mockReset();
 });
@@ -171,7 +181,11 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     stageResult(targetWithCounts([MARKED_CONTRACT]));
     const { result } = renderHook(() => useScenarioImport());
 
-    await act(async () => result.current.handleFile("<yaml>"));
+    // Not awaited: a staged load settles only once its confirm does.
+    let loaded!: Promise<void>;
+    await act(async () => {
+      loaded = result.current.handleFile("<yaml>");
+    });
     // Warnings are staged, not yet published; nothing has loaded.
     expect(result.current.warnings).toBeNull();
     expect(result.current.confirm).not.toBeNull();
@@ -180,6 +194,7 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     await act(async () => result.current.confirm!.onContinue());
     expect(result.current.warnings).toEqual([IMPORT_ALICE_WARNING]);
     expect(loadScenarioMock).toHaveBeenCalledTimes(1);
+    await loaded; // settles once the confirmed load has (7vtc)
   });
 
   it("onContinue settles only after the load has committed (nursing-sheduler-iks)", async () => {
@@ -190,7 +205,9 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     loadScenarioMock.mockReturnValue(new Promise((resolve) => (commitLoad = resolve)));
     stageResult(targetWithCounts([MARKED_CONTRACT]));
     const { result } = renderHook(() => useScenarioImport());
-    await act(async () => result.current.handleFile("<yaml>"));
+    await act(async () => {
+      void result.current.handleFile("<yaml>");
+    });
 
     let settled = false;
     let continued!: Promise<void>;
@@ -221,7 +238,9 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     stageResult(targetWithCounts([MARKED_CONTRACT]));
     const { result } = renderHook(() => useScenarioImport());
 
-    await act(async () => result.current.handleFile("<yaml>"));
+    await act(async () => {
+      void result.current.handleFile("<yaml>");
+    });
     expect(result.current.confirm).not.toBeNull();
 
     await act(async () => result.current.confirm!.onContinue());
@@ -231,6 +250,96 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     expect(result.current.warnings).toBeNull();
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalled();
+  });
+});
+
+describe("useScenarioImport — Load keeps every saved roster (plq5 P2)", () => {
+  it("switches without clearing: the roster stays with the schedule being left", async () => {
+    stageResult(targetWithCounts([]));
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleFile("<yaml>"));
+    expect(loadScenarioMock).toHaveBeenCalledOnce();
+    expect(clearRosterMock).not.toHaveBeenCalled();
+  });
+
+  it("an Edit-YAML apply keeps the roster", async () => {
+    stageResult(targetWithCounts([]));
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleEdit("<yaml>"));
+    expect(clearRosterMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useScenarioImport — an older file with issues still loads (C-22)", () => {
+  const ISSUE = { path: "preferences[3]", message: "weight must be '.inf'" };
+
+  function stageWithIssues() {
+    prepareMock.mockReturnValue({
+      issues: [],
+      warnings: [],
+      target: targetWithCounts([]),
+      doc: null,
+      optimizeIssues: [ISSUE],
+    } satisfies PrepareScenarioLoadResult);
+  }
+
+  it("loads and keeps the issues to show as warnings", async () => {
+    stageWithIssues();
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleFile("<yaml>"));
+    expect(loadScenarioMock).toHaveBeenCalledOnce();
+    expect(result.current.issues).toBeNull();
+    expect(result.current.loadIssues).toEqual([ISSUE]);
+  });
+
+  it("a v1 Leave file is offered conversion first, then loads with its issues (objg + C-22)", async () => {
+    const plan = {
+      shiftId: "Leave",
+      shiftIndex: 2,
+      convertedRequests: 1,
+      droppedRequests: 0,
+      historyEntries: 0,
+      blockers: [],
+      leaveLikeIds: ["Leave"],
+      allShiftRules: 0,
+      convertible: true,
+      doc: null,
+    };
+    prepareMock.mockImplementation((_raw: string, opts?: { convertV1LeaveShift?: boolean }) =>
+      opts?.convertV1LeaveShift
+        ? {
+            issues: [],
+            warnings: [],
+            target: targetWithCounts([]),
+            doc: null,
+            optimizeIssues: [ISSUE],
+          }
+        : {
+            issues: [{ path: "shiftTypes.items[2]", message: "rename" }],
+            warnings: [],
+            target: null,
+            doc: null,
+            v1LeaveShift: plan,
+          },
+    );
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => {
+      void result.current.handleFile("<yaml>");
+    });
+    expect(loadScenarioMock).not.toHaveBeenCalled();
+    await act(async () => result.current.confirm!.onContinue());
+    expect(clearRosterMock).not.toHaveBeenCalled();
+    expect(loadScenarioMock).toHaveBeenCalledOnce();
+    expect(result.current.loadIssues).toEqual([ISSUE]);
+  });
+
+  it("an Edit-YAML draft with the same issues is still refused", async () => {
+    stageWithIssues();
+    const { result } = renderHook(() => useScenarioImport());
+    await act(async () => result.current.handleEdit("<yaml>"));
+    expect(loadScenarioMock).not.toHaveBeenCalled();
+    expect(result.current.issues).toEqual([ISSUE]);
+    expect(result.current.loadIssues).toBeNull();
   });
 });
 

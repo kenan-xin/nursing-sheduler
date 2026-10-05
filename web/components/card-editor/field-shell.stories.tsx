@@ -40,11 +40,14 @@ export const WithHint: Story = {
 };
 
 export const WithError: Story = {
-  args: { error: "Weight must be a valid number, Infinity, or -Infinity" },
+  args: {
+    error:
+      "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
+  },
   play: async ({ canvas }) => {
     // The error line is announced, not just painted (role="alert").
     await expect(canvas.getByRole("alert")).toHaveTextContent(
-      "Weight must be a valid number, Infinity, or -Infinity",
+      "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
     );
   },
 };

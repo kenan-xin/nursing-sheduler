@@ -254,6 +254,37 @@ def test_leave_does_not_satisfy_all_succession():
     assert status == "INFEASIBLE"
 
 
+GROUP_HARD_OFF_PLUS_MEMBER_LEAVE_SCENARIO = """
+apiVersion: alpha
+dates:
+  range: {startDate: 2026-12-24, endDate: 2026-12-26}
+people:
+  items: [{id: A}, {id: B}]
+  groups: [{id: Seniors, members: [A, B]}]
+shiftTypes:
+  items: [{id: D}]
+preferences:
+  - type: at most one shift per day
+  - type: shift request
+    person: Seniors
+    date: 2026-12-25
+    shiftType: OFF
+    weight: .inf
+  - type: shift request
+    person: A
+    date: 2026-12-25
+    shiftType: LEAVE
+    weight: .inf
+"""
+
+
+def test_leave_day_satisfies_a_hard_off_request():
+    # B5: both cells say "A does not work on the 25th"; the pinned leave keeps its Leave cell.
+    df, status = _run(GROUP_HARD_OFF_PLUS_MEMBER_LEAVE_SCENARIO)
+    assert status == "OPTIMAL"
+    assert _cell(df, 0, 1) == "Leave"
+
+
 # ===========================================================================
 # R1-R4: characterization regressions locking the confirmed LEAVE contract
 # (contract C1-C4). Every test carries a discriminating observable so it

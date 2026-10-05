@@ -45,6 +45,8 @@ export interface RosterEditBarProps {
   onSetCell: (coordinate: EditCoordinate, day: RosterDayState) => void;
   /** Clear the selection without editing. */
   onCancel: () => void;
+  /** Rules the last edit to this cell broke (C-19). A warning: the edit is kept. */
+  warnings?: readonly string[];
 }
 
 /** One chooser entry. `{value,label}` is the shape Base UI reads automatically. */
@@ -64,6 +66,7 @@ export function RosterEditBar({
   current,
   onSetCell,
   onCancel,
+  warnings,
 }: RosterEditBarProps) {
   // Base UI hides everything outside the picker's input from assistive tech while
   // its popup is open — `aria-hidden` lands on this bar's own OFF / LV and Cancel
@@ -199,6 +202,28 @@ export function RosterEditBar({
       >
         <FaXmark className="size-3.5" aria-hidden /> Cancel
       </Button>
+      {/* Audit C-08: a hand edit lives only in this roster. It is not leave or a
+          request, so the solver never sees it. */}
+      <p data-testid="roster-edit-scope" className="basis-full text-meta text-ink3">
+        Roster only. The next run will not keep this.
+      </p>
+      {warnings !== undefined && warnings.length > 0 ? (
+        <div
+          role="status"
+          data-testid="roster-edit-warnings"
+          className="basis-full rounded-control border border-warn bg-warntint px-3 py-2 text-meta text-warnink"
+        >
+          <p className="font-semibold">
+            This change breaks {warnings.length === 1 ? "a rule" : `${warnings.length} rules`}. It
+            is kept.
+          </p>
+          <ul className="list-disc pl-4.5">
+            {warnings.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }

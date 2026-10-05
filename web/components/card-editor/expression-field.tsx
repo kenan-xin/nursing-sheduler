@@ -144,7 +144,7 @@ export function ExpressionField({
         <span>
           {isSquaredExpression(expression)
             ? "T is the ideal count. |x − T|² pushes x toward T from both sides — pair it with a negative or −∞ weight (a positive weight is rejected)."
-            : "T is a whole number in the same unit as the coefficients — e.g. a 160h contract in half-hour units is 320."}
+            : "T is a whole number in the same unit as the coefficients."}
         </span>
       </p>
       {error && (

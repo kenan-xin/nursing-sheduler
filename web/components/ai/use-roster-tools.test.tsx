@@ -62,11 +62,11 @@ vi.mock("@/lib/store", async (importOriginal) => {
       prepare: fixture.prepare,
       cancel: fixture.cancel,
     },
-    rosterStorage: {
+    currentRosterStorage: () => ({
       ...actual.rosterStorage,
       readWorking: async () => fixture.working,
       readCurrentCandidate: async () => fixture.pointer,
-    },
+    }),
   };
 });
 
@@ -1012,6 +1012,22 @@ describe("prepare_borrowed_cover with no saved roster (bead 20wo)", () => {
       startDate: "2026-11-05",
       endDate: "2026-11-05",
     });
+  });
+
+  it("records the other dates' leave when one date already has leave (bead 8g1f C4)", async () => {
+    const ward = SCENARIOS.understaffedNight();
+    fixture.scenario = {
+      ...ward,
+      reqData: [{ uid: "ana-04", person: "ana", date: "04", kind: "leave" }],
+    };
+    await tool("prepare_borrowed_cover").handler(
+      { ...RINA, person: "ana", dates: ["2026-11-04", "2026-11-05"] },
+      {},
+    );
+    const commands = fixture.prepare.mock.calls[0][0].commands;
+    expect(commands.filter((c: { type: string }) => c.type === "add_leave")).toEqual([
+      { type: "add_leave", personId: "ana", startDate: "2026-11-05", endDate: "2026-11-05" },
+    ]);
   });
 
   it("records no leave when the reason is not sickness (bead v9lu)", async () => {

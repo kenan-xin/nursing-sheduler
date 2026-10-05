@@ -596,7 +596,7 @@ exactly `Infinity/-Infinity; any string (parse failure) is invalid.`
 | preferred_num_people | number `< required (required is a number)` | `Preferred number of people must be greater than required number of people` |
 | qualified_people | selection empty | `At least one person must be selected` |
 | date | selection empty | `At least one date must be selected` |
-| weight | only when preferred≠required AND weight invalid | `Weight must be a valid number, Infinity, or -Infinity` |
+| weight | only when preferred≠required AND weight invalid | `Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity` |
 | weight | only when preferred≠required AND number `> 0` | `Weight must be 0 or less (including -Infinity)` |
 | coefficients | (see coefficient table below) | — |
 
@@ -609,7 +609,7 @@ exactly `Infinity/-Infinity; any string (parse failure) is invalid.`
 | person | selection empty | `At least one person must be selected` |
 | pattern | fewer than 2 entries | `At least 2 shift types must be selected for a succession pattern` |
 | date | selection empty | `At least one date must be selected` |
-| weight | invalid | `Weight must be a valid number, Infinity, or -Infinity` |
+| weight | invalid | `Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity` |
 
 (successions:129-150)
 
@@ -622,7 +622,7 @@ exactly `Infinity/-Infinity; any string (parse failure) is invalid.`
 | count_shift_types | selection empty | `At least one shift type must be selected` |
 | expression | not one of `SUPPORTED_EXPRESSIONS` | `Please select a valid expression` |
 | target | not an integer `>= 0` | `Target must be a non-negative integer` |
-| weight | invalid | `Weight must be a valid number, Infinity, or -Infinity` |
+| weight | invalid | `Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity` |
 | weight | expression is `\|x - T\|^2 AND weight not non-positive` | `Weight must be non-positive for shift count with "\|x - T\|^2"` |
 | coefficients | (see coefficient table below) | — |
 
@@ -636,7 +636,7 @@ exactly `Infinity/-Infinity; any string (parse failure) is invalid.`
 | people1 | selection empty | `At least one person must be selected for People 1` |
 | people2 | selection empty | `At least one person must be selected for People 2` |
 | shift_types (error key `shiftTypes)` | selection empty | `At least one shift type must be selected` |
-| weight | invalid | `Weight must be a valid number, Infinity, or -Infinity` |
+| weight | invalid | `Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity` |
 
 (affinities:131-156)
 
@@ -647,7 +647,7 @@ exactly `Infinity/-Infinity; any string (parse failure) is invalid.`
 | preceptors | selection empty | `At least one preceptor must be selected` |
 | preceptees | selection empty | `At least one preceptee must be selected` |
 | shift_types (error key `shiftTypes)` | selection empty | `At least one shift type must be selected` |
-| weight | invalid (string / NaN) | `Weight must be a valid number, Infinity, or -Infinity` |
+| weight | invalid (string / NaN) | `Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity` |
 | date | selection empty | (no error — date is optional) |
 
 (coverings:132-153)

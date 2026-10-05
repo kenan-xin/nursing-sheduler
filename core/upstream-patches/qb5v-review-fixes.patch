@@ -1,0 +1,62 @@
+# qb5v review patch against genie 1bf4b85 (bead nursing-sheduler-qb5v).
+# hunk: a ledger read error logs and leaves the roster run intact; result.explanation is omitted from the API and the result event when None, so a web client that predates the key keeps reading results
+
+diff --git a/core/nurse_scheduling/scheduler.py b/core/nurse_scheduling/scheduler.py
+index 27f7b42d..9243d2d4 100644
+--- a/core/nurse_scheduling/scheduler.py
++++ b/core/nurse_scheduling/scheduler.py
+@@ -532,7 +532,13 @@ def schedule(
+     if on_roster is not None:
+         on_roster(_build_roster_payload(ctx, prettify))
+     if on_explanation is not None:
+-        on_explanation({"kind": "ledger", "ledger": explain.read_ledger(ctx)})
++        try:
++            ledger = explain.read_ledger(ctx)
++        except Exception:
++            # The ledger only explains the roster; never fail a run that has one.
++            logger.exception("Reading the penalty ledger failed")
++        else:
++            on_explanation({"kind": "ledger", "ledger": ledger})
+     solution = {}
+     for d, s, p in ctx.shifts:
+         solution[(d, s, p)] = ctx.solver.get_value(ctx.shifts[(d, s, p)])
+diff --git a/core/nurse_scheduling/server/api/schemas.py b/core/nurse_scheduling/server/api/schemas.py
+index 77d81a2a..58df6d19 100644
+--- a/core/nurse_scheduling/server/api/schemas.py
++++ b/core/nurse_scheduling/server/api/schemas.py
+@@ -21,7 +21,7 @@ from datetime import datetime
+ from typing import Any, Literal
+ from urllib.parse import quote
+ 
+-from pydantic import BaseModel
++from pydantic import BaseModel, Field
+ 
+ from ..config import ServerSettings
+ from ..jobs.models import Job, JobPurpose, JobState, OptimizationOutcome
+@@ -177,8 +177,9 @@ class OptimizationResultResponse(BaseModel):
+     """Original solver status."""
+     termination_reason: str | None
+     """Normalized reason solver execution stopped."""
+-    explanation: dict[str, Any] | None = None
+-    """v2: penalty ledger (roster) or why a proven-infeasible run has none."""
++    explanation: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
++    """v2: penalty ledger (roster) or why a proven-infeasible run has none. Omitted when
++    None, so a web client that predates the key still reads results without one."""
+ 
+ 
+ class JobErrorResponse(BaseModel):
+diff --git a/core/nurse_scheduling/server/jobs/controller.py b/core/nurse_scheduling/server/jobs/controller.py
+index eb721de7..4a06f230 100644
+--- a/core/nurse_scheduling/server/jobs/controller.py
++++ b/core/nurse_scheduling/server/jobs/controller.py
+@@ -680,8 +680,9 @@ class JobController:
+                 "score": job.result.score,
+                 "solver_status": job.result.solver_status,
+                 "termination_reason": job.result.termination_reason,
+-                "explanation": job.result.explanation,
+                 "artifact_name": job.artifact_name,
++                # Omitted when None, so a web client that predates the key keeps working.
++                **({"explanation": job.result.explanation} if job.result.explanation is not None else {}),
+             },
+             occurred_at=occurred_at,
+         )

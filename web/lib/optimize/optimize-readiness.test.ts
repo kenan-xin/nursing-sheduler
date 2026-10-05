@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createEmptyScenarioUiState } from "@/lib/scenario";
 import {
   deriveOptimizeReadiness,
   UNSUPPORTED_EXPRESSION_REASON,
@@ -11,6 +12,7 @@ const ready: OptimizeReadinessSource = {
   staff: [{ id: "p1" }],
   shifts: [{ id: "day" }],
   shiftGroups: [],
+  cardsByKind: createEmptyScenarioUiState().cardsByKind,
   counts: [{ expression: "x >= T" }, { expression: ["x >= T", "x <= T"] }],
 };
 
@@ -44,6 +46,7 @@ describe("deriveOptimizeReadiness", () => {
       staff: [],
       shifts: [],
       shiftGroups: [],
+      cardsByKind: ready.cardsByKind,
       counts: [],
     });
     expect(result.ready).toBe(false);
@@ -80,8 +83,32 @@ describe("deriveOptimizeReadiness", () => {
       staff: [],
       shifts: [],
       shiftGroups: [],
+      cardsByKind: ready.cardsByKind,
       counts: [],
     });
     expect(result.issues.map((i) => i.kind)).toEqual(["dates", "people", "shift-types"]);
+  });
+
+  it("blocks an enabled rule that names an empty shift group (T3)", () => {
+    const requirement = {
+      uid: "r1",
+      shiftType: ["Nights"],
+      requiredNumPeople: 1,
+      qualifiedPeople: ["ALL"],
+      date: ["ALL"],
+      weight: -1,
+    };
+    const withRule = (members: string[], disabled?: boolean): OptimizeReadinessSource => ({
+      ...ready,
+      shiftGroups: [{ id: "Nights", members }],
+      cardsByKind: { ...ready.cardsByKind, requirements: [{ ...requirement, disabled }] },
+    });
+    const blocked = deriveOptimizeReadiness(withRule([]));
+    expect(blocked.ready).toBe(false);
+    expect(blocked.issues[0]).toMatchObject({ kind: "empty-shift-groups", href: "/shift-types" });
+    expect(blocked.issues[0].before).toContain("“Nights”");
+    // A disabled rule is never sent, and a group with members resolves fine.
+    expect(deriveOptimizeReadiness(withRule([], true)).ready).toBe(true);
+    expect(deriveOptimizeReadiness(withRule(["day"])).ready).toBe(true);
   });
 });

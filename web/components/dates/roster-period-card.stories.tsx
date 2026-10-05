@@ -9,7 +9,7 @@ const meta = {
   title: "Dates/RosterPeriodCard",
   component: RosterPeriodCard,
   parameters: { layout: "padded" },
-  args: { range: COMMITTED, importedHolidaysPresent: false, onCommit: fn() },
+  args: { range: COMMITTED, importApplied: false, onCommit: fn() },
 } satisfies Meta<typeof RosterPeriodCard>;
 
 export default meta;
@@ -17,8 +17,10 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   play: async ({ args, canvas }) => {
-    // A complete, valid edit commits immediately with the effective import flag.
+    // An edit is a draft; Apply commits it with the effective import flag.
     fireEvent.change(canvas.getByTestId("range-end"), { target: { value: "2026-08-20" } });
+    await expect(args.onCommit).not.toHaveBeenCalled();
+    fireEvent.click(canvas.getByTestId("range-apply"));
     await expect(args.onCommit).toHaveBeenCalledWith(
       { start: "2026-08-01", end: "2026-08-20" },
       false,
@@ -36,7 +38,7 @@ export const InvalidRange: Story = {
 };
 
 export const HolidaysImported: Story = {
-  args: { importedHolidaysPresent: true },
+  args: { importApplied: true },
   play: async ({ canvas }) => {
     await expect(canvas.getByTestId("import-toggle")).toHaveAttribute("aria-checked", "true");
     await expect(canvas.getByTestId("import-count")).toBeVisible();
@@ -44,7 +46,7 @@ export const HolidaysImported: Story = {
 };
 
 export const ImportToggleOn: Story = {
-  args: { range: { start: "", end: "" }, importedHolidaysPresent: false },
+  args: { range: { start: "", end: "" }, importApplied: false },
   play: async ({ args, canvas }) => {
     // A fresh roster seeds the import ON; a valid range surfaces it and the commit
     // carries the flag.

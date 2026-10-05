@@ -17,7 +17,11 @@
 // live handlers only through the context this rendering provides.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { CopilotChatMessageView, CopilotChatView } from "@copilotkit/react-core/v2";
+import {
+  CopilotChatMessageView,
+  CopilotChatUserMessage,
+  CopilotChatView,
+} from "@copilotkit/react-core/v2";
 import type { Message } from "@ag-ui/client";
 import { readThreadMessages } from "@/lib/ai/assistant/history-repo";
 import { toTransportThread } from "@/lib/ai/assistant/messages";
@@ -32,7 +36,7 @@ import {
   type AssistantSendOptions,
 } from "./use-assistant-session";
 import { useAssistantProposals } from "./use-assistant-proposals";
-import { useAssistantFollowUps } from "./use-assistant-follow-ups";
+import { isAppFollowUp, useAssistantFollowUps } from "./use-assistant-follow-ups";
 import { CardDockContext, DockedComposer } from "./assistant-card-dock";
 import { AssistantReceipts } from "./assistant-receipts";
 import { ApplyNavigationNotice } from "./apply-navigation-notice";
@@ -190,7 +194,52 @@ const ActivityContext = createContext<AssistantActivity>(null);
 function ActivityCursor() {
   return <AssistantActivityStatus activity={useContext(ActivityContext)} />;
 }
-const MESSAGE_VIEW = { cursor: ActivityCursor };
+/** A follow-up the app sent in the user's place says so: the user did not type it (C-36). */
+function AppAwareMessageRenderer(props: { content: string; className?: string }) {
+  if (!isAppFollowUp(props.content)) return <CopilotChatUserMessage.MessageRenderer {...props} />;
+  return (
+    <div data-testid="assistant-app-follow-up">
+      <CopilotChatUserMessage.MessageRenderer {...props} />
+      <p className="px-1 text-right text-label text-ink3">Sent by the app</p>
+    </div>
+  );
+}
+const USER_MESSAGE = { messageRenderer: AppAwareMessageRenderer };
+const MESSAGE_VIEW = { cursor: ActivityCursor, userMessage: USER_MESSAGE };
+
+const OPEN_PREVIEW_KEY = "assistant.open-preview-thread";
+
+function readOpenPreviewThread(): string | null {
+  try {
+    return sessionStorage.getItem(OPEN_PREVIEW_KEY);
+  } catch {
+    return null; // Storage denied: the notice below is best-effort.
+  }
+}
+
+function writeOpenPreviewThread(threadId: string | null): void {
+  try {
+    if (threadId) sessionStorage.setItem(OPEN_PREVIEW_KEY, threadId);
+    else sessionStorage.removeItem(OPEN_PREVIEW_KEY);
+  } catch {
+    // Storage denied: the notice below is best-effort.
+  }
+}
+
+/**
+ * A live Preview is memory only, by design (`activeProposal` in the assistant store), so
+ * a reload drops the card while the chat still says "press Apply". Only WHICH thread had
+ * one open is noted for this tab -- never the proposal, which must not regain a live
+ * Apply -- so the page after a reload can say where the card went (C-37). Hidden again
+ * once a Preview shows or a turn runs.
+ */
+export function usePreviewClosedOnReload(threadId: string, running: boolean): boolean {
+  const open = useAssistantStore((state) => state.activeProposal !== null);
+  const [closed, setClosed] = useState(() => !open && readOpenPreviewThread() === threadId);
+  useEffect(() => writeOpenPreviewThread(open ? threadId : null), [open, threadId]);
+  if (closed && (open || running)) setClosed(false);
+  return closed;
+}
 
 export interface AssistantLiveConversationProps {
   threadId: string;
@@ -237,7 +286,9 @@ export function AssistantLiveConversation({
       assistantActions.clearChoices();
       return options ? session.send(text, options) : session.send(text);
     },
+    proposals.undone,
   );
+  const previewClosed = usePreviewClosedOnReload(threadId, running || session.sending);
   const dock = useMemo(
     () => ({ onSend: sendMessage, disabled: running, proposals }),
     [sendMessage, running, proposals],
@@ -282,6 +333,15 @@ export function AssistantLiveConversation({
       {session.messages.length === 0 && <WelcomeState />}
       <RefusalNotice />
       <LifecycleNotice onRetry={retry.canRetry ? retry.retry : null} />
+      {previewClosed && (
+        <p
+          className="px-4 pb-2 text-meta text-ink2"
+          role="status"
+          data-testid="assistant-preview-closed"
+        >
+          The Preview closed on reload. Ask again.
+        </p>
+      )}
       <CompactionNotice show={session.summarised} />
       <AssistantReceipts controller={proposals} />
       <ApplyNavigationNotice controller={proposals} />
@@ -383,6 +443,7 @@ export function AssistantHistoricalConversation({
       <CopilotChatMessageView
         className="mx-auto min-h-0 w-full max-w-[70ch] flex-1 overflow-y-auto px-4"
         messages={messages}
+        userMessage={USER_MESSAGE}
       />
     </div>
   );

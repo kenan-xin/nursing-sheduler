@@ -58,13 +58,15 @@ import {
   confirmationsDigest,
   outstandingAssumptions,
 } from "@/lib/proposal";
-import { NurseSchedulerDb, SCENARIO_WRITE_TABLES } from "./schema";
+import { ASSISTANT_WRITE_TABLES, NurseSchedulerDb, SCENARIO_WRITE_TABLES } from "./schema";
 import {
   type AssistantProposalV1,
   type AssistantReceiptV1,
   type CapturedGeneration,
   GLOBAL_GENERATION_SCOPE,
   type GenerationScopeKey,
+  LEGACY_MIGRATION_KEY,
+  rosterKeys,
   type LeaseOwner,
   type LeaseResult,
   type OptimizeBasisRecordV2,
@@ -77,7 +79,67 @@ import {
   type TabWorkspaceSelectionV1,
   type WriterLeaseV2,
 } from "./types";
-import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
+import {
+  createEmptyScenarioUiState,
+  RECENT_SCHEDULES_LIMIT,
+  scheduleAutoName,
+  type ScenarioUiState,
+} from "@/lib/scenario";
+
+/**
+ * Every table a schedule's rows live in (plq5 delete). The scenario write set PLUS the
+ * assistant conversation tables, which `SCENARIO_WRITE_TABLES` deliberately leaves out:
+ * only a whole-schedule delete (and the create that removes schedules over the limit)
+ * may reach both.
+ */
+const SCHEDULE_DELETE_TABLES = [
+  ...new Set([...SCENARIO_WRITE_TABLES, ...ASSISTANT_WRITE_TABLES]),
+  // Each schedule's own roster rows (plq5 P2).
+  "roster",
+  "snapshot",
+  "meta",
+] as const;
+
+/** One row of the Recent schedules list. */
+export interface ScheduleSummary {
+  scenarioId: string;
+  /** The user's name, or `null` when the list should show {@link autoName}. */
+  title: string | null;
+  autoName: string;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** A live lease on it names a different tab. */
+  heldByOtherTab: boolean;
+  /** Empty and never edited (what New leaves behind). Only listed while open here. */
+  blank: boolean;
+  /** It has a saved roster of its own (plq5 P2). */
+  hasRoster: boolean;
+}
+
+/** A schedule the limit removed while creating another. */
+export interface RemovedSchedule {
+  scenarioId: string;
+  name: string;
+}
+
+/** Empty, never edited, never named or pinned, no roster — nothing a user could miss. */
+function isBlankSchedule(envelope: ScenarioEnvelopeV3, withRoster: Set<string>): boolean {
+  const { scenario } = envelope;
+  return (
+    !withRoster.has(envelope.scenarioId) &&
+    envelope.documentRevision === 1 &&
+    !envelope.title &&
+    !envelope.pinned &&
+    scenario.staff.length === 0 &&
+    scenario.shifts.length === 0 &&
+    !scenario.rangeStart
+  );
+}
+
+function scheduleName(envelope: ScenarioEnvelopeV3): string {
+  return envelope.title || scheduleAutoName(envelope.scenario);
+}
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -145,6 +207,8 @@ export interface ScenarioSelection {
    * scenario writes no scenario-scoped fact at all.
    */
   commit: ScenarioCommitV1 | null;
+  /** Schedules the Recent schedules limit removed to make room (New and Load only). */
+  removed: RemovedSchedule[];
 }
 
 export interface CommitInput {
@@ -218,6 +282,23 @@ export interface ScenarioRepository {
   read(scenarioId: string): Promise<ScenarioEnvelopeV3>;
   /** Reread everything a tab must not trust process memory for. */
   readTabContext(tabId: string): Promise<TabContext>;
+  /** The most recently active scenario (last created, loaded, acquired or edited). */
+  latestScenarioId(): Promise<string | null>;
+  /**
+   * Recent schedules, newest `updatedAt` first. Blank schedules are left out unless
+   * `tabId` has that one selected.
+   */
+  listSchedules(input: { tabId: string }): Promise<ScheduleSummary[]>;
+  /** Set or clear (empty string) the user's name. Metadata only. */
+  renameSchedule(input: { scenarioId: string; title: string }): Promise<ScenarioEnvelopeV3>;
+  /** Pin or unpin. Metadata only. */
+  setSchedulePinned(input: { scenarioId: string; pinned: boolean }): Promise<ScenarioEnvelopeV3>;
+  /**
+   * Delete a schedule and every row keyed to it, and bump its assistant fence.
+   * Refused (`schedule_open`) for the schedule `tabId` has open, and (`target_owned`)
+   * while another tab holds a live lease on it.
+   */
+  deleteSchedule(input: { scenarioId: string; tabId: string }): Promise<void>;
   /**
    * Start a fresh Undo session for a scenario this owner already holds. Prior
    * reversal payloads are invalidated; commits, links, and receipts are kept.
@@ -363,7 +444,7 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
     tabId: string,
     mode: "acquire" | "takeover",
     at: Date,
-  ): Promise<{ lease: WriterLeaseV2; tookOver: boolean }> {
+  ): Promise<{ lease: WriterLeaseV2; tookOver: boolean; wasOwnLease: boolean }> {
     const scenarioId = envelope.scenarioId;
     const existing = await db.writerLeases.get(scenarioId);
     const live = isLeaseLive(existing, at);
@@ -395,7 +476,11 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
     const epoch = renewInPlace ? existing.epoch : highWater + 1;
     const lease = renewedLease({ scenarioId, ownerTabId: tabId, epoch }, at, leaseTtlMs);
     await db.writerLeases.put(lease);
-    return { lease, tookOver: !renewInPlace && existing !== undefined };
+    return {
+      lease,
+      tookOver: !renewInPlace && existing !== undefined,
+      wasOwnLease: existing?.ownerTabId === tabId,
+    };
   }
 
   /**
@@ -493,7 +578,9 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
       topCommitId: commit.commitId,
       historyCursor: isContent ? content.length + 1 : envelope.historyCursor,
       scenario: next.scenario,
-      backupFingerprint: next.backupFingerprint,
+      // Undo/Redo restore content only. The backup record is a fact about the
+      // file on disk, so a download made after the edit must survive navigation.
+      backupFingerprint: isContent ? next.backupFingerprint : envelope.backupFingerprint,
       updatedAt: iso,
     };
     await db.scenarioEnvelopes.put(nextEnvelope);
@@ -541,6 +628,120 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
     return next;
   }
 
+  /**
+   * Delete one schedule's rows from every table keyed to it, then bump its assistant
+   * fence (as `clearAssistantContent` does) so a detached late callback cannot
+   * recreate what was just removed. The fence row itself is permanent. Caller holds a
+   * transaction over {@link SCHEDULE_DELETE_TABLES}.
+   */
+  async function deleteScheduleInTx(scenarioId: string, at: Date): Promise<void> {
+    await db.scenarioEnvelopes.delete(scenarioId);
+    await db.scenarioCommits.where("scenarioId").equals(scenarioId).delete();
+    await db.historyLinks.where("scenarioId").equals(scenarioId).delete();
+    await db.optimizeBases.where("scenarioId").equals(scenarioId).delete();
+    await db.assistantProposals.where("scenarioId").equals(scenarioId).delete();
+    await db.assistantReceipts.where("scenarioId").equals(scenarioId).delete();
+    await db.diagnosticSearches.where("scenarioId").equals(scenarioId).delete();
+    const threadIds = await db.assistantThreads
+      .where("scenarioId")
+      .equals(scenarioId)
+      .primaryKeys();
+    await db.assistantThreads.bulkDelete(threadIds);
+    await db.assistantTurns.where("scenarioId").equals(scenarioId).delete();
+    // Messages are indexed by thread, not scenario.
+    await db.assistantMessages.where("threadId").anyOf(threadIds).delete();
+    await db.tabSelections.where("scenarioId").equals(scenarioId).delete();
+    await db.writerLeases.delete(scenarioId);
+    await db.roster.delete(rosterKeys.working(scenarioId));
+    await db.roster.where("key").startsWith(rosterKeys.candidate("", scenarioId)).delete();
+    await db.meta.delete(rosterKeys.currentCandidate(scenarioId));
+    await db.snapshot.filter((row) => row.scenarioId === scenarioId).delete();
+    // The migration marker names the schedule the legacy record became. Left pointing
+    // at a deleted one, the next boot would read that as an interrupted migration and
+    // mint the legacy content (or an empty schedule) again as the newest schedule. So
+    // it moves to the newest survivor: the migration stays done.
+    const marker = await db.repositoryMeta.get(LEGACY_MIGRATION_KEY);
+    if (marker?.state === "complete" && marker.scenarioId === scenarioId) {
+      const heir = await db.scenarioEnvelopes.orderBy("updatedAt").last();
+      await db.repositoryMeta.put({ ...marker, scenarioId: heir?.scenarioId ?? null });
+    }
+    const fence = await ensureGeneration(db, scenarioGenerationScope(scenarioId), at);
+    await db.assistantGenerations.put({
+      ...fence,
+      generation: fence.generation + 1,
+      clearedAt: at.toISOString(),
+    });
+  }
+
+  /**
+   * The Recent schedules limit, applied only when a schedule is created (plq5 §2).
+   * Blank schedules go first (silently: nothing is lost), then the oldest unpinned
+   * ones until at most {@link RECENT_SCHEDULES_LIMIT} unpinned remain, the new one
+   * included. A schedule a live tab holds is never removed.
+   */
+  async function removeOverLimitInTx(createdId: string, at: Date): Promise<RemovedSchedule[]> {
+    const envelopes = await db.scenarioEnvelopes.toArray();
+    const withRoster = await schedulesWithRoster();
+    const leases = await db.writerLeases.toArray();
+    const held = new Set(
+      leases.filter((lease) => isLeaseLive(lease, at)).map((lease) => lease.scenarioId),
+    );
+    const removable = (envelope: ScenarioEnvelopeV3) =>
+      envelope.scenarioId !== createdId && !held.has(envelope.scenarioId);
+
+    const kept: ScenarioEnvelopeV3[] = [];
+    for (const envelope of envelopes) {
+      if (removable(envelope) && isBlankSchedule(envelope, withRoster)) {
+        await deleteScheduleInTx(envelope.scenarioId, at);
+      } else {
+        kept.push(envelope);
+      }
+    }
+
+    const unpinned = kept.filter((envelope) => !envelope.pinned);
+    let excess = unpinned.length - RECENT_SCHEDULES_LIMIT;
+    const removed: RemovedSchedule[] = [];
+    const oldestFirst = unpinned
+      .filter(removable)
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+    for (const envelope of oldestFirst) {
+      if (excess <= 0) break;
+      await deleteScheduleInTx(envelope.scenarioId, at);
+      removed.push({ scenarioId: envelope.scenarioId, name: scheduleName(envelope) });
+      excess -= 1;
+    }
+    return removed;
+  }
+
+  /**
+   * The schedules holding a roster of their own, working or candidate (plq5 P2). Keys
+   * are `working:<id>` and `candidate:<id>:<jobId>`; the pre-P2 unscoped ones have
+   * no id and are skipped. Caller holds a transaction over `roster`.
+   */
+  async function schedulesWithRoster(): Promise<Set<string>> {
+    const keys = await db.roster.toCollection().primaryKeys();
+    return new Set(
+      keys.flatMap((key) => {
+        const [kind, scenarioId, jobId] = key.split(":");
+        const scoped = kind === "working" ? jobId === undefined : jobId !== undefined;
+        return scoped && scenarioId ? [scenarioId] : [];
+      }),
+    );
+  }
+
+  /** A metadata-only envelope write: `recordRevision` moves, nothing else does. */
+  async function writeScheduleMetadata(
+    scenarioId: string,
+    change: (envelope: ScenarioEnvelopeV3) => ScenarioEnvelopeV3,
+  ): Promise<ScenarioEnvelopeV3> {
+    return db.transaction("rw", db.scenarioEnvelopes, async () => {
+      const envelope = await requireEnvelope(scenarioId);
+      const next = { ...change(envelope), recordRevision: envelope.recordRevision + 1 };
+      await db.scenarioEnvelopes.put(next);
+      return next;
+    });
+  }
+
   /** Recompute availability after a write, from the freshly persisted facts. */
   async function historyOf(envelope: ScenarioEnvelopeV3): Promise<HistoryAvailability> {
     const commits = await readSessionCommits(db, envelope.scenarioId, envelope.historySessionId);
@@ -550,6 +751,80 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
   return {
     async read(scenarioId) {
       return db.transaction("r", db.scenarioEnvelopes, () => requireEnvelope(scenarioId));
+    },
+
+    async latestScenarioId() {
+      const latest = await db.scenarioEnvelopes.orderBy("updatedAt").last();
+      return latest?.scenarioId ?? null;
+    },
+
+    async listSchedules({ tabId }) {
+      return db.transaction(
+        "r",
+        [db.scenarioEnvelopes, db.writerLeases, db.tabSelections, db.roster],
+        async (): Promise<ScheduleSummary[]> => {
+          const at = now();
+          const selected = (await db.tabSelections.get(tabId))?.scenarioId ?? null;
+          const heldElsewhere = new Set(
+            (await db.writerLeases.toArray())
+              .filter((lease) => isLeaseLive(lease, at) && lease.ownerTabId !== tabId)
+              .map((lease) => lease.scenarioId),
+          );
+          const withRoster = await schedulesWithRoster();
+          const envelopes = await db.scenarioEnvelopes.orderBy("updatedAt").reverse().toArray();
+          return envelopes
+            .map((envelope) => ({ envelope, blank: isBlankSchedule(envelope, withRoster) }))
+            .filter(({ envelope, blank }) => !blank || envelope.scenarioId === selected)
+            .map(({ envelope, blank }) => ({
+              scenarioId: envelope.scenarioId,
+              title: envelope.title || null,
+              autoName: scheduleAutoName(envelope.scenario),
+              pinned: envelope.pinned === true,
+              createdAt: envelope.createdAt,
+              updatedAt: envelope.updatedAt,
+              heldByOtherTab: heldElsewhere.has(envelope.scenarioId),
+              hasRoster: withRoster.has(envelope.scenarioId),
+              blank,
+            }));
+        },
+      );
+    },
+
+    async renameSchedule({ scenarioId, title }) {
+      const trimmed = title.trim();
+      return writeScheduleMetadata(scenarioId, ({ title: _previous, ...rest }) =>
+        trimmed ? { ...rest, title: trimmed } : rest,
+      );
+    },
+
+    async setSchedulePinned({ scenarioId, pinned }) {
+      return writeScheduleMetadata(scenarioId, ({ pinned: _previous, ...rest }) =>
+        pinned ? { ...rest, pinned: true } : rest,
+      );
+    },
+
+    async deleteSchedule({ scenarioId, tabId }) {
+      await db.transaction("rw", SCHEDULE_DELETE_TABLES, async () => {
+        const at = now();
+        const selection = await db.tabSelections.get(tabId);
+        const lease = await db.writerLeases.get(scenarioId);
+        if (
+          selection?.scenarioId === scenarioId ||
+          (isLeaseLive(lease, at) && lease.ownerTabId === tabId)
+        ) {
+          throw new RepositoryError("schedule_open", "this tab has the schedule open", {
+            scenarioId,
+          });
+        }
+        if (isLeaseLive(lease, at)) {
+          throw new RepositoryError("target_owned", "another tab is editing this schedule", {
+            scenarioId,
+            heldBy: lease.ownerTabId,
+          });
+        }
+        await requireEnvelope(scenarioId);
+        await deleteScheduleInTx(scenarioId, at);
+      });
     },
 
     async readTabContext(tabId) {
@@ -627,7 +902,8 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
       // acquire it, record the switch, update the selection, release the old lease.
       // Any failure aborts every one of those — so a refused target leaves the
       // selection, BOTH envelopes, and the old lease exactly as they were.
-      return db.transaction("rw", SCENARIO_WRITE_TABLES, async (): Promise<ScenarioSelection> => {
+      // The DELETE table set, because creating a schedule may remove old ones (plq5).
+      return db.transaction("rw", SCHEDULE_DELETE_TABLES, async (): Promise<ScenarioSelection> => {
         const at = now();
         const acquire = input.acquire ?? true;
 
@@ -726,7 +1002,14 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
           await db.writerLeases.delete(input.currentOwner.scenarioId);
         }
 
-        return { selection, envelope, lease, owner, commit };
+        // Step 6 — a CREATE applies the Recent schedules limit, after the old lease is
+        // released so the schedule this tab just left counts as free.
+        const removed =
+          input.target.kind === "existing"
+            ? []
+            : await removeOverLimitInTx(envelope.scenarioId, at);
+
+        return { selection, envelope, lease, owner, commit, removed };
       });
     },
 
@@ -737,7 +1020,12 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
         async (): Promise<LeaseResult> => {
           const at = now();
           const envelope = await requireEnvelope(scenarioId);
-          const { lease, tookOver } = await acquireLeaseInTx(envelope, tabId, mode, at);
+          const { lease, tookOver, wasOwnLease } = await acquireLeaseInTx(
+            envelope,
+            tabId,
+            mode,
+            at,
+          );
           let accepted = await acceptLeaseEpoch(envelope, lease.epoch, at);
           // History-session rollover happens HERE, inside the fenced acquisition, not
           // in a second transaction afterwards. Split across two transactions it was
@@ -745,7 +1033,10 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
           // B-rollover let a stale B expire C's reversal material and replace C's
           // session. Folded in, the rollover either lands with the acquisition that
           // earned it or does not happen at all.
-          if (rollHistorySession) {
+          // A lease row (live or lapsed) still naming this tab means no other tab
+          // has owned, so none has written: the history is this tab's own and
+          // survives a lapse (sleep, a throttled hidden tab).
+          if (rollHistorySession && !wasOwnLease) {
             accepted = await rollHistorySessionInTx(accepted, at);
           }
           return {
@@ -1230,10 +1521,14 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
               { proposalId: proposal.proposalId, revision: proposal.revision },
             );
           }
-          if (stored.status === "applied" || stored.status === "cancelled") {
+          if (
+            stored.status === "applied" ||
+            stored.status === "cancelled" ||
+            stored.status === "stale"
+          ) {
             throw new RepositoryError(
               "proposal_conflict",
-              `this change was already ${stored.status}`,
+              `this change was already ${stored.status === "stale" ? "replaced" : stored.status}`,
               { proposalId: proposal.proposalId, status: stored.status },
             );
           }

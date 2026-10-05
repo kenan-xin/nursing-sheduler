@@ -229,18 +229,44 @@ describe("affinitiesMapper", () => {
   const advanced: AffinityCard = {
     uid: "a2",
     date: "ALL",
-    people1: [["P1"], ["P3"]],
+    people1: [["P1", "P3"]],
     people2: ["P2"],
     shiftTypes: ["D"],
     weight: 1,
   };
+
+  it("says together means the same shift on the same day, and describes a grouped card honestly", () => {
+    expect(affinitiesMapper.summary(supported)).toBe(
+      "P1 with P2 on the same shift on the same day (D), ALL: together where possible (weight 1).",
+    );
+    expect(affinitiesMapper.summary(advanced)).toContain("even on different shifts");
+    // Bug hunt B2: ALL is one term in core, any shift that day (v1).
+    expect(affinitiesMapper.summary({ ...supported, shiftTypes: ["ALL"] })).toBe(
+      "P1 with P2 on the same day, where ALL or a shift group counts as one shift, so different shifts in it still count as together (ALL), ALL: together where possible (weight 1).",
+    );
+  });
+
+  it("states the pairing strength in the Preview's words, so keep-apart never reads as together", () => {
+    expect(affinitiesMapper.summary({ ...supported, weight: -10 })).toContain(
+      ": apart where possible (weight -10).",
+    );
+    expect(affinitiesMapper.summary({ ...supported, weight: -Infinity })).toContain(
+      ": never together.",
+    );
+    expect(affinitiesMapper.summary({ ...supported, weight: 0 })).toContain(
+      ": no effect (weight 0).",
+    );
+    expect(affinitiesMapper.summary({ ...advanced, weight: -5 })).toContain(
+      ": apart where possible (weight -5).",
+    );
+  });
 
   it("declares weight as the sole quick field for a single-term affinity", () => {
     expect(affinitiesMapper.unsupportedReason(supported)).toBeUndefined();
     expect(affinitiesMapper.quickFields(supported).map((f) => f.key)).toEqual(["weight"]);
   });
 
-  it("marks a multi-term affinity unsupported", () => {
+  it("marks a grouped affinity unsupported", () => {
     expect(affinitiesMapper.unsupportedReason(advanced)).toBeDefined();
     expect(affinitiesMapper.quickFields(advanced)).toEqual([]);
   });
@@ -271,6 +297,15 @@ describe("coveringsMapper", () => {
     expect(coveringsMapper.unsupportedReason(advanced)).toBeDefined();
   });
 
+  it("says the preceptor works the same shift, and states a grouped card's real meaning", () => {
+    expect(coveringsMapper.summary(supported)).toBe(
+      "P1 supervise P2 on the same shift on the same day (D), every date.",
+    );
+    const grouped = { ...supported, shiftTypes: [["D", "N"]] };
+    expect(coveringsMapper.unsupportedReason(grouped)).toBeDefined();
+    expect(coveringsMapper.summary(grouped)).toContain("even on a different shift");
+  });
+
   it("applyQuickField is always a no-op", () => {
     expect(coveringsMapper.applyQuickField(supported, "weight", 5)).toBe(supported);
   });
@@ -281,7 +316,7 @@ describe("countsMapper — 2 rest days in any 7 days in a row", () => {
     const card = buildRestDaysRuleCard("t");
     expect(countsMapper.defaultTitle(card)).toBe("2 rest days in any 7 days in a row");
     expect(countsMapper.summary(card)).toBe(
-      "Everyone: at most 5 worked days in any 7 days in a row, counting the days before the roster from each nurse's history.",
+      "Everyone: at most 5 worked days in any 7 days in a row, counting the days before the roster from each nurse's history. Strong preference. Short staffing can break it.",
     );
     expect(countsMapper.quickFields(card)).toEqual([]);
     expect(countsMapper.unsupportedReason(card)).toBeUndefined();

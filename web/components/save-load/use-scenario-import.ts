@@ -7,11 +7,12 @@
 // stage a combined replacement/version confirmation whenever the current
 // workspace is non-empty OR the version is incompatible (direct commit only for a
 // genuinely empty workspace on a matching version) -> commit via the store's
-// `loadScenario` (one tracked undoable full-slice replacement, backup baseline
-// null) and publish the pre-computed warnings. Both inbound entry points call
-// `handleFile` and render the same confirm / `ImportWarningsBanner` from the
-// state this hook returns -- the Upload modal and the Edit-YAML Apply, both wired
-// in `save-load-workspace.tsx`.
+// `loadScenario` (a switch to a fresh identity, not undoable, backup baseline
+// null) and publish the pre-computed warnings. The Upload modal calls `handleFile`;
+// the Edit-YAML Apply calls `handleEdit`, which commits one undoable edit on the
+// same identity instead of a Load (C-06). Both render the same confirm /
+// `ImportWarningsBanner` from the state this hook returns, wired in
+// `save-load-workspace.tsx`.
 
 import { useState } from "react";
 import { toast } from "sonner";
@@ -29,8 +30,13 @@ import {
   hasBlockingUnsupportedExpression,
   UNSUPPORTED_EXPRESSION_REASON,
 } from "@/lib/optimize/optimize-readiness";
-import { isScenarioSliceEmpty, loadScenario, useScenarioStore } from "@/lib/store";
-import { loadConfirmCopy } from "./load-controls-core";
+import {
+  applyScenarioEdit,
+  isScenarioSliceEmpty,
+  loadScenario,
+  useScenarioStore,
+} from "@/lib/store";
+import { loadConfirmCopy, v1LeaveShiftOfferCopy } from "./load-controls-core";
 
 /** Ready-to-render props for the combined load confirmation dialog. */
 export interface PendingImportConfirm {
@@ -40,6 +46,11 @@ export interface PendingImportConfirm {
   description: string;
   /** FR-SL-19 file/current version pair for the mono detail box, when the version case applies. */
   detail?: string;
+  /** Destructive style: the load overwrites a non-empty workspace and cannot be undone. */
+  destructive?: boolean;
+  /** Button labels when not the default Continue / Cancel. */
+  confirmLabel?: string;
+  cancelLabel?: string;
   /** Resolves only after the load has committed or been refused -- hold the confirm busy until then. */
   onContinue: () => Promise<void>;
   onCancel: () => void;
@@ -52,12 +63,25 @@ export interface UseScenarioImportOptions {
 
 export interface UseScenarioImportResult {
   issues: ScenarioValidationIssue[] | null;
+  /** Issues a loaded file still has (C-22). Not blocking the load; they block Optimize. */
+  loadIssues: ScenarioValidationIssue[] | null;
   clearIssues: () => void;
   clearImportState: () => void;
   confirm: PendingImportConfirm | null;
   warnings: string[] | null;
   dismissWarnings: () => void;
-  handleFile: (text: string) => void;
+  /**
+   * Settles once the load does: committed, refused, blocked on issues, or its staged
+   * confirm cancelled. A caller holds its own busy state on it (7vtc).
+   */
+  handleFile: (text: string) => Promise<void>;
+  /**
+   * Apply an Edit-YAML draft as ONE undoable edit on the current scenario identity
+   * (v1 parity, C-06): same validation, warnings and version gate as `handleFile`,
+   * but no replacement confirm and no identity switch, so Undo history and the
+   * assistant thread survive.
+   */
+  handleEdit: (text: string) => Promise<void>;
 }
 
 interface StagedTarget {
@@ -67,6 +91,8 @@ interface StagedTarget {
   replacement: boolean;
   fileVersion: string | undefined;
   target: ImportNormalizationTarget;
+  /** An Edit-YAML apply (undoable edit) rather than a Load (identity switch). */
+  edit: boolean;
   /**
    * The final merged + deduped warning list — base advanced-syntax survivors plus
    * the uncredited-leave guard findings, computed from `target` BEFORE any
@@ -74,6 +100,10 @@ interface StagedTarget {
    * same list; `commit` never re-runs guard resolution after mutation.
    */
   warnings: string[];
+  /** The file's producer-preflight issues, shown after the load (C-22). */
+  loadIssues: ScenarioValidationIssue[];
+  /** Settles the `handleFile`/`handleEdit` promise that staged this target. */
+  settle: () => void;
 }
 
 /**
@@ -131,11 +161,36 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
   const [issues, setIssues] = useState<ScenarioValidationIssue[] | null>(null);
   const [staged, setStaged] = useState<StagedTarget | null>(null);
   const [warnings, setWarnings] = useState<string[] | null>(null);
+  const [loadIssues, setLoadIssues] = useState<ScenarioValidationIssue[] | null>(null);
+  // The offer to convert a v1 "Leave" shift (objg), shown before any load confirm.
+  const [leaveOffer, setLeaveOffer] = useState<PendingImportConfirm | null>(null);
 
   // Commit performs EXACTLY ONE state replacement, then publishes the warning list
   // that was already computed from the unchanged target before this call. It never
   // runs guard resolution after mutation.
-  const commit = async (target: ImportNormalizationTarget, stagedWarnings: string[]) => {
+  const commit = async (
+    target: ImportNormalizationTarget,
+    stagedWarnings: string[],
+    edit: boolean,
+    stagedIssues: ScenarioValidationIssue[] = [],
+  ) => {
+    if (edit) {
+      // An Edit-YAML apply is an ordinary tracked edit on THIS identity (C-06).
+      const outcome = await applyScenarioEdit(target);
+      if (!outcome.ok) {
+        toast.error(
+          outcome.reason === "not-owner"
+            ? "This schedule is being edited in another tab. Take over editing, then apply again."
+            : "Could not apply your changes — nothing was changed.",
+        );
+        return;
+      }
+      setWarnings(stagedWarnings.length > 0 ? stagedWarnings : null);
+      setStaged(null);
+      onCommitted?.();
+      toast.success("Changes applied. Undo reverts them.");
+      return;
+    }
     // A Load is an atomic scenario SWITCH: it mints a fresh identity holding the
     // imported content, so the restored file cannot inherit the previous document's
     // history or receipts.
@@ -150,6 +205,9 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     // The returned promise is what the confirm dialog holds its busy state on: it must
     // not settle before the IndexedDB switch has committed, or a hard reload in that
     // window aborts the write and silently drops the import (nursing-sheduler-iks).
+    //
+    // plq5 P2 (replaces C-23): nothing is cleared. The saved roster stays with the
+    // schedule being left, and the fresh identity starts with none of its own.
     const outcome = await loadScenario(target);
     if (!outcome.ok) {
       toast.error(
@@ -160,65 +218,119 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
       return;
     }
     setWarnings(stagedWarnings.length > 0 ? stagedWarnings : null);
+    setLoadIssues(stagedIssues.length > 0 ? stagedIssues : null);
     setStaged(null);
     onCommitted?.();
     toast.success("Scenario loaded — this replaces your current setup.");
   };
 
-  const handleFile = (text: string) => {
-    const result = prepareScenarioLoad(text);
-    if (result.issues.length > 0 || !result.target) {
-      setIssues(result.issues);
+  const stage = async (text: string, edit: boolean, convertV1LeaveShift = false): Promise<void> => {
+    const result = prepareScenarioLoad(text, { convertV1LeaveShift });
+    const plan = result.v1LeaveShift;
+    if (plan && !convertV1LeaveShift && plan.convertible) {
+      // The dialog closes through `onCancel` after Continue too, so only a real
+      // decline may publish the rename error.
+      let accepted = false;
+      setIssues(null);
+      return new Promise<void>((settle) => {
+        setLeaveOffer({
+          ...v1LeaveShiftOfferCopy(plan),
+          confirmLabel: "Convert to paid leave",
+          cancelLabel: "Don't convert",
+          onContinue: async () => {
+            accepted = true;
+            setLeaveOffer(null);
+            // Not awaited: this dialog's own busy state must not wait on the next one.
+            void stage(text, edit, true).then(settle, settle);
+          },
+          onCancel: () => {
+            setLeaveOffer(null);
+            if (!accepted) {
+              setIssues(result.issues);
+              settle();
+            }
+          },
+        });
+      });
+    }
+    // An Edit-YAML draft stays strict: its issues show in the editor, where they
+    // are fixed. Only a loaded FILE may carry them in (C-22). A converted v1 file
+    // reaches this point like any other.
+    const optimizeIssues = result.optimizeIssues ?? [];
+    if (result.issues.length > 0 || !result.target || (edit && optimizeIssues.length > 0)) {
+      setIssues(result.issues.length > 0 ? result.issues : optimizeIssues);
       return;
     }
     setIssues(null);
+    setLoadIssues(null);
     // Compute the full merged warning list from the unchanged target NOW, before
     // any `loadScenario` call. Both the direct and version-confirmed paths publish
     // this exact list, so the guard is evaluated once against the pre-load target.
     const mergedWarnings = mergeImportWarnings(result.target, result.warnings);
     const versionStatus = classifyLoadVersion(result.target.meta.appVersion);
     // Emptiness is computed against the CURRENT (pre-load) workspace at the moment
-    // of load — the state the incoming file would overwrite.
-    const replacement = !isScenarioSliceEmpty(useScenarioStore.getState());
+    // of load — the state the incoming file would overwrite. An edit is undoable,
+    // so it overwrites nothing that cannot come back.
+    const replacement = !edit && !isScenarioSliceEmpty(useScenarioStore.getState());
     // DL12: only a genuinely empty workspace on a matching version commits
     // directly; every other load stages one combined confirmation.
     if (versionStatus === null && !replacement) {
-      commit(result.target, mergedWarnings);
+      await commit(result.target, mergedWarnings, edit, optimizeIssues);
       return;
     }
-    setStaged({
-      versionStatus,
-      replacement,
-      fileVersion: result.target.meta.appVersion,
-      target: result.target,
-      warnings: mergedWarnings,
+    const target = result.target;
+    return new Promise<void>((settle) => {
+      setStaged({
+        versionStatus,
+        replacement,
+        fileVersion: target.meta.appVersion,
+        target,
+        edit,
+        warnings: mergedWarnings,
+        loadIssues: optimizeIssues,
+        settle,
+      });
     });
   };
 
-  const confirm: PendingImportConfirm | null = staged
-    ? {
-        ...loadConfirmCopy(
-          staged.versionStatus,
-          staged.replacement,
-          staged.fileVersion,
-          currentAppVersion(),
-        ),
-        onContinue: () => commit(staged.target, staged.warnings),
-        onCancel: () => setStaged(null),
-      }
-    : null;
+  const confirm: PendingImportConfirm | null = leaveOffer
+    ? leaveOffer
+    : staged
+      ? {
+          ...loadConfirmCopy(
+            staged.versionStatus,
+            staged.replacement,
+            staged.fileVersion,
+            currentAppVersion(),
+          ),
+          onContinue: () =>
+            commit(staged.target, staged.warnings, staged.edit, staged.loadIssues).finally(
+              staged.settle,
+            ),
+          onCancel: () => {
+            setStaged(null);
+            staged.settle();
+          },
+        }
+      : null;
 
   return {
     issues,
+    loadIssues,
     clearIssues: () => setIssues(null),
     clearImportState: () => {
+      leaveOffer?.onCancel();
+      staged?.settle();
       setIssues(null);
       setStaged(null);
+      setLeaveOffer(null);
       setWarnings(null);
+      setLoadIssues(null);
     },
     confirm,
     warnings,
     dismissWarnings: () => setWarnings(null),
-    handleFile,
+    handleFile: (text) => stage(text, false),
+    handleEdit: (text) => stage(text, true),
   };
 }

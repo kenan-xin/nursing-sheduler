@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
-import type { ScenarioUiState } from "@/lib/scenario";
-import { performCopy, performDownload, SCENARIO_DOWNLOAD_FILENAME } from "./scenario-file-export";
+import { stringify } from "yaml";
+import {
+  prepareScenarioLoad,
+  toCanonicalScenarioDocument,
+  type CanonicalScenarioDocument,
+  type ScenarioUiState,
+} from "@/lib/scenario";
+import { loadScenario, pickScenario, useScenarioStore } from "@/lib/store";
+import { resetScenarioForTest } from "@/lib/store/test-authority";
+import { performAnonymisedDownload } from "./anonymise-export";
+import { performCopy, performDownload, scenarioDownloadFilename } from "./scenario-file-export";
 
 /** An imperfect draft (equal start/end shift) — producer-invalid, but a Workspace
  *  backup preserves it (DL12 §2: readiness gates Optimize, not backup). */
@@ -22,6 +31,14 @@ function makeDuplicateIdUiState(): ScenarioUiState {
   return state;
 }
 
+describe("scenarioDownloadFilename", () => {
+  it("dates the file with the local day, as v1 did (C-32)", () => {
+    expect(scenarioDownloadFilename(new Date(2026, 8, 5, 23, 30))).toBe(
+      "nurse-scheduling-2026-09-05.yaml",
+    );
+  });
+});
+
 describe("performDownload", () => {
   it("writes the validated YAML to the injected file writer, then records the backup", () => {
     const writeFile = vi.fn();
@@ -31,7 +48,7 @@ describe("performDownload", () => {
 
     expect(result.ok).toBe(true);
     expect(writeFile).toHaveBeenCalledTimes(1);
-    expect(writeFile).toHaveBeenCalledWith(expect.any(String), SCENARIO_DOWNLOAD_FILENAME);
+    expect(writeFile).toHaveBeenCalledWith(expect.any(String), scenarioDownloadFilename());
     const [yaml] = writeFile.mock.calls[0] as [string, string];
     expect(yaml).toContain("apiVersion: alpha");
     expect(recordBackup).toHaveBeenCalledTimes(1);
@@ -90,5 +107,39 @@ describe("performCopy", () => {
 
     expect(result.ok).toBe(false);
     expect(writeClipboard).not.toHaveBeenCalled();
+  });
+});
+
+describe("a loaded older file with Optimize issues still downloads (C-22)", () => {
+  it("plain and anonymised Download both write the file", async () => {
+    // A legacy file whose marked contract breaks producer preflight (weight 1, not .inf).
+    const doc = toCanonicalScenarioDocument(makeValidUiState());
+    doc.preferences.push({
+      type: "shift count",
+      person: "Alice",
+      countDates: "ALL",
+      countShiftTypes: "D",
+      countShiftTypeCoefficients: [["D", 1]],
+      expression: "x = T",
+      target: 20,
+      hoursContract: { unit: "half-hour", policy: "exact" },
+      weight: 1,
+    } as CanonicalScenarioDocument["preferences"][number]);
+    const prepared = prepareScenarioLoad(stringify(doc, { version: "1.2" }));
+    expect(prepared.optimizeIssues!.length).toBeGreaterThan(0);
+
+    await resetScenarioForTest();
+    expect((await loadScenario(prepared.target!)).ok).toBe(true);
+    const state = pickScenario(useScenarioStore.getState());
+
+    const writeFile = vi.fn();
+    expect(performDownload(state, { writeFile, recordBackup: vi.fn() }).ok).toBe(true);
+    const anonymised = performAnonymisedDownload(
+      state,
+      { people: true, groups: false, scatter: false },
+      { writeFile },
+    );
+    expect(anonymised.ok).toBe(true);
+    expect(writeFile).toHaveBeenCalledTimes(2);
   });
 });

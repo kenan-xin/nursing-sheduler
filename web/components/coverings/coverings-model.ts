@@ -16,8 +16,10 @@
 //   • an empty date selection serializes as an OMITTED `date` (= all dates), never
 //     `date: []` (a no-op) — so `buildCoveringCard` leaves `date` unset when empty
 //     and the T05 boundary drops it (spec 11 FR-CV-12, DL08);
-//   • the canonical single-equation save shape wraps each flat person/shift-type
-//     selection in a one-element outer array (spec 11 EDGE-CV-01).
+//   • the save shape wraps each flat person selection in a one-element outer
+//     array (any preceptor covers any preceptee), but saves `shiftTypes` as a
+//     FLAT list: core makes one group per element, so each shift is checked on
+//     its own and the preceptor must work the same shift (bead yzty).
 
 import {
   isDayStateSelector,
@@ -31,6 +33,7 @@ import {
 import type { TransferOption } from "@/components/entity-editor/transfer-list";
 import type { DateScopeOption, DateScopeItem } from "@/components/card-editor/date-scope-field";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
+import { expandPersonRefs } from "@/lib/rules/expansion";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 
 /**
@@ -62,6 +65,13 @@ export const COVERING_MESSAGES = {
   // unselectable here, not silently stringified.
   numericShiftId:
     "A numeric shift type ID cannot be used as a covering selector; reference it by a string ID instead",
+  // Core sums preceptors and preceptees per day, so a preceptee who is also a
+  // preceptor covers themselves: when every preceptee is one, the rule never binds.
+  selfSupervised:
+    "Every preceptee is also a preceptor, so this rule never applies. Pick preceptees who are not preceptors",
+  emptyPreceptees: "The preceptees selected name no one, so this rule never applies",
+  partialOverlap: (names: readonly string[]) =>
+    `Both preceptor and preceptee: ${names.join(", ")}. They count as supervising themselves.`,
 } as const;
 
 /** The flat draft the form edits. Note: NO weight — a covering is always enforced. */
@@ -252,17 +262,38 @@ export type CoveringErrors = Partial<Record<CoveringSelectField, string>>;
  */
 export function validateCoveringForm(
   form: CoveringFormState,
-  state: Pick<ScenarioUiState, "shiftGroups">,
+  state: Pick<ScenarioUiState, "shiftGroups" | "staff" | "staffGroups">,
 ): CoveringErrors {
   const errors: CoveringErrors = {};
   if (form.preceptors.length === 0) errors.preceptors = COVERING_MESSAGES.preceptors;
-  if (form.preceptees.length === 0) errors.preceptees = COVERING_MESSAGES.preceptees;
+  if (form.preceptees.length === 0) {
+    errors.preceptees = COVERING_MESSAGES.preceptees;
+  } else if (form.preceptors.length > 0) {
+    const preceptees = expandPersonRefs(form.preceptees as PersonRef[], state);
+    if (preceptees.size === 0) {
+      errors.preceptees = COVERING_MESSAGES.emptyPreceptees;
+    } else if (supervisorOverlap(form, state).length === preceptees.size) {
+      errors.preceptees = COVERING_MESSAGES.selfSupervised;
+    }
+  }
   if (form.shiftTypes.length === 0) {
     errors.shiftTypes = COVERING_MESSAGES.shiftTypes;
   } else if (selectionReachesDayState(form.shiftTypes, state)) {
     errors.shiftTypes = COVERING_MESSAGES.offLeave;
   }
   return errors;
+}
+
+/** The people (ids, preceptee order) named as both preceptor and preceptee, with
+ *  groups and `ALL` expanded. Full overlap blocks Save; a partial one only warns. */
+export function supervisorOverlap(
+  form: Pick<CoveringFormState, "preceptors" | "preceptees">,
+  state: Pick<ScenarioUiState, "staff" | "staffGroups">,
+): string[] {
+  const preceptors = expandPersonRefs(form.preceptors as PersonRef[], state);
+  return [...expandPersonRefs(form.preceptees as PersonRef[], state)].filter((id) =>
+    preceptors.has(id),
+  );
 }
 
 /** Whether any selected shift-type ref is (or expands to) an OFF/LEAVE day-state. */
@@ -277,8 +308,8 @@ export function selectionReachesDayState(
 
 /**
  * Assemble the saved covering card from a validated draft (spec 11 FR-CV-07,
- * EDGE-CV-01). Each flat person/shift-type selection is wrapped in a one-element
- * outer array (the canonical single-equation shape); the weight is the inert
+ * EDGE-CV-01). Each flat person selection is wrapped in a one-element outer
+ * array; `shiftTypes` stays flat so core checks each shift on its own; the weight is the inert
  * `COVERING_WEIGHT`; an empty date selection leaves `date` **omitted** (never
  * `date: []`) so the T05 boundary serializes it as "all dates" (DL08). `uid` is
  * injectable for deterministic tests.
@@ -291,7 +322,9 @@ export function buildCoveringCard(
     uid,
     preceptors: [form.preceptors] as NestedPersonRefList,
     preceptees: [form.preceptees] as NestedPersonRefList,
-    shiftTypes: [form.shiftTypes],
+    // Flat: core makes one group per element, so a preceptee on D needs a
+    // preceptor on D, not on any other listed shift (bead yzty).
+    shiftTypes: [...form.shiftTypes],
     weight: COVERING_WEIGHT,
   };
   const description = form.description.trim();
@@ -324,12 +357,42 @@ export function coveringToForm(card: CoveringCard): CoveringFormState {
   };
 }
 
-/** A covering form can author exactly one OR term per selector. Imported cards
- * with multiple terms carry meaning the flat form cannot represent; keep them
- * read-only so an edit can never flatten and silently change the constraint. */
+/**
+ * Whether `shiftTypes` checks each shift on its own (what the form saves): every
+ * top-level element is a scalar ref or a one-member group (`["D"]` compiles like
+ * `"D"` in core). A multi-member group (`[["D", "N"]]`, the pre-yzty save shape)
+ * lets a preceptor on N cover a preceptee on D; flattening it would change that.
+ */
+export function isPerShiftSelector(shiftTypes: unknown): boolean {
+  return (
+    Array.isArray(shiftTypes) &&
+    shiftTypes.every((term) => !Array.isArray(term) || term.length === 1)
+  );
+}
+
+/** The meaning the form authors: each shift on its own. */
+export const COVERING_SAME_SHIFT = "on the same shift on the same day";
+
+/** What a grouped-shift (pre-yzty) card actually checks, stated honestly. */
+export const COVERING_GROUPED_MEANING =
+  "Grouped rule: a preceptor on any of these shifts that day counts, even on a different shift from the preceptee. Edit via Save & Load (YAML).";
+
+/** How a card's shifts are checked, in words for the card and Rules overview. */
+export function coveringShiftMeaning(card: CoveringCard): string {
+  return isPerShiftSelector(card.shiftTypes)
+    ? `A preceptor ${COVERING_SAME_SHIFT}`
+    : COVERING_GROUPED_MEANING;
+}
+
+/** A covering form authors one people group per side and per-shift shift
+ * types. Other shapes (several people groups, grouped shifts) carry meaning the
+ * flat form cannot represent; keep them read-only so an edit can never flatten
+ * and silently change the constraint. */
 export function isAdvancedCoveringCard(card: CoveringCard): boolean {
   return (
-    card.preceptors.length !== 1 || card.preceptees.length !== 1 || card.shiftTypes.length !== 1
+    card.preceptors.length !== 1 ||
+    card.preceptees.length !== 1 ||
+    !isPerShiftSelector(card.shiftTypes)
   );
 }
 

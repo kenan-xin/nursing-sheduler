@@ -10,7 +10,7 @@ import { buildCoveringCard, emptyCoveringForm } from "./coverings-model";
 // The covering card participates in the shared T07 reference cascade (card-fields
 // already maps `coverings`). These tests prove the covering-specific behaviors
 // spec 06 / spec 11 require: rename rewrites nested trees; delete prunes and drops
-// on an emptied required field; an emptied optional `date` is omitted, not a drop.
+// on an emptied required field, an emptied optional `date` included (bug hunt A-06).
 
 function stateWith(card: CoveringCard): ScenarioUiState {
   return {
@@ -50,9 +50,9 @@ describe("rename cascade (AC-CV-11)", () => {
     expect(next.cardsByKind.coverings[0].uid).toBe("cov-1");
   });
 
-  it("rewrites a renamed shift type inside the nested shiftTypes tree", () => {
+  it("rewrites a renamed shift type inside the flat shiftTypes list", () => {
     const next = renameEntity(stateWith(CARD), "shift", "D", "Day");
-    expect(next.cardsByKind.coverings[0].shiftTypes).toEqual([["Day"]]);
+    expect(next.cardsByKind.coverings[0].shiftTypes).toEqual(["Day"]);
   });
 
   it("rewrites a renamed date group in the optional date field", () => {
@@ -67,11 +67,9 @@ describe("delete cascade (AC-CV-12, spec 06 FR-RI-11 + covering date rule)", () 
     expect(next.cardsByKind.coverings).toHaveLength(0);
   });
 
-  it("keeps the rule but OMITS date when the only date reference is deleted", () => {
+  it("drops the rule when the only date reference is deleted, never widening it (bug hunt A-06)", () => {
     const next = deleteEntity(stateWith(CARD), "date", "Wk1");
-    const covering = next.cardsByKind.coverings[0];
-    expect(covering).toBeDefined();
-    expect("date" in covering).toBe(false);
+    expect(next.cardsByKind.coverings).toHaveLength(0);
   });
 
   it("prunes a deleted shift type from a multi-member selection without dropping", () => {
@@ -80,6 +78,6 @@ describe("delete cascade (AC-CV-12, spec 06 FR-RI-11 + covering date rule)", () 
       "cov-2",
     );
     const next = deleteEntity(stateWith(multi), "shift", "N");
-    expect(next.cardsByKind.coverings[0].shiftTypes).toEqual([["D"]]);
+    expect(next.cardsByKind.coverings[0].shiftTypes).toEqual(["D"]);
   });
 });

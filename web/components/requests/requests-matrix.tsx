@@ -19,12 +19,14 @@ import {
   dayStateOf,
   historyValueAt,
   isHistorySlotClickable,
+  type GroupSourceMarker,
   type RequestColumn,
   type RequestRow,
   type ShiftTypeOrderIndex,
 } from "@/components/requests/requests-model";
 import { FaBriefcase, FaCalendar, FaLayerGroup, FaMugHot, type IconType } from "@/components/icons";
 import { isSingaporePublicHoliday, utcDayOfWeek } from "@/lib/dates";
+import { useSingaporeHolidayList } from "@/lib/query/singapore-holidays";
 import { changeKeys } from "@/lib/change-highlight/keys";
 import { changeTargetProps, useChangeHighlightKeys } from "@/lib/change-highlight/store";
 import { cn } from "@/lib/utils";
@@ -60,6 +62,8 @@ export interface RequestsMatrixProps {
   onCellPointerEnter(person: PersonRef, colRef: DateRef): void;
   onHistoryPointerDown(person: PersonRef, columnIndex: number): void;
   onHistoryPointerEnter(person: PersonRef, columnIndex: number): void;
+  /** `groupSourceMarkers(...)`: person cells a group row / date-group column covers. */
+  groupSources?: ReadonlyMap<string, GroupSourceMarker>;
 }
 
 const ROW_HEIGHT = 40;
@@ -203,7 +207,7 @@ function buildCellView(cells: readonly UiRequestCell[], orderIndex: ShiftTypeOrd
 
 interface CellVisual {
   className: string;
-  style?: { opacity: number };
+  style?: { backgroundColor: string };
 }
 
 function cellVisual(view: CellView, cellsAt: readonly UiRequestCell[]): CellVisual {
@@ -221,13 +225,19 @@ function cellVisual(view: CellView, cellsAt: readonly UiRequestCell[]): CellVisu
   const prefs = cellsAt.map(cellPreferenceOf);
   const sign = aggregateSign(prefs);
   const alpha = cellAlpha(prefs);
-  const base =
+  const [tint, ink] =
     sign === "all-positive"
-      ? "bg-successtint text-successink"
+      ? ["--successtint", "text-successink"]
       : sign === "all-negative"
-        ? "bg-warntint text-warnink"
-        : "bg-panel text-ink2";
-  return { className: `${base} border border-line2`, style: { opacity: alpha } };
+        ? ["--warntint", "text-warnink"]
+        : ["--panel", "text-ink2"];
+  // FR-SR-16's α fades the TINT only (the spec's rgba background); the text keeps
+  // its full-strength ink so a low-weight cell still meets AA (t4tz). Element
+  // opacity faded the text with it, down to ~1.1:1 at the α floor.
+  return {
+    className: `${ink} border border-line2`,
+    style: { backgroundColor: `color-mix(in srgb, var(${tint}) ${alpha * 100}%, transparent)` },
+  };
 }
 
 export function RequestsMatrix({
@@ -246,7 +256,9 @@ export function RequestsMatrix({
   onCellPointerEnter,
   onHistoryPointerDown,
   onHistoryPointerEnter,
+  groupSources,
 }: RequestsMatrixProps) {
+  useSingaporeHolidayList(); // re-render when the live holiday list arrives
   const scrollRef = useRef<HTMLDivElement>(null);
   // Pointer-aware geometry: dense 40px rows / 40px history columns on a precise
   // pointer (the prototype's metrics), growing to the 44px coarse minimum on
@@ -402,7 +414,8 @@ export function RequestsMatrix({
                   {col.label}
                 </span>
                 {col.kind === "date-group" && col.count !== undefined ? (
-                  <span className="text-[9px] text-ink3">{col.count}</span>
+                  // ink2, not ink3: ink3 on dark --brandtint is 3.6-3.8:1 (t4tz).
+                  <span className="text-[9px] text-ink2">{col.count}</span>
                 ) : null}
                 {col.kind === "date-item" ? (
                   <span className="font-mono text-[9px] text-ink3">
@@ -466,7 +479,7 @@ export function RequestsMatrix({
                   const value = historyValueAt(person, columnIndex, historyCount);
                   const clickable = isHistorySlotClickable(person, columnIndex, historyCount);
                   // Prototype `showPlus`: an empty, clickable slot in normal mode gets a
-                  // faint "+" add affordance (ScreenRequests.dc.html:553-555); quick mode
+                  // "+" add affordance in ink3 (ScreenRequests.dc.html:553-555); quick mode
                   // never shows it since a click there doesn't open the history editor.
                   const showPlus = !value && clickable && mode === "normal";
                   // Only a clickable slot in NORMAL mode opens an editor, so only
@@ -482,7 +495,7 @@ export function RequestsMatrix({
                     className: cn(
                       "flex items-center justify-center border-b border-r border-line2 font-mono text-label",
                       clickable
-                        ? cn("cursor-pointer hover:bg-panel", showPlus ? "text-faint" : "text-ink2")
+                        ? cn("cursor-pointer hover:bg-panel", showPlus ? "text-ink3" : "text-ink2")
                         : "text-faint",
                     ),
                     "data-testid": `hist-${row.id}-${columnIndex}`,
@@ -532,6 +545,12 @@ export function RequestsMatrix({
                   const view = buildCellView(cellsAt, shiftTypeOrderIndex);
                   const staged = stagedKeys?.has(key) ?? false;
                   const visual = cellVisual(view, cellsAt);
+                  // Inherited from a group row / date-group column: a small top-aligned
+                  // glyph plus (on an empty cell) the bare selector with no tint or
+                  // border, so it stays secondary to a direct request; the sources are
+                  // named in full in the title and accessible name.
+                  const group = groupSources?.get(key);
+                  const groupText = group ? group.sources.join("\n") : "";
                   // Identical presentation for both element types — see the
                   // history slot above.
                   const cellPresentation = {
@@ -542,17 +561,34 @@ export function RequestsMatrix({
                       staged ? "outline outline-2 outline-brand -outline-offset-2" : null,
                     ),
                     style: visual.style,
-                    title: view.primaryText || undefined,
+                    title: [view.primaryText, groupText].filter(Boolean).join("\n") || undefined,
                     "data-testid": `cell-${row.id}-${colRef}`,
                     ...changeTargetProps(changeKey, highlighted.has(changeKey)),
                   };
-                  const cellContent = view.empty ? null : (
-                    <span className="truncate">
-                      {view.primaryText}
-                      {view.shadowedCount > 0 ? (
-                        <span className="text-faint"> (+{view.shadowedCount})</span>
-                      ) : null}
-                    </span>
+                  const groupMark = group ? (
+                    <FaLayerGroup
+                      aria-hidden
+                      data-testid={`group-source-${row.id}-${colRef}`}
+                      className="ml-0.5 mt-0.5 size-[7px] shrink-0 self-start text-ink3"
+                    />
+                  ) : null;
+                  const cellContent = view.empty ? (
+                    group ? (
+                      <>
+                        <span className="truncate font-mono text-[9px] text-ink3">
+                          {group.short}
+                        </span>
+                        {groupMark}
+                      </>
+                    ) : null
+                  ) : (
+                    <>
+                      <span className="truncate">
+                        {view.primaryText}
+                        {view.shadowedCount > 0 ? <span> (+{view.shadowedCount})</span> : null}
+                      </span>
+                      {groupMark}
+                    </>
                   );
 
                   // Normal mode opens the cell editor, so the cell is a real
@@ -566,7 +602,7 @@ export function RequestsMatrix({
                         {...cellPresentation}
                         aria-label={`Edit ${row.label} on ${col.label}${
                           view.primaryText ? `, currently ${view.primaryText}` : ", no request"
-                        }`}
+                        }${group ? `; ${group.sources.join("; ")}` : ""}`}
                         onClick={(event: MouseEvent<HTMLButtonElement>) =>
                           onCellClick(row.id, colRef, event.currentTarget)
                         }

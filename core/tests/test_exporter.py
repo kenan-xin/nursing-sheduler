@@ -66,6 +66,17 @@ def test_export_to_csv_writes_utf8_bom():
     assert payload.decode("utf-8-sig") == "A,B\nC,D\n"
 
 
+def test_export_to_excel_writes_formula_like_strings_as_text():
+    # D-03: an ID such as =HYPERLINK(...) must never become a live formula, on either sheet.
+    values = ["=1+1", "+1", "-1", "@SUM(A1)", '=HYPERLINK("http://example.invalid","N")']
+    buffer = BytesIO()
+    exporter.export_to_excel(pd.DataFrame([values]), buffer, {"comments": {(1, 1): ["=2+2"]}, "styles": {}})
+    workbook = load_workbook(buffer)
+    cells = [cell for sheet in workbook.worksheets for row in sheet.iter_rows() for cell in row]
+    assert [cell.value for cell in workbook.active[1]] == values
+    assert not [cell.coordinate for cell in cells if cell.data_type == "f"]
+
+
 def test_export_to_excel_rejects_legacy_comment_info_shape():
     df = pd.DataFrame([["x"]])
     output = BytesIO()

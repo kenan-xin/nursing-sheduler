@@ -13,7 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isRepositoryError, LEASE_TTL_MS } from "@/lib/repository";
 import { createEmptyScenarioUiState } from "@/lib/scenario";
-import { useAuthorityStore } from "./authority";
+import { canMutateScenario, useAuthorityStore, type OwnershipHint } from "./authority";
 import { drainScenarioCommands, scenarioCommands } from "./commands";
 import { loadScenario, newScenario } from "./lifecycle";
 import { commitPaintGesture } from "./paint";
@@ -117,6 +117,25 @@ describe("one mutation class, one durable commit", () => {
     expect(useAuthorityStore.getState().scenarioId).not.toBe(original);
     expect(scenario.getState().rangeStart).toBe("2026-05-01");
     expect(scenario.getState().backupFingerprint).toBeNull();
+  });
+
+  it("a fresh tab opens the most recently loaded scenario, not the first one (A-01)", async () => {
+    let millis = Date.parse("2026-09-29T09:00:00.000Z");
+    const now = () => new Date((millis += 1_000));
+    harness = await installTestAuthority({ now });
+    await scenarioCommands.mutate({ rangeStart: "2026-01-01" });
+    await loadScenario({
+      ...createEmptyScenarioUiState(),
+      rangeStart: "2026-05-01",
+      rangeEnd: "2026-05-31",
+    });
+    const loadedId = useAuthorityStore.getState().scenarioId;
+    await harness.authority.release();
+
+    // A new tab: fresh tab id, no selection of its own, same database.
+    harness = await installTestAuthority({ databaseName: harness.databaseName, now });
+    expect(useAuthorityStore.getState().scenarioId).toBe(loadedId);
+    expect(scenario.getState().rangeStart).toBe("2026-05-01");
   });
 
   it("releases the previous scenario's lease when the switch commits", async () => {
@@ -415,6 +434,51 @@ describe("authoritative reread on resumption", () => {
     expect((await scenarioCommands.mutate({ rangeStart: "2026-03-03" })).ok).toBe(true);
   });
 
+  it("after another tab Loads, this tab offers Switch and never reclaims the old schedule (bug hunt A-02)", async () => {
+    const hints: OwnershipHint[] = [];
+    const loader = await installTestAuthority({ broadcast: (hint) => hints.push(hint) });
+    const tab = await installTestAuthority({
+      databaseName: loader.databaseName,
+      install: false,
+    });
+    await tab.authority.initialize();
+    const oldId = tab.authorityStore.getState().scenarioId;
+    expect(tab.authorityStore.getState().ownership).toBe("read-only");
+    hints.length = 0; // the loader's boot hint was delivered long ago
+
+    await loadScenario({ ...createEmptyScenarioUiState(), rangeStart: "2026-05-01" });
+    const loadedId = useAuthorityStore.getState().scenarioId;
+    for (const hint of hints) await tab.authority.onHint(hint);
+
+    // Nothing changes until the user clicks: the old schedule stays on screen...
+    expect(tab.authorityStore.getState().peerLoadedScenarioId).toBe(loadedId);
+    await tab.authority.keepAlive();
+    expect(tab.authorityStore.getState().scenarioId).toBe(oldId);
+    // ...and its now-free lease is NOT silently taken, so no edit can land on it.
+    expect(tab.authorityStore.getState().ownership).not.toBe("owner");
+    expect(canMutateScenario(tab.authorityStore.getState())).toBe(false);
+
+    await tab.authority.followPeerLoad();
+    expect(tab.authorityStore.getState()).toMatchObject({
+      scenarioId: loadedId,
+      peerLoadedScenarioId: null,
+      ownership: "read-only",
+    });
+    expect(tab.scenario.getState().rangeStart).toBe("2026-05-01");
+  });
+
+  it("a Load hint is checked against the loader's durable selection", async () => {
+    await harness.authority.onHint({
+      kind: "acquired",
+      scenarioId: "forged",
+      fromScenarioId: useAuthorityStore.getState().scenarioId!,
+      tabId: "elsewhere",
+      epoch: 1,
+    });
+    expect(useAuthorityStore.getState().peerLoadedScenarioId).toBeNull();
+    expect(useAuthorityStore.getState().ownership).toBe("owner");
+  });
+
   it("a hint about a DIFFERENT scenario is ignored entirely", async () => {
     const before = useAuthorityStore.getState().documentRevision;
     await harness.authority.onHint({
@@ -510,6 +574,24 @@ describe("a FREE lease is re-acquired without a click (bead d854)", () => {
     expect(useAuthorityStore.getState().ownership).toBe("owner");
     expect((await expiring.db.writerLeases.get(scenarioId))!.epoch).toBeGreaterThan(before);
     expect((await scenarioCommands.mutate({ rangeStart: "2026-04-03" })).ok).toBe(true);
+  });
+
+  it("a lone owner whose lease lapsed keeps its Undo history on re-acquire (A-05)", async () => {
+    let millis = Date.parse("2026-09-28T00:00:00.000Z");
+    harness = await installTestAuthority({ now: () => new Date(millis) });
+    await scenarioCommands.mutate({ rangeStart: "2026-04-01" });
+    await scenarioCommands.mutate({ rangeEnd: "2026-04-30" });
+
+    setVisibility("hidden");
+    millis += LEASE_TTL_MS + 1_000;
+    await harness.authority.keepAlive();
+    setVisibility("visible");
+    await harness.authority.reconcile();
+
+    expect(useAuthorityStore.getState().ownership).toBe("owner");
+    expect(useAuthorityStore.getState().canUndo).toBe(true);
+    expect((await scenarioCommands.undo()).ok).toBe(true);
+    expect(scenario.getState().rangeEnd).toBe("");
   });
 
   it("a lapsed owner that another tab took over meanwhile stays taken-over", async () => {

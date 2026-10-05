@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatWeight,
+  invalidWeightMessage,
   isValidWeightValue,
   isWeightNonPositive,
   parseWeightInput,
@@ -37,12 +38,33 @@ describe("parseWeightInput (parity with the historical parseWeightValue)", () =>
     expect(parseWeightInput("")).toBe("");
   });
 
-  it("parseInt fallback truncates a trailing non-numeric tail (EDGE-PR-09)", () => {
-    expect(parseWeightInput("10abc")).toBe(10);
+  it("reads thousands separators, as formatWeight writes them", () => {
+    expect(parseWeightInput("1,000")).toBe(1000);
+    expect(parseWeightInput("+1,000,000")).toBe(1_000_000);
+    expect(parseWeightInput(" -50 ")).toBe(-50);
+  });
+
+  it("keeps unclear text verbatim instead of cutting it (bug hunt C6)", () => {
+    for (const raw of ["10abc", "1e3", "1.2.3", "10.5", "1,00"]) {
+      expect(parseWeightInput(raw)).toBe(raw);
+    }
+  });
+
+  it("names refused text 'Not a number'; a number out of range keeps the range message", () => {
+    expect(invalidWeightMessage("10abc", "Range")).toBe("Not a number. Range");
+    expect(invalidWeightMessage(9e15, "Range")).toBe("Range");
   });
 });
 
 describe("isValidWeightValue / isWeightNonPositive", () => {
+  it("caps finite weights at 1t either way (bug hunt B3: 9000t overflows the solver)", () => {
+    expect(isValidWeightValue(parseWeightInput("1t"))).toBe(true);
+    expect(isValidWeightValue(parseWeightInput("-1t"))).toBe(true);
+    expect(isValidWeightValue(parseWeightInput("9000t"))).toBe(false);
+    expect(isValidWeightValue(-1e12 - 1)).toBe(false);
+    expect(isValidWeightValue(-Infinity)).toBe(true);
+  });
+
   it("accepts finite numbers and both infinities; rejects any string", () => {
     expect(isValidWeightValue(-1)).toBe(true);
     expect(isValidWeightValue(0)).toBe(true);

@@ -21,7 +21,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { JobResponse } from "@/lib/bff/types";
 import { scenarioCommands, useHotStore, useScenarioStore } from "@/lib/store";
-import { resetScenarioForTest } from "@/lib/store/test-authority";
+import { mirrorOpenScheduleForRoster, resetScenarioForTest } from "@/lib/store/test-authority";
 import {
   toCanonicalScenarioDocument,
   type CanonicalScenarioDocument,
@@ -29,6 +29,7 @@ import {
   type UiTemporaryCover,
 } from "@/lib/scenario";
 import { applyCovers } from "@/lib/scenario/temporary-cover";
+import { withDefaultExportLayout } from "@/lib/scenario/default-export-layout";
 import type { RosterCover } from "@/lib/roster/types";
 import { makeTemporaryCover } from "@/lib/scenario/test-fixtures";
 import { cards, requirement } from "@/lib/rules/ward-fixtures.test-support";
@@ -212,6 +213,7 @@ async function readyStore() {
     rangeStart: "2026-07-01",
     rangeEnd: "2026-07-14",
   });
+  await mirrorOpenScheduleForRoster();
 }
 
 function onlineInfo() {
@@ -690,6 +692,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
       );
 
       await userEvent.click(screen.getByTestId("optimize-capture-dismiss"));
+      await userEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
 
       await waitFor(async () => expect(await store.readCurrentCandidate()).toBeNull(), {
         timeout: CAPTURE_TIMEOUT,
@@ -1453,7 +1456,9 @@ describe("OptimizeAndExportScreen — temporary cover (d582)", () => {
     await userEvent.click(screen.getByTestId("optimize-submit"));
     await waitFor(() => expect(staged).toHaveLength(1));
     const applied = applyCovers(useScenarioStore.getState());
-    expect(prepared[0]).toEqual(toCanonicalScenarioDocument(applied.state));
+    expect(prepared[0]).toEqual(
+      withDefaultExportLayout(toCanonicalScenarioDocument(applied.state)),
+    );
     expect(applied.decrements).not.toHaveLength(0);
     expect(staged[0]).toEqual({
       entries: [{ name: "Haseena (Ward 3)", iso: "2026-07-03", shiftId: "day", groups: [] }],
@@ -1467,6 +1472,10 @@ describe("OptimizeAndExportScreen — temporary cover (d582)", () => {
     await userEvent.click(screen.getByTestId("optimize-submit"));
     await waitFor(() => expect(staged).toHaveLength(1));
     expect(staged[0]).toEqual({ entries: [], decrements: [] });
-    expect(prepared[0]).toEqual(toCanonicalScenarioDocument(useScenarioStore.getState()));
+    // No saved layout, so the run carries v1's default one (audit C-01).
+    expect(prepared[0].export?.extraRows?.length).toBeGreaterThan(0);
+    expect(prepared[0]).toEqual(
+      withDefaultExportLayout(toCanonicalScenarioDocument(useScenarioStore.getState())),
+    );
   });
 });

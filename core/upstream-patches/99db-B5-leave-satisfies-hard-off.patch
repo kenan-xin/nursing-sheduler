@@ -1,0 +1,68 @@
+# 99db patch for preference_types.py and tests/test_leave_daystate.py against genie 1bf4b85.
+# hunk: a +inf OFF request is satisfied by OFF or LEAVE (offs + leaves == 1), so a group hard OFF plus a member's leave is not INFEASIBLE (bug hunt B5, bead 99db)
+
+diff --git a/core/nurse_scheduling/preference_types.py b/core/nurse_scheduling/preference_types.py
+index 96bd6d8..d802114 100644
+--- a/core/nurse_scheduling/preference_types.py
++++ b/core/nurse_scheduling/preference_types.py
+@@ -190,11 +190,16 @@ def shift_request(
+                 for s in compiled_preference.shift_types:
+                     # Add the objective
+                     if s == constants.OFF_sid:
+-                        utils.add_objective(ctx, weight, ctx.offs[(d, p)])
++                        off_expr = ctx.offs[(d, p)]
++                        if weight == math.inf:
++                            # A leave day is also a day off: a hard OFF (e.g. on a group row) plus a
++                            # member's leave pin is not a conflict (bug hunt B5, bead 99db).
++                            off_expr = off_expr + ctx.leaves[(d, p)]
++                        utils.add_objective(ctx, weight, off_expr)
+                         ctx.reports.append(
+                             Report(
+                                 f"shift_request_pref_{preference_idx}_d_{d}_p_{p}_offs",
+-                                ctx.offs[(d, p)],
++                                off_expr,
+                                 lambda x: x == 1,
+                             )
+                         )
+diff --git a/core/tests/test_leave_daystate.py b/core/tests/test_leave_daystate.py
+index c2367ad..8fb2ba9 100644
+--- a/core/tests/test_leave_daystate.py
++++ b/core/tests/test_leave_daystate.py
+@@ -254,6 +254,37 @@ def test_leave_does_not_satisfy_all_succession():
+     assert status == "INFEASIBLE"
+ 
+ 
++GROUP_HARD_OFF_PLUS_MEMBER_LEAVE_SCENARIO = """
++apiVersion: alpha
++dates:
++  range: {startDate: 2026-12-24, endDate: 2026-12-26}
++people:
++  items: [{id: A}, {id: B}]
++  groups: [{id: Seniors, members: [A, B]}]
++shiftTypes:
++  items: [{id: D}]
++preferences:
++  - type: at most one shift per day
++  - type: shift request
++    person: Seniors
++    date: 2026-12-25
++    shiftType: OFF
++    weight: .inf
++  - type: shift request
++    person: A
++    date: 2026-12-25
++    shiftType: LEAVE
++    weight: .inf
++"""
++
++
++def test_leave_day_satisfies_a_hard_off_request():
++    # B5: both cells say "A does not work on the 25th"; the pinned leave keeps its Leave cell.
++    df, status = _run(GROUP_HARD_OFF_PLUS_MEMBER_LEAVE_SCENARIO)
++    assert status == "OPTIMAL"
++    assert _cell(df, 0, 1) == "Leave"
++
++
+ # ===========================================================================
+ # R1-R4: characterization regressions locking the confirmed LEAVE contract
+ # (contract C1-C4). Every test carries a discriminating observable so it

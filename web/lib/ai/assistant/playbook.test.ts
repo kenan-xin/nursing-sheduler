@@ -189,17 +189,31 @@ describe("rest rules are guidance, not law", () => {
       weight,
     });
     const off = { type: "set_rule_enabled", ruleKind: "successions", ruleId: "r" } as const;
-    expect(relaxesRestRule([{ ...off, enabled: false }])).toBe(true);
-    expect(relaxesRestRule([{ type: "remove_rule", ruleKind: "successions", ruleId: "r" }])).toBe(
-      true,
-    );
-    expect(relaxesRestRule([edit("-10")])).toBe(true);
-    expect(relaxesRestRule([{ ...off, enabled: true }])).toBe(false);
-    expect(relaxesRestRule([edit("-infinity")])).toBe(false);
+    // The rule as it stands before the change.
+    const was = (weight: number) => [{ uid: "r", person: "ALL", pattern: ["N", "D"], weight }];
+    const hard = was(-Infinity);
+    expect(relaxesRestRule([{ ...off, enabled: false }], hard)).toBe(true);
     expect(
-      relaxesRestRule([
-        { type: "set_rule_enabled", ruleKind: "counts", ruleId: "r", enabled: false },
-      ]),
+      relaxesRestRule([{ type: "remove_rule", ruleKind: "successions", ruleId: "r" }], hard),
+    ).toBe(true);
+    expect(relaxesRestRule([edit("-10")], hard)).toBe(true);
+    expect(relaxesRestRule([edit("-5")], was(-10))).toBe(true);
+    expect(relaxesRestRule([{ ...off, enabled: true }], hard)).toBe(false);
+    expect(relaxesRestRule([edit("-infinity")], hard)).toBe(false);
+    // A positive rest rule (day off after nights) cut toward zero or flipped also softens it.
+    expect(relaxesRestRule([edit("5")], was(Infinity))).toBe(true);
+    expect(relaxesRestRule([edit("-50")], was(10))).toBe(true);
+    expect(relaxesRestRule([edit("0")], was(10))).toBe(true);
+    expect(relaxesRestRule([edit("5")], was(10))).toBe(true);
+    // bead 8g1f S2: a stronger penalty or bonus relaxes nothing.
+    expect(relaxesRestRule([edit("-20")], was(-10))).toBe(false);
+    expect(relaxesRestRule([edit("20")], was(10))).toBe(false);
+    expect(relaxesRestRule([edit("infinity")], was(10))).toBe(false);
+    expect(
+      relaxesRestRule(
+        [{ type: "set_rule_enabled", ruleKind: "counts", ruleId: "r", enabled: false }],
+        hard,
+      ),
     ).toBe(false);
   });
 
@@ -375,7 +389,7 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS).toContain(TRUTHFUL_SUMMARY_RULE);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-28.3");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-30.1");
   });
 });
 

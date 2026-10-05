@@ -50,6 +50,7 @@ function controller(outcome: ApplyOutcomeView | null): AssistantProposalControll
     readiness: null,
     applying: false,
     outcome,
+    undone: null,
     receipts: [],
     confirm: vi.fn(),
     withdraw: vi.fn(),
@@ -61,9 +62,8 @@ function controller(outcome: ApplyOutcomeView | null): AssistantProposalControll
   };
 }
 
-/** A covering rule lives on the "Shift Type Coverings" screen; its Preview scope word is
- *  "Supervision" (SCOPE_LABEL). Two direct entries make it the primary screen, so the
- *  announcement is what names it. */
+/** A covering rule lives on the "Shift Type Coverings" screen. Two direct entries make it
+ *  the primary screen, so the announcement is what names it. */
 const COVERING_DIFF: ProposalDiff = {
   direct: [
     entry("rule:coverings:c1", "shift-type-coverings"),

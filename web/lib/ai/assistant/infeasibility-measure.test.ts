@@ -12,6 +12,11 @@
 //   PYTHON=/usr/bin/python3 pnpm measure:infeasibility
 // MEASURE_TIMEOUT_S (default 90, the app's per-candidate budget) and MEASURE_POOL
 // (scenarios solved in parallel, default 4) tune it. Results print as JSON + a table.
+//
+// Parallel solves never meet the backend's per-client queue cap (JOB_MAX_PENDING_PER_CLIENT,
+// default 2): each solve is its own oracle.py process calling `nurse_scheduling.schedule`
+// directly, with no job server or client id. A variant that posts to a real backend
+// must start it with JOB_MAX_PENDING_PER_CLIENT=0, or MEASURE_POOL > 2 gets 429s.
 
 import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";

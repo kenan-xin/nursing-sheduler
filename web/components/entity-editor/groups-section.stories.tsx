@@ -22,7 +22,7 @@ function GroupsHarness() {
   const groups = useScenarioStore(descriptor.readGroups);
   const commit = React.useCallback(
     (transform: (live: ScenarioUiState) => ScenarioUiState | null) => {
-      void scenarioCommands.mutate((live) => transform(live as ScenarioUiState));
+      return scenarioCommands.mutate((live) => transform(live as ScenarioUiState));
     },
     [],
   );

@@ -12,6 +12,7 @@ import { FaCircleExclamation } from "@/components/icons";
 // edited ticket) — imported directly per the project's react-icons/fa6
 // convention (see upload-modal.tsx).
 import { FaBrush } from "react-icons/fa6";
+import { RESERVED_SHIFT_TYPE } from "@/lib/scenario";
 import { quickPaintStatus } from "./quick-paint-status";
 
 export interface PaintTarget {
@@ -52,6 +53,8 @@ export function QuickPaintPanel({
   onSetNegInf,
 }: QuickPaintPanelProps) {
   const status = quickPaintStatus(selectedIds, weight);
+  // LEAVE ignores the weight (it is a hard pin), so the weight controls grey out.
+  const weightUnused = selectedIds.includes(RESERVED_SHIFT_TYPE.leave);
 
   return (
     <div
@@ -112,22 +115,25 @@ export function QuickPaintPanel({
           value={weight}
           onChange={(e) => onWeightChange(e.target.value)}
           placeholder="0"
+          disabled={weightUnused}
           data-testid="quick-paint-weight-input"
           className="h-9.5 flex-1 font-mono"
         />
         <button
           type="button"
           data-testid="quick-paint-pos-inf"
+          disabled={weightUnused}
           onClick={onSetPosInf}
-          className="pointer-coarse:min-h-touch pointer-coarse:min-w-touch h-9.5 flex-none rounded-control border border-success bg-successtint px-3.5 font-mono text-meta font-bold text-successink"
+          className="pointer-coarse:min-h-touch pointer-coarse:min-w-touch h-9.5 flex-none rounded-control border border-success bg-successtint px-3.5 font-mono text-meta font-bold text-successink disabled:cursor-not-allowed disabled:opacity-50"
         >
           +∞
         </button>
         <button
           type="button"
           data-testid="quick-paint-neg-inf"
+          disabled={weightUnused}
           onClick={onSetNegInf}
-          className="pointer-coarse:min-h-touch pointer-coarse:min-w-touch h-9.5 flex-none rounded-control border border-warn bg-warntint px-3.5 font-mono text-meta font-bold text-warnink"
+          className="pointer-coarse:min-h-touch pointer-coarse:min-w-touch h-9.5 flex-none rounded-control border border-warn bg-warntint px-3.5 font-mono text-meta font-bold text-warnink disabled:cursor-not-allowed disabled:opacity-50"
         >
           −∞
         </button>

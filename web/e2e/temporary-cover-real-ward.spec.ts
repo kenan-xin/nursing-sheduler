@@ -214,7 +214,8 @@ test.describe("temporary cover on a real ward", () => {
   test("the Excel download has her row under the staff rows and a provenance cover table", async () => {
     await page.getByTestId("roster-export-xlsx").click({ timeout: BOUND });
     const edited = await nextDownload();
-    expect(edited.filename).toMatch(/-edited\.xlsx$/);
+    // A cover is not an edit (C-33): no grid edits, so no "-edited" suffix.
+    expect(edited.filename).toMatch(/^roster-\d{4}-\d{2}-\d{2}\.xlsx$/);
     await expectCoverWorkbook("the edited roster export", edited.bytes);
     await expect(page.getByTestId("roster-action-error")).toHaveCount(0);
   });

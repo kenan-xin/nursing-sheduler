@@ -59,6 +59,7 @@ export {
 export {
   commandsDigest,
   deriveIdempotencyKey,
+  conflictingDraftMessage,
   describeProposalReadiness,
   proposalBasisBlock,
   type EvidenceReference,

@@ -94,6 +94,78 @@ function mount(document: RosterDocument) {
   );
 }
 
+describe("setup changed since the solve (C-20)", () => {
+  const shifts = [{ id: "D" }, { id: "N" }];
+
+  it("is quiet while Setup still matches the roster", async () => {
+    await scenarioCommands.mutate({ staff: [{ id: "Alice Ng" }, { id: 7 }], shifts });
+    mount(await fixtureRosterDocument());
+    expect(screen.queryByTestId("roster-setup-changed")).toBeNull();
+  });
+
+  it("says so after a person is renamed or removed", async () => {
+    await scenarioCommands.mutate({ staff: [{ id: "Alice Ng" }, { id: "Bo" }], shifts });
+    mount(await fixtureRosterDocument());
+    expect(screen.getByTestId("roster-setup-changed")).toHaveTextContent(
+      "Setup changed since this roster was solved",
+    );
+  });
+
+  it("says so after a shift type is removed", async () => {
+    await scenarioCommands.mutate({
+      staff: [{ id: "Alice Ng" }, { id: 7 }],
+      shifts: [{ id: "D" }],
+    });
+    mount(await fixtureRosterDocument());
+    expect(screen.getByTestId("roster-setup-changed")).toBeDefined();
+  });
+});
+
+describe("hand edits are rule-checked (C-19)", () => {
+  function mountEditing(
+    document: RosterDocument,
+    selectedCell: { personIdx: number; dateIdx: number },
+  ) {
+    render(
+      <RosterContentWidthProvider>
+        <RosterViewer
+          document={document}
+          editing={{
+            selectedCell,
+            selectCell: vi.fn(),
+            setCell: vi.fn(),
+            swapCells: vi.fn(),
+            undo: vi.fn(),
+            canUndo: false,
+          }}
+        />
+      </RosterContentWidthProvider>,
+    );
+  }
+
+  it("warns on the edit bar when an edit breaks a rule, and keeps the edit", async () => {
+    // P2 works the one D needed on 4 Jul.
+    mountEditing(await fixtureRosterDocument({ document: documentNeeding(1) }), {
+      personIdx: 1,
+      dateIdx: 1,
+    });
+    fireEvent.click(screen.getByTestId("roster-edit-option-OFF"));
+    const warning = screen.getByTestId("roster-edit-warnings");
+    expect(warning).toHaveTextContent("This change breaks a rule. It is kept.");
+    expect(warning).toHaveTextContent("has 0 of the 1");
+  });
+
+  it("stays quiet when the edit breaks nothing", async () => {
+    // P2's N on 3 Jul is needed by no rule.
+    mountEditing(await fixtureRosterDocument({ document: documentNeeding(1) }), {
+      personIdx: 1,
+      dateIdx: 0,
+    });
+    fireEvent.click(screen.getByTestId("roster-edit-option-OFF"));
+    expect(screen.queryByTestId("roster-edit-warnings")).toBeNull();
+  });
+});
+
 describe("temporary cover on the roster (d582)", () => {
   it("control: with no cover the scoped cell is short", async () => {
     mount(await fixtureRosterDocument({ document: documentNeeding(2) }));

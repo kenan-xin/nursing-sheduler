@@ -69,6 +69,9 @@ class WorkspaceDateContainer(BaseModel):
     range: WorkspaceDateRange
     items: list[datetime.date] = Field(default_factory=list)
     groups: list[DateGroup] = Field(default_factory=list)
+    # The web app's holiday-import switch (bead 6975): authoring state only, never
+    # copied into the strict document by `_strict_dict`.
+    importPublicHolidays: StrictBool | None = None
 
 
 class _WorkspacePreferenceFields(BaseModel):

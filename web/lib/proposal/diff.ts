@@ -14,9 +14,11 @@
 //
 // WHY A STRUCTURAL DIFF RATHER THAN PER-ARM DESCRIPTIONS. A per-arm description
 // states what its author believed the arm does. The range cascade alone reaches date
-// groups, every preference card, the request matrix and the export layout, through
-// two different mechanisms (purge and re-key). Comparing documents cannot forget a
-// surface, and it keeps working when an arm's transform is improved underneath it.
+// groups, every preference card and the request matrix, through two different
+// mechanisms (purge and re-key). The export layout it also reaches has no screen
+// (deferred route), so it gets one summary line and no capability id. Comparing
+// documents cannot forget a surface, and it keeps working when an arm's transform is
+// improved underneath it.
 
 import type {
   AffinityCard,
@@ -31,19 +33,40 @@ import type {
   UiShiftType,
   UiTemporaryCover,
 } from "@/lib/scenario";
-import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
-import { isEditableAffinityCard } from "@/components/affinities/affinities-model";
-import { isEditableCoveringCard } from "@/components/coverings/coverings-model";
+import {
+  describeCountStrength,
+  EXPRESSION_OPS,
+  substituteTarget,
+} from "@/components/card-editor/expression-model";
+import {
+  affinityTogetherMeaning,
+  describePairingStrength,
+  isEditableAffinityCard,
+} from "@/components/affinities/affinities-model";
+import {
+  COVERING_SAME_SHIFT,
+  isEditableCoveringCard,
+} from "@/components/coverings/coverings-model";
 import { isContractedHoursCard } from "@/components/counts/counts-model";
 import { formatHalfHours } from "@/components/counts/half-hour-codec";
+import { groupLeaveReach, leaveReachText } from "@/components/requests/requests-model";
 import { calendarSpan } from "./assumptions";
-import { generateDateItems } from "@/lib/dates";
+import { CAPABILITY_ENTRIES } from "@/lib/capability/help-content";
+import type { CapabilityEntryV1 } from "@/lib/capability/types";
+import { findNavItemById } from "@/components/shell/nav-config";
+import { generateDateItems, holidayImportApplied } from "@/lib/dates";
 import { formatShortDate } from "@/lib/dates/date-id";
 import { cardNeedOn, coverStatuses } from "@/lib/scenario/temporary-cover";
 import { requiredOn } from "@/lib/rules/shortfalls";
+import {
+  MAX_WORKED_IN_7,
+  REST_DAYS_RULE_DESCRIPTION,
+  REST_DAYS_WEIGHT,
+  isRestDaysRuleCard,
+} from "@/lib/rules/rest-days";
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
-import { rosterDatesBetween } from "./operations";
+import { rosterDatesBetween, withStoredShiftCodes } from "./operations";
 
 /**
  * Where a change lands, named as the capability the user would go to see it.
@@ -64,14 +87,14 @@ export type DiffScope =
   | "leave-and-requests"
   | "export-layout";
 
-/** The one scope with no capability entry: the Export Layout route is deferred. */
-const SCOPE_WITHOUT_CAPABILITY: DiffScope = "export-layout";
+/** The one scope with no capability entry: the Export Layout route is deferred (C-26). */
+export const SCOPE_WITHOUT_CAPABILITY: DiffScope = "export-layout";
 
 /** The progressive setup domains, in dependency order (guided-setup flow). */
 export const SETUP_DOMAINS = ["dates", "people", "shifts", "rules", "requests"] as const;
 export type SetupDomain = (typeof SETUP_DOMAINS)[number];
 
-const SCOPE_DOMAIN: Record<DiffScope, SetupDomain> = {
+const SCOPE_DOMAIN: Record<DiffScope, SetupDomain | null> = {
   "roster-period": "dates",
   "staff-list": "people",
   "shift-types": "shifts",
@@ -81,7 +104,7 @@ const SCOPE_DOMAIN: Record<DiffScope, SetupDomain> = {
   "shift-affinities": "rules",
   "shift-type-coverings": "rules",
   "leave-and-requests": "requests",
-  "export-layout": "requests",
+  "export-layout": null,
 };
 
 const RULE_SCOPE: Record<keyof CardsByKind, DiffScope> = {
@@ -140,7 +163,8 @@ function describeCell(cell: UiRequestCell): string {
         ];
   if (cell.weight === Infinity) return must;
   if (cell.weight === -Infinity) return never;
-  if (cell.weight === 0 && cell.kind === "off") return "Asked for the day off";
+  // Only a loaded file can still carry one: the app treats weight 0 on OFF as a removal.
+  if (cell.weight === 0 && cell.kind === "off") return "Day off at weight 0 (no effect)";
   return cell.weight < 0 ? `${avoids} (weight ${cell.weight})` : `${wants} (weight ${cell.weight})`;
 }
 
@@ -248,8 +272,12 @@ function describeRequirement(card: RequirementCard): string {
   if (p == null || p === n) {
     return `Exactly ${n} ${n === 1 ? "person" : "people"} on ${shifts}, ${dates}${exceptions}${ban}${mix}`;
   }
+  // p is always a ceiling; -∞ forces the gap to p to zero, so the count is exactly p.
+  if (card.weight === -Infinity) {
+    return `Exactly ${p} ${p === 1 ? "person" : "people"} on ${shifts}, ${dates}${exceptions} (a must)${ban}${mix}`;
+  }
   if (card.weight < 0) {
-    return `At least ${n}, ideally ${p} people on ${shifts}, ${dates}${exceptions} (weight ${card.weight})${ban}${mix}`;
+    return `${n} to ${p} people on ${shifts}, ${dates}${exceptions}, aiming for ${p} (weight ${card.weight})${ban}${mix}`;
   }
   const lean = card.weight > 0 ? `${n} preferred` : "no preference";
   return `${n} to ${p} people on ${shifts}, ${dates}${exceptions} (${lean}, weight ${card.weight})${ban}${mix}`;
@@ -305,24 +333,6 @@ function describeSuccession(card: SuccessionCard): string {
   return `${pattern} on consecutive days for ${renderPeople(card.person, "everyone")}, ${renderDates(card.date)}: ${renderStrength(card.weight)}`;
 }
 
-/**
- * A count's strength, per `shift_count` in core (the objective is maximised): a linear
- * expression is a yes/no the weight REWARDS, so a negative weight pays for breaking it;
- * `|x - T|^2` is a squared gap, so a negative weight pulls toward T.
- */
-function renderCountStrength(squared: boolean, weight: number, target: number): string {
-  if (weight === 0) return "no effect (weight 0)";
-  if (squared) {
-    if (weight === -Infinity) return `must be exactly ${target}`;
-    if (weight < 0) return `pulled toward ${target} (weight ${weight})`;
-    return `refused by the solver (a positive weight is not allowed here)`;
-  }
-  if (weight === Infinity) return "must always hold";
-  if (weight === -Infinity) return "must never hold, the solver forces the opposite";
-  if (weight > 0) return `kept to where possible (weight ${weight})`;
-  return `worked against, the solver is rewarded for breaking it (weight ${weight})`;
-}
-
 /** A contracted-hours card (4h5a): the hours, what each shift and leave day counts, a must. */
 function describeContract(card: ContractedHoursCountCard): string | null {
   const { target } = card;
@@ -339,41 +349,41 @@ function describeContract(card: ContractedHoursCountCard): string | null {
 /** `null` for a list-shaped count: no single sentence says it honestly. */
 function describeCount(card: CountCard): string | null {
   if (isContractedHoursCard(card)) return describeContract(card);
+  if (isRestDaysRuleCard(card) && card.weight === REST_DAYS_WEIGHT) {
+    const people = renderPeople(card.person, "");
+    return `${people ? `Each of ${people}` : "Every nurse"} gets ${REST_DAYS_RULE_DESCRIPTION} (at most ${MAX_WORKED_IN_7} shifts); strong preference`;
+  }
   if (typeof card.expression !== "string" || typeof card.target !== "number") return null;
   const op = EXPRESSION_OPS.find((candidate) => candidate.value === card.expression);
   if (!op) return null;
   const squared = op.value === "|x - T|^2";
   const amount = squared ? `Close to ${card.target}` : substituteTarget(op.title, card.target);
   const shifts = flattenRefs(card.countShiftTypes).map(String).join(" + ");
+  const weighted = card.countShiftTypeCoefficients?.length ? " (weighted count)" : "";
   const people = renderPeople(card.person, "");
-  return `${amount} ${shifts} shifts for ${people ? `each of ${people}` : "everyone"}, across ${renderDates(card.countDates)}: ${renderCountStrength(squared, card.weight, card.target)}`;
+  return `${amount} ${shifts} shifts${weighted} for ${people ? `each of ${people}` : "everyone"}, across ${renderDates(card.countDates)}: ${describeCountStrength(squared, card.weight, card.target)}`;
 }
 
-/** A pairing's strength, per `shift_affinity` in core: the weight is gained on each date both sides work. */
-function renderPairingStrength(weight: number): string {
-  if (weight === Infinity) return "must work together on every date";
-  if (weight === -Infinity) return "never together";
-  if (weight > 0) return `together where possible (weight ${weight})`;
-  if (weight < 0) return `apart where possible (weight ${weight})`;
-  return "no effect (weight 0)";
-}
-
-/** `null` for a multi-term card: flattening its groups would state a different rule. */
-function describePairing(card: AffinityCard): string | null {
+/** `null` for a grouped card: flattening its groups would state a different rule. */
+function describePairing(card: AffinityCard, groups: ScenarioUiState): string | null {
   if (!isEditableAffinityCard(card)) return null;
   const shifts = flattenRefs(card.shiftTypes).map(String).join(" or ");
-  return `${renderPeople(card.people1, "everyone")} with ${renderPeople(card.people2, "everyone")} on ${shifts}, ${renderDates(card.date)}: ${renderPairingStrength(card.weight)}`;
+  return `${renderPeople(card.people1, "everyone")} with ${renderPeople(card.people2, "everyone")} ${affinityTogetherMeaning(card, groups)} (${shifts}), ${renderDates(card.date)}: ${describePairingStrength(card.weight)}`;
 }
 
 /** Restates `shift_type_covering` in core: a hard implication, so no strength. */
 function describeSupervision(card: CoveringCard): string | null {
   if (!isEditableCoveringCard(card)) return null;
   const shifts = flattenRefs(card.shiftTypes).map(String).join(" or ");
-  return `Whenever ${renderPeople(card.preceptees, "everyone")} works ${shifts}, at least one of ${renderPeople(card.preceptors, "everyone")} works it too, ${renderDates(card.date)}`;
+  return `Whenever ${renderPeople(card.preceptees, "everyone")} works ${shifts}, at least one of ${renderPeople(card.preceptors, "everyone")} works ${COVERING_SAME_SHIFT}, ${renderDates(card.date)}`;
 }
 
 /** The plain sentence for the families the assistant authors; `null` keeps the opaque form. */
-function describeRule(kind: keyof CardsByKind, card: Record<string, unknown>): string | null {
+function describeRule(
+  kind: keyof CardsByKind,
+  card: Record<string, unknown>,
+  state: ScenarioUiState,
+): string | null {
   switch (kind) {
     case "requirements":
       return describeRequirement(card as unknown as RequirementCard);
@@ -382,7 +392,7 @@ function describeRule(kind: keyof CardsByKind, card: Record<string, unknown>): s
     case "counts":
       return describeCount(card as unknown as CountCard);
     case "affinities":
-      return describePairing(card as unknown as AffinityCard);
+      return describePairing(card as unknown as AffinityCard, state);
     case "coverings":
       return describeSupervision(card as unknown as CoveringCard);
   }
@@ -394,9 +404,13 @@ function describeRule(kind: keyof CardsByKind, card: Record<string, unknown>): s
  * sentence omits coefficients; an assistant edit can only change those by changing the
  * counted shifts, which the sentence does show.
  */
-function ruleBody(card: Record<string, unknown>, kind: keyof CardsByKind): string {
+function ruleBody(
+  card: Record<string, unknown>,
+  kind: keyof CardsByKind,
+  state: ScenarioUiState,
+): string {
   const { uid: _uid, disabled, applied: _applied, ...rest } = card;
-  const plain = describeRule(kind, card);
+  const plain = describeRule(kind, card, state);
   if (plain === null) return `${disabled ? "Off" : "On"} · ${stableStringify(rest)}`;
   const title = typeof card.description === "string" ? card.description.trim() : "";
   return `${disabled ? "Off" : "On"} · ${title ? `“${title}” · ` : ""}${plain}`;
@@ -410,6 +424,26 @@ function renderStaffGroup(members: readonly string[], description: string | unde
 
 function coordinateKey(cell: UiRequestCell): string {
   return `${stableStringify(cell.person)}|${stableStringify(cell.date)}`;
+}
+
+/**
+ * A request row and date as the Preview says them (F13): "Ana on Mon 5 Oct",
+ * "everyone in Seniors on weekends". A roster date id is looked up in each document,
+ * `after` first, so a date that left the period still reads as a date.
+ */
+function cellLabel(person: unknown, date: unknown, states: readonly ScenarioUiState[]): string {
+  const who = renderPeople(person, "everyone");
+  const group = states.some((state) => state.staffGroups.some((g) => String(g.id) === who));
+  const iso = states
+    .map(
+      (state) =>
+        generateDateItems({ start: state.rangeStart, end: state.rangeEnd }).find(
+          (day) => day.id === String(date),
+        )?.iso,
+    )
+    .find((found) => found !== undefined);
+  const when = iso ? formatShortDate(iso, true) : renderDates(date);
+  return `${group ? `everyone in ${who}` : who} on ${when}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -662,11 +696,15 @@ function compareRequestMatrix(before: ScenarioUiState, after: ScenarioUiState): 
     const from = describeCoordinateCells(beforeCells.get(key) ?? []);
     const to = describeCoordinateCells(afterCells.get(key) ?? []);
     if (from === to) continue;
-    const [person, date] = key.split("|");
+    // A person id may hold "|"; a date never does, so the last one is the separator.
+    const cut = key.lastIndexOf("|");
     entries.push({
       key: `cell:${key}`,
       scope: "leave-and-requests",
-      label: `${JSON.parse(person)} on ${JSON.parse(date)}`,
+      label: cellLabel(JSON.parse(key.slice(0, cut)), JSON.parse(key.slice(cut + 1)), [
+        after,
+        before,
+      ]),
       before: from,
       after: to,
       kind: from === null ? "created" : to === null ? "removed" : "changed",
@@ -691,6 +729,19 @@ export function diffScenarioDocuments(
       label: "Roster period",
       before: render(before),
       after: render(after),
+      kind: "changed",
+    });
+  }
+
+  // The switch as the Dates screen shows it (bead 6975).
+  const holidayImport = (state: ScenarioUiState) => (holidayImportApplied(state) ? "On" : "Off");
+  if (holidayImport(before) !== holidayImport(after)) {
+    entries.push({
+      key: "dates:holiday-import",
+      scope: "roster-period",
+      label: "Import Singapore public holidays",
+      before: holidayImport(before),
+      after: holidayImport(after),
       kind: "changed",
     });
   }
@@ -757,15 +808,20 @@ export function diffScenarioDocuments(
         keyPrefix: `rule:${kind}`,
         identity: (card) => card.uid,
         label: (card) => ruleTitle(card, kind),
-        render: (card) => ruleBody(card as unknown as Record<string, unknown>, kind),
-        renderChange:
-          kind === "requirements"
-            ? (from, to) =>
-                requirementChange(
+        render: (card) => ruleBody(card as unknown as Record<string, unknown>, kind, after),
+        renderChange: (from, to) => {
+          const change =
+            kind === "requirements"
+              ? requirementChange(
                   from as unknown as RequirementCard,
                   to as unknown as RequirementCard,
                 )
-            : undefined,
+              : undefined;
+          // An edit that leaves a rule off changes nothing the next run does (C-13).
+          if (!from.disabled || !to.disabled) return change;
+          const body = change ?? ruleBody(to as unknown as Record<string, unknown>, kind, after);
+          return `${body} · This rule is off. The optimiser ignores it.`;
+        },
       }),
     );
   }
@@ -778,19 +834,16 @@ export function diffScenarioDocuments(
 
   entries.push(...compareRequestMatrix(before, after));
 
-  const exportBefore = stableStringify(before.exportLayout);
-  const exportAfter = stableStringify(after.exportLayout);
-  if (exportBefore !== exportAfter) {
-    const count = (state: ScenarioUiState) =>
-      state.exportLayout.formatting.length +
-      state.exportLayout.extraColumns.length +
-      state.exportLayout.extraRows.length;
+  // A cascade (delete, rename) can prune the layout, and it is still sent to the solver.
+  if (stableStringify(before.exportLayout) !== stableStringify(after.exportLayout)) {
+    const count = ({ exportLayout: l }: ScenarioUiState) =>
+      l.formatting.length + l.extraColumns.length + l.extraRows.length;
     entries.push({
       key: "export:layout",
-      scope: "export-layout",
+      scope: SCOPE_WITHOUT_CAPABILITY,
       label: "Export layout rules",
-      before: `${count(before)} rule${count(before) === 1 ? "" : "s"}`,
-      after: `${count(after)} rule${count(after) === 1 ? "" : "s"}`,
+      before: `${count(before)}`,
+      after: `${count(after)}`,
       kind: "changed",
     });
   }
@@ -877,6 +930,34 @@ function collapseOffRuns(
     ];
   }
   return collapsed;
+}
+
+/**
+ * Leave on a staff-group row pins every member on every date (bb8t). The per-date
+ * rows only name the group, so one line states the person-days it reaches; the
+ * Preview is the confirmation, so it must say so before Apply.
+ */
+function groupLeaveLines(commands: readonly AssistantCommandV1[], after: ScenarioUiState): Entry[] {
+  return commands.flatMap((command): Entry[] => {
+    if (command.type !== "add_leave") return [];
+    const span = rosterDatesBetween(after, command.startDate, command.endDate);
+    if (!span.ok) return [];
+    const reach = groupLeaveReach(
+      after,
+      span.ids.map((date) => [command.personId, date] as const),
+    );
+    if (!reach) return [];
+    return [
+      {
+        key: `groupleave:${stableStringify(command.personId)}|${command.startDate}|${command.endDate}`,
+        scope: "leave-and-requests",
+        label: `${String(command.personId)}: paid leave for every member`,
+        before: null,
+        after: `Pins paid leave for ${leaveReachText(reach)}`,
+        kind: "created",
+      },
+    ];
+  });
 }
 
 /**
@@ -1042,6 +1123,7 @@ function directKeys(
     switch (command.type) {
       case "set_roster_range":
         keys.add("dates:range");
+        keys.add("dates:holiday-import");
         break;
       case "set_rule_enabled":
         keys.add(`rule:${command.ruleKind}:${command.ruleId}`);
@@ -1164,8 +1246,11 @@ function directKeys(
 export function deriveProposalDiff(
   before: ScenarioUiState,
   after: ScenarioUiState,
-  commands: readonly AssistantCommandV1[],
+  asked: readonly AssistantCommandV1[],
 ): ProposalDiff {
+  // The ids the batch actually stored (an added shift code is uppercased), so the
+  // highlight names the row the document holds.
+  const commands = withStoredShiftCodes(asked);
   const named = directKeys(commands, before, after);
   const all = diffScenarioDocuments(before, after);
   const direct = [
@@ -1178,6 +1263,7 @@ export function deriveProposalDiff(
       after,
     ),
     ...availabilityLines(commands, after),
+    ...groupLeaveLines(commands, after),
   ];
   const cascade = [
     ...all.filter((entry) => !named.has(entry.key)),
@@ -1191,34 +1277,33 @@ export function deriveProposalDiff(
       !directDomains.has(domain) && cascade.some((entry) => SCOPE_DOMAIN[entry.scope] === domain),
   );
 
-  const capabilityIds = [
-    ...new Set(
-      all.map((entry) => entry.scope).filter((scope) => scope !== SCOPE_WITHOUT_CAPABILITY),
-    ),
-  ].sort();
+  const capabilityIds = [...new Set(all.map((entry) => entry.scope))]
+    .filter((scope) => scope !== SCOPE_WITHOUT_CAPABILITY)
+    .sort();
 
   return { direct, cascade, capabilityIds, needsReview };
 }
 
-/** The screen label a Preview shows for a scope. */
-export const SCOPE_LABEL: Record<DiffScope, string> = {
-  "roster-period": "Dates",
-  "staff-list": "Staff",
-  "shift-types": "Shift types",
-  "staffing-requirements": "Staffing requirements",
-  "shift-successions": "Shift sequences",
-  "shift-counts": "Shift counts",
-  "shift-affinities": "Pairings",
-  "shift-type-coverings": "Supervision",
-  "leave-and-requests": "Leave and requests",
-  "export-layout": "Export layout",
-};
+/**
+ * The screen label a Preview shows for a scope: the SIDEBAR's name for the scope's
+ * screen (C-28), so a badge and the "Affects:" line never name one screen twice.
+ */
+export const SCOPE_LABEL = Object.fromEntries(
+  (Object.keys(SCOPE_DOMAIN) as DiffScope[]).map((scope) => {
+    if (scope === SCOPE_WITHOUT_CAPABILITY) return [scope, "Export layout"];
+    const entry: CapabilityEntryV1 | undefined = CAPABILITY_ENTRIES.find(
+      (candidate) => candidate.id === scope,
+    );
+    if (entry?.routeId === undefined) throw new Error(`diff: scope "${scope}" has no screen`);
+    return [scope, findNavItemById(entry.routeId).label];
+  }),
+) as Record<DiffScope, string>;
 
-/** The setup-domain label the “Needs review” markers use. */
+/** The setup-domain label the “Needs review” markers use: the Guided step's sidebar name. */
 export const SETUP_DOMAIN_LABEL: Record<SetupDomain, string> = {
-  dates: "Dates",
-  people: "People and groups",
-  shifts: "Shift types",
-  rules: "Rules and staffing",
-  requests: "Leave and requests",
+  dates: findNavItemById("dates").label,
+  people: findNavItemById("people").label,
+  shifts: findNavItemById("shift-types").label,
+  rules: findNavItemById("rules").label,
+  requests: findNavItemById("shift-requests").label,
 };

@@ -47,6 +47,8 @@ export {
   type ReceiptStanding,
   type ScenarioAuthorityConfig,
   type ScenarioOwnership,
+  type ScheduleActionOutcome,
+  type ScheduleSummary,
   type WriteStatus,
 } from "./authority";
 
@@ -55,7 +57,6 @@ export {
   drainScenarioCommands,
   readAuthoritativeScenarioIdentity,
   readAuthoritativeScenarioOwnership,
-  readConflictingEditorDraft,
   readScenarioHistoryDepth,
   scenarioCommands,
 } from "./commands";
@@ -118,10 +119,12 @@ export {
   type WorkingEditOutcome,
   type WorkingPromotionOutcome,
 } from "./roster-storage";
+export { currentRosterStorage, rosterStorageFor } from "./roster-scope";
 
 export { commitPaintGesture } from "./paint";
 
 export {
+  applyScenarioEdit,
   BRING_UP_STALL_MS,
   initializeScenarioAuthority,
   loadScenario,

@@ -54,12 +54,12 @@ const HARD = buildAffinityCard(
   "a3",
 );
 
-// `buildAffinityCard` always emits ONE term, so it cannot produce an advanced card;
-// this shape (two top-level terms) is hand-built to exercise the read-only branch.
+// `buildAffinityCard` always emits flat lists, so it cannot produce an advanced card;
+// this grouped shape is hand-built to exercise the read-only branch.
 const ADVANCED: AffinityCard = {
   uid: "a4",
-  description: "Advanced (multi-term) affinity",
-  people1: [["Alice"], ["Bob"]],
+  description: "Advanced (grouped) affinity",
+  people1: [["Alice", "Bob"]],
   people2: ["Bob"],
   shiftTypes: ["D"],
   date: ["ALL"],

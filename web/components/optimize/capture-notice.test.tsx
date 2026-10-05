@@ -153,7 +153,7 @@ describe("CaptureNotice — actionable states still offer their action", () => {
     expect(onRetry).toHaveBeenCalled();
   });
 
-  it("offers Discard once a roster is saved, and a retry after a failed discard", async () => {
+  it("offers Delete (confirmed first) once a roster is saved, and a retry after a failed delete", async () => {
     const committed = show({
       status: "committed",
       pointer: { jobId: "opt_1", candidateVersion: 1, submissionOrdinal: 1 },
@@ -162,7 +162,15 @@ describe("CaptureNotice — actionable states still offer their action", () => {
       // awaiting a choice, so it must not vary with this.
       working: { kind: "awaiting-choice", reason: "working-present" },
     });
-    await userEvent.click(screen.getByTestId("optimize-capture-dismiss"));
+    const button = screen.getByTestId("optimize-capture-dismiss");
+    expect(button).toHaveTextContent("Delete this result");
+    await userEvent.click(button);
+    // C-18 — asks first, and says what stays.
+    expect(committed.onDismiss).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("confirm-dialog")).toHaveTextContent(
+      /roster on the Roster screen stays as it is/,
+    );
+    await userEvent.click(screen.getByTestId("confirm-dialog-confirm"));
     expect(committed.onDismiss).toHaveBeenCalled();
     cleanup();
 

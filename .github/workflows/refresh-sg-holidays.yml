@@ -1,0 +1,81 @@
+name: Refresh SG holidays
+
+# Monthly refresh of the bundled Singapore holiday snapshot (web/lib/dates/holidays-sg.ts)
+# from data.gov.sg. Opens or updates one PR to develop when the file changes (bead jdhz).
+#
+# The PR is created with GITHUB_TOKEN, so GitHub does NOT run CI on it (events raised by
+# GITHUB_TOKEN never trigger other workflows). Close and reopen the PR, or push to its
+# branch, to get CI. Permanent fix: push/create with a fine-grained PAT or a GitHub App
+# token (e.g. actions/create-github-app-token) stored as a secret.
+# Also requires Settings > Actions > General > "Allow GitHub Actions to create and approve
+# pull requests".
+
+on:
+  schedule:
+    - cron: "23 2 3 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-sg-holidays
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BRANCH: chore/refresh-sg-holidays
+      FILE: web/lib/dates/holidays-sg.ts
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: develop
+          # No token on disk while pnpm install and the refresh script run; only the
+          # push/PR step below gets it.
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.14.0
+      # The script needs no deps, but pnpm 11 installs before `run` anyway; keep it frozen.
+      - name: Install dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Regenerate holidays-sg.ts
+        working-directory: web
+        run: pnpm refresh:sg-holidays
+      - name: Open or update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- "$FILE"; then
+            echo "No holiday changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git add -- "$FILE"
+          git commit -m "chore(dates): refresh bundled Singapore holidays"
+          gh auth setup-git # git push authenticates through gh with GH_TOKEN
+          git push --force origin "$BRANCH"
+
+          title="chore(dates): refresh bundled Singapore holidays"
+          body="Automated monthly refresh of \`$FILE\` from the data.gov.sg MOM public holidays dataset (\`pnpm refresh:sg-holidays\`, workflow run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}).
+
+          Review the diff against the MOM announcement before merging.
+
+          **CI has not run on this PR**: it was opened with \`GITHUB_TOKEN\`, which does not trigger workflows. Close and reopen the PR (or push a commit) to run CI. Permanent fix: use a PAT or GitHub App token in \`.github/workflows/refresh-sg-holidays.yml\`."
+
+          pr=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" --title "$title" --body "$body"
+          else
+            gh pr create --base develop --head "$BRANCH" --title "$title" --body "$body"
+          fi

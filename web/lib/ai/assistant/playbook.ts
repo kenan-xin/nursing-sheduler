@@ -37,8 +37,10 @@
 
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
+import type { SuccessionCard } from "@/lib/scenario";
+import { parseWeightInput } from "@/components/card-editor/weight-value";
 
-export const PLAYBOOK_VERSION = "2026-09-28.3";
+export const PLAYBOOK_VERSION = "2026-09-30.1";
 
 /**
  * How every `offer_choices` option must read (bead tpt2). The card is a pick, not a prompt:
@@ -81,14 +83,24 @@ export const MAX_DAILY_WORKING_MINUTES = 12 * 60;
 
 /**
  * True when a change turns off, deletes or softens a shift sequence (rest) rule.
- * ponytail: reads the commands only, so an edit that narrows a rule but keeps it hard
- * carries no warning; pass the before-state if that ever matters.
+ * `successions` are the rules before the change: an edit softens one when it moves the
+ * weight toward zero or past it (a penalty or must lowered, a bonus or must-do cut or
+ * flipped); a penalty or bonus raised relaxes nothing (bead 8g1f S2).
+ * ponytail: an edit that narrows a rule but keeps its weight carries no warning.
  */
-export function relaxesRestRule(commands: readonly AssistantCommandV1[]): boolean {
+export function relaxesRestRule(
+  commands: readonly AssistantCommandV1[],
+  successions: readonly Pick<SuccessionCard, "uid" | "weight">[],
+): boolean {
   return commands.some((c) => {
     if (c.type === "set_rule_enabled") return c.ruleKind === "successions" && !c.enabled;
     if (c.type === "remove_rule") return c.ruleKind === "successions";
-    if (c.type === "edit_shift_sequence_rule") return !/infinity/i.test(c.weight);
+    if (c.type === "edit_shift_sequence_rule") {
+      const was = successions.find((card) => card.uid === c.ruleId)?.weight;
+      const now = parseWeightInput(c.weight);
+      if (was === undefined || typeof now !== "number") return false;
+      return was > 0 ? now < was : was < 0 && now > was;
+    }
     return false;
   });
 }
@@ -126,7 +138,7 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     ask: [
       "The first and last day of the roster.",
       "Recommend 28 days (4 weeks) first, since a roster period is usually 4 weeks, not a calendar month: offer '4 weeks: 1-28 Oct', or, when the previous period's end or the staff's history is known, 'day after the last period + 27 days'. Offer the calendar month as the second option. Never present 28 days as \"only\".",
-      "Whether to import the public holidays.",
+      "Whether to import the public holidays. When the schedule says importPublicHolidays: false, the user turned the import off: keep it off unless they ask.",
     ],
     proposeWith: ["set_roster_range"],
   },

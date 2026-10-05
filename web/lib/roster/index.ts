@@ -163,6 +163,8 @@ export {
   type CoverSheetRow,
 } from "./cover-sheet";
 
+export { buildCountCellDeltas, type CountCellDelta } from "./count-cells";
+
 export {
   buildEditedCellPatches,
   EditedXlsxError,
@@ -189,9 +191,11 @@ export {
 
 export {
   clearRosterDataAndNotify,
+  clearRunResidue,
   clearViewPreferenceLive,
   type RosterClearDeps,
   type RosterClearOutcome,
+  type RunResidueOutcome,
 } from "./roster-clear";
 
 export {

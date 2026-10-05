@@ -66,6 +66,7 @@ import {
   stageSubmissionSnapshot,
 } from "./submission-snapshot";
 import { ROSTER_SUBMISSION_VERSION } from "./roster-candidate-builder";
+import { preferenceSources } from "./explanation";
 import { rosterStorage } from "@/lib/store";
 import { acquireSessionStorage } from "./session-storage";
 import type { PeopleReverseMap } from "@/lib/scenario";
@@ -146,6 +147,11 @@ export interface OptimizeRunSubmitInput {
    * diagnosed against.
    */
   semanticProfile?: InfoSemanticProfile | null;
+  /**
+   * The card uid behind each of `document.preferences` (`preferenceCardUids`), so the run's
+   * explanation names rules by card. Absent: rules are named by cell or label.
+   */
+  ruleUids?: readonly (string | null)[];
 }
 
 /** The closed result of a `submit()` call. */
@@ -772,6 +778,10 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
         type: "submit-started",
         anonymized: prep.anonymized,
         peopleCount: prep.peopleCount,
+        explainContext: {
+          sources: preferenceSources(input.document, input.ruleUids),
+          people: prep.reverseMap,
+        },
       });
 
       // F2 write-ahead: allocate the origin-wide submission ordinal and write the

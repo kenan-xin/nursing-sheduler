@@ -424,6 +424,53 @@ describe("the model's arguments, at the shipped tool boundary", () => {
   });
 });
 
+describe("a revision sets the earlier Preview aside (bug hunt S1)", () => {
+  it("disables Apply on the earlier Preview when the revision is refused, and says so", async () => {
+    await mount();
+    await proposalTool().handler(LIVE_ARGS, {});
+    expect(await screen.findByTestId("proposal-apply")).toBeEnabled();
+
+    const answer = text(
+      await proposalTool().handler(
+        { summary: "Remove Zed.", operations: [{ type: "remove_person", personId: "Zed" }] },
+        {},
+      ),
+    );
+
+    expect(answer).toContain("The app refused that change:");
+    expect(answer).toContain("The earlier preview was set aside");
+    await waitFor(() =>
+      expect(screen.getByTestId("assistant-proposal")).toHaveAttribute("data-status", "stale"),
+    );
+    expect(screen.getByTestId("proposal-apply")).toBeDisabled();
+    expect(screen.getByTestId("proposal-blocks")).toHaveTextContent("replaced");
+  });
+
+  it("shows the revision, applicable, when it succeeds", async () => {
+    await mount();
+    await proposalTool().handler(LIVE_ARGS, {});
+    await screen.findByTestId("proposal-apply");
+    await proposalTool().handler(
+      {
+        ...LIVE_ARGS,
+        operations: [{ ...LIVE_ARGS.operations[0], end: "2026-09-08" }],
+      },
+      {},
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("assistant-proposal")).toHaveAttribute(
+        "data-proposal-revision",
+        "2",
+      ),
+    );
+    expect(screen.getByTestId("assistant-proposal")).toHaveAttribute(
+      "data-status",
+      "preview_ready",
+    );
+    expect(screen.getByTestId("proposal-apply")).toBeEnabled();
+  });
+});
+
 describe("the live journey: tool call to Preview to user Apply to Undo", () => {
   it("renders the real Preview, applies only on the user's press, and reverses exactly", async () => {
     const user = userEvent.setup();
@@ -447,8 +494,9 @@ describe("the live journey: tool call to Preview to user Apply to Undo", () => {
     expect(direct).toHaveTextContent("2026-09-01 to 2026-09-07");
 
     // The explicit choice the user made is visible as a fact of the change, not an
-    // assumption: no holiday groups are imported.
-    expect(direct.textContent ?? "").not.toMatch(/holiday/i);
+    // assumption: the holiday import is off (bead 6975) and no groups are imported.
+    expect(direct).toHaveTextContent("Import Singapore public holidays");
+    expect(direct).toHaveTextContent("On → Off");
     expect(useScenarioStore.getState().dateGroups).toEqual(before.dateGroups);
 
     // NOTHING HAS BEEN APPLIED. The Preview exists, the document does not move.

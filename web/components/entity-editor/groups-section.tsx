@@ -69,7 +69,8 @@
 import * as React from "react";
 import { toast } from "sonner";
 import type { ScenarioUiState } from "@/lib/scenario";
-import { RenameCollisionError } from "@/lib/cascade";
+import { cardsReferencing, RenameCollisionError } from "@/lib/cascade";
+import { useScenarioStore, type CommandOutcome } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -90,7 +91,6 @@ import {
 } from "@/components/icons";
 import {
   addGroup,
-  deleteGroup,
   duplicateGroup,
   reorderGroups,
   renameGroup,
@@ -105,13 +105,17 @@ import {
   type EditorItemBase,
 } from "./core";
 import { TransferList } from "./transfer-list";
+import { deleteWithSummary, saveRefusalMessage } from "./delete-with-summary";
 
 /**
  * Apply an operation to the durable scenario. The callback runs AT THE QUEUE HEAD,
  * against the state the previous command committed — so rapid actions compose
- * instead of overwriting each other. Returning `null` withdraws the write.
+ * instead of overwriting each other. Returning `null` withdraws the write. The
+ * outcome resolves once the write lands or is refused, so a Save can report it.
  */
-type Commit = (transform: (live: ScenarioUiState) => ScenarioUiState | null) => void;
+type Commit = (
+  transform: (live: ScenarioUiState) => ScenarioUiState | null,
+) => Promise<CommandOutcome>;
 
 // ---------------------------------------------------------------------------
 // Public config — copy + explicit flags. Every field is optional and defaults to
@@ -248,6 +252,8 @@ export interface GroupsSectionProps<TItem extends EditorItemBase> {
   /** The change-highlight key for a group row (lib/change-highlight). The Staff and
    *  Shift screens name their groups differently, so each passes its own. */
   groupChangeKey?: (groupId: string) => string;
+  /** Replaces the immediate delete (e.g. with a confirm). Default: delete at once. */
+  onDeleteGroup?: (groupId: string) => void;
 }
 
 export function GroupsSection<TItem extends EditorItemBase>({
@@ -264,6 +270,7 @@ export function GroupsSection<TItem extends EditorItemBase>({
   onCloseForm,
   config,
   groupChangeKey,
+  onDeleteGroup,
 }: GroupsSectionProps<TItem>) {
   const cfg = React.useMemo(() => resolveConfig(config), [config]);
   const [dragId, setDragId] = React.useState<string | null>(null);
@@ -393,6 +400,7 @@ export function GroupsSection<TItem extends EditorItemBase>({
             isEditing={editingGroupId === group.id}
             onEdit={() => onEditGroup(group.id)}
             onCloseForm={onCloseForm}
+            onDelete={onDeleteGroup && (() => onDeleteGroup(group.id))}
             isStale={isStale}
             changeKey={groupChangeKey?.(group.id)}
             cfg={cfg}
@@ -465,6 +473,7 @@ function GroupRow<TItem extends EditorItemBase>({
   isEditing,
   onEdit,
   onCloseForm,
+  onDelete,
   isStale,
   changeKey,
   cfg,
@@ -489,6 +498,7 @@ function GroupRow<TItem extends EditorItemBase>({
   isEditing: boolean;
   onEdit: () => void;
   onCloseForm: () => void;
+  onDelete?: () => void;
   isStale: () => boolean;
   changeKey: string | undefined;
   cfg: ResolvedConfig;
@@ -506,6 +516,13 @@ function GroupRow<TItem extends EditorItemBase>({
   onDragEnd: () => void;
 }) {
   const changeTarget = useChangeTarget(changeKey);
+  // T3: an empty group a rule still names resolves to nothing, and core rejects
+  // it at solve time — so the row says so up front.
+  const emptyUsedBy = useScenarioStore((s) =>
+    group.members.length === 0
+      ? cardsReferencing(s.cardsByKind, descriptor.domain, group.id).length
+      : 0,
+  );
   if (isEditing) {
     // No surface of its own: the open form IS the active editor card (the
     // `selected` role, applied inside GroupForm). Wrapping it in a second L1 card
@@ -595,6 +612,11 @@ function GroupRow<TItem extends EditorItemBase>({
               {group.id}
             </span>
             <span className="font-mono text-label text-ink3">{cfg.formatCount(memberCount)}</span>
+            {emptyUsedBy > 0 && (
+              <Badge variant="warn" casing="normal" data-testid={`group-empty-used-${group.id}`}>
+                Empty, used by {emptyUsedBy} {emptyUsedBy === 1 ? "rule" : "rules"}
+              </Badge>
+            )}
           </div>
           {group.members.length > 0 && (
             <div className="flex flex-wrap gap-1">
@@ -659,8 +681,9 @@ function GroupRow<TItem extends EditorItemBase>({
             aria-label="Delete group"
             data-testid={`group-delete-${group.id}`}
             onClick={() => {
+              if (onDelete) return onDelete();
               onCloseForm();
-              commit((live) => deleteGroup(live, descriptor, group.id));
+              void deleteWithSummary(commit, `group “${group.id}”`, descriptor.domain, group.id);
             }}
           >
             <FaTrash />
@@ -736,7 +759,7 @@ function GroupForm<TItem extends EditorItemBase>({
         : [...cur, memberId],
     );
 
-  const save = () => {
+  const save = async () => {
     // Synchronous stale-Save guard (close-gate Major): abort if the item/group slice
     // moved since form-open (temporal travel / external cascade). Self-Save is never
     // stale here (drafts don't mutate live). Same predicate as the visible-close effect.
@@ -748,11 +771,14 @@ function GroupForm<TItem extends EditorItemBase>({
       toast.error(idCheck.message);
       return;
     }
+    let outcome: CommandOutcome;
     try {
       // The whole compound save — add-or-rename, fields, membership — is ONE
       // queue-head transform, so every step applies to the committed groups rather
-      // than to the snapshot this form was rendered from.
-      commit((live) => {
+      // than to the snapshot this form was rendered from. It is AWAITED (T6): the
+      // rename cascade throws at the queue head, and a refusal resolves, so "saved"
+      // is only said once the write has landed.
+      outcome = await commit((live) => {
         let next = live;
         let gid: string;
         if (mode === "add") {
@@ -773,11 +799,16 @@ function GroupForm<TItem extends EditorItemBase>({
         }
         return writeGroupMembers(next, descriptor, gid, draftMembers);
       });
-      toast.success(`Group “${idCheck.id}” ${mode === "add" ? "added" : "saved"}.`);
-      onDone();
     } catch (err) {
       toast.error(err instanceof RenameCollisionError ? err.message : "Save failed.");
+      return;
     }
+    if (!outcome.ok) {
+      toast.error(saveRefusalMessage(outcome, "group"));
+      return;
+    }
+    toast.success(`Group “${idCheck.id}” ${mode === "add" ? "added" : "saved"}.`);
+    onDone();
   };
 
   return (
@@ -808,7 +839,7 @@ function GroupForm<TItem extends EditorItemBase>({
           data-testid={mode === "add" ? "add-group-id" : `group-edit-id-${group!.id}`}
           value={id}
           autoFocus
-          placeholder="Enter group ID"
+          placeholder="Enter group name"
           onChange={(e) => setId(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") save();

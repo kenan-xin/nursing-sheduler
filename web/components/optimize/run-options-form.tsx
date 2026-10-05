@@ -222,7 +222,7 @@ export function RunOptionsForm({
         >
           {submitting ? (
             <>
-              <FaSpinner className="animate-spin-slow" aria-hidden /> Optimising…
+              <FaSpinner className="animate-spin-slow" aria-hidden /> Optimizing…
             </>
           ) : (
             <>
@@ -236,7 +236,7 @@ export function RunOptionsForm({
           </p>
         ) : null}
         <p className="text-meta text-ink3">
-          Optimising sends your scheduling data to the backend to generate the XLSX.
+          Optimising sends your scheduling data to the backend, then downloads the generated XLSX.
         </p>
       </div>
     </form>

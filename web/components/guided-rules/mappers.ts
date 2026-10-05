@@ -16,8 +16,7 @@ import {
 import { formatShortDate } from "@/lib/dates/date-id";
 import { isValidWeightValue } from "@/components/card-editor/weight-field";
 import {
-  REQUIREMENT_MESSAGES,
-  skillMixFloor,
+  requiredCountError,
   summarizeRefs as summarizeRequirementRefs,
 } from "@/components/requirements/requirements-model";
 import {
@@ -34,11 +33,17 @@ import {
 } from "@/components/counts/counts-model";
 import {
   AFFINITY_MESSAGES,
+  AFFINITY_GROUPED_MEANING,
+  affinityTogetherMeaning,
+  describePairingStrength,
   isAdvancedAffinityCard,
   summarizeRefs as summarizeAffinityRefs,
 } from "@/components/affinities/affinities-model";
 import {
+  COVERING_GROUPED_MEANING,
+  COVERING_SAME_SHIFT,
   isAdvancedCoveringCard,
+  isPerShiftSelector,
   summarizeRefs as summarizeCoveringRefs,
 } from "@/components/coverings/coverings-model";
 import { isRestDaysRuleCard } from "@/lib/rules/rest-days";
@@ -102,12 +107,7 @@ export const requirementsMapper: GuidedRuleMapper<RequirementCard> = {
         label: "Required people",
         value: card.requiredNumPeople,
         min: 0,
-        validate: (value) =>
-          !(Number.isFinite(value) && value >= 0)
-            ? REQUIREMENT_MESSAGES.requiredMin
-            : value < skillMixFloor(card)
-              ? REQUIREMENT_MESSAGES.skillMixAboveRequired
-              : undefined,
+        validate: (value) => requiredCountError(card, value),
       },
     ];
   },
@@ -175,7 +175,7 @@ export const countsMapper: GuidedRuleMapper<CountCard> = {
   summary(card) {
     const who = summarizeCountRefs(card.person);
     if (isRestDaysRuleCard(card)) {
-      return `${who === RESERVED_SHIFT_TYPE.all ? "Everyone" : who}: at most 5 worked days in any 7 days in a row, counting the days before the roster from each nurse's history.`;
+      return `${who === RESERVED_SHIFT_TYPE.all ? "Everyone" : who}: at most 5 worked days in any 7 days in a row, counting the days before the roster from each nurse's history. Strong preference. Short staffing can break it.`;
     }
     const expr = describeCountExpressionTarget(card.expression, card.target);
     return `${who}: ${expr} across ${summarizeCountRefs(card.countDates)}.`;
@@ -218,10 +218,14 @@ export const affinitiesMapper: GuidedRuleMapper<AffinityCard> = {
     if (trimmed) return trimmed;
     return `${summarizeAffinityRefs(card.people1)} × ${summarizeAffinityRefs(card.people2)} pairing`;
   },
-  summary(card) {
+  summary(card, groups) {
     const shiftLabel = summarizeAffinityRefs(card.shiftTypes);
     const dateLabel = summarizeAffinityRefs(card.date);
-    return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} on ${shiftLabel}, ${dateLabel}.`;
+    const strength = describePairingStrength(card.weight);
+    if (isAdvancedAffinityCard(card)) {
+      return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} on ${shiftLabel}, ${dateLabel}: ${strength}. ${AFFINITY_GROUPED_MEANING}`;
+    }
+    return `${summarizeAffinityRefs(card.people1)} with ${summarizeAffinityRefs(card.people2)} ${affinityTogetherMeaning(card, groups)} (${shiftLabel}), ${dateLabel}: ${strength}.`;
   },
   quickFields(card): GuidedQuickField[] {
     if (isAdvancedAffinityCard(card)) return [];
@@ -238,7 +242,7 @@ export const affinitiesMapper: GuidedRuleMapper<AffinityCard> = {
   },
   unsupportedReason(card) {
     return isAdvancedAffinityCard(card)
-      ? "This affinity has more than one OR-group — adjust it in Advanced."
+      ? "This affinity uses the older grouped form (any of each group, any of these shifts) — adjust it in Advanced."
       : undefined;
   },
   applyQuickField(card, key, value) {
@@ -260,7 +264,11 @@ export const coveringsMapper: GuidedRuleMapper<CoveringCard> = {
   summary(card) {
     const shiftLabel = summarizeCoveringRefs(card.shiftTypes);
     const dateLabel = card.date === undefined ? "every date" : summarizeCoveringRefs(card.date);
-    return `${summarizeCoveringRefs(card.preceptors)} supervise ${summarizeCoveringRefs(card.preceptees)} on ${shiftLabel}, ${dateLabel}.`;
+    const who = `${summarizeCoveringRefs(card.preceptors)} supervise ${summarizeCoveringRefs(card.preceptees)}`;
+    if (!isPerShiftSelector(card.shiftTypes)) {
+      return `${who} on ${shiftLabel}, ${dateLabel}. ${COVERING_GROUPED_MEANING}`;
+    }
+    return `${who} ${COVERING_SAME_SHIFT} (${shiftLabel}), ${dateLabel}.`;
   },
   // A covering's weight is a structural constant (COVERING_WEIGHT) the backend
   // ignores — there is no editable number to expose, so this row is display-only.
@@ -269,7 +277,7 @@ export const coveringsMapper: GuidedRuleMapper<CoveringCard> = {
   },
   unsupportedReason(card) {
     return isAdvancedCoveringCard(card)
-      ? "This covering has more than one OR-group — adjust it in Advanced."
+      ? "This covering uses a grouped form (several groups, or shifts checked together) — adjust it in Advanced."
       : undefined;
   },
   applyQuickField(card) {

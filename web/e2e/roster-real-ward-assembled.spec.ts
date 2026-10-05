@@ -155,7 +155,11 @@ async function probeRosterStorage(page: Page): Promise<RosterResidueProbe> {
         (row) => String(row.key) === keys.scenarioPersistKey,
       );
 
-      const pointerRow = metaRows.find((row) => String(row.key) === keys.currentCandidateMetaKey);
+      // plq5 P2: rows and the pointer are keyed per schedule (`<key>:<scenarioId>`);
+      // this journey has one schedule, so its row is the one with the key's prefix.
+      const isKey = (row: Record<string, unknown>, key: string) =>
+        String(row.key) === key || String(row.key).startsWith(`${key}:`);
+      const pointerRow = metaRows.find((row) => isKey(row, keys.currentCandidateMetaKey));
       const pointerValue = pointerRow?.value as
         | { jobId?: unknown; candidateVersion?: unknown }
         | null
@@ -172,7 +176,7 @@ async function probeRosterStorage(page: Page): Promise<RosterResidueProbe> {
         };
       }
 
-      const workingRow = rosterRows.find((row) => String(row.key) === keys.workingRosterKey);
+      const workingRow = rosterRows.find((row) => isKey(row, keys.workingRosterKey));
       if (workingRow !== undefined) {
         const document = workingRow.document as {
           frozenXlsx: Blob;
@@ -229,11 +233,15 @@ async function probeCandidateDocument(
       });
       try {
         const row = await new Promise<Record<string, unknown> | undefined>((resolve, reject) => {
-          const request = db
-            .transaction("roster", "readonly")
-            .objectStore("roster")
-            .get(`${keys.candidateKeyPrefix}${targetJobId}`);
-          request.onsuccess = () => resolve(request.result as Record<string, unknown> | undefined);
+          const request = db.transaction("roster", "readonly").objectStore("roster").getAll();
+          // `candidate:<scenarioId>:<jobId>` since plq5 P2.
+          request.onsuccess = () =>
+            resolve(
+              (request.result as Array<Record<string, unknown>>).find((candidate) => {
+                const key = String(candidate.key);
+                return key.startsWith(keys.candidateKeyPrefix) && key.endsWith(`:${targetJobId}`);
+              }),
+            );
           request.onerror = () => reject(request.error ?? new Error("candidate read failed"));
         });
         if (row === undefined) return null;

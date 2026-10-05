@@ -25,7 +25,12 @@
 import type { PeopleReverseMap } from "@/lib/scenario";
 import type { RosterSubmission } from "@/lib/roster";
 import type { RosterCover } from "@/lib/roster/types";
-import { rosterStorage, type RosterStorage, type SnapshotDeletionOutcome } from "@/lib/store";
+import {
+  currentRosterStorage,
+  rosterStorage,
+  type RosterStorage,
+  type SnapshotDeletionOutcome,
+} from "@/lib/store";
 import type { SessionCaptureState } from "./session-transaction";
 
 /**
@@ -60,6 +65,8 @@ export interface StagedSubmissionSnapshot {
    * envelope version, it is F3's to judge: the assembler validates it.
    */
   cover: RosterCover;
+  /** The schedule the run was submitted from (plq5 P2); `null` for an unscoped stage. */
+  scenarioId: string | null;
 }
 
 /**
@@ -126,7 +133,8 @@ export async function stageSubmissionSnapshot(input: {
   cover?: RosterCover;
   store?: SubmissionSnapshotStore;
 }): Promise<SessionCaptureState> {
-  const store = input.store ?? rosterStorage;
+  // The schedule open NOW is the one this run was submitted from (plq5 P2).
+  const store = input.store ?? currentRosterStorage();
   try {
     const expectedClearEpoch = await store.getClearEpoch();
     const outcome = await store.allocateSubmissionSnapshot({
@@ -227,6 +235,7 @@ export async function readStagedSubmissionSnapshot(
       submissionOrdinal: row.submissionOrdinal,
       payload,
       cover: cover ?? { entries: [], decrements: [] },
+      scenarioId: row.scenarioId ?? null,
     },
   };
 }

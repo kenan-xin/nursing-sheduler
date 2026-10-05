@@ -26,6 +26,9 @@ import {
   scenarioCommands,
   type ScenarioStoreState,
 } from "@/lib/store";
+import { countSkippedRequestPaints, foldPaintIntents } from "@/lib/store/paint-fold";
+import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
+import { confirmDialog } from "@/components/shell/confirm-store";
 import { generateDateItems, hasCompleteRange, type DateRange } from "@/lib/dates";
 import {
   RESERVED_SHIFT_TYPE,
@@ -41,6 +44,8 @@ import {
   buildColumns,
   buildRows,
   buildShiftTypeOrderIndex,
+  groupLeaveReach,
+  leaveReachText,
   historyColumnCount,
   historyLayout,
   type RequestColumn,
@@ -99,6 +104,8 @@ export interface RequestsController {
   /** Normal-mode history editor "-- Clear --" (truncate through position). */
   commitHistoryClear(personId: PersonRef, historyIndex: number): void;
 
+  /** What {@link applyRequestsCsv} would do to the matrix right now, in cells. */
+  previewRequestsCsv(deltas: ShiftRequestDelta[], weight: number): RequestChangeCounts;
   applyRequestsCsv(deltas: ShiftRequestDelta[], weight: number): void;
   applyHistoryCsv(entries: PeopleHistoryEntry[]): void;
 
@@ -108,6 +115,25 @@ export interface RequestsController {
     personScope: "individual" | "group",
     dateScope: "individual" | "group",
   ): void;
+  /** What a clear would remove right now: every cell, or one shape's cells. */
+  countClearable(shape?: ClearShape): ClearCounts;
+}
+
+export interface ClearShape {
+  personScope: "individual" | "group";
+  dateScope: "individual" | "group";
+}
+
+export interface ClearCounts {
+  requests: number;
+  off: number;
+  leave: number;
+}
+
+export interface RequestChangeCounts {
+  added: number;
+  changed: number;
+  removed: number;
 }
 
 export interface UseRequestsOptions {
@@ -160,6 +186,128 @@ export function pickRequestsScenario(state: ScenarioStoreState): RequestsScenari
  */
 function cellSelectorKey(cell: UiRequestCell): string {
   return cell.kind === "request" ? `request:${cell.shiftType}` : cell.kind;
+}
+
+/**
+ * Replace ONE coordinate's cells with a cell-editor result. The Requests cell
+ * editor and the Roster's "Also record as leave / day off" (kyh3) both write
+ * through this, so the two paths cannot disagree about identity or shape.
+ */
+export function replaceCoordinateCells(
+  reqData: readonly UiRequestCell[],
+  person: PersonRef,
+  date: DateRef,
+  result: CellEditorResult,
+): UiRequestCell[] {
+  const atCoordinate = reqData.filter((c) => c.person === person && c.date === date);
+  const others = reqData.filter((c) => !(c.person === person && c.date === date));
+  // Preserve durable identity per selector/day-state so an edit re-using an
+  // existing selector keeps its `uid` (Workspace identity never depends on array
+  // position); a genuinely new cell is minted a fresh `uid` at creation (T17r
+  // review P1 — every manual create path allocates identity).
+  const uidBySelector = new Map<string, string>();
+  for (const cell of atCoordinate) {
+    if (cell.uid) uidBySelector.set(cellSelectorKey(cell), cell.uid);
+  }
+  const uidFor = (selector: string): string => uidBySelector.get(selector) ?? crypto.randomUUID();
+
+  let cells: UiRequestCell[] = [];
+  if (result.kind === "leave") cells = [{ kind: "leave", person, date, uid: uidFor("leave") }];
+  else if (result.kind === "off")
+    cells = [{ kind: "off", person, date, weight: result.weight, uid: uidFor("off") }];
+  else if (result.kind === "requests") {
+    // Empty prefs is an erase (parity note): `cells` stays `[]`.
+    cells = result.prefs.map((p) => ({
+      kind: "request",
+      person,
+      date,
+      shiftType: p.shiftType,
+      weight: p.weight,
+      uid: uidFor(`request:${p.shiftType}`),
+    }));
+  }
+  return [...others, ...cells];
+}
+
+/**
+ * Cell-level diff of two matrices, keyed by coordinate + selector: a key only in
+ * `after` is added, only in `before` removed, in both with another weight changed.
+ */
+function countRequestChanges(
+  before: readonly UiRequestCell[],
+  after: readonly UiRequestCell[],
+): RequestChangeCounts {
+  const keyOf = (c: UiRequestCell) => `${paintCellKey(c.person, c.date)}|${cellSelectorKey(c)}`;
+  const weightOf = (c: UiRequestCell) => (c.kind === "leave" ? null : c.weight);
+  const prior = new Map(before.map((c) => [keyOf(c), c]));
+  let added = 0;
+  let changed = 0;
+  for (const cell of after) {
+    const prev = prior.get(keyOf(cell));
+    if (!prev) added++;
+    else if (weightOf(prev) !== weightOf(cell)) changed++;
+    prior.delete(keyOf(cell));
+  }
+  return { added, changed, removed: prior.size };
+}
+
+/** Whether a cell sits in a person-scope × date-scope shape of `scenario`. */
+function shapeMatcher(
+  scenario: Pick<ScenarioUiState, "staff" | "rangeStart" | "rangeEnd">,
+  personScope: "individual" | "group",
+  dateScope: "individual" | "group",
+): (cell: UiRequestCell) => boolean {
+  const individualPersonIds = new Set(scenario.staff.map((p) => p.id));
+  const scopeRange: DateRange = { start: scenario.rangeStart, end: scenario.rangeEnd };
+  const individualDateIds = hasCompleteRange(scopeRange)
+    ? new Set<DateRef>(generateDateItems(scopeRange).map((d) => d.id))
+    : new Set<DateRef>();
+  return (cell) => {
+    const personIsIndividual = individualPersonIds.has(cell.person);
+    const dateIsIndividual = individualDateIds.has(cell.date);
+    const matchesPerson = personScope === "individual" ? personIsIndividual : !personIsIndividual;
+    const matchesDate = dateScope === "individual" ? dateIsIndividual : !dateIsIndividual;
+    return matchesPerson && matchesDate;
+  };
+}
+
+/**
+ * Asks before pinning leave on a group row or date-group column (bb8t): one such
+ * cell pins leave for every member on every date it covers. `null` when no
+ * coordinate is a group one, so the caller commits synchronously as before.
+ */
+function groupLeavePrompt(
+  coords: readonly (readonly [PersonRef, DateRef])[],
+): Promise<boolean> | null {
+  const reach = groupLeaveReach(useScenarioStore.getState(), coords);
+  if (!reach) return null;
+  return confirmDialog({
+    title: "Pin leave for a whole group?",
+    description: `Pin paid leave for ${leaveReachText(reach)}? Each pinned day is always honoured and takes these nurses off coverage.`,
+    confirmLabel: "Pin leave",
+  });
+}
+
+/** The coordinates a staged gesture pins leave on. */
+function stagedLeaveCoords(staged: ReadonlyMap<string, StagedCoordinate>): [PersonRef, DateRef][] {
+  return [...staged]
+    .filter(([, intent]) => intent.mode === "day-state" && intent.dayState.kind === "leave")
+    .map(([key]) => JSON.parse(key) as [PersonRef, DateRef]);
+}
+
+function commitStagedPaint(): void {
+  const staged = useHotStore.getState().paint;
+  const skipped = staged
+    ? countSkippedRequestPaints(useScenarioStore.getState().reqData, staged)
+    : 0;
+  void commitPaintGesture(useHotStore);
+  if (skipped > 0) {
+    toast.warning(
+      skipped === 1
+        ? "1 cell skipped: it holds leave or OFF. Clear it first."
+        : `${skipped} cells skipped: they hold leave or OFF. Clear them first.`,
+    );
+  }
 }
 
 function stageCellIntent(
@@ -262,12 +410,11 @@ export function useRequests({
   function applyHistoryPaintCell(personId: PersonRef, columnIndex: number): void {
     const selection = resolveHistoryPaintSelection(quickPaintSelectedIds, historyItemIds);
     if (selection.kind === "error") {
-      // FR-SR-32's verbatim multi-select error must be VISIBLE — the reducer
-      // produces it; surface it (previously swallowed silently).
-      toast.error(selection.message);
+      // The reducer's errors must be VISIBLE. The id collapses the per-cell
+      // repeats of one drag into a single toast.
+      toast.error(selection.message, { id: selection.message });
       return;
     }
-    if (selection.kind === "skip") return;
     const liveStaff = useScenarioStore.getState().staff;
     const person = liveStaff.find((p) => p.id === personId);
     if (!person) return;
@@ -324,7 +471,17 @@ export function useRequests({
   useEffect(() => {
     function handleMouseUp() {
       if (dragCellTypeRef.current === "preference") {
-        void commitPaintGesture(useHotStore);
+        // A gesture that pins leave on any group cell waits for ONE answer. The
+        // staged buffer (and its highlight) stays up meanwhile; Cancel drops the
+        // whole gesture, confirm commits it as the usual single write.
+        const staged = useHotStore.getState().paint;
+        const prompt = staged ? groupLeavePrompt(stagedLeaveCoords(staged)) : null;
+        if (!prompt) commitStagedPaint();
+        else
+          void prompt.then((ok) => {
+            if (ok) commitStagedPaint();
+            else useHotStore.getState().cancelPaint();
+          });
       } else if (dragCellTypeRef.current === "history") {
         flushHistoryGesture();
       }
@@ -370,6 +527,16 @@ export function useRequests({
     applyHistoryPaintCell(person, columnIndex);
   }
 
+  /** Leave saved on a group cell is confirmed first; Cancel writes nothing. */
+  function commitCellEdit(person: PersonRef, date: DateRef, result: CellEditorResult): void {
+    const prompt = result.kind === "leave" ? groupLeavePrompt([[person, date]]) : null;
+    if (!prompt) writeCellEdit(person, date, result);
+    else
+      void prompt.then((ok) => {
+        if (ok) writeCellEdit(person, date, result);
+      });
+  }
+
   /**
    * Save one cell's preferences as a QUEUE-HEAD TRANSFORM over the committed matrix.
    *
@@ -379,38 +546,10 @@ export function useRequests({
    * Only this coordinate's cells are replaced now, and every other cell comes from
    * whatever the previous command committed.
    */
-  function commitCellEdit(person: PersonRef, date: DateRef, result: CellEditorResult): void {
-    scenarioCommands.setReqData((scenario) => {
-      const atCoordinate = scenario.reqData.filter((c) => c.person === person && c.date === date);
-      const others = scenario.reqData.filter((c) => !(c.person === person && c.date === date));
-      // Preserve durable identity per selector/day-state so an edit re-using an
-      // existing selector keeps its `uid` (Workspace identity never depends on array
-      // position); a genuinely new cell is minted a fresh `uid` at creation (T17r
-      // review P1 — every manual create path allocates identity).
-      const uidBySelector = new Map<string, string>();
-      for (const cell of atCoordinate) {
-        if (cell.uid) uidBySelector.set(cellSelectorKey(cell), cell.uid);
-      }
-      const uidFor = (selector: string): string =>
-        uidBySelector.get(selector) ?? crypto.randomUUID();
-
-      let cells: UiRequestCell[] = [];
-      if (result.kind === "leave") cells = [{ kind: "leave", person, date, uid: uidFor("leave") }];
-      else if (result.kind === "off")
-        cells = [{ kind: "off", person, date, weight: result.weight ?? 0, uid: uidFor("off") }];
-      else if (result.kind === "requests") {
-        // Empty prefs is an erase (parity note): `cells` stays `[]`.
-        cells = result.prefs.map((p) => ({
-          kind: "request",
-          person,
-          date,
-          shiftType: p.shiftType,
-          weight: p.weight,
-          uid: uidFor(`request:${p.shiftType}`),
-        }));
-      }
-      return [...others, ...cells];
-    });
+  function writeCellEdit(person: PersonRef, date: DateRef, result: CellEditorResult): void {
+    scenarioCommands.setReqData((scenario) =>
+      replaceCoordinateCells(scenario.reqData, person, date, result),
+    );
   }
 
   function clearCell(person: PersonRef, date: DateRef): void {
@@ -453,8 +592,14 @@ export function useRequests({
     });
   }
 
-  function applyRequestsCsv(deltas: ShiftRequestDelta[], weight: number): void {
-    if (deltas.length === 0) return;
+  /**
+   * The CSV deltas as per-coordinate paint intents, the same shapes a quick-paint
+   * drag stages. A delta's own weight wins; otherwise `weight` (quick paint) applies.
+   */
+  function stageRequestsCsv(
+    deltas: ShiftRequestDelta[],
+    weight: number,
+  ): Map<string, StagedCoordinate> {
     // The CSV delta carries a STRINGIFIED person id (built in `requests-editor.tsx`
     // via `state.staff.map(p => String(p.id))`), but the matrix, manual edits, and
     // quick-paint all key coordinates by the real typed `PersonRef` under strict
@@ -468,27 +613,49 @@ export function useRequests({
     );
     // NOTE: the id map is read from the projection because the CSV rows were parsed
     // against the roster the user was looking at; the staged cells themselves are
-    // folded into the committed matrix at the queue head by `setReqData` below.
-    const hot = useHotStore.getState();
-    hot.beginPaint();
+    // folded into the committed matrix at the queue head by `setReqData`.
+    const staged = new Map<string, StagedCoordinate>();
     for (const d of deltas) {
       const person = typedIdByString.get(d.personId);
       if (person === undefined) continue;
+      const key = paintCellKey(person, d.dateId);
+      const w = d.weight ?? weight;
       // A matrix export writes day-states as their reserved labels (OFF/LEAVE);
       // route them back to a leave/off cell so an export → import round-trip
       // restores the pin rather than a request cell named "OFF"/"LEAVE" (which
       // the projection rejects). Everything else is a worked request delta.
       if (isDayStateSelector(d.shiftType)) {
-        hot.stagePaintDayState(
-          person,
-          d.dateId,
-          d.shiftType === RESERVED_SHIFT_TYPE.leave ? { kind: "leave" } : { kind: "off", weight },
-        );
+        staged.set(key, {
+          mode: "day-state",
+          dayState:
+            d.shiftType === RESERVED_SHIFT_TYPE.leave
+              ? { kind: "leave" }
+              : { kind: "off", weight: w },
+        });
         continue;
       }
-      hot.stagePaintRequestDelta(person, d.dateId, d.shiftType, weight);
+      const prior = staged.get(key);
+      const selectorDeltas = prior?.mode === "requests" ? prior.deltas : new Map<string, number>();
+      selectorDeltas.set(d.shiftType, w);
+      staged.set(key, { mode: "requests", deltas: selectorDeltas });
     }
-    void commitPaintGesture(useHotStore);
+    return staged;
+  }
+
+  function previewRequestsCsv(deltas: ShiftRequestDelta[], weight: number): RequestChangeCounts {
+    const current = useScenarioStore.getState().reqData;
+    const next = foldPaintIntents(current, stageRequestsCsv(deltas, weight), () => "");
+    return countRequestChanges(current, next);
+  }
+
+  function applyRequestsCsv(deltas: ShiftRequestDelta[], weight: number): void {
+    if (deltas.length === 0) return;
+    const staged = stageRequestsCsv(deltas, weight);
+    // One command, one Undo entry, folded against the matrix at the queue head —
+    // the same fold a quick-paint drag commits through.
+    void scenarioCommands.setReqData((current) =>
+      foldPaintIntents(current.reqData, staged, () => crypto.randomUUID()),
+    );
   }
 
   function applyHistoryCsv(entries: PeopleHistoryEntry[]): void {
@@ -529,20 +696,21 @@ export function useRequests({
     dateScope: "individual" | "group",
   ): void {
     scenarioCommands.setReqData((scenario) => {
-      const individualPersonIds = new Set(scenario.staff.map((p) => p.id));
-      const scopeRange: DateRange = { start: scenario.rangeStart, end: scenario.rangeEnd };
-      const individualDateIds = hasCompleteRange(scopeRange)
-        ? new Set<DateRef>(generateDateItems(scopeRange).map((d) => d.id))
-        : new Set<DateRef>();
-      return scenario.reqData.filter((cell) => {
-        const personIsIndividual = individualPersonIds.has(cell.person);
-        const dateIsIndividual = individualDateIds.has(cell.date);
-        const matchesPerson =
-          personScope === "individual" ? personIsIndividual : !personIsIndividual;
-        const matchesDate = dateScope === "individual" ? dateIsIndividual : !dateIsIndividual;
-        return !(matchesPerson && matchesDate);
-      });
+      const inShape = shapeMatcher(scenario, personScope, dateScope);
+      return scenario.reqData.filter((cell) => !inShape(cell));
     });
+  }
+
+  function countClearable(shape?: ClearShape): ClearCounts {
+    const scenario = useScenarioStore.getState();
+    const inShape = shape ? shapeMatcher(scenario, shape.personScope, shape.dateScope) : () => true;
+    const counts: ClearCounts = { requests: 0, off: 0, leave: 0 };
+    for (const cell of scenario.reqData) {
+      if (!inShape(cell)) continue;
+      if (cell.kind === "request") counts.requests++;
+      else counts[cell.kind]++;
+    }
+    return counts;
   }
 
   return {
@@ -564,10 +732,12 @@ export function useRequests({
     clearCell,
     commitHistorySet,
     commitHistoryClear,
+    previewRequestsCsv,
     applyRequestsCsv,
     applyHistoryCsv,
     clearAllRequests,
     clearAllHistory,
     clearRequestsByShape,
+    countClearable,
   };
 }

@@ -9,6 +9,8 @@ import {
   cellPreferenceOf,
   cellPreferenceSet,
   comparePreferences,
+  groupLeaveReach,
+  groupSourceMarkers,
   historyColumnCount,
   historyColumnLabels,
   historyLayout,
@@ -17,12 +19,121 @@ import {
   isHistorySlotClickable,
   sortPreferences,
   resolveDayStatePrecedence,
+  leaveReachText,
   weightDisplayLabel,
   type CellPreference,
+  type GroupScope,
 } from "./requests-model";
 import type { UiPeopleGroup, UiPerson, UiRequestCell } from "@/lib/scenario";
 
 const orderIndex = buildShiftTypeOrderIndex(["Day", "Night", "AM", "PM", "GROUP_A"]);
+
+// 2026-10-01 is a Thursday: 03 and 04 are the weekend.
+const WARD: GroupScope = {
+  staff: [{ id: "Aisha" }, { id: "Beng" }, { id: "Chloe" }],
+  staffGroups: [
+    { id: "Seniors", members: ["Aisha", "Beng"] },
+    { id: "Leads", members: ["Seniors"] },
+  ],
+  rangeStart: "2026-10-01",
+  rangeEnd: "2026-10-07",
+  dateGroups: [{ id: "Early", members: ["01", "02"] }],
+};
+
+describe("groupSourceMarkers (bb8t)", () => {
+  it("marks every member cell of a group row, naming the source and payload", () => {
+    const markers = groupSourceMarkers(WARD, [
+      { kind: "request", person: "Seniors", date: "02", shiftType: "AM", weight: 5 },
+    ]);
+    expect([...markers.keys()]).toEqual([
+      JSON.stringify(["Aisha", "02"]),
+      JSON.stringify(["Beng", "02"]),
+    ]);
+    expect(markers.get(JSON.stringify(["Aisha", "02"]))).toEqual({
+      sources: ["From Seniors · AM +5"],
+      short: "AM",
+    });
+  });
+
+  it("expands keyword and authored date-group columns, and nested people groups", () => {
+    const markers = groupSourceMarkers(WARD, [
+      { kind: "off", person: "Chloe", date: "WEEKEND", weight: 20 },
+      { kind: "leave", person: "Leads", date: "Early" },
+    ]);
+    expect(markers.get(JSON.stringify(["Chloe", "03"]))?.sources).toEqual([
+      "From WEEKEND · OFF +20",
+    ]);
+    expect(markers.has(JSON.stringify(["Chloe", "02"]))).toBe(false);
+    expect(markers.get(JSON.stringify(["Beng", "01"]))).toEqual({
+      sources: ["From Leads × Early · LEAVE"],
+      short: "LEAVE",
+    });
+    expect(markers.size).toBe(2 + 4);
+  });
+
+  it("lists every source reaching one cell and ignores direct requests", () => {
+    const markers = groupSourceMarkers(WARD, [
+      { kind: "request", person: "Aisha", date: "03", shiftType: "PM", weight: 1 },
+      { kind: "request", person: "Seniors", date: "ALL", shiftType: "AM", weight: 5 },
+      { kind: "off", person: "Aisha", date: "WEEKEND", weight: -Infinity },
+    ]);
+    expect(markers.get(JSON.stringify(["Aisha", "03"]))?.sources).toEqual([
+      "From Seniors × ALL · AM +5",
+      "From WEEKEND · OFF -∞",
+    ]);
+    expect(markers.get(JSON.stringify(["Aisha", "01"]))?.sources).toEqual([
+      "From Seniors × ALL · AM +5",
+    ]);
+  });
+});
+
+describe("groupLeaveReach (bb8t)", () => {
+  it("is null when every coordinate is a person × date item", () => {
+    expect(
+      groupLeaveReach(WARD, [
+        ["Aisha", "01"],
+        ["Chloe", "07"],
+      ]),
+    ).toBeNull();
+  });
+
+  it("counts people × days for a group row, a date-group column, or both", () => {
+    expect(groupLeaveReach(WARD, [["Seniors", "01"]])).toEqual({
+      people: 2,
+      days: 1,
+      personDays: 2,
+    });
+    expect(groupLeaveReach(WARD, [["Chloe", "ALL"]])).toEqual({
+      people: 1,
+      days: 7,
+      personDays: 7,
+    });
+    expect(groupLeaveReach(WARD, [["Leads", "WEEKDAY"]])).toEqual({
+      people: 2,
+      days: 5,
+      personDays: 10,
+    });
+  });
+
+  it("counts a person-day once across overlapping cells of one gesture", () => {
+    expect(
+      groupLeaveReach(WARD, [
+        ["Seniors", "WEEKEND"],
+        ["Aisha", "03"],
+        ["Chloe", "04"],
+      ]),
+    ).toEqual({ people: 3, days: 2, personDays: 5 });
+  });
+
+  it("reads as the confirm copy, singular and plural", () => {
+    expect(leaveReachText({ people: 6, days: 28, personDays: 168 })).toBe(
+      "6 people on 28 days (168 person-days)",
+    );
+    expect(leaveReachText({ people: 1, days: 1, personDays: 1 })).toBe(
+      "1 person on 1 day (1 person-day)",
+    );
+  });
+});
 
 describe("weightDisplayLabel (FR-SR-14/43)", () => {
   it("renders infinities and zero verbatim", () => {

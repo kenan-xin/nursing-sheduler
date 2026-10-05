@@ -41,6 +41,7 @@ import {
   type CoefficientPair,
 } from "@/components/card-editor/coefficient-model";
 import {
+  invalidWeightMessage,
   isValidWeightValue,
   isWeightNonPositive,
   type WeightFieldValue,
@@ -76,14 +77,23 @@ export const REQUIREMENT_MESSAGES = {
   shiftTypeMultiple: "Select exactly one shift type or group",
   requiredInvalid: "Required number of people must be a valid number",
   requiredMin: "Required number of people must be at least 0",
+  requiredWhole: "Required number of people must be a whole number",
+  // The optimiser needs at least Required and at most Preferred: no roster could meet both.
+  requiredAbovePreferred:
+    "Required number of people cannot be more than the preferred number of people",
   preferredInvalid: "Preferred number of people must be a valid number",
   preferredMin: "Preferred number of people must be at least 1",
+  preferredWhole: "Preferred number of people must be a whole number",
   preferredLessThanRequired:
     "Preferred number of people must be greater than required number of people",
   qualifiedEmpty: "At least one person must be selected",
   dateEmpty: "At least one date must be selected",
-  weightInvalid: "Weight must be a valid number, Infinity, or -Infinity",
-  weightPositive: "Weight must be 0 or less (including -Infinity)",
+  weightInvalid:
+    "Weight must be a whole number from -1t to 1t (1,000,000,000,000), Infinity, or -Infinity",
+  weightPositive: "Weight must be 0 or less",
+  // Core refuses ±inf beside `preferredNumPeople` (models.py, shift type requirement).
+  weightInfinite:
+    "A preferred number cannot have an infinite weight. For a hard count, leave Preferred empty",
   // OFF/LEAVE are structurally EXCLUDED from the single-select's options (never
   // merely disabled) — see `buildRequirementShiftTypeOptions` — so this message
   // is defensive documentation, not a reachable per-option tooltip.
@@ -457,6 +467,8 @@ export function validateRequirementForm(
     errors.requiredNumPeople = REQUIREMENT_MESSAGES.requiredInvalid;
   } else if (form.requiredNumPeople < 0) {
     errors.requiredNumPeople = REQUIREMENT_MESSAGES.requiredMin;
+  } else if (!Number.isInteger(form.requiredNumPeople)) {
+    errors.requiredNumPeople = REQUIREMENT_MESSAGES.requiredWhole;
   }
 
   const prefRaw = form.preferredNumPeople;
@@ -466,6 +478,8 @@ export function validateRequirementForm(
       errors.preferredNumPeople = REQUIREMENT_MESSAGES.preferredInvalid;
     } else if (prefRaw < 1) {
       errors.preferredNumPeople = REQUIREMENT_MESSAGES.preferredMin;
+    } else if (!Number.isInteger(prefRaw)) {
+      errors.preferredNumPeople = REQUIREMENT_MESSAGES.preferredWhole;
     } else if (
       typeof form.requiredNumPeople === "number" &&
       Number.isFinite(form.requiredNumPeople) &&
@@ -484,7 +498,9 @@ export function validateRequirementForm(
 
   if (preferredDiffersFromRequired(form)) {
     if (!isValidWeightValue(form.weight)) {
-      errors.weight = REQUIREMENT_MESSAGES.weightInvalid;
+      errors.weight = invalidWeightMessage(form.weight, REQUIREMENT_MESSAGES.weightInvalid);
+    } else if (!Number.isFinite(form.weight)) {
+      errors.weight = REQUIREMENT_MESSAGES.weightInfinite;
     } else if (!isWeightNonPositive(form.weight)) {
       errors.weight = REQUIREMENT_MESSAGES.weightPositive;
     }
@@ -524,6 +540,23 @@ function validateSkillMix(form: RequirementFormState): string | undefined {
 /** The lowest head count this card's skill mix allows: its largest minimum. */
 export function skillMixFloor(card: Pick<RequirementCardBody, "skillMix">): number {
   return Math.max(0, ...(card.skillMix ?? []).map((entry) => entry.minNumPeople));
+}
+
+/**
+ * A new Required count on a card whose other fields stay as they are: the Guided quick
+ * field and the assistant's `set_staffing_requirement_people` both check with this.
+ */
+export function requiredCountError(
+  card: Pick<RequirementCardBody, "skillMix" | "preferredNumPeople">,
+  value: number,
+): string | undefined {
+  if (!Number.isFinite(value)) return REQUIREMENT_MESSAGES.requiredInvalid;
+  if (value < 0) return REQUIREMENT_MESSAGES.requiredMin;
+  if (!Number.isInteger(value)) return REQUIREMENT_MESSAGES.requiredWhole;
+  if (value < skillMixFloor(card)) return REQUIREMENT_MESSAGES.skillMixAboveRequired;
+  if (card.preferredNumPeople != null && value > card.preferredNumPeople)
+    return REQUIREMENT_MESSAGES.requiredAbovePreferred;
+  return undefined;
 }
 
 /**
@@ -615,7 +648,8 @@ export function requirementToForm(
         : Array.isArray(card.date)
           ? [...card.date]
           : [card.date],
-    weight: card.weight,
+    // Without a preferred number the stored weight is the inert -1: the dial opens at the default.
+    weight: card.preferredNumPeople == null ? emptyRequirementForm().weight : card.weight,
     skillMix: (card.skillMix ?? []).map((e) => ({ ...e })),
     requiredNumPeopleOverrides: (card.requiredNumPeopleOverrides ?? []).map(([date, n]) => ({
       date,
