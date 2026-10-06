@@ -22,6 +22,7 @@ import { feasibilityParameters } from "./use-feasibility-tools";
 import { capabilityIdParameters, policyParameters } from "./use-help-tools";
 import { prepareParameters } from "./use-proposal-tools";
 import { choiceParameters } from "./use-choice-tools";
+import { newPeriodParameters, scheduleRefParameters } from "./use-schedule-tools";
 import {
   borrowParameters,
   rosterReadParameters,
@@ -54,6 +55,9 @@ export const MODEL_VISIBLE_TOOL_SCHEMAS: Readonly<Record<string, z.ZodTypeAny>> 
   prepare_roster_swap: swapPrepareParameters,
   // Step 3 of the cover ladder: a card; the temporary nurse is added on the user's Apply.
   prepare_borrowed_cover: borrowParameters,
+  // plq5 P3: read a past schedule, and show a "Create November?" card.
+  get_past_schedule_summary: scheduleRefParameters,
+  prepare_new_period_from_schedule: newPeriodParameters,
 });
 
 /** The tools registered with no parameters. Named so the set is provably complete. */
@@ -63,4 +67,5 @@ export const PARAMETERLESS_MODEL_VISIBLE_TOOLS: readonly string[] = Object.freez
   "request_optimize_run",
   "get_optimize_result",
   "get_setup_progress",
+  "list_recent_schedules",
 ]);

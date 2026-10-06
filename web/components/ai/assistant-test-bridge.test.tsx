@@ -90,6 +90,7 @@ describe("the assistant bridge is compiled out of ordinary production", () => {
       "clearHistory",
       "lastTurn",
       "optimizeBases",
+      "prepareNewPeriod",
       "ready",
       "selectThread",
       "settings",

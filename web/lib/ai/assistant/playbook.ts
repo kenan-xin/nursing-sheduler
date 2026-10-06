@@ -40,7 +40,7 @@ import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/co
 import type { SuccessionCard } from "@/lib/scenario";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 
-export const PLAYBOOK_VERSION = "2026-10-05.4";
+export const PLAYBOOK_VERSION = "2026-10-06.1";
 
 /**
  * The priority ladder (spec docs/superpowers/specs/2026-09-29-priority-ladder-design.md,
@@ -491,4 +491,19 @@ export const FEASIBILITY_INSTRUCTIONS: readonly string[] = [
   `After the user applies a fix, offer a run with ${OPTIMIZE_RUN_TOOL} and never say a run has started; once it finishes, read ${OPTIMIZE_RESULT_TOOL} and say in one sentence whether the schedule can now be built.`,
   "Never suggest anything in safetyFloor, even if the user asks.",
   "When contracted hours are set and a run fails, suggest lowering the contracted minimum (edit_contracted_hours) and say how many days the contracts ask for against what the period allows.",
+];
+
+// ---------------------------------------------------------------------------
+// A new period from a past schedule (plq5 P3). One block, so branches that also edit
+// this file merge without touching it.
+// ---------------------------------------------------------------------------
+
+/** Carried in the list_recent_schedules and get_past_schedule_summary results. */
+export const NEW_PERIOD_INSTRUCTIONS: readonly string[] = [
+  'To start a new period from a past schedule ("based on September, create November"), find it with list_recent_schedules and use its ref. Never guess a ref.',
+  "Read it with get_past_schedule_summary when you need its people, rules or roster. Reading changes nothing and does not open it.",
+  "Take the new period's first and last day from what the user said, and ask when unsure. Rest history is carried only when the new period starts on nextPeriodStart, the day after the past roster ends.",
+  "Then call prepare_new_period_from_schedule. It copies people, groups, shift types and rules, marks Singapore public holidays and carries rest history. Requests, leave and temporary covers stay with the past schedule; if the user wants some for the new period, add them after it is created, with prepare_scenario_change.",
+  "When no rest history can be carried, say why and ask with offer_choices whether to continue without it. Call again with continueWithoutHistory true only after the user agrees.",
+  "Only the user creates it, by pressing Create on the card. The chat then moves to the new schedule and starts fresh, with a note linking back to the past schedule, which keeps this conversation.",
 ];

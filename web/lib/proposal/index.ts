@@ -77,3 +77,14 @@ export {
   type PrepareProposalInput,
   type PrepareProposalResult,
 } from "./prepare";
+
+export {
+  MIN_HISTORY_DAYS,
+  deriveNewPeriod,
+  historyDaysFor,
+  nextDay,
+  type HistoryStatus,
+  type NewPeriodPlan,
+  type NewPeriodResult,
+  type PastRoster,
+} from "./new-period";

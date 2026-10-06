@@ -287,6 +287,9 @@ export function RecentSchedulesCard({
                       {row.title ? `${row.autoName} · ` : ""}
                       {lastEditedLabel(row.updatedAt)}
                     </span>
+                    {row.derivedFrom ? (
+                      <span className="text-meta text-ink3">Based on {row.derivedFrom}</span>
+                    ) : null}
                   </div>
                 )}
                 {renaming === row.scenarioId ? null : (

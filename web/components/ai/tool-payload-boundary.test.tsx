@@ -488,6 +488,17 @@ describe("malformed payloads, for every parameterized tool in the registry", () 
         '{"person":"SN-Priya","dates":[],"reason":"swap","partner":"SN-Cara","summary":"s"}',
       ],
     ],
+    get_past_schedule_summary: [
+      ["missing scheduleRef", "{}"],
+      ["wrong-typed scheduleRef", '{"scheduleRef":7}'],
+    ],
+    prepare_new_period_from_schedule: [
+      ["missing dates", '{"scheduleRef":"sch-1"}'],
+      [
+        "wrong-typed continueWithoutHistory",
+        '{"scheduleRef":"sch-1","rangeStart":"2026-11-01","rangeEnd":"2026-11-30","continueWithoutHistory":"yes"}',
+      ],
+    ],
     prepare_borrowed_cover: [
       [
         "missing name",

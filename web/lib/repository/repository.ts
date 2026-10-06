@@ -83,6 +83,7 @@ import {
   createEmptyScenarioUiState,
   RECENT_SCHEDULES_LIMIT,
   scheduleAutoName,
+  scheduleWard,
   type ScenarioUiState,
 } from "@/lib/scenario";
 
@@ -106,6 +107,11 @@ export interface ScheduleSummary {
   /** The user's name, or `null` when the list should show {@link autoName}. */
   title: string | null;
   autoName: string;
+  ward: string;
+  rangeStart: string;
+  rangeEnd: string;
+  /** The name of the schedule it was made from ("new period from a past schedule"). */
+  derivedFrom: string | null;
   pinned: boolean;
   createdAt: string;
   updatedAt: string;
@@ -176,7 +182,18 @@ export type ScenarioSwitchTarget =
    * identity even when the bytes match a prior document, so a restored file can
    * never inherit another document's history, receipts, or threads.
    */
-  | { kind: "load"; scenario: ScenarioUiState };
+  | { kind: "load"; scenario: ScenarioUiState }
+  /**
+   * A Load made from a past schedule (plq5 P3): refused (`stale_revision`) unless the
+   * source still has `expectedSourceRevision`, checked in the same transaction. The
+   * source itself is never written.
+   */
+  | {
+      kind: "derive";
+      scenario: ScenarioUiState;
+      derivedFrom: { scenarioId: string; title: string };
+      expectedSourceRevision: number;
+    };
 
 export interface ScenarioSwitch {
   tabId: string;
@@ -679,7 +696,12 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
    * ones until at most {@link RECENT_SCHEDULES_LIMIT} unpinned remain, the new one
    * included. A schedule a live tab holds is never removed.
    */
-  async function removeOverLimitInTx(createdId: string, at: Date): Promise<RemovedSchedule[]> {
+  async function removeOverLimitInTx(
+    createdId: string,
+    at: Date,
+    /** A new period's source is kept too: it was just read for this create. */
+    sourceId?: string,
+  ): Promise<RemovedSchedule[]> {
     const envelopes = await db.scenarioEnvelopes.toArray();
     const withRoster = await schedulesWithRoster();
     const leases = await db.writerLeases.toArray();
@@ -687,7 +709,9 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
       leases.filter((lease) => isLeaseLive(lease, at)).map((lease) => lease.scenarioId),
     );
     const removable = (envelope: ScenarioEnvelopeV3) =>
-      envelope.scenarioId !== createdId && !held.has(envelope.scenarioId);
+      envelope.scenarioId !== createdId &&
+      envelope.scenarioId !== sourceId &&
+      !held.has(envelope.scenarioId);
 
     const kept: ScenarioEnvelopeV3[] = [];
     for (const envelope of envelopes) {
@@ -779,6 +803,10 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
               scenarioId: envelope.scenarioId,
               title: envelope.title || null,
               autoName: scheduleAutoName(envelope.scenario),
+              ward: scheduleWard(envelope.scenario),
+              rangeStart: envelope.scenario.rangeStart,
+              rangeEnd: envelope.scenario.rangeEnd,
+              derivedFrom: envelope.derivedFrom?.title ?? null,
               pinned: envelope.pinned === true,
               createdAt: envelope.createdAt,
               updatedAt: envelope.updatedAt,
@@ -949,15 +977,34 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
             createdAt: at.toISOString(),
           };
         } else {
+          const target = input.target;
+          if (target.kind === "derive") {
+            const source = await requireEnvelope(target.derivedFrom.scenarioId);
+            if (source.documentRevision !== target.expectedSourceRevision) {
+              throw new RepositoryError("stale_revision", "the source schedule changed", {
+                scenarioId: source.scenarioId,
+                expected: target.expectedSourceRevision,
+                actual: source.documentRevision,
+              });
+            }
+          }
           const snapshot =
-            input.target.kind === "new"
-              ? EMPTY_SNAPSHOT(input.target.apiVersion)
+            target.kind === "new"
+              ? EMPTY_SNAPSHOT(target.apiVersion)
               : // A loaded file is not a fresh local backup, so the fingerprint is
                 // `null` (unknown) — matching the shipped Load contract exactly.
-                { scenario: input.target.scenario, backupFingerprint: null };
-          const created = await createEnvelope(snapshot, input.target.kind, at);
+                { scenario: target.scenario, backupFingerprint: null };
+          const created = await createEnvelope(
+            snapshot,
+            target.kind === "new" ? "new" : "load",
+            at,
+          );
           envelope = created.envelope;
           commit = created.commit;
+          if (target.kind === "derive") {
+            envelope = { ...envelope, derivedFrom: target.derivedFrom };
+            await db.scenarioEnvelopes.put(envelope);
+          }
         }
 
         // Step 3 — acquire the target. A live foreign owner throws here, which
@@ -1007,7 +1054,11 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
         const removed =
           input.target.kind === "existing"
             ? []
-            : await removeOverLimitInTx(envelope.scenarioId, at);
+            : await removeOverLimitInTx(
+                envelope.scenarioId,
+                at,
+                input.target.kind === "derive" ? input.target.derivedFrom.scenarioId : undefined,
+              );
 
         return { selection, envelope, lease, owner, commit, removed };
       });

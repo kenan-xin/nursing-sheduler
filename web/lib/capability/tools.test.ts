@@ -39,6 +39,8 @@ const NOT_REGISTRY_GOVERNED: Record<string, string> = {
   prepare_roster_swap: "Roster swap: shows a host card; the USER applies it on the Roster screen",
   prepare_borrowed_cover:
     "Temporary cover: shows a host card; the USER books it on the Staff screen",
+  prepare_new_period_from_schedule:
+    "New period (plq5 P3): shows a host card; the USER creates the schedule with Create",
 };
 
 describe("assistant tool names", () => {

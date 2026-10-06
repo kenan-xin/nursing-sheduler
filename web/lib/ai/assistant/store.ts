@@ -89,6 +89,8 @@ import {
 import type { SendRefusal } from "./send-gate";
 import type { RosterChangeRequest } from "@/lib/roster/change-request";
 import type { RosterChangeView } from "./roster-context";
+import type { NewPeriodView } from "./new-period";
+import type { NewPeriodRequest } from "@/lib/store";
 
 /** The schedule proposal a roster card applies with it, and which record it changes. */
 export interface LinkedScheduleChange {
@@ -265,6 +267,20 @@ export interface AssistantUiState {
    */
   activeRunRequest: { turnEpoch: number } | null;
   /**
+   * The live "Create November?" card from `prepare_new_period_from_schedule` (plq5 P3).
+   * Carried by a follow-up like `activeProposal`; Create re-derives and re-checks the
+   * source anyway. In memory only.
+   */
+  activeNewPeriod: {
+    /** Changes on every show. */
+    id: number;
+    request: NewPeriodRequest;
+    view: NewPeriodView;
+    turnEpoch: number;
+    /** The turn that showed it. Never carried (see `activeRosterChange`). */
+    shownInEpoch: number;
+  } | null;
+  /**
    * Where the run the user started from the run card is, so its roster can be opened
    * when it finishes (`use-open-roster-after-run.ts`). `requested` until the run goes
    * live, `running` until it ends, then how opening the Roster page went. `null` for
@@ -343,6 +359,7 @@ const INITIAL: AssistantUiState = {
   activeProposal: null,
   activeDiagnostic: null,
   activeRunRequest: null,
+  activeNewPeriod: null,
   runFollowUp: null,
   activeRosterChange: null,
   rosterChangeApplying: false,
@@ -1083,6 +1100,7 @@ export const assistantActions = {
       preparingTurnEpoch: turnEpoch,
       activeProposal: carry(state.activeProposal),
       activeRosterChange: carry(state.activeRosterChange),
+      activeNewPeriod: carry(state.activeNewPeriod),
     });
     return turnEpoch;
   },
@@ -1189,6 +1207,24 @@ export const assistantActions = {
     useAssistantStore.setState({ activeRunRequest: null });
   },
 
+  /** Show the "Create November?" card, replacing any earlier one. */
+  showNewPeriod(card: { request: NewPeriodRequest; view: NewPeriodView }, turnEpoch: number): void {
+    const previous = useAssistantStore.getState().activeNewPeriod;
+    useAssistantStore.setState({
+      activeNewPeriod: {
+        ...card,
+        id: (previous?.id ?? 0) + 1,
+        turnEpoch,
+        shownInEpoch: turnEpoch,
+      },
+    });
+  },
+
+  /** Dismiss it: Create succeeded, or the user said not now. */
+  clearNewPeriod(): void {
+    useAssistantStore.setState({ activeNewPeriod: null });
+  },
+
   setRunFollowUp(runFollowUp: RunFollowUp): void {
     useAssistantStore.setState({ runFollowUp });
   },
@@ -1263,10 +1299,12 @@ export const assistantActions = {
  * not the tool called: a tool that refused and showed nothing gave the user nothing.
  */
 export function turnAwaitsUserOnCard(turnEpoch: number): boolean {
-  const { activeChoices, activeRunRequest, activeRosterChange } = useAssistantStore.getState();
+  const { activeChoices, activeRunRequest, activeRosterChange, activeNewPeriod } =
+    useAssistantStore.getState();
   return (
     activeChoices?.turnEpoch === turnEpoch ||
     activeRunRequest?.turnEpoch === turnEpoch ||
+    activeNewPeriod?.shownInEpoch === turnEpoch ||
     activeRosterChange?.shownInEpoch === turnEpoch
   );
 }

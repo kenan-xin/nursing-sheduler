@@ -181,6 +181,33 @@ describe("mounting reserves nothing and contacts no provider", () => {
   });
 });
 
+describe("a schedule made from a past one (plq5 P3)", () => {
+  afterEach(() => useAuthorityStore.setState({ derivedFrom: null }));
+
+  it("says the past schedule keeps its conversation, and links back to it", async () => {
+    await makeReady();
+    useAuthorityStore.setState({ derivedFrom: "Ward 3 · April 2026" });
+    render(<AssistantSurface />);
+    assistantActions.openPanel();
+
+    const note = await screen.findByTestId("assistant-derived-note");
+    expect(note).toHaveTextContent(
+      "Made from “Ward 3 · April 2026”. Its conversation stays with it.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Open it from Recent schedules" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows no note for an ordinary schedule", async () => {
+    await makeReady();
+    render(<AssistantSurface />);
+    assistantActions.openPanel();
+    await waitFor(() => expect(screen.getByTestId("assistant-dock")).toBeInTheDocument());
+    expect(screen.queryByTestId("assistant-derived-note")).toBeNull();
+  });
+});
+
 describe("the responsive dock and sheet", () => {
   beforeEach(async () => {
     await makeReady();

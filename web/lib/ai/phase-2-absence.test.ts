@@ -76,6 +76,13 @@ const MODEL_VISIBLE_TOOLS = [
   "find_swap_partners",
   "prepare_roster_swap",
   "prepare_borrowed_cover",
+  // WIDENED DELIBERATELY (2026-10-06, plq5 P3): a new period from a past schedule. Two
+  // reads of what Recent schedules keeps, and a card; the user's Create makes the new
+  // schedule through a Load-shaped switch. No roster is written: history is copied INTO
+  // the new schedule's people, and the past roster is only read.
+  "list_recent_schedules",
+  "get_past_schedule_summary",
+  "prepare_new_period_from_schedule",
 ] as const;
 
 /**
