@@ -389,6 +389,57 @@ describe("after a failed run with no static cause, the solver's core names the l
     }
   });
 
+  it("drops rule changes for rules the core does not name, keeping the approved order", () => {
+    // A hard rest rule and a hard request the clash does not involve: relaxing either
+    // cannot resolve it, so only the core's own members and the leave repairs remain.
+    const base = state();
+    const ward2: ScenarioUiState = {
+      ...base,
+      reqData: [
+        ...base.reqData,
+        {
+          uid: "ben-never-n",
+          person: "ben",
+          date: "03",
+          kind: "request",
+          shiftType: "N",
+          weight: -Infinity,
+        },
+      ],
+      cardsByKind: {
+        ...base.cardsByKind,
+        successions: [
+          {
+            uid: "rest-nd",
+            description: "No day after a night",
+            person: ["ALL"],
+            pattern: ["N", "D"],
+            weight: -Infinity,
+          },
+        ],
+      },
+    };
+    const ids = (c: ResolvedCoreMember[] | null) => rank(ward2, c).map((o) => o.repairId);
+    expect(ids(null)).toEqual(["soften_hard_request", "soften_rest_rule"]);
+    const leaveOnly = core.filter((m) => m.kind === "leave");
+    expect(ids(leaveOnly)).toEqual(["move_leave", "ask_nurse_on_leave"]);
+    // Once the core names them, each rule change is back, in the playbook's order.
+    const named: ResolvedCoreMember[] = [
+      ...leaveOnly,
+      { kind: "succession", ruleId: "rest-nd", label: "No day after a night", nurse: "ana" },
+      {
+        kind: "request",
+        ruleId: "ben-never-n",
+        label: "ben N",
+        nurse: "ben",
+        date: "2026-11-03",
+        shift: ["N"],
+        must: false,
+      },
+    ];
+    expect(ids(named)).toEqual(["soften_hard_request", "soften_rest_rule", "move_leave"]);
+  });
+
   it("reaches the report only after an infeasible run", () => {
     const ids = (after: boolean) =>
       buildFeasibilityReport(state(), after, core).options.map((o) => o.repairId);

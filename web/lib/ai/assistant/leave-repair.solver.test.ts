@@ -5,7 +5,7 @@
 //   RUN_DIFFERENTIAL=1 PYTHON=/usr/bin/python3 pnpm vitest run lib/ai/assistant/leave-repair.solver
 
 import { describe, expect, it } from "vitest";
-import { resolveCore, type InfeasibleCore } from "@/lib/optimize/explanation";
+import { preferenceSources, resolveCore, type InfeasibleCore } from "@/lib/optimize/explanation";
 import { applyAssistantCommands } from "@/lib/proposal/operations";
 import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
 import { cards, leave, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
@@ -18,6 +18,7 @@ import {
 } from "@/lib/scenario";
 // Direct path: the barrel re-exports repair-options and `@/lib/scenario` would cycle.
 import { withCoverOverrides } from "@/lib/scenario/temporary-cover";
+import { preferenceCardUids } from "@/lib/scenario/canonical";
 import { callOracleRaw, GATED, oracleBudget } from "@/lib/scenario/differential/oracle-client";
 import { buildFeasibilityReport, type RepairOption } from "./repair-options";
 
@@ -29,9 +30,7 @@ interface Solved {
 }
 
 function solve(state: ScenarioUiState): Solved {
-  const prep = prepareOptimizeSubmission(toCanonicalScenarioDocument(withCoverOverrides(state)), {
-    anonymize: false,
-  });
+  const prep = prepareOptimizeSubmission(document(state), { anonymize: false });
   if (!prep.ok) throw new Error(`not submittable: ${JSON.stringify(prep.issues)}`);
   const solved = callOracleRaw<Solved>({
     op: "schedule",
@@ -42,6 +41,15 @@ function solve(state: ScenarioUiState): Solved {
   if (!solved.ok) throw new Error(solved.error);
   return solved;
 }
+
+const document = (state: ScenarioUiState) => toCanonicalScenarioDocument(withCoverOverrides(state));
+
+/** The core named by card uid, as the Optimize screen's explain context names it. */
+const coreOf = (state: ScenarioUiState, solved: Solved) =>
+  resolveCore(solved.explanation!.core!, {
+    sources: preferenceSources(document(state), preferenceCardUids(withCoverOverrides(state))),
+    people: [],
+  });
 
 const found = (s: Solved) => s.status === "OPTIMAL" || s.status === "FEASIBLE";
 
@@ -91,7 +99,7 @@ describe.skipIf(!GATED)("leave repairs, solver-confirmed", () => {
       const before = solve(state);
       expect(before.status).toBe("INFEASIBLE");
       expect(before.explanation?.kind).toBe("infeasible");
-      const core = resolveCore(before.explanation!.core!, { sources: [], people: [] });
+      const core = coreOf(state, before);
       expect(core).toContainEqual(
         expect.objectContaining({ kind: "leave", nurse: "cara", date: "2026-11-05" }),
       );
@@ -114,7 +122,7 @@ describe.skipIf(!GATED)("leave repairs, solver-confirmed", () => {
       expect(findStaffingShortfalls(state)).toEqual([]);
       const before = solve(state);
       expect(before.status).toBe("INFEASIBLE");
-      const core = resolveCore(before.explanation!.core!, { sources: [], people: [] });
+      const core = coreOf(state, before);
       const leaveDays = core.filter((m) => m.kind === "leave");
       expect(leaveDays.length).toBeGreaterThan(0);
       expect(leaveDays.every((m) => m.nurse === "cara")).toBe(true);
@@ -124,11 +132,8 @@ describe.skipIf(!GATED)("leave repairs, solver-confirmed", () => {
       expect(blind).not.toContain("move_leave");
       const options = buildFeasibilityReport(state, true, core).options;
       const ids = options.map((o) => o.repairId);
-      // The rest rules are the only rule changes ranked above the leave repairs.
-      expect(ids.filter((id) => id !== "soften_rest_rule")).toEqual([
-        "move_leave",
-        "ask_nurse_on_leave",
-      ]);
+      // The core names both rest rules, so softening one stays, ranked before the leave.
+      expect(ids).toEqual(["soften_rest_rule", "move_leave", "ask_nurse_on_leave"]);
       for (const id of ["move_leave", "ask_nurse_on_leave"] as const) {
         const option = options.find((o) => o.repairId === id)!;
         expect(option.evidence).toBe("hypothesis");

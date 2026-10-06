@@ -1377,6 +1377,33 @@ const BUILDERS: Record<RepairId, Builder> = {
   split_long_shift: splitLongShift,
 };
 
+/** Repairs that change one named rule or request: they help a proven clash only if it names it. */
+const RULE_CHANGES: ReadonlySet<RepairId> = new Set<RepairId>([
+  "relax_contracted_hours",
+  "align_overlapping_requirements",
+  "soften_hard_request",
+  "extra_shift_willing_nurse",
+  "relax_count_rule",
+  "soften_rest_rule",
+]);
+
+/** The option changes a rule (by card uid) or a request (by nurse and date) the core names. */
+function touchesCore(core: readonly ResolvedCoreMember[], option: RepairOption): boolean {
+  const rules = new Set(core.map((m) => m.ruleId));
+  return option.operations.some((op) => {
+    if ("ruleId" in op) return rules.has(op.ruleId);
+    if (op.type !== "set_shift_request" && op.type !== "set_off_request") return false;
+    return core.some(
+      (m) =>
+        m.kind === "request" &&
+        m.nurse === String(op.personId) &&
+        m.date !== undefined &&
+        m.date >= op.startDate &&
+        m.date <= op.endDate,
+    );
+  });
+}
+
 export function rankRepairOptions(
   state: ScenarioUiState,
   findings: StaffingFinding[],
@@ -1388,7 +1415,10 @@ export function rankRepairOptions(
   const options: RepairOption[] = [];
   for (const id of REPAIR_ORDER[situation]) {
     const built = BUILDERS[id](ctx, findings, situation);
-    if (built && isSafeOption(state, built)) options.push(built);
+    // Coordinator ruling (msnp): relaxing a rule outside a proven core cannot resolve it.
+    const offCore =
+      built !== null && !!ctx.core?.length && RULE_CHANGES.has(id) && !touchesCore(ctx.core, built);
+    if (built && !offCore && isSafeOption(state, built)) options.push(built);
     if (options.length === MAX_OPTIONS) break;
   }
   return options;
