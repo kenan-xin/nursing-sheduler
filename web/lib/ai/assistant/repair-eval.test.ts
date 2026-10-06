@@ -69,13 +69,15 @@ const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
   personalCapsTooLow: ["extra_shift_willing_nurse"],
   busyNightsWithRestRule: ["borrow_temporary_nurse", "run_one_short"],
   rnMixOnLeave: ["borrow_temporary_nurse", "ask_nurse_on_leave"],
-  shortOnLeaveDay: ["borrow_temporary_nurse", "ask_nurse_on_leave", "run_one_short"],
+  // Every day needs all three nurses, so no date can take her leave: no move (msnp).
+  shortOnLeaveDay: ["borrow_temporary_nurse", "run_one_short", "ask_nurse_on_leave"],
   tooFewNurses: ["borrow_temporary_nurse", "add_staff_member"],
 };
 
 /** The host question each option's Preview must raise before Apply (none = asked in chat or plain manager call). */
 const AGREEMENT: Partial<Record<RepairId, AssumptionType>> = {
   ask_nurse_on_leave: "leave_cancelled",
+  move_leave: "leave_moved",
   extra_shift_willing_nurse: "extra_shifts_agreed",
 };
 

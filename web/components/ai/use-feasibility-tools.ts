@@ -10,6 +10,8 @@ import { z } from "zod";
 import { useModelVisibleTool } from "./register-model-visible-tool";
 import { pickScenario, useHotStore, useScenarioStore } from "@/lib/store";
 import { buildFeasibilityReport } from "@/lib/ai/assistant/repair-options";
+import { resolveCore } from "@/lib/optimize/explanation";
+import type { OptimizeRunView } from "@/lib/optimize/run-view";
 
 export const feasibilityParameters = z.object({
   afterInfeasibleRun: z
@@ -21,6 +23,13 @@ export const feasibilityParameters = z.object({
     ),
 });
 
+/** The failed run's proven core, named by rule id and real person, or null (msnp). */
+export function provenCoreOf(view: OptimizeRunView) {
+  const explanation = view.result?.explanation;
+  if (explanation?.kind !== "infeasible" || !explanation.core || !view.explainContext) return null;
+  return resolveCore(explanation.core, view.explainContext);
+}
+
 export function useFeasibilityTools(agentId: string, turnEpoch: number): void {
   useModelVisibleTool(
     {
@@ -29,7 +38,7 @@ export function useFeasibilityTools(agentId: string, turnEpoch: number): void {
       description:
         "Find where the schedule is short-staffed and get up to three realistic, safe ways to fix " +
         "it, best first: for example borrowing a nurse from another ward, adding a nurse to the " +
-        "staff list, asking a named nurse on leave, or allowing one more night this period. Each option lists its exact operations and " +
+        "staff list, moving or giving up a named nurse's leave day with her agreement, or allowing one more night this period. Each option lists its exact operations and " +
         "who must agree. Use it before running Optimize when set-up progress reports known gaps, " +
         "and whenever a run is infeasible. It changes nothing.",
       parameters: feasibilityParameters,
@@ -37,7 +46,11 @@ export function useFeasibilityTools(agentId: string, turnEpoch: number): void {
       handler: async () => {
         const view = useHotStore.getState().runView;
         const infeasible = view.lifecycle === "completed" && view.outcome === "infeasible";
-        return buildFeasibilityReport(pickScenario(useScenarioStore.getState()), infeasible);
+        return buildFeasibilityReport(
+          pickScenario(useScenarioStore.getState()),
+          infeasible,
+          infeasible ? provenCoreOf(view) : null,
+        );
       },
     },
     [agentId, turnEpoch],

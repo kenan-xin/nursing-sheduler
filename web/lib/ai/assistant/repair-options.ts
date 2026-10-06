@@ -33,7 +33,9 @@ import {
   MAX_ASSISTANT_OPERATIONS,
   type AssistantCommandV1,
 } from "@/lib/proposal/commands";
-import { expandPersonRefs, flattenShiftTypeRefs } from "@/lib/rules/expansion";
+import { expandPersonRefs, expandShiftTypeRefs, flattenShiftTypeRefs } from "@/lib/rules/expansion";
+import type { ResolvedCoreMember } from "@/lib/optimize/explanation";
+import { applyAssistantCommands } from "@/lib/proposal/operations";
 import {
   capOf,
   findStaffingShortfalls,
@@ -65,6 +67,8 @@ import {
   MAX_BORROWED,
   MAX_CAP_RAISE,
   MAX_EXPLAINED_FINDINGS,
+  MAX_LEAVE_CHANGES,
+  MAX_LEAVE_MOVE_DAYS,
   MAX_NEW_STAFF,
   MAX_OPTIONS,
   PLAYBOOK_VERSION,
@@ -104,6 +108,8 @@ interface Ctx {
   items: DateItem[];
   staffIds: Set<string>;
   groupIds: Set<string>;
+  /** The solver's proven core after a failed run, or null. */
+  core: readonly ResolvedCoreMember[] | null;
 }
 
 type Builder = (ctx: Ctx, findings: StaffingFinding[], situation: Situation) => RepairOption | null;
@@ -122,9 +128,10 @@ const REASON_WORDS = {
 
 const PLACEHOLDER = /^(Borrowed|New) nurse \d+$/;
 
-function makeCtx(state: ScenarioUiState): Ctx {
+function makeCtx(state: ScenarioUiState, core: readonly ResolvedCoreMember[] | null = null): Ctx {
   return {
     state,
+    core,
     items: generateDateItems({ start: state.rangeStart, end: state.rangeEnd }),
     staffIds: new Set(state.staff.map((p) => String(p.id))),
     groupIds: new Set(state.staffGroups.map((g) => String(g.id))),
@@ -501,7 +508,7 @@ const relaxContractedHours: Builder = (ctx) => {
       const c = contractOf(ctx.state, person);
       if (c?.card.uid !== card.uid) continue;
       const away = awayDays(ctx.state, person);
-      const most = (days - away.leave - away.off) * step(c) + away.leave * c.leaveCoef;
+      const most = mostContracted(ctx.state, person, c);
       if (c.floor <= most) continue;
       return contractOption(
         ctx,
@@ -833,42 +840,338 @@ const addStaffMember: Builder = (ctx, all) => {
   });
 };
 
-const askNurseOnLeave: Builder = (ctx, all) => {
-  const findings = gapsOnly(all);
-  for (const f of findings) {
-    if (f.dateId === null || gapOn(findings, f.dateId) !== 1) continue;
-    // She must be the missing nurse in every finding that day, or her leave is not the gap.
-    const sameDay = findings.filter((g) => g.dateId === f.dateId);
-    const onLeave = f.away.find(
-      (a) =>
-        a.reason === "leave" &&
-        sameDay.every((g) => g.away.some((b) => b.person === a.person && b.reason === "leave")),
+// --- Leave (bead msnp) ------------------------------------------------------
+//
+// A nurse's leave is an agreement with her, so a leave repair is the last resort: move a
+// leave day to a nearby date the roster can spare, else give up one leave day. Each day is
+// one operation the host asks her about on the Preview (assumptions.ts). The static check
+// says which leave is a gap; after a failed run with no static cause, the solver's proven
+// core names the leave days instead (explanation.ts), so the app never guesses at one.
+
+/**
+ * Leave no repair may touch. A leave cell records no kind, so its own label is the only
+ * record that it is sick or compassionate leave.
+ * ponytail: a label match; a structured leave kind would replace it.
+ */
+const PROTECTED_LEAVE = /sick|compassion|bereave|medical|hospital|\bmc\b/i;
+
+/** Her own leave cell on that date (a group's leave is not hers to give), unless protected. */
+const askableLeave = (state: ScenarioUiState, person: string, dateId: string) =>
+  state.reqData.find(
+    (c) =>
+      c.kind === "leave" &&
+      String(c.person) === person &&
+      toDateId(c.date, { start: state.rangeStart, end: state.rangeEnd }) === dateId &&
+      !PROTECTED_LEAVE.test(c.description ?? ""),
+  );
+
+/** A nurse's leave day a repair may ask about, and the shifts she would cover. */
+interface LeaveDay {
+  person: string;
+  dateId: string;
+  shifts: string[];
+}
+
+/** Per short date in roster order: its gap, and the nurses away on leave in every finding there. */
+function provenLeaveDays(ctx: Ctx, findings: StaffingFinding[]) {
+  return shortDates(ctx, findings).map((dateId) => {
+    const sameDay = findings.filter((f) => f.dateId === dateId);
+    const shifts = worstOn(sameDay, dateId)?.shiftTypes ?? [];
+    const onLeave = (f: StaffingFinding, person: string) =>
+      f.away.some((a) => a.person === person && a.reason === "leave");
+    const people = [...new Set(sameDay[0].away.map((a) => a.person))].filter(
+      (person) =>
+        sameDay.every((f) => onLeave(f, person)) && askableLeave(ctx.state, person, dateId),
     );
-    const iso = isoOf(ctx, f.dateId);
-    if (!onLeave || !iso) continue;
-    const when = dateLabel(ctx, f.dateId);
-    const shifts = f.shiftTypes.join("/");
-    return makeOption("ask_nurse_on_leave", {
-      title: `Ask ${onLeave.person} whether they can give up their leave on ${when} to cover ${shifts}`,
-      why: `${when} is one nurse short for ${shifts}, and ${onLeave.person} ${f.skillMix ? "is qualified and " : ""}is on leave that day.`,
-      operations: [
-        {
-          type: "clear_requests",
-          personId: personRef(ctx, onLeave.person),
-          startDate: iso,
-          endDate: iso,
-        },
-      ],
-      confirmationQuestion: `Has ${onLeave.person} agreed to give up their leave on ${when}?`,
-      needsFromUser: [
-        "What kind of leave it is. Do not ask a nurse on sick or compassionate leave.",
-        `Whether ${onLeave.person} has agreed.`,
-      ],
-      capabilityId: "leave-and-requests",
-      evidence: "static_check",
-    });
+    return {
+      dateId,
+      gap: gapOn(findings, dateId),
+      days: people.map((person): LeaveDay => ({ person, dateId, shifts })),
+    };
+  });
+}
+
+/** The leave days in the solver's proven core, by date: each one is part of the clash. */
+function coreLeaveDays(ctx: Ctx) {
+  const byDate = new Map<string, LeaveDay[]>();
+  for (const m of ctx.core ?? []) {
+    const dateId = ctx.items.find((i) => i.iso === m.date)?.id;
+    if (m.kind !== "leave" || !m.nurse || !dateId) continue;
+    if (!askableLeave(ctx.state, m.nurse, dateId)) continue;
+    const shifts = [
+      ...new Set(
+        (ctx.core ?? []).flatMap((s) =>
+          s.kind === "staffing" && s.date === m.date ? (s.shift ?? []) : [],
+        ),
+      ),
+    ];
+    byDate.set(dateId, [...(byDate.get(dateId) ?? []), { person: m.nurse, dateId, shifts }]);
+  }
+  return ctx.items.flatMap((i) => {
+    const days = byDate.get(i.id);
+    return days ? [{ dateId: i.id, gap: 1, days }] : [];
+  });
+}
+
+/** Short date ids the static check finds in `state`. */
+const shortIn = (state: ScenarioUiState) =>
+  new Set(gapsOnly(findStaffingShortfalls(state)).flatMap((f) => (f.dateId ? [f.dateId] : [])));
+
+/** The most half-hours her free and leave days can give her contract (relaxContractedHours' proof). */
+function mostContracted(state: ScenarioUiState, person: string, c: NurseContract): number {
+  const days = generateDateItems({
+    start: state.rangeStart,
+    end: state.rangeEnd,
+  }).length;
+  const away = awayDays(state, person);
+  return (days - away.leave - away.off) * Math.max(...c.workCoefs) + away.leave * c.leaveCoef;
+}
+
+/** The change leaves her contracted minimum no harder to reach than it was. */
+function keepsContract(before: ScenarioUiState, after: ScenarioUiState, person: string): boolean {
+  const c = contractOf(before, person);
+  if (!c) return true;
+  return mostContracted(after, person, c) >= Math.min(c.floor, mostContracted(before, person, c));
+}
+
+/**
+ * Working any of `shifts` on `dateId` would complete one of her hard forbidden rest
+ * patterns with the days her own pins fix (leave, a hard day off, a hard shift request).
+ * ponytail: ignores a rule's date scope; the solver still holds every rest rule.
+ */
+function restForbids(state: ScenarioUiState, person: string, dateId: string, shifts: string[]) {
+  const range = { start: state.rangeStart, end: state.rangeEnd };
+  const items = generateDateItems(range);
+  const at = items.findIndex((i) => i.id === dateId);
+  const worked = new Set(state.shifts.map((s) => String(s.id)));
+  const fixed = (index: number): string | null => {
+    const item = items[index];
+    const cell =
+      item &&
+      state.reqData.find(
+        (c) =>
+          String(c.person) === person &&
+          toDateId(c.date, range) === item.id &&
+          (c.kind === "leave" || c.weight === Infinity),
+      );
+    if (!cell) return null;
+    return cell.kind === "leave" ? "LEAVE" : cell.kind === "off" ? "OFF" : String(cell.shiftType);
+  };
+  const matches = (element: unknown, id: string) => {
+    const refs = flattenShiftTypeRefs(element as SuccessionCard["pattern"]).map(String);
+    return (
+      refs.includes(id) ||
+      (worked.has(id) && (refs.some(isAll) || expandShiftTypeRefs(refs, state).has(id)))
+    );
+  };
+  const rules = state.cardsByKind.successions.filter(
+    (c) => !c.disabled && c.weight === -Infinity && expandPersonRefs(c.person, state).has(person),
+  );
+  // No short shift named (a core leave day with no staffing member): any worked shift.
+  return (shifts.length > 0 ? shifts : [...worked]).every((shift) =>
+    rules.some((rule) => {
+      const pattern = asList(rule.pattern);
+      return pattern.some(
+        (element, i) =>
+          matches(element, shift) &&
+          pattern.every((other, j) => {
+            if (j === i) return true;
+            const id = fixed(at - i + j);
+            return id !== null && matches(other, id);
+          }),
+      );
+    }),
+  );
+}
+
+interface LeavePick {
+  day: LeaveDay;
+  op: AssistantCommandV1;
+  /** move_leave: the date id her leave moves to. */
+  to: string | null;
+}
+
+/** One leave day's operation on `state`, or null when it would break her rest or contract. */
+type LeaveStep = (
+  ctx: Ctx,
+  state: ScenarioUiState,
+  day: LeaveDay,
+  /** Dates a moved leave day may not land on. */
+  avoid: Set<string>,
+) => LeavePick | null;
+
+/** Her rest rules and contract still hold once she is free to work that day. */
+const stillFits = (before: ScenarioUiState, after: ScenarioUiState, day: LeaveDay) =>
+  !restForbids(after, day.person, day.dateId, day.shifts) &&
+  keepsContract(before, after, day.person);
+
+const cancelStep: LeaveStep = (ctx, state, day) => {
+  const iso = isoOf(ctx, day.dateId);
+  if (!iso) return null;
+  const op: AssistantCommandV1 = {
+    type: "clear_requests",
+    personId: personRef(ctx, day.person),
+    startDate: iso,
+    endDate: iso,
+  };
+  const applied = applyAssistantCommands(state, [op]);
+  return applied.ok && stillFits(state, applied.next, day) ? { day, op, to: null } : null;
+};
+
+/** Her leave day moved to the nearest date that can spare her (the earlier on a tie). */
+const moveStep: LeaveStep = (ctx, state, day, avoid) => {
+  const cell = askableLeave(state, day.person, day.dateId);
+  // move_leave names the cell by its span id.
+  if (!cell || String(cell.date) !== day.dateId) return null;
+  const from = ctx.items.findIndex((i) => i.id === day.dateId);
+  const hers = new Set(
+    state.reqData
+      .filter((c) => String(c.person) === day.person)
+      .map((c) => toDateId(c.date, range(ctx))),
+  );
+  const nearest = ctx.items
+    .map((item, i) => ({ item, distance: Math.abs(i - from) }))
+    // A date she has anything on would lose it; an avoided date has no one to spare.
+    .filter(({ distance }) => distance > 0 && distance <= MAX_LEAVE_MOVE_DAYS)
+    .filter(({ item }) => !avoid.has(item.id) && !hers.has(item.id))
+    .sort((a, b) => a.distance - b.distance);
+  for (const { item } of nearest) {
+    const op: AssistantCommandV1 = {
+      type: "move_leave",
+      personId: cell.person,
+      fromDate: cell.date,
+      toDate: item.id,
+    };
+    const applied = applyAssistantCommands(state, [op]);
+    if (!applied.ok || shortIn(applied.next).has(item.id)) continue;
+    if (stillFits(state, applied.next, day)) return { day, op, to: item.id };
   }
   return null;
+};
+
+/**
+ * Proven: one leave operation per nurse per short day, at most MAX_LEAVE_CHANGES, each day
+ * kept only when its operations close it. Core: ONE leave day, since a minimal core breaks
+ * when any one member goes, moved off every core date; each leaves no new short date.
+ */
+function planLeave(ctx: Ctx, all: StaffingFinding[], step: LeaveStep) {
+  const findings = gapsOnly(all);
+  const short = new Set(shortDates(ctx, findings));
+  const proven = short.size > 0;
+  const groups = proven ? provenLeaveDays(ctx, findings) : coreLeaveDays(ctx);
+  // Where a moved day may not land: a short date, or another day of the same clash.
+  const avoid = proven ? short : new Set(groups.map((g) => g.dateId));
+  let state = ctx.state;
+  const picks: LeavePick[] = [];
+  const stayShort: string[] = [];
+  for (const { dateId, gap, days } of groups) {
+    const mine: LeavePick[] = [];
+    let next = state;
+    for (const day of days) {
+      if (mine.length === gap || picks.length + mine.length === MAX_LEAVE_CHANGES) break;
+      const pick = step(ctx, next, day, avoid);
+      const applied = pick && applyAssistantCommands(next, [pick.op]);
+      if (!pick || !applied?.ok) continue;
+      next = applied.next;
+      mine.push(pick);
+    }
+    const after = shortIn(next);
+    const noNewGap = [...after].every((d) => short.has(d));
+    if (mine.length > 0 && noNewGap && !(proven && after.has(dateId))) {
+      state = next;
+      picks.push(...mine);
+    } else if (proven) stayShort.push(dateId);
+    if (!proven && picks.length > 0) break;
+  }
+  return picks.length > 0 ? { picks, stayShort, proven } : null;
+}
+
+const joinAnd = (items: string[]) =>
+  items.length === 1 ? items[0] : `${items.slice(0, -1).join("; ")} and ${items.at(-1)}`;
+
+/** The why shared by both leave repairs: what proves her leave is the gap, and what stays short. */
+function leaveWhy(
+  ctx: Ctx,
+  plan: NonNullable<ReturnType<typeof planLeave>>,
+  findings: StaffingFinding[],
+  tail: string,
+) {
+  const [first] = plan.picks;
+  const when = dateLabel(ctx, first.day.dateId);
+  const shifts = first.day.shifts.join("/") || "that day";
+  const skill = gapsOnly(findings).some((f) => f.dateId === first.day.dateId && f.skillMix)
+    ? "is qualified and "
+    : "";
+  const cause = !plan.proven
+    ? `The optimiser proved that ${joinAnd(plan.picks.map((p) => `${p.day.person}'s leave on ${dateLabel(ctx, p.day.dateId)}`))} ${plan.picks.length === 1 ? "is" : "are"} part of the clash that leaves no roster. Test it on a copy before calling it a fix.`
+    : plan.picks.length === 1
+      ? `${when} is one nurse short for ${shifts}, and ${first.day.person} ${skill}is on leave that day.`
+      : "Each of those days is short only because a qualified nurse is on leave.";
+  const stays = plan.stayShort.length
+    ? ` ${joinAnd(plan.stayShort.map((d) => dateLabel(ctx, d)))} ${plan.stayShort.length === 1 ? "stays" : "stay"} short: no leave there can close it.`
+    : "";
+  return `${cause}${tail}${stays}`;
+}
+
+const LEAVE_KIND_QUESTION =
+  "What kind of leave it is. Never ask a nurse on sick or compassionate leave.";
+
+const moveLeave: Builder = (ctx, all) => {
+  const plan = planLeave(ctx, all, moveStep);
+  if (!plan) return null;
+  const moves = plan.picks.map(
+    (p) =>
+      `${p.day.person} from ${dateLabel(ctx, p.day.dateId)} to ${dateLabel(ctx, p.to as string)}`,
+  );
+  const [first] = plan.picks;
+  const names = [...new Set(plan.picks.map((p) => p.day.person))];
+  return makeOption("move_leave", {
+    title:
+      plan.picks.length === 1
+        ? `Ask ${first.day.person} whether they can move their leave from ${dateLabel(ctx, first.day.dateId)} to ${dateLabel(ctx, first.to as string)}, to cover ${first.day.shifts.join("/") || "that day"}`
+        : `Ask nurses on leave to move one leave day each: ${joinAnd(moves)}`,
+    why: leaveWhy(
+      ctx,
+      plan,
+      all,
+      ` The new ${plan.picks.length === 1 ? "date stays" : "dates stay"} fully staffed, the leave keeps counting toward contracted hours, and no rest rule is relaxed.`,
+    ),
+    operations: plan.picks.map((p) => p.op),
+    confirmationQuestion: `Has ${joinAnd(moves.map((m) => m.replace(/^(\S+) from/, "$1 agreed to move their leave from")))}?`,
+    needsFromUser: [
+      `${LEAVE_KIND_QUESTION} Never move it either.`,
+      `Whether ${joinAnd(names)} ${names.length === 1 ? "has" : "have"} agreed to the new ${plan.picks.length === 1 ? "date" : "dates"}.`,
+    ],
+    capabilityId: "leave-and-requests",
+    evidence: plan.proven ? "static_check" : "hypothesis",
+  });
+};
+
+const askNurseOnLeave: Builder = (ctx, all) => {
+  const plan = planLeave(ctx, all, cancelStep);
+  if (!plan) return null;
+  const [first] = plan.picks;
+  const days = plan.picks.map((p) => `${p.day.person} on ${dateLabel(ctx, p.day.dateId)}`);
+  const names = [...new Set(plan.picks.map((p) => p.day.person))];
+  return makeOption("ask_nurse_on_leave", {
+    title:
+      plan.picks.length === 1
+        ? `Ask ${first.day.person} whether they can give up their leave on ${dateLabel(ctx, first.day.dateId)} to cover ${first.day.shifts.join("/") || "that day"}`
+        : `Ask nurses on leave to give up one leave day each: ${joinAnd(days)}`,
+    why: leaveWhy(ctx, plan, all, ""),
+    // One day at a time: each day is its own operation and its own question to her.
+    operations: plan.picks.map((p) => p.op),
+    confirmationQuestion:
+      plan.picks.length === 1
+        ? `Has ${first.day.person} agreed to give up their leave on ${dateLabel(ctx, first.day.dateId)}?`
+        : `Has each nurse agreed to give up that one leave day: ${joinAnd(days)}?`,
+    needsFromUser: [
+      LEAVE_KIND_QUESTION,
+      `Whether ${joinAnd(names)} ${names.length === 1 ? "has" : "have"} agreed.`,
+    ],
+    capabilityId: "leave-and-requests",
+    evidence: plan.proven ? "static_check" : "hypothesis",
+  });
 };
 
 const runOneShort: Builder = (ctx, all) => {
@@ -1068,6 +1371,7 @@ const BUILDERS: Record<RepairId, Builder> = {
   soften_rest_rule: softenRestRule,
   borrow_temporary_nurse: borrowTemporaryNurse,
   add_staff_member: addStaffMember,
+  move_leave: moveLeave,
   ask_nurse_on_leave: askNurseOnLeave,
   run_one_short: runOneShort,
   split_long_shift: splitLongShift,
@@ -1076,11 +1380,11 @@ const BUILDERS: Record<RepairId, Builder> = {
 export function rankRepairOptions(
   state: ScenarioUiState,
   findings: StaffingFinding[],
-  opts: { runInfeasible: boolean },
+  opts: { runInfeasible: boolean; core?: readonly ResolvedCoreMember[] | null },
 ): RepairOption[] {
   const situation = classifySituation(findings, opts.runInfeasible);
   if (situation === null) return [];
-  const ctx = makeCtx(state);
+  const ctx = makeCtx(state, opts.core ?? null);
   const options: RepairOption[] = [];
   for (const id of REPAIR_ORDER[situation]) {
     const built = BUILDERS[id](ctx, findings, situation);
@@ -1428,8 +1732,19 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
           );
         }
       case "clear_requests":
+        // One leave day at a time, and never sick or compassionate leave (msnp).
+        return (
+          nurseAsked &&
+          real(op.personId) &&
+          op.startDate === op.endDate &&
+          askableLeave(state, String(op.personId), toDateId(op.startDate, range(ctx))) !== undefined
+        );
       case "move_leave":
-        return nurseAsked && real(op.personId);
+        return (
+          nurseAsked &&
+          real(op.personId) &&
+          askableLeave(state, String(op.personId), String(op.fromDate)) !== undefined
+        );
       case "add_person":
         // bead 2vtv: a new staff member joins no group; the manager names one in chat.
         if (option.repairId === "add_staff_member") return op.groups.length === 0;
@@ -1489,9 +1804,11 @@ export interface FeasibilityReport {
   instructions: readonly string[];
 }
 
+/** `core`: the solver's proven core of the failed run, when it has one. */
 export function buildFeasibilityReport(
   state: ScenarioUiState,
   afterInfeasibleRun: boolean,
+  core: readonly ResolvedCoreMember[] | null = null,
 ): FeasibilityReport {
   const findings = findStaffingShortfalls(state);
   return {
@@ -1502,7 +1819,10 @@ export function buildFeasibilityReport(
       findings.length > 0
         ? "These gaps are certain: the rules as written cannot be met on those days, so you may name them as the cause."
         : "No certain cause was found. The cause is unknown, and every option is a guess to test.",
-    options: rankRepairOptions(state, findings, { runInfeasible: afterInfeasibleRun }),
+    options: rankRepairOptions(state, findings, {
+      runInfeasible: afterInfeasibleRun,
+      core: afterInfeasibleRun ? core : null,
+    }),
     safetyFloor: SAFETY_FLOOR,
     instructions: FEASIBILITY_INSTRUCTIONS,
   };

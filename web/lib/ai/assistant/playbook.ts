@@ -6,9 +6,9 @@
 // line to account. Bump PLAYBOOK_VERSION on any change to the wording or order.
 //
 // The repair order follows ward practice: remove a preference before touching
-// people, use willing staff and the float pool before asking someone on leave, and
-// run a shift short only as the manager's last call. The safety floor is never
-// crossed (enforced again in code by repair-options.ts `isSafeOption`).
+// people, use willing staff, the float pool and running one short before asking
+// someone on leave, then move a leave day before cancelling one (user decision, msnp).
+// The safety floor is never crossed (enforced again in code by repair-options.ts `isSafeOption`).
 //
 // REST RULES ARE GUIDANCE, NOT LAW (user decision, 2026-09-24; research
 // docs/research/2026-09-24-assistant/06-sg-rest-guidelines.md). The Employment Act
@@ -40,7 +40,7 @@ import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/co
 import type { SuccessionCard } from "@/lib/scenario";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 
-export const PLAYBOOK_VERSION = "2026-10-05.4";
+export const PLAYBOOK_VERSION = "2026-10-06.1";
 
 /**
  * The priority ladder (spec docs/superpowers/specs/2026-09-29-priority-ladder-design.md,
@@ -260,6 +260,7 @@ export type RepairId =
   | "soften_rest_rule"
   | "borrow_temporary_nurse"
   | "add_staff_member"
+  | "move_leave"
   | "ask_nurse_on_leave"
   | "run_one_short"
   | "split_long_shift";
@@ -382,15 +383,30 @@ export const REPAIRS: readonly RepairEntry[] = [
       "Head count only: put her in a staff group only when the manager names it. Ask for her name; never invent one.",
   },
   {
+    // Bead msnp: the leave day moves to a nearby date the roster can spare, so she keeps
+    // her leave. After rule changes, borrowed or new staff and running one short.
+    id: "move_leave",
+    title: "Move a named nurse's leave day to a nearby date the roster can spare",
+    whenToUse:
+      "A qualified nurse is on leave on a short day, and a date within a week of it is not short.",
+    disruption: "high",
+    confirmation: "named_nurse",
+    enforcedBy: "host_question",
+    opTypes: ["move_leave"],
+    guardrail:
+      "Only with her agreement, only to a date that stays fully staffed, keeping her rest rules and contracted hours, and never sick or compassionate leave.",
+  },
+  {
+    // Bead msnp: the last resort, one leave day at a time on each short day.
     id: "ask_nurse_on_leave",
-    title: "Ask a named nurse on leave to cover one shift",
-    whenToUse: "A qualified nurse is on leave on the one day that is one nurse short.",
+    title: "Ask named nurses on leave to give up one leave day each",
+    whenToUse: "Qualified nurses are on leave on short days, and no other repair closes the gap.",
     disruption: "high",
     confirmation: "named_nurse",
     enforcedBy: "host_question",
     opTypes: ["clear_requests"],
     guardrail:
-      "One day only, only with her agreement, and never someone on sick or compassionate leave.",
+      "One day at a time, each day only with her agreement, and never someone on sick or compassionate leave.",
   },
   {
     id: "run_one_short",
@@ -435,8 +451,9 @@ export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
     "align_overlapping_requirements",
     "soften_hard_request",
     "borrow_temporary_nurse",
-    "ask_nurse_on_leave",
     "run_one_short",
+    "move_leave",
+    "ask_nurse_on_leave",
     "split_long_shift",
   ],
   chronic: [
@@ -444,6 +461,8 @@ export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
     "borrow_temporary_nurse",
     "add_staff_member",
     "run_one_short",
+    "move_leave",
+    "ask_nurse_on_leave",
     "split_long_shift",
   ],
   // Spec: 1, 3, as hypotheses. A blind borrow is not a guess worth testing.
@@ -456,6 +475,9 @@ export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
     "soften_hard_request",
     "relax_count_rule",
     "soften_rest_rule",
+    // The solver's proven core names the leave days (msnp).
+    "move_leave",
+    "ask_nurse_on_leave",
   ],
 };
 
@@ -465,6 +487,10 @@ export const MAX_CAP_RAISE = 2;
 export const MAX_OPTIONS = 3;
 export const MAX_BORROWED = 3;
 export const MAX_NEW_STAFF = 2;
+/** A moved leave day lands at most this many days from where it was. */
+export const MAX_LEAVE_MOVE_DAYS = 7;
+/** At most this many leave days asked about in one option: each is a nurse's own agreement. */
+export const MAX_LEAVE_CHANGES = 3;
 export const MAX_EXPLAINED_FINDINGS = 5;
 /** The strength a softened request gets: a nurse wish on the priority ladder (20 to 40). */
 export const SOFT_REQUEST_WEIGHT = 20;

@@ -92,6 +92,8 @@ describe("repair catalogue", () => {
       "borrow_temporary_nurse",
       "add_staff_member",
       "run_one_short",
+      "move_leave",
+      "ask_nurse_on_leave",
       "split_long_shift",
     ]);
     for (const situation of ["capped", "acute", "unexplained"] as const) {
@@ -118,6 +120,8 @@ describe("repair catalogue", () => {
       "soften_hard_request",
       "relax_count_rule",
       "soften_rest_rule",
+      "move_leave",
+      "ask_nurse_on_leave",
     ]);
     for (const [situation, order] of Object.entries(REPAIR_ORDER)) {
       if (situation !== "unexplained") expect(order, situation).not.toContain("soften_rest_rule");
@@ -128,7 +132,7 @@ describe("repair catalogue", () => {
     for (const repair of REPAIRS) {
       if (
         repair.confirmation === "named_nurse" &&
-        repair.opTypes.some((op) => op === "clear_requests")
+        repair.opTypes.some((op) => op === "clear_requests" || op === "move_leave")
       ) {
         expect(repair.enforcedBy).toBe("host_question");
       }
@@ -406,7 +410,7 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS).toContain(TRUTHFUL_SUMMARY_RULE);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-10-05.4");
+    expect(PLAYBOOK_VERSION).toBe("2026-10-06.1");
   });
 });
 
