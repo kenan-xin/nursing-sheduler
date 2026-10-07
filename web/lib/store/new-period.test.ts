@@ -2,7 +2,7 @@
 // re-derives from the past schedule, refuses one that changed since the Preview, and
 // otherwise is a Load that records where it came from. The past schedule is not written.
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   persistThreadMessages,
   readThreadMessages,
@@ -62,6 +62,10 @@ async function saveRoster(scenarioId: string, roster: PastRoster, revision: numb
     expectedWorkingRevision: revision,
     expectedClearEpoch: await storage.getClearEpoch(),
   });
+}
+
+async function clearRoster(scenarioId: string) {
+  await createRosterStorageForDb(() => harness.db, scenarioId).clearRosterData();
 }
 
 /** April with a roster, then October open: the state the user asks from. */
@@ -234,6 +238,38 @@ describe("creating the new period", () => {
     });
   });
 
+  // The roster moves after Create's reread but before the switch transaction: only
+  // the transaction's own fence can see it. Clear restarts the working revision at 1,
+  // so "clear, then save" is the ABA case.
+  it.each([
+    ["edited", (april: string) => saveRoster(april, rosterFor("D"), 1)],
+    ["cleared", (april: string) => clearRoster(april)],
+    [
+      "cleared and replaced",
+      async (april: string) => {
+        await clearRoster(april);
+        await saveRoster(april, rosterFor("D"), null);
+      },
+    ],
+  ])("refuses when April's roster is %s just before the switch", async (_, change) => {
+    const april = await aprilThenOctober();
+    const request = await requestFor(april);
+    const october = useAuthorityStore.getState().scenarioId;
+    const repo = harness.authority["repository"];
+    const original = repo.selectOrSwitchScenario.bind(repo);
+    vi.spyOn(repo, "selectOrSwitchScenario").mockImplementationOnce(async (input) => {
+      await change(april);
+      return original(input);
+    });
+
+    expect(await assistantProposalCommands.createNewPeriod(request)).toEqual({
+      ok: false,
+      reason: "changed",
+    });
+    expect(useAuthorityStore.getState().scenarioId).toBe(october);
+    expect(await scenarioCommands.listSchedules()).toHaveLength(2);
+  });
+
   it("refuses the source revision inside the switch, not only before it", async () => {
     const april = await aprilThenOctober();
     const request = await requestFor(april);
@@ -246,6 +282,7 @@ describe("creating the new period", () => {
           scenario: past.scenario,
           derivedFrom: { scenarioId: april, title: past.name },
           expectedSourceRevision: request.expectedSourceRevision + 1,
+          expectedSourceRoster: null,
         },
         acquire: false,
       }),

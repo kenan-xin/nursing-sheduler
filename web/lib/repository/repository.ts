@@ -185,17 +185,28 @@ export type ScenarioSwitchTarget =
   | { kind: "load"; scenario: ScenarioUiState }
   /**
    * A Load made from a past schedule (plq5 P3): refused (`stale_revision`) unless the
-   * source still has `expectedSourceRevision`, checked in the same transaction. The
-   * source itself is never written.
+   * source still has `expectedSourceRevision` and `expectedSourceRoster`, checked in
+   * the same transaction. The source itself is never written.
    */
   | {
       kind: "derive";
       scenario: ScenarioUiState;
       derivedFrom: { scenarioId: string; title: string };
       expectedSourceRevision: number;
+      /**
+       * The source's working roster the scenario was derived from, `null` when it had
+       * none. The epoch is part of the identity: Clear restarts the revision at 1.
+       */
+      expectedSourceRoster: SourceRosterFence | null;
       /** The schedule whose active conversation continues in the new one (user decision 2026-10-07). */
       carryThreadFrom?: string;
     };
+
+/** A working roster row's exact identity: its revision and the clear epoch it was written under. */
+export interface SourceRosterFence {
+  revision: number;
+  clearEpoch: number;
+}
 
 export interface ScenarioSwitch {
   tabId: string;
@@ -1038,6 +1049,18 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
                 scenarioId: source.scenarioId,
                 expected: target.expectedSourceRevision,
                 actual: source.documentRevision,
+              });
+            }
+            // The roster has its own revision, so a roster save leaves the document
+            // revision alone: fence it here too, or May keeps a rest history April lost.
+            const roster = await db.roster.get(rosterKeys.working(source.scenarioId));
+            const expected = target.expectedSourceRoster;
+            if (
+              (roster?.revision ?? null) !== (expected?.revision ?? null) ||
+              (roster?.clearEpoch ?? null) !== (expected?.clearEpoch ?? null)
+            ) {
+              throw new RepositoryError("stale_revision", "the source roster changed", {
+                scenarioId: source.scenarioId,
               });
             }
           }

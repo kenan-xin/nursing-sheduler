@@ -59,6 +59,7 @@ import {
   type ScenarioEnvelopeV3,
   type ScenarioRepository,
   type ScheduleSummary,
+  type SourceRosterFence,
 } from "@/lib/repository";
 import {
   deriveIdempotencyKey,
@@ -1510,6 +1511,7 @@ export class ScenarioAuthority {
           scenario: ScenarioUiState;
           derivedFrom: { scenarioId: string; title: string };
           expectedSourceRevision: number;
+          expectedSourceRoster: SourceRosterFence | null;
         }
       | { kind: "existing"; scenarioId: string },
   ): Promise<CommandOutcome> {
@@ -1640,6 +1642,13 @@ export class ScenarioAuthority {
    * and the open schedule is not switched. `null` when it no longer exists.
    */
   async readPastSchedule(scenarioId: string): Promise<PastSchedule | null> {
+    return (await this.readPastWithRoster(scenarioId))?.past ?? null;
+  }
+
+  /** The past schedule and the exact working-roster row it was read with. */
+  private async readPastWithRoster(
+    scenarioId: string,
+  ): Promise<{ past: PastSchedule; roster: SourceRosterFence | null } | null> {
     let envelope: ScenarioEnvelopeV3;
     try {
       envelope = await this.repository.read(scenarioId);
@@ -1650,11 +1659,14 @@ export class ScenarioAuthority {
       .readWorking()
       .catch(() => null);
     return {
-      scenarioId,
-      name: envelope.title || scheduleAutoName(envelope.scenario),
-      documentRevision: envelope.documentRevision,
-      scenario: envelope.scenario,
-      roster: asPastRoster(row?.document),
+      past: {
+        scenarioId,
+        name: envelope.title || scheduleAutoName(envelope.scenario),
+        documentRevision: envelope.documentRevision,
+        scenario: envelope.scenario,
+        roster: asPastRoster(row?.document),
+      },
+      roster: row ? { revision: row.revision, clearEpoch: row.clearEpoch } : null,
     };
   }
 
@@ -1667,8 +1679,9 @@ export class ScenarioAuthority {
    * past schedule is never written.
    */
   async createNewPeriod(request: NewPeriodRequest): Promise<NewPeriodOutcome> {
-    const past = await this.readPastSchedule(request.sourceScenarioId);
-    if (!past) return { ok: false, reason: "missing" };
+    const read = await this.readPastWithRoster(request.sourceScenarioId);
+    if (!read) return { ok: false, reason: "missing" };
+    const { past } = read;
     const derived = deriveNewPeriod(past.scenario, past.roster, {
       start: request.rangeStart,
       end: request.rangeEnd,
@@ -1680,13 +1693,14 @@ export class ScenarioAuthority {
     ) {
       return { ok: false, reason: "changed" };
     }
-    // ponytail: a roster edit to the source between this read and the switch is not
-    // fenced; the document revision is (in the switch transaction).
+    // The switch transaction re-checks both the document revision and this exact
+    // roster row, so an edit between this read and the switch refuses as `changed`.
     const outcome = await this.switchScenario({
       kind: "derive",
       scenario: derived.plan.scenario,
       derivedFrom: { scenarioId: past.scenarioId, title: past.name },
       expectedSourceRevision: request.expectedSourceRevision,
+      expectedSourceRoster: read.roster,
     });
     if (outcome.ok) return { ok: true };
     return { ok: false, reason: outcome.code === "stale_revision" ? "changed" : outcome.reason };

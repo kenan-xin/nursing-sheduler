@@ -49,6 +49,7 @@ export {
   type ScenarioSelection,
   type ScenarioSwitch,
   type ScenarioSwitchTarget,
+  type SourceRosterFence,
   type TabContext,
 } from "./repository";
 
