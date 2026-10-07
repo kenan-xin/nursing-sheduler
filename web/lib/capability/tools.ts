@@ -18,6 +18,9 @@ export const ASSISTANT_TOOL_NAMES = [
   // Read-only setup and feasibility reports (plan 2026-09-24 guided setup and repair).
   "get_setup_progress",
   "suggest_feasibility_options",
+  // plq5 P3 -- read a past schedule kept in this browser. Neither opens nor writes it.
+  "list_recent_schedules",
+  "get_past_schedule_summary",
   // T06 -- read the versioned help/capability registry.
   "list_app_capabilities",
   "explain_app_capability",

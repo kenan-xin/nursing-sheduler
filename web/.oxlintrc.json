@@ -352,7 +352,10 @@
               "apply",
               "undoReceipt",
               "read",
-              "describeReceipts"
+              "describeReceipts",
+              "listSchedules",
+              "readPastSchedule",
+              "createNewPeriod"
             ],
             "message": "The positive half of the rule above, as an ALLOW-list: preparing, confirming, applying, undoing and reading a proposal all go through the projection adapter's serial queue and its fences. A member that is not on this list is a durable path nobody reviewed."
           }
@@ -711,7 +714,10 @@
               "apply",
               "undoReceipt",
               "read",
-              "describeReceipts"
+              "describeReceipts",
+              "listSchedules",
+              "readPastSchedule",
+              "createNewPeriod"
             ],
             "message": "The positive half of the rule above, as an ALLOW-list: preparing, confirming, applying, undoing and reading a proposal all go through the projection adapter's serial queue and its fences. A member that is not on this list is a durable path nobody reviewed."
           }
@@ -923,7 +929,10 @@
               "apply",
               "undoReceipt",
               "read",
-              "describeReceipts"
+              "describeReceipts",
+              "listSchedules",
+              "readPastSchedule",
+              "createNewPeriod"
             ],
             "message": "The positive half of the rule above, as an ALLOW-list: preparing, confirming, applying, undoing and reading a proposal all go through the projection adapter's serial queue and its fences. A member that is not on this list is a durable path nobody reviewed."
           }
@@ -1668,7 +1677,10 @@
               "apply",
               "undoReceipt",
               "read",
-              "describeReceipts"
+              "describeReceipts",
+              "listSchedules",
+              "readPastSchedule",
+              "createNewPeriod"
             ],
             "message": "The positive half of the rule above, as an ALLOW-list: preparing, confirming, applying, undoing and reading a proposal all go through the projection adapter's serial queue and its fences. A member that is not on this list is a durable path nobody reviewed."
           }
@@ -1827,7 +1839,10 @@
               "apply",
               "undoReceipt",
               "read",
-              "describeReceipts"
+              "describeReceipts",
+              "listSchedules",
+              "readPastSchedule",
+              "createNewPeriod"
             ],
             "message": "The positive half of the rule above, as an ALLOW-list: preparing, confirming, applying, undoing and reading a proposal all go through the projection adapter's serial queue and its fences. A member that is not on this list is a durable path nobody reviewed."
           }
@@ -1939,7 +1954,10 @@
               "apply",
               "undoReceipt",
               "read",
-              "describeReceipts"
+              "describeReceipts",
+              "listSchedules",
+              "readPastSchedule",
+              "createNewPeriod"
             ],
             "message": "The positive half of the rule above, as an ALLOW-list: preparing, confirming, applying, undoing and reading a proposal all go through the projection adapter's serial queue and its fences. A member that is not on this list is a durable path nobody reviewed."
           }

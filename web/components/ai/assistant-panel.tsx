@@ -51,6 +51,31 @@ import {
   AssistantHistoricalConversation,
   AssistantLiveConversation,
 } from "./assistant-conversation";
+import { useCapabilityNavigation } from "./use-capability-navigation";
+
+/**
+ * A schedule made from a past one continues the conversation (plq5 P3, user decision
+ * 2026-10-07); the schedule it started on keeps a copy. This line says so and links back.
+ */
+function DerivedFromNote() {
+  const derivedFrom = useAuthorityStore((state) => state.derivedFrom);
+  const navigate = useCapabilityNavigation();
+  if (!derivedFrom) return null;
+  return (
+    <div
+      className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line2 px-4 py-2 text-meta text-ink2"
+      data-testid="assistant-derived-note"
+    >
+      <span>
+        Made from “{derivedFrom}”. The conversation continues here, and the schedule it started on
+        keeps a copy.
+      </span>
+      <Button variant="outline" size="sm" onClick={() => void navigate("save-and-load")}>
+        Open it from Recent schedules
+      </Button>
+    </div>
+  );
+}
 
 /** Why the panel is read-only right now, or `null` when it is live. */
 function readOnlyReason(ownership: string): string | null {
@@ -169,6 +194,7 @@ function PanelBody() {
         </Button>
       </div>
 
+      <DerivedFromNote />
       {threadId === null ? (
         <p className="p-4 text-meta text-ink2">Opening this schedule&apos;s conversation…</p>
       ) : reason ? (

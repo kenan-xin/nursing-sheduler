@@ -23,6 +23,9 @@ import type {
   AssistantProposalV1,
   AssistantScenarioBasis,
   CommandOutcome,
+  NewPeriodOutcome,
+  NewPeriodRequest,
+  PastSchedule,
   PrepareAssistantProposalInput,
   PrepareAssistantProposalOutcome,
   ReceiptStanding,
@@ -191,6 +194,23 @@ export const assistantProposalCommands = {
   /** Receipts for the selected scenario, newest first, with current Undo standing. */
   describeReceipts(): Promise<ReceiptStanding[]> {
     return getScenarioAuthority().describeAssistantReceipts();
+  },
+
+  // plq5 P3: a new period from a past schedule. Two reads and the card's Apply.
+
+  /** Recent schedules, newest first. A read. */
+  listSchedules(): Promise<ScheduleSummary[]> {
+    return getScenarioAuthority().listSchedules();
+  },
+
+  /** A past schedule and its saved roster. A read: nothing is switched or written. */
+  readPastSchedule(scenarioId: string): Promise<PastSchedule | null> {
+    return getScenarioAuthority().readPastSchedule(scenarioId);
+  },
+
+  /** THE new-period Apply: re-derive, refuse a changed source, create and open it. */
+  createNewPeriod(request: NewPeriodRequest): Promise<NewPeriodOutcome> {
+    return getScenarioAuthority().createNewPeriod(request);
   },
 } as const;
 

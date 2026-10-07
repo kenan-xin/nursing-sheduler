@@ -158,6 +158,9 @@ export const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
   find_swap_partners: "Looking for who can swap…",
   prepare_roster_swap: "Preparing a swap…",
   prepare_borrowed_cover: "Preparing a temporary cover…",
+  list_recent_schedules: "Reading your saved schedules…",
+  get_past_schedule_summary: "Reading a past schedule…",
+  prepare_new_period_from_schedule: "Preparing the new schedule…",
 };
 
 /**

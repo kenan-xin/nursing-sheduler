@@ -31,6 +31,7 @@ import { useOptimizeTools } from "./use-optimize-tools";
 import { useChoiceTools } from "./use-choice-tools";
 import { useRosterTools } from "./use-roster-tools";
 import { useFeasibilityTools } from "./use-feasibility-tools";
+import { useScheduleTools } from "./use-schedule-tools";
 import { computeScenarioSummary } from "@/components/home/scenario-summary";
 import { computeCoverageWarnings } from "@/components/requirements/requirements-model";
 import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
@@ -90,6 +91,9 @@ export function useModelVisibleTools(agentId: string, turnEpoch: number): void {
   useRosterTools(agentId, turnEpoch);
   // Clickable options when the model asks the user to pick. Sends a message; no write.
   useChoiceTools(agentId, turnEpoch);
+  // Past schedules (plq5 P3): two reads and a "Create November?" card. The user's
+  // Create on the card makes the new schedule; no tool does.
+  useScheduleTools(agentId, turnEpoch);
 
   useParameterlessModelVisibleTool(
     {

@@ -83,6 +83,7 @@ import {
   createEmptyScenarioUiState,
   RECENT_SCHEDULES_LIMIT,
   scheduleAutoName,
+  scheduleWard,
   type ScenarioUiState,
 } from "@/lib/scenario";
 
@@ -106,6 +107,11 @@ export interface ScheduleSummary {
   /** The user's name, or `null` when the list should show {@link autoName}. */
   title: string | null;
   autoName: string;
+  ward: string;
+  rangeStart: string;
+  rangeEnd: string;
+  /** The name of the schedule it was made from ("new period from a past schedule"). */
+  derivedFrom: string | null;
   pinned: boolean;
   createdAt: string;
   updatedAt: string;
@@ -176,7 +182,31 @@ export type ScenarioSwitchTarget =
    * identity even when the bytes match a prior document, so a restored file can
    * never inherit another document's history, receipts, or threads.
    */
-  | { kind: "load"; scenario: ScenarioUiState };
+  | { kind: "load"; scenario: ScenarioUiState }
+  /**
+   * A Load made from a past schedule (plq5 P3): refused (`stale_revision`) unless the
+   * source still has `expectedSourceRevision` and `expectedSourceRoster`, checked in
+   * the same transaction. The source itself is never written.
+   */
+  | {
+      kind: "derive";
+      scenario: ScenarioUiState;
+      derivedFrom: { scenarioId: string; title: string };
+      expectedSourceRevision: number;
+      /**
+       * The source's working roster the scenario was derived from, `null` when it had
+       * none. The epoch is part of the identity: Clear restarts the revision at 1.
+       */
+      expectedSourceRoster: SourceRosterFence | null;
+      /** The schedule whose active conversation continues in the new one (user decision 2026-10-07). */
+      carryThreadFrom?: string;
+    };
+
+/** A working roster row's exact identity: its revision and the clear epoch it was written under. */
+export interface SourceRosterFence {
+  revision: number;
+  clearEpoch: number;
+}
 
 export interface ScenarioSwitch {
   tabId: string;
@@ -674,12 +704,68 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
   }
 
   /**
+   * Continue one schedule's active conversation on a new one (plq5 P3, user decision
+   * 2026-10-07). The copy is a new thread, with new message ids, under the NEW
+   * schedule's fences, so a Clear on either side never reaches the other. The source
+   * thread is suspended, unchanged. Turn rows are not copied and the copies drop their
+   * `turnId`: a retry on the source thread replaces only the source's own messages.
+   */
+  async function copyActiveThreadInTx(
+    fromScenarioId: string,
+    toScenarioId: string,
+    at: Date,
+  ): Promise<void> {
+    const source = await db.assistantThreads
+      .where("[scenarioId+state]")
+      .equals([fromScenarioId, "active"])
+      .first();
+    if (!source) return;
+    const [global, scenario] = generationScopesFor(toScenarioId);
+    const generations = {
+      globalGeneration: (await ensureGeneration(db, global, at)).generation,
+      scenarioGeneration: (await ensureGeneration(db, scenario, at)).generation,
+    };
+    const threadId = newId();
+    const iso = at.toISOString();
+    await db.assistantThreads.put({ ...source, state: "historical", updatedAt: iso });
+    // The summary comes along: `seq` is kept, so its `throughSeq` still holds.
+    await db.assistantThreads.put({
+      ...source,
+      ...generations,
+      threadId,
+      scenarioId: toScenarioId,
+      state: "active",
+      createdAt: iso,
+      updatedAt: iso,
+    });
+    const messages = await db.assistantMessages
+      .where("[threadId+seq]")
+      .between([source.threadId, -Infinity], [source.threadId, Infinity])
+      .toArray();
+    await db.assistantMessages.bulkPut(
+      messages.map((message) => ({
+        ...message,
+        ...generations,
+        messageId: newId(),
+        threadId,
+        scenarioId: toScenarioId,
+        turnId: null,
+      })),
+    );
+  }
+
+  /**
    * The Recent schedules limit, applied only when a schedule is created (plq5 §2).
    * Blank schedules go first (silently: nothing is lost), then the oldest unpinned
    * ones until at most {@link RECENT_SCHEDULES_LIMIT} unpinned remain, the new one
    * included. A schedule a live tab holds is never removed.
    */
-  async function removeOverLimitInTx(createdId: string, at: Date): Promise<RemovedSchedule[]> {
+  async function removeOverLimitInTx(
+    createdId: string,
+    at: Date,
+    /** A new period's source is kept too: it was just read for this create. */
+    sourceId?: string,
+  ): Promise<RemovedSchedule[]> {
     const envelopes = await db.scenarioEnvelopes.toArray();
     const withRoster = await schedulesWithRoster();
     const leases = await db.writerLeases.toArray();
@@ -687,7 +773,9 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
       leases.filter((lease) => isLeaseLive(lease, at)).map((lease) => lease.scenarioId),
     );
     const removable = (envelope: ScenarioEnvelopeV3) =>
-      envelope.scenarioId !== createdId && !held.has(envelope.scenarioId);
+      envelope.scenarioId !== createdId &&
+      envelope.scenarioId !== sourceId &&
+      !held.has(envelope.scenarioId);
 
     const kept: ScenarioEnvelopeV3[] = [];
     for (const envelope of envelopes) {
@@ -779,6 +867,10 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
               scenarioId: envelope.scenarioId,
               title: envelope.title || null,
               autoName: scheduleAutoName(envelope.scenario),
+              ward: scheduleWard(envelope.scenario),
+              rangeStart: envelope.scenario.rangeStart,
+              rangeEnd: envelope.scenario.rangeEnd,
+              derivedFrom: envelope.derivedFrom?.title ?? null,
               pinned: envelope.pinned === true,
               createdAt: envelope.createdAt,
               updatedAt: envelope.updatedAt,
@@ -949,15 +1041,49 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
             createdAt: at.toISOString(),
           };
         } else {
+          const target = input.target;
+          if (target.kind === "derive") {
+            const source = await requireEnvelope(target.derivedFrom.scenarioId);
+            if (source.documentRevision !== target.expectedSourceRevision) {
+              throw new RepositoryError("stale_revision", "the source schedule changed", {
+                scenarioId: source.scenarioId,
+                expected: target.expectedSourceRevision,
+                actual: source.documentRevision,
+              });
+            }
+            // The roster has its own revision, so a roster save leaves the document
+            // revision alone: fence it here too, or May keeps a rest history April lost.
+            const roster = await db.roster.get(rosterKeys.working(source.scenarioId));
+            const expected = target.expectedSourceRoster;
+            if (
+              (roster?.revision ?? null) !== (expected?.revision ?? null) ||
+              (roster?.clearEpoch ?? null) !== (expected?.clearEpoch ?? null)
+            ) {
+              throw new RepositoryError("stale_revision", "the source roster changed", {
+                scenarioId: source.scenarioId,
+              });
+            }
+          }
           const snapshot =
-            input.target.kind === "new"
-              ? EMPTY_SNAPSHOT(input.target.apiVersion)
+            target.kind === "new"
+              ? EMPTY_SNAPSHOT(target.apiVersion)
               : // A loaded file is not a fresh local backup, so the fingerprint is
                 // `null` (unknown) — matching the shipped Load contract exactly.
-                { scenario: input.target.scenario, backupFingerprint: null };
-          const created = await createEnvelope(snapshot, input.target.kind, at);
+                { scenario: target.scenario, backupFingerprint: null };
+          const created = await createEnvelope(
+            snapshot,
+            target.kind === "new" ? "new" : "load",
+            at,
+          );
           envelope = created.envelope;
           commit = created.commit;
+          if (target.kind === "derive") {
+            envelope = { ...envelope, derivedFrom: target.derivedFrom };
+            await db.scenarioEnvelopes.put(envelope);
+            if (target.carryThreadFrom) {
+              await copyActiveThreadInTx(target.carryThreadFrom, envelope.scenarioId, at);
+            }
+          }
         }
 
         // Step 3 — acquire the target. A live foreign owner throws here, which
@@ -1007,7 +1133,11 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
         const removed =
           input.target.kind === "existing"
             ? []
-            : await removeOverLimitInTx(envelope.scenarioId, at);
+            : await removeOverLimitInTx(
+                envelope.scenarioId,
+                at,
+                input.target.kind === "derive" ? input.target.derivedFrom.scenarioId : undefined,
+              );
 
         return { selection, envelope, lease, owner, commit, removed };
       });
