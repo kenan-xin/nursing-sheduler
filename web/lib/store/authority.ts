@@ -1525,7 +1525,11 @@ export class ScenarioAuthority {
       try {
         const input = {
           tabId: this.tabId,
-          target,
+          // A new period continues the conversation of the schedule open now.
+          target:
+            target.kind === "derive" && fromScenarioId
+              ? { ...target, carryThreadFrom: fromScenarioId }
+              : target,
           ...(this.owner ? { currentOwner: this.owner } : {}),
           // Opening a past schedule starts a fresh Undo session, as a reload does:
           // Undo never reaches back across a switch.
@@ -1659,7 +1663,8 @@ export class ScenarioAuthority {
    * assistant's card. The past schedule is re-read and the new one re-derived with the
    * SAME pure transform the Preview ran; a different result, or a source revision that
    * moved, refuses as `changed`. Then it is a Load (a new identity) that records where
-   * it came from. The past schedule is never written.
+   * it came from, and the open schedule's conversation continues on it (a copy). The
+   * past schedule is never written.
    */
   async createNewPeriod(request: NewPeriodRequest): Promise<NewPeriodOutcome> {
     const past = await this.readPastSchedule(request.sourceScenarioId);

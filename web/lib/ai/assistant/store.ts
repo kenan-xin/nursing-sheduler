@@ -1220,9 +1220,23 @@ export const assistantActions = {
     });
   },
 
-  /** Dismiss it: Create succeeded, or the user said not now. */
+  /** Dismiss it: the user said not now. */
   clearNewPeriod(): void {
     useAssistantStore.setState({ activeNewPeriod: null });
+  },
+
+  /**
+   * Create opened the new schedule (user decision 2026-10-07). The conversation goes
+   * with it; the cards made for the schedule just left do not. A Preview there would be
+   * refused anyway (its lease is gone); this sets it aside so it is never offered.
+   */
+  setAsideScheduleCards(): void {
+    useAssistantStore.setState({
+      activeProposal: null,
+      activeRosterChange: null,
+      activeRunRequest: null,
+      activeNewPeriod: null,
+    });
   },
 
   setRunFollowUp(runFollowUp: RunFollowUp): void {

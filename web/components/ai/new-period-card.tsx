@@ -4,8 +4,9 @@
 //
 // Create is host state the model cannot press. It runs the authority's new-period
 // Apply, which re-derives the schedule from the past one and refuses if that changed
-// since this card was shown; then the new schedule opens, and the panel follows it to
-// a fresh conversation. A card from a stopped turn shows no Create control.
+// since this card was shown; then the new schedule opens and the conversation continues
+// there, without the cards made for the old one. A card from a stopped turn shows no
+// Create control.
 
 import { useState } from "react";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
@@ -44,7 +45,7 @@ export function NewPeriodCard({ disabled }: { disabled: boolean }) {
     try {
       const outcome = await assistantProposalCommands.createNewPeriod(active.request);
       if (outcome.ok) {
-        assistantActions.clearNewPeriod();
+        assistantActions.setAsideScheduleCards();
       } else {
         setFailed({
           id: active.id,

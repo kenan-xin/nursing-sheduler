@@ -40,7 +40,7 @@ import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/co
 import type { SuccessionCard } from "@/lib/scenario";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 
-export const PLAYBOOK_VERSION = "2026-10-06.1";
+export const PLAYBOOK_VERSION = "2026-10-07.1";
 
 /**
  * The priority ladder (spec docs/superpowers/specs/2026-09-29-priority-ladder-design.md,
@@ -505,5 +505,5 @@ export const NEW_PERIOD_INSTRUCTIONS: readonly string[] = [
   "Take the new period's first and last day from what the user said, and ask when unsure. Rest history is carried only when the new period starts on nextPeriodStart, the day after the past roster ends.",
   "Then call prepare_new_period_from_schedule. It copies people, groups, shift types and rules, marks Singapore public holidays and carries rest history. Requests, leave and temporary covers stay with the past schedule; if the user wants some for the new period, add them after it is created, with prepare_scenario_change.",
   "When no rest history can be carried, say why and ask with offer_choices whether to continue without it. Call again with continueWithoutHistory true only after the user agrees.",
-  "Only the user creates it, by pressing Create on the card. The chat then moves to the new schedule and starts fresh, with a note linking back to the past schedule, which keeps this conversation.",
+  "Only the user creates it, by pressing Create on the card. The new schedule then opens and this conversation continues there; the schedule the chat was on keeps a copy. A Preview prepared before Create is set aside: prepare it again for the new schedule.",
 ];

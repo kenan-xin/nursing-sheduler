@@ -70,7 +70,7 @@ describe("the card's sentences", () => {
       "Not copied: 2 requests, 1 leave day. Add them for May 2026 if they still apply.",
     );
     expect(view.dropped).toEqual(["Date group “Handover days”: 2 dates → 0 dates"]);
-    expect(view.outcome).toMatch(/chat moves to “Ward 3 · May 2026”/);
+    expect(view.outcome).toMatch(/conversation continues in “Ward 3 · May 2026”/);
   });
 
   it("say why no history was carried", () => {

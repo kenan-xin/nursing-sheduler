@@ -131,7 +131,8 @@ Three tools. Each one is registered through `useModelVisibleTool` (`web/componen
 - Preview stores the source's `documentRevision`.
 - Apply re-reads the source. If the source changed, Apply refuses: "September changed since this preview. Ask again."
 - Otherwise Apply runs `switchScenario` with a new target kind, `derive`. This is `load` plus `derivedFrom`. The past schedule is never written.
-- The card says: "Creates 'Ward 3 · November 2025' and opens it. September is kept. This conversation stays with September." Assistant threads are per schedule (`schema.ts:204`), so November starts a fresh thread (Q3).
+- The card says: "Creates 'Ward 3 · November 2025' and opens it. September is kept. This conversation continues in 'Ward 3 · November 2025', and this schedule keeps a copy." Assistant threads are per schedule (`schema.ts:204`). The switch transaction copies the open schedule's active thread onto the new identity, with new message ids and the new schedule's fences. The old thread is kept unchanged (Q3, decision 3 as revised 2026-10-07).
+- A Preview, roster change or run card made before Create is set aside on Create. Its Apply is refused anyway, because the old schedule's lease is gone.
 - There is no Undo on the receipt. To go back, open September from Recent schedules. To remove November, delete it.
 
 ## 6. Privacy
@@ -176,7 +177,7 @@ There is nothing to rewrite. Existing envelopes show up in the list with auto-na
 
 1. Roster per schedule (P2) is approved. Load and New stop clearing the roster once P2 ships. This replaces the C-23 ruling.
 2. Keep up to 30 unpinned schedules. At the limit, the oldest unpinned schedule is removed, and the list says so first. Pinned schedules are never removed.
-3. After "create November from September", the conversation moves to November, with a short note that links back to September's conversation.
+3. After "create November from September", the conversation moves to November, with a short note that links back to September's conversation. Revised 2026-10-07: the same conversation continues in November, so the user can keep talking. The schedule the chat was on keeps a copy up to that point.
 4. History carried into a new period covers the longest look-back that any rule needs, with a minimum of 7 days.
 5. Pinning a schedule also asks the browser for persistent storage.
 6. Duplicate copies the roster too.

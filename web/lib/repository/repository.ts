@@ -193,6 +193,8 @@ export type ScenarioSwitchTarget =
       scenario: ScenarioUiState;
       derivedFrom: { scenarioId: string; title: string };
       expectedSourceRevision: number;
+      /** The schedule whose active conversation continues in the new one (user decision 2026-10-07). */
+      carryThreadFrom?: string;
     };
 
 export interface ScenarioSwitch {
@@ -691,6 +693,57 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
   }
 
   /**
+   * Continue one schedule's active conversation on a new one (plq5 P3, user decision
+   * 2026-10-07). The copy is a new thread, with new message ids, under the NEW
+   * schedule's fences, so a Clear on either side never reaches the other. The source
+   * thread is suspended, unchanged. Turn rows are not copied and the copies drop their
+   * `turnId`: a retry on the source thread replaces only the source's own messages.
+   */
+  async function copyActiveThreadInTx(
+    fromScenarioId: string,
+    toScenarioId: string,
+    at: Date,
+  ): Promise<void> {
+    const source = await db.assistantThreads
+      .where("[scenarioId+state]")
+      .equals([fromScenarioId, "active"])
+      .first();
+    if (!source) return;
+    const [global, scenario] = generationScopesFor(toScenarioId);
+    const generations = {
+      globalGeneration: (await ensureGeneration(db, global, at)).generation,
+      scenarioGeneration: (await ensureGeneration(db, scenario, at)).generation,
+    };
+    const threadId = newId();
+    const iso = at.toISOString();
+    await db.assistantThreads.put({ ...source, state: "historical", updatedAt: iso });
+    // The summary comes along: `seq` is kept, so its `throughSeq` still holds.
+    await db.assistantThreads.put({
+      ...source,
+      ...generations,
+      threadId,
+      scenarioId: toScenarioId,
+      state: "active",
+      createdAt: iso,
+      updatedAt: iso,
+    });
+    const messages = await db.assistantMessages
+      .where("[threadId+seq]")
+      .between([source.threadId, -Infinity], [source.threadId, Infinity])
+      .toArray();
+    await db.assistantMessages.bulkPut(
+      messages.map((message) => ({
+        ...message,
+        ...generations,
+        messageId: newId(),
+        threadId,
+        scenarioId: toScenarioId,
+        turnId: null,
+      })),
+    );
+  }
+
+  /**
    * The Recent schedules limit, applied only when a schedule is created (plq5 §2).
    * Blank schedules go first (silently: nothing is lost), then the oldest unpinned
    * ones until at most {@link RECENT_SCHEDULES_LIMIT} unpinned remain, the new one
@@ -1004,6 +1057,9 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
           if (target.kind === "derive") {
             envelope = { ...envelope, derivedFrom: target.derivedFrom };
             await db.scenarioEnvelopes.put(envelope);
+            if (target.carryThreadFrom) {
+              await copyActiveThreadInTx(target.carryThreadFrom, envelope.scenarioId, at);
+            }
           }
         }
 

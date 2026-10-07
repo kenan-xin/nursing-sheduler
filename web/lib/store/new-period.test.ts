@@ -3,6 +3,12 @@
 // otherwise is a Load that records where it came from. The past schedule is not written.
 
 import { beforeEach, describe, expect, it } from "vitest";
+import {
+  persistThreadMessages,
+  readThreadMessages,
+  readThreadsForScenario,
+  selectActiveThread,
+} from "@/lib/ai/assistant/history-repo";
 import { deriveNewPeriod, type PastRoster } from "@/lib/proposal";
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
 import { useAuthorityStore } from "./authority";
@@ -122,6 +128,85 @@ describe("creating the new period", () => {
       hasRoster: false,
       rangeStart: "2026-05-01",
     });
+  });
+
+  it("continues October's conversation in May; October keeps its own thread", async () => {
+    const april = await aprilThenOctober();
+    const october = useAuthorityStore.getState().scenarioId!;
+    const config = { db: harness.db };
+    const thread = await selectActiveThread(october, config);
+    await persistThreadMessages(
+      [
+        { id: "m1", role: "user", content: "Based on April, create May." },
+        { id: "m2", role: "assistant", content: "Here is May. Press Create." },
+      ],
+      {
+        threadId: thread.threadId,
+        scenarioId: october,
+        modelId: "test/model",
+        turnId: "turn-1",
+        globalGeneration: thread.globalGeneration,
+        scenarioGeneration: thread.scenarioGeneration,
+        createdAt: new Date().toISOString(),
+      },
+      config,
+    );
+    const octoberBefore = await readThreadMessages(thread.threadId, config);
+
+    expect((await assistantProposalCommands.createNewPeriod(await requestFor(april))).ok).toBe(
+      true,
+    );
+    const may = useAuthorityStore.getState().scenarioId!;
+
+    // The panel's own lookup finds the carried thread, with the same messages.
+    const carried = await selectActiveThread(may, config);
+    expect(carried.threadId).not.toBe(thread.threadId);
+    const copies = await readThreadMessages(carried.threadId, config);
+    expect(copies.map((m) => [m.seq, m.role, m.content])).toEqual(
+      octoberBefore.map((m) => [m.seq, m.role, m.content]),
+    );
+    expect(copies.every((m) => m.scenarioId === may && m.turnId === null)).toBe(true);
+    expect(copies.map((m) => m.messageId)).not.toContain("m1");
+
+    // October keeps its thread, unchanged, and suspended.
+    const [kept] = await readThreadsForScenario(october, config);
+    expect(kept).toMatchObject({ threadId: thread.threadId, state: "historical" });
+    expect(await readThreadMessages(thread.threadId, config)).toEqual(octoberBefore);
+  });
+
+  it("a Preview prepared on October before Create cannot be applied after it", async () => {
+    const april = await aprilThenOctober();
+    const prepared = await assistantProposalCommands.prepare({
+      proposalId: crypto.randomUUID(),
+      threadId: "thread-1",
+      turnId: "turn-1",
+      registryStamp: { appBuildVersion: "test-build", manifestSha256: "test-manifest" },
+      commands: [
+        {
+          type: "set_roster_range",
+          start: "2026-10-01",
+          end: "2026-10-15",
+          importPublicHolidays: false,
+        },
+      ],
+      rationale: "Because you asked.",
+      evidence: [],
+      outcome: "untested",
+    });
+    if (!prepared.ok) throw new Error("prepare failed");
+
+    expect((await assistantProposalCommands.createNewPeriod(await requestFor(april))).ok).toBe(
+      true,
+    );
+    const may = useAuthorityStore.getState().documentRevision;
+
+    const applied = await assistantProposalCommands.apply({
+      proposalId: prepared.proposal.proposalId,
+      receiptId: crypto.randomUUID(),
+    });
+    expect(applied.ok).toBe(false);
+    expect(useAuthorityStore.getState().documentRevision).toBe(may);
+    expect(stateSpine.scenario.getState().rangeEnd).toBe("2026-05-31");
   });
 
   it("refuses when April's document changed since the preview", async () => {

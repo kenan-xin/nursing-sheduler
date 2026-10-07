@@ -19,6 +19,15 @@ type NsWindow = {
     scenario(): { rangeStart: string; staff: { id: string; history?: string[] }[] };
   };
   __nsAssistant: {
+    selectThread(scenarioId: string): Promise<{ threadId: string }>;
+    appendMessage(input: {
+      threadId: string;
+      scenarioId: string;
+      messageId: string;
+      role: "user" | "assistant";
+      content: string;
+    }): Promise<string>;
+    tableCounts(): Promise<Record<string, number>>;
     prepareNewPeriod(input: {
       scenarioId: string;
       rangeStart: string;
@@ -125,6 +134,25 @@ test("based on September, create October: the user's Create makes it, with rest 
   }, SEPTEMBER);
   await saveSeptemberRoster(page, september);
 
+  // The conversation so far, on September.
+  await page.evaluate(async (id) => {
+    const assistant = (window as unknown as NsWindow).__nsAssistant;
+    const { threadId } = await assistant.selectThread(id);
+    for (const [messageId, role, content] of [
+      ["e2e-u1", "user", "Based on September, create October."],
+      ["e2e-a1", "assistant", "Here is October. Press Create to make it."],
+    ] as const) {
+      const outcome = await assistant.appendMessage({
+        threadId,
+        scenarioId: id,
+        messageId,
+        role,
+        content,
+      });
+      if (outcome !== "accepted") throw new Error(`seed ${messageId}: ${outcome}`);
+    }
+  }, september);
+
   await page.getByTestId("assistant-launcher").click();
   await expect(page.getByTestId("assistant-dock")).toBeVisible();
   await page.evaluate(
@@ -150,7 +178,7 @@ test("based on September, create October: the user's Create makes it, with rest 
   await page.getByTestId("new-period-create").click();
   await expect(card).toHaveCount(0);
   await expect(page.getByTestId("assistant-derived-note")).toContainText(
-    "Made from “Ward 3 · September 2025”. Its conversation stays with it.",
+    "Made from “Ward 3 · September 2025”. The conversation continues here, and the schedule it started on keeps a copy.",
   );
   const october = await page.evaluate(async () => {
     const store = (window as unknown as NsWindow).__nsStore;
@@ -158,6 +186,12 @@ test("based on September, create October: the user's Create makes it, with rest 
     return { id: store.authority().scenarioId, scenario: store.scenario() };
   });
   expect(october.id).not.toBe(september);
+  // The same conversation continues on October; September keeps its own copy.
+  await expect(page.getByText("Based on September, create October.")).toBeVisible();
+  await expect(page.getByText("Here is October. Press Create to make it.")).toBeVisible();
+  expect(
+    await page.evaluate(() => (window as unknown as NsWindow).__nsAssistant.tableCounts()),
+  ).toMatchObject({ assistantThreads: 2, assistantMessages: 4 });
   expect(october.scenario.rangeStart).toBe("2025-10-01");
   expect(october.scenario.staff[0]!.history).toEqual(["OFF", "OFF", "OFF", "OFF", "OFF", "N", "N"]);
 

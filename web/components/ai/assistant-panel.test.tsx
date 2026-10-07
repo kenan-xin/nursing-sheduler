@@ -184,7 +184,7 @@ describe("mounting reserves nothing and contacts no provider", () => {
 describe("a schedule made from a past one (plq5 P3)", () => {
   afterEach(() => useAuthorityStore.setState({ derivedFrom: null }));
 
-  it("says the past schedule keeps its conversation, and links back to it", async () => {
+  it("says the conversation continues here, and links back to the past schedule", async () => {
     await makeReady();
     useAuthorityStore.setState({ derivedFrom: "Ward 3 · April 2026" });
     render(<AssistantSurface />);
@@ -192,7 +192,7 @@ describe("a schedule made from a past one (plq5 P3)", () => {
 
     const note = await screen.findByTestId("assistant-derived-note");
     expect(note).toHaveTextContent(
-      "Made from “Ward 3 · April 2026”. Its conversation stays with it.",
+      "Made from “Ward 3 · April 2026”. The conversation continues here, and the schedule it started on keeps a copy.",
     );
     expect(
       screen.getByRole("button", { name: "Open it from Recent schedules" }),

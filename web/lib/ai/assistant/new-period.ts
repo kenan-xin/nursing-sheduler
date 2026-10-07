@@ -97,7 +97,7 @@ export function buildNewPeriodView(
       (entry) => `${entry.label}: ${entry.before ?? "none"} → ${entry.after ?? "removed"}`,
     ),
     outcome:
-      `Creates “${newName}” and opens it. “${source.name}” is kept, with this ` +
-      `conversation; the chat moves to “${newName}” and starts fresh.`,
+      `Creates “${newName}” and opens it. “${source.name}” is kept. This ` +
+      `conversation continues in “${newName}”, and this schedule keeps a copy.`,
   };
 }

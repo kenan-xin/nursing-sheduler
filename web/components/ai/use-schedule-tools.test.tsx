@@ -213,13 +213,19 @@ describe("the card", () => {
     render(<NewPeriodCard disabled={false} />);
   }
 
-  it("creates and opens May only on the user's Create", async () => {
+  it("creates and opens May only on the user's Create, setting aside the old schedule's Preview", async () => {
     await showMay();
+    act(() =>
+      useAssistantStore.setState({
+        activeProposal: { proposalId: "p-october", turnEpoch: TURN } as never,
+      }),
+    );
     expect(screen.getByText("Create “Ward 3 · May 2026”?")).toBeInTheDocument();
     await act(async () => {
       fireEvent.click(screen.getByTestId("new-period-create"));
     });
     await vi.waitFor(() => expect(useAssistantStore.getState().activeNewPeriod).toBeNull());
+    expect(useAssistantStore.getState().activeProposal).toBeNull();
     expect(useAuthorityStore.getState()).toMatchObject({ derivedFrom: "Ward 3 · April 2026" });
     expect(await scenarioCommands.listSchedules()).toHaveLength(3);
   });
