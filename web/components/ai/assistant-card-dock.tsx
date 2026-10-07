@@ -31,6 +31,7 @@ import type { AssistantProposalController } from "./use-assistant-proposals";
 import { ChoiceCard } from "./choice-card";
 import { DockServicesContext } from "./dock-card";
 import { DiagnosticSearchCard } from "./diagnostic-search-card";
+import { NewPeriodCard } from "./new-period-card";
 import { OptimizeRunRequestCard } from "./optimize-run-request-card";
 import { ProposalPreviewCard } from "./proposal-preview-card";
 import { RosterChangeCard } from "./roster-change-card";
@@ -57,6 +58,7 @@ function useDockKeys(proposals: AssistantProposalController | undefined) {
         : null,
   );
   const choice = useAssistantStore((s) => s.activeChoices?.id ?? null);
+  const newPeriod = useAssistantStore((s) => s.activeNewPeriod?.id ?? null);
   const proposal =
     proposals?.proposal && proposals.readiness ? proposals.proposal.proposalId : null;
   return {
@@ -64,6 +66,7 @@ function useDockKeys(proposals: AssistantProposalController | undefined) {
     run: run === null ? null : `run:${run}`,
     roster,
     choice: choice === null ? null : `choice:${choice}`,
+    newPeriod: newPeriod === null ? null : `new-period:${newPeriod}`,
     proposal: proposal === null ? null : `proposal:${proposal}`,
   };
 }
@@ -71,7 +74,13 @@ function useDockKeys(proposals: AssistantProposalController | undefined) {
 /** A card is waiting for the user's pick (the diagnostic card only reports). */
 function useCardOpen(proposals: AssistantProposalController | undefined): boolean {
   const keys = useDockKeys(proposals);
-  return Boolean(keys.run || keys.roster?.startsWith("roster:") || keys.choice || keys.proposal);
+  return Boolean(
+    keys.run ||
+    keys.roster?.startsWith("roster:") ||
+    keys.choice ||
+    keys.newPeriod ||
+    keys.proposal,
+  );
 }
 
 /** The stacked cards, newest nearest the composer. */
@@ -84,6 +93,7 @@ function AssistantCardDock({ value }: { value: CardDockValue }) {
     [keys.run, <OptimizeRunRequestCard />],
     [keys.roster, <RosterChangeCard onSend={value.onSend} disabled={value.disabled} />],
     [keys.choice, <ChoiceCard onSend={value.onSend} disabled={value.disabled} />],
+    [keys.newPeriod, <NewPeriodCard disabled={value.disabled} />],
     [
       keys.proposal,
       <ProposalPreviewCard

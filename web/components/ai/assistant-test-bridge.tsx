@@ -38,6 +38,8 @@ import { readAssistantSettings } from "@/lib/ai/assistant/settings-repo";
 import type { AssistantGenerationPair } from "@/lib/ai/assistant/fence";
 import type { AssistantSettingsV1 } from "@/lib/ai/assistant/records";
 import { readClearFacts } from "@/lib/ai/assistant/clear-repo";
+import { scheduleRef } from "@/lib/ai/assistant/new-period";
+import { prepareNewPeriod } from "./use-schedule-tools";
 import {
   assistantActions,
   selectReady,
@@ -97,6 +99,16 @@ export interface AssistantBridge {
   optimizeBases(): Promise<number>;
   /** Row counts per assistant table, plus the surviving fence rows. */
   tableCounts(): Promise<Record<string, number>>;
+  /**
+   * Run the REAL `prepare_new_period_from_schedule` body for a schedule (plq5 P3), so a
+   * browser journey reaches the shipped card without a live model.
+   */
+  prepareNewPeriod(input: {
+    scenarioId: string;
+    rangeStart: string;
+    rangeEnd: string;
+    continueWithoutHistory?: boolean;
+  }): Promise<unknown>;
   /** Select (or create) this scenario's active thread through the product path. */
   selectThread(scenarioId: string): Promise<{ threadId: string } & AssistantGenerationPair>;
   /**
@@ -222,6 +234,12 @@ export function AssistantTestBridge() {
         return latest
           ? { turnId: latest.turnId, state: latest.state, terminalReason: latest.terminalReason }
           : null;
+      },
+      prepareNewPeriod({ scenarioId, continueWithoutHistory = false, ...range }) {
+        return prepareNewPeriod(
+          { scheduleRef: scheduleRef(scenarioId), continueWithoutHistory, ...range },
+          useAssistantStore.getState().turnEpoch,
+        );
       },
       /** The in-memory diagnostic card. Clear must leave none behind. */
       activeDiagnostic() {

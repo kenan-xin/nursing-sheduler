@@ -59,10 +59,13 @@ import {
   type ScenarioEnvelopeV3,
   type ScenarioRepository,
   type ScheduleSummary,
+  type SourceRosterFence,
 } from "@/lib/repository";
 import {
   deriveIdempotencyKey,
+  deriveNewPeriod,
   prepareProposal,
+  type PastRoster,
   type AssistantCommandV1,
   type CommandRejection,
   type EvidenceReference,
@@ -70,7 +73,7 @@ import {
   type ProposalOutcome,
 } from "@/lib/proposal";
 import type { CapabilityRegistryStamp } from "@/lib/capability/types";
-import type { ScenarioUiState, UiRequestCell } from "@/lib/scenario";
+import { scheduleAutoName, type ScenarioUiState, type UiRequestCell } from "@/lib/scenario";
 // `planReap` is imported by its DEEP path, never through the `@/lib/optimize`
 // barrel: the barrel pulls in the run controller, which imports `@/lib/store`, and
 // that would close a require cycle. `basis/reaper` and `basis/basis-row` are pure
@@ -88,6 +91,7 @@ import { pickScenario } from "./fingerprint";
 import type { HotStore } from "./hot-store";
 import type { ScenarioProjectionHandle } from "./scenario-store";
 import { shareStructure } from "./structural-share";
+import { createRosterStorageForDb } from "./roster-storage";
 
 // ---------------------------------------------------------------------------
 // Session-authority projection
@@ -128,6 +132,8 @@ export interface AuthorityState {
    * New or Load (plq5). Empty otherwise. The Save & Load card announces them.
    */
   removedSchedules: readonly string[];
+  /** The name of the schedule this one was made from (plq5 P3), or `null`. */
+  derivedFrom: string | null;
   /** Derived from persisted commit facts, never from a process-memory stack. */
   canUndo: boolean;
   canRedo: boolean;
@@ -149,6 +155,7 @@ const INITIAL_AUTHORITY_STATE: AuthorityState = {
   heldByTabId: null,
   peerLoadedScenarioId: null,
   removedSchedules: [],
+  derivedFrom: null,
   canUndo: false,
   canRedo: false,
   writeStatus: "idle",
@@ -257,6 +264,42 @@ export type ScheduleActionOutcome =
       /** `open-here`: this tab has it open. `open-elsewhere`: another tab is editing it. */
       reason: "open-here" | "open-elsewhere" | "storage-full" | "failed";
     };
+
+/** A past schedule as the assistant may read it (plq5 P3). Read-only. */
+export interface PastSchedule {
+  scenarioId: string;
+  name: string;
+  documentRevision: number;
+  scenario: ScenarioUiState;
+  /** Its saved roster, or `null` when it has none (or one this build cannot read). */
+  roster: PastRoster | null;
+}
+
+/** "Create November from September": what the user's Apply on the card asks for. */
+export interface NewPeriodRequest {
+  sourceScenarioId: string;
+  rangeStart: string;
+  rangeEnd: string;
+  /** The source's document revision and the result's digest, as the Preview showed them. */
+  expectedSourceRevision: number;
+  expectedDigest: string;
+}
+
+export type NewPeriodOutcome =
+  | { ok: true }
+  | { ok: false; reason: "changed" | "missing" | CommandFailureReason };
+
+/** Only the fields the derivation reads, and only when they have the roster's shape. */
+function asPastRoster(document: unknown): PastRoster | null {
+  const doc = document as Partial<PastRoster> | null;
+  return doc &&
+    Array.isArray(doc.solvedDays) &&
+    Array.isArray(doc.edits) &&
+    Array.isArray(doc.context?.people) &&
+    Array.isArray(doc.context?.calendar)
+    ? { context: doc.context, solvedDays: doc.solvedDays, edits: doc.edits }
+    : null;
+}
 
 function scheduleActionFailure(error: unknown): ScheduleActionOutcome {
   if (isRepositoryError(error, "schedule_open")) return { ok: false, reason: "open-here" };
@@ -621,6 +664,7 @@ export class ScenarioAuthority {
       scenarioId: envelope.scenarioId,
       documentRevision: envelope.documentRevision,
       recordRevision: envelope.recordRevision,
+      derivedFrom: envelope.derivedFrom?.title ?? null,
       ...(history ? { canUndo: history.undo, canRedo: history.redo } : {}),
     });
   }
@@ -1462,6 +1506,13 @@ export class ScenarioAuthority {
     target:
       | { kind: "new"; apiVersion?: string }
       | { kind: "load"; scenario: ScenarioUiState }
+      | {
+          kind: "derive";
+          scenario: ScenarioUiState;
+          derivedFrom: { scenarioId: string; title: string };
+          expectedSourceRevision: number;
+          expectedSourceRoster: SourceRosterFence | null;
+        }
       | { kind: "existing"; scenarioId: string },
   ): Promise<CommandOutcome> {
     return this.enqueue(async () => {
@@ -1476,7 +1527,11 @@ export class ScenarioAuthority {
       try {
         const input = {
           tabId: this.tabId,
-          target,
+          // A new period continues the conversation of the schedule open now.
+          target:
+            target.kind === "derive" && fromScenarioId
+              ? { ...target, carryThreadFrom: fromScenarioId }
+              : target,
           ...(this.owner ? { currentOwner: this.owner } : {}),
           // Opening a past schedule starts a fresh Undo session, as a reload does:
           // Undo never reaches back across a switch.
@@ -1580,6 +1635,75 @@ export class ScenarioAuthority {
         return scheduleActionFailure(error);
       }
     });
+  }
+
+  /**
+   * Read a past schedule and its saved roster (plq5 P3). A read: no lease, no write,
+   * and the open schedule is not switched. `null` when it no longer exists.
+   */
+  async readPastSchedule(scenarioId: string): Promise<PastSchedule | null> {
+    return (await this.readPastWithRoster(scenarioId))?.past ?? null;
+  }
+
+  /** The past schedule and the exact working-roster row it was read with. */
+  private async readPastWithRoster(
+    scenarioId: string,
+  ): Promise<{ past: PastSchedule; roster: SourceRosterFence | null } | null> {
+    let envelope: ScenarioEnvelopeV3;
+    try {
+      envelope = await this.repository.read(scenarioId);
+    } catch {
+      return null;
+    }
+    const row = await createRosterStorageForDb(() => this.db, scenarioId)
+      .readWorking()
+      .catch(() => null);
+    return {
+      past: {
+        scenarioId,
+        name: envelope.title || scheduleAutoName(envelope.scenario),
+        documentRevision: envelope.documentRevision,
+        scenario: envelope.scenario,
+        roster: asPastRoster(row?.document),
+      },
+      roster: row ? { revision: row.revision, clearEpoch: row.clearEpoch } : null,
+    };
+  }
+
+  /**
+   * Create a new period from a past schedule and open it: the user's Apply on the
+   * assistant's card. The past schedule is re-read and the new one re-derived with the
+   * SAME pure transform the Preview ran; a different result, or a source revision that
+   * moved, refuses as `changed`. Then it is a Load (a new identity) that records where
+   * it came from, and the open schedule's conversation continues on it (a copy). The
+   * past schedule is never written.
+   */
+  async createNewPeriod(request: NewPeriodRequest): Promise<NewPeriodOutcome> {
+    const read = await this.readPastWithRoster(request.sourceScenarioId);
+    if (!read) return { ok: false, reason: "missing" };
+    const { past } = read;
+    const derived = deriveNewPeriod(past.scenario, past.roster, {
+      start: request.rangeStart,
+      end: request.rangeEnd,
+    });
+    if (
+      !derived.ok ||
+      derived.plan.digest !== request.expectedDigest ||
+      past.documentRevision !== request.expectedSourceRevision
+    ) {
+      return { ok: false, reason: "changed" };
+    }
+    // The switch transaction re-checks both the document revision and this exact
+    // roster row, so an edit between this read and the switch refuses as `changed`.
+    const outcome = await this.switchScenario({
+      kind: "derive",
+      scenario: derived.plan.scenario,
+      derivedFrom: { scenarioId: past.scenarioId, title: past.name },
+      expectedSourceRevision: request.expectedSourceRevision,
+      expectedSourceRoster: read.roster,
+    });
+    if (outcome.ok) return { ok: true };
+    return { ok: false, reason: outcome.code === "stale_revision" ? "changed" : outcome.reason };
   }
 
   /** Serialize a metadata write; keep `recordRevision` honest when it is this tab's schedule. */
