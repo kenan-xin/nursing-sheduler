@@ -78,13 +78,21 @@ def op_load(req):
 def op_schedule(req):
     """C3: run the real scheduler/context setup. Rejections raised during model
     build (OFF/LEAVE misuse, unknown ids, coverage) surface as {ok: false}.
-    An optional `timeout` (seconds) is the job's solver budget; `seconds` is wall time."""
+    An optional `timeout` (seconds) is the job's solver budget; `seconds` is wall time.
+    `explain: true` adds the run's `explanation` (a ledger, or the proven core of a run
+    with no roster), as the job server reports it."""
     try:
         started = time.monotonic()
+        explained = []
         _df, _sol, _score, status, _cell = nurse_scheduling.schedule(
-            req["yaml"].encode("utf-8"), timeout=req.get("timeout")
+            req["yaml"].encode("utf-8"),
+            timeout=req.get("timeout"),
+            on_explanation=explained.append if req.get("explain") else None,
         )
-        return {"ok": True, "status": status, "seconds": round(time.monotonic() - started, 2)}
+        out = {"ok": True, "status": status, "seconds": round(time.monotonic() - started, 2)}
+        if req.get("explain"):
+            out["explanation"] = explained[-1] if explained else None
+        return out
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e), "errorType": type(e).__name__}
 

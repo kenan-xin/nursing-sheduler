@@ -19,7 +19,7 @@ import type { ScenarioUiState } from "@/lib/scenario";
 import { stableYaml } from "@/lib/scenario/test-fixtures";
 // Direct path: the barrel re-exports this module and `@/lib/scenario` would cycle.
 import { withCoverOverrides } from "@/lib/scenario/temporary-cover";
-import { REST_PRACTICE_WARNING, type RepairId } from "./playbook";
+import type { RepairId } from "./playbook";
 import {
   buildFeasibilityReport,
   isSafeOption,
@@ -69,13 +69,15 @@ const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
   personalCapsTooLow: ["extra_shift_willing_nurse"],
   busyNightsWithRestRule: ["borrow_temporary_nurse", "run_one_short"],
   rnMixOnLeave: ["borrow_temporary_nurse", "ask_nurse_on_leave"],
-  shortOnLeaveDay: ["borrow_temporary_nurse", "ask_nurse_on_leave", "run_one_short"],
+  // Every day needs all three nurses, so no date can take her leave: no move (msnp).
+  shortOnLeaveDay: ["borrow_temporary_nurse", "run_one_short", "ask_nurse_on_leave"],
   tooFewNurses: ["borrow_temporary_nurse", "add_staff_member"],
 };
 
 /** The host question each option's Preview must raise before Apply (none = asked in chat or plain manager call). */
 const AGREEMENT: Partial<Record<RepairId, AssumptionType>> = {
   ask_nurse_on_leave: "leave_cancelled",
+  move_leave: "leave_moved",
   extra_shift_willing_nurse: "extra_shifts_agreed",
 };
 
@@ -305,38 +307,13 @@ describe("the scripted wards read as real ward situations", () => {
     ]);
   });
 
-  it("rest rules too tight: no certain cause, so no blind borrow; soften a rest rule, with the warning", () => {
-    // Unexplained order is soften a hard request, relax a count cap, then soften a rest rule:
-    // this ward has only the rest rules.
+  it("rest rules too tight: no certain cause, no blind borrow, and never a relaxed rest rule", () => {
+    // User decision 2026-09-30: rest rules are safety rules, so no repair relaxes one. This
+    // ward has only the rest rules, so the app offers nothing to relax.
     const state = SCENARIOS.restRuleTooTight();
     const report = buildFeasibilityReport(state, true);
     expect(report.findings).toEqual([]);
-    expect(report.options.map((o) => o.repairId)).toEqual(["soften_rest_rule"]);
-    const [soften] = report.options;
-    expect(soften.operations).toEqual([
-      {
-        type: "edit_shift_sequence_rule",
-        ruleId: "no-day-after-night",
-        description: "No day shift straight after a night",
-        people: ["Nurses"],
-        pattern: ["N", "D"],
-        dates: ["ALL"],
-        weight: "-1000",
-      },
-    ]);
-    expect(soften).toMatchObject({
-      evidence: "hypothesis",
-      confirmation: "manager",
-      enforcedBy: "apply",
-    });
-    expect(soften.why).toContain(REST_PRACTICE_WARNING);
-    expect(isSafeOption(state, soften)).toBe(true);
-    const result = applyAssistantCommands(state, soften.operations);
-    if (!result.ok) throw new Error(result.rejection.message);
-    const card = result.next.cardsByKind.successions.find((c) => c.uid === "no-day-after-night");
-    // Softened, never deleted or switched off.
-    expect(card).toMatchObject({ weight: -1000 });
-    expect(card?.disabled).toBeFalsy();
+    expect(report.options).toEqual([]);
     expect(buildFeasibilityReport(state, false).options).toEqual([]);
   });
 });

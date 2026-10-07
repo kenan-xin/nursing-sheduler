@@ -23,6 +23,7 @@ import {
   type RepairOption,
   violatesSafetyFloor,
 } from "./repair-options";
+import { SAFETY_FLOOR } from "./playbook";
 
 const rank = (state = SCENARIOS.onlyRnOnLeave(), runInfeasible = false) =>
   rankRepairOptions(state, findStaffingShortfalls(state), { runInfeasible });
@@ -989,11 +990,10 @@ describe("isSafeOption", () => {
     ],
   ];
 
-  it("accepts a hard rest rule softened to a strong preference, and nothing looser", () => {
+  it("refuses every repair that weakens a rest rule (user decision 2026-09-30)", () => {
     const rest = SCENARIOS.restRuleTooTight();
     const soften = (patch: Record<string, unknown> = {}) =>
       option({
-        repairId: "soften_rest_rule",
         evidence: "hypothesis",
         operations: [
           {
@@ -1008,12 +1008,34 @@ describe("isSafeOption", () => {
           },
         ] as Op[],
       });
-    expect(isSafeOption(rest, soften())).toBe(true);
+    expect(isSafeOption(rest, soften())).toBe(false);
+    expect(isSafeOption(rest, soften({ weight: "-1000" }))).toBe(false);
     expect(isSafeOption(rest, soften({ weight: "-infinity" }))).toBe(false);
     expect(isSafeOption(rest, soften({ weight: "10" }))).toBe(false);
     expect(isSafeOption(rest, soften({ people: ["ana"] }))).toBe(false);
     expect(isSafeOption(rest, soften({ dates: ["2026-11-03"] }))).toBe(false);
     expect(isSafeOption(rest, soften({ ruleId: "ghost" }))).toBe(false);
+    // The final boundary names the rest line for a repair; a change the manager asks for
+    // (not a repair) may still soften it.
+    const [op] = soften().operations;
+    expect(violatesSafetyFloor(rest, [op], { leaveAsked: true, repair: true })).toBe(
+      SAFETY_FLOOR[0],
+    );
+    expect(violatesSafetyFloor(rest, [op], { leaveAsked: true })).toBeNull();
+    expect(
+      violatesSafetyFloor(
+        rest,
+        [
+          {
+            type: "set_rule_enabled",
+            ruleKind: "successions",
+            ruleId: "no-day-after-night",
+            enabled: false,
+          },
+        ],
+        { leaveAsked: true, repair: true },
+      ),
+    ).toBe(SAFETY_FLOOR[0]);
     // Turning it off is the manager's own call, never a repair.
     expect(
       isSafeOption(
@@ -2247,7 +2269,6 @@ describe("unexplained-path guesses (bead nursing-sheduler-spdk, l3m fixtures)", 
     };
     const ids = unexplained(state).map((o) => o.repairId);
     expect(ids).not.toContain("relax_count_rule");
-    expect(ids).toContain("soften_rest_rule");
   });
 
   it("softens the nurse's whole consecutive block of hard requests, not one day", () => {

@@ -113,11 +113,13 @@ export function useDiagnosticTools(agentId: string, turnEpoch: number): void {
         const { token } = context;
 
         // A tested copy becomes a Preview, so the safety floor holds here as it does for
-        // the ranked options. A Preview always asks before leave is removed.
+        // the ranked options. A Preview always asks before leave is removed. A candidate is
+        // a repair, so it never weakens a rest rule or touches protected leave.
         const scenario = pickScenario(useScenarioStore.getState());
         const refused = args.candidates.flatMap((candidate, index) => {
           const line = violatesSafetyFloor(scenario, candidate.operations as AssistantCommandV1[], {
             leaveAsked: true,
+            repair: true,
           });
           return line === null ? [] : [`Candidate ${index + 1} breaks the safety floor: "${line}"`];
         });
