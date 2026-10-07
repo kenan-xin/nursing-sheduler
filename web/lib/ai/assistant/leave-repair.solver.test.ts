@@ -53,10 +53,10 @@ const coreOf = (state: ScenarioUiState, solved: Solved) =>
 
 const found = (s: Solved) => s.status === "OPTIMAL" || s.status === "FEASIBLE";
 
-const rest = (uid: string, pattern: string[]): SuccessionCard => ({
+const rest = (uid: string, pattern: string[], person = ["ALL"]): SuccessionCard => ({
   uid,
   description: uid,
-  person: ["ALL"],
+  person,
   pattern,
   weight: -Infinity,
 });
@@ -132,8 +132,9 @@ describe.skipIf(!GATED)("leave repairs, solver-confirmed", () => {
       expect(blind).not.toContain("move_leave");
       const options = buildFeasibilityReport(state, true, core).options;
       const ids = options.map((o) => o.repairId);
-      // The core names both rest rules, so softening one stays, ranked before the leave.
-      expect(ids).toEqual(["soften_rest_rule", "move_leave", "ask_nurse_on_leave"]);
+      // The core names both rest rules, but no repair relaxes a rest rule (user decision
+      // 2026-09-30): the leave repairs are all that is offered.
+      expect(ids).toEqual(["move_leave", "ask_nurse_on_leave"]);
       for (const id of ["move_leave", "ask_nurse_on_leave"] as const) {
         const option = options.find((o) => o.repairId === id)!;
         expect(option.evidence).toBe("hypothesis");
@@ -143,5 +144,119 @@ describe.skipIf(!GATED)("leave repairs, solver-confirmed", () => {
       }
     },
     oracleBudget(3),
+  );
+
+  it(
+    "a moved leave day never lands where pinned nights and hard rest leave too few",
+    () => {
+      // Review P1: ben must work the night of the 3rd, so he can work neither shift on the
+      // 4th. Cara's leave moved to the 4th leaves ana alone for two shifts.
+      const state = ward({
+        staff: people("ana", "ben", "cara"),
+        reqData: [
+          leave("cara", "05"),
+          {
+            uid: "ben-night",
+            kind: "request",
+            person: "ben",
+            date: "03",
+            shiftType: "N",
+            weight: Infinity,
+          },
+        ],
+        cardsByKind: cards({
+          requirements: [
+            requirement("day", "D", 1, {
+              date: [
+                "2026-11-01",
+                "2026-11-02",
+                "2026-11-03",
+                "2026-11-04",
+                "2026-11-05",
+                "2026-11-07",
+              ],
+            }),
+            requirement("night", "N", 1, {
+              date: [
+                "2026-11-01",
+                "2026-11-02",
+                "2026-11-03",
+                "2026-11-04",
+                "2026-11-06",
+                "2026-11-07",
+              ],
+            }),
+            requirement("busy-night", "N", 2, { date: ["2026-11-05"] }),
+          ],
+          successions: [
+            rest("no-day-after-night", ["N", "D"], ["ben"]),
+            rest("no-two-nights", ["N", "N"], ["ben"]),
+          ],
+        }),
+      });
+      const move = buildFeasibilityReport(state, true).options.find(
+        (o) => o.repairId === "move_leave",
+      )!;
+      expect(move.operations).not.toContainEqual(expect.objectContaining({ toDate: "04" }));
+      expect(move.evidence).toBe("hypothesis");
+      expect(found(appliedSolve(state, move))).toBe(true);
+    },
+    oracleBudget(1),
+  );
+
+  it(
+    "the core's own request is softened even when an unrelated one is written first",
+    () => {
+      // Review P2: ben's request and rest rule come first; ana's are the clash.
+      const state = ward({
+        staff: people("ana", "ben", "cara"),
+        reqData: [
+          {
+            uid: "ben-unrelated",
+            kind: "request",
+            person: "ben",
+            date: "01",
+            shiftType: "N",
+            weight: -Infinity,
+          },
+          {
+            uid: "ana-night",
+            kind: "request",
+            person: "ana",
+            date: "04",
+            shiftType: "N",
+            weight: Infinity,
+          },
+          {
+            uid: "ana-day",
+            kind: "request",
+            person: "ana",
+            date: "05",
+            shiftType: "D",
+            weight: Infinity,
+          },
+        ],
+        cardsByKind: cards({
+          requirements: [requirement("day", "D", 1), requirement("night", "N", 1)],
+          successions: [
+            rest("irrelevant-ben", ["N", "N"], ["ben"]),
+            rest("actual-ana-rest", ["N", "D"], ["ana"]),
+          ],
+        }),
+      });
+      expect(findStaffingShortfalls(state)).toEqual([]);
+      const before = solve(state);
+      expect(before.status).toBe("INFEASIBLE");
+      const core = coreOf(state, before);
+      expect(core.some((m) => m.ruleId === "irrelevant-ben")).toBe(false);
+      const soften = buildFeasibilityReport(state, true, core).options.find(
+        (o) => o.repairId === "soften_hard_request",
+      );
+      expect(soften?.operations).toEqual([
+        expect.objectContaining({ type: "set_shift_request", personId: "ana" }),
+      ]);
+      expect(found(appliedSolve(state, soften!))).toBe(true);
+    },
+    oracleBudget(2),
   );
 });

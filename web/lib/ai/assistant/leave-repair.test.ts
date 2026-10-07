@@ -7,14 +7,23 @@ import type { ResolvedCoreMember } from "@/lib/optimize/explanation";
 import { deriveAssumptions } from "@/lib/proposal/assumptions";
 import { applyAssistantCommands } from "@/lib/proposal/operations";
 import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
-import { cards, leave, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
+import {
+  cards,
+  leave,
+  nightCap,
+  people,
+  requirement,
+  ward,
+} from "@/lib/rules/ward-fixtures.test-support";
+import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 import type { ScenarioUiState, SuccessionCard, UiRequestCell } from "@/lib/scenario";
-import { REPAIR_ORDER } from "./playbook";
+import { REPAIR_ORDER, SAFETY_FLOOR } from "./playbook";
 import {
   buildFeasibilityReport,
   isSafeOption,
   rankRepairOptions,
   type RepairOption,
+  violatesSafetyFloor,
 } from "./repair-options";
 
 const BUSY = ["2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05"];
@@ -74,6 +83,121 @@ function applied(state: ScenarioUiState, option: RepairOption): ScenarioUiState 
   return result.next;
 }
 
+describe("review regressions (msnp)", () => {
+  const NIGHTS = [
+    "2026-11-01",
+    "2026-11-02",
+    "2026-11-03",
+    "2026-11-04",
+    "2026-11-06",
+    "2026-11-07",
+  ];
+  const sick = { ...leave("ana", "05"), uid: "sick-ana", description: "Sick leave" };
+  const annual = { ...leave("ana", "05"), uid: "annual-ana", description: "Annual leave" };
+  /** Ana is one of the two qualified for nights, and the 5th needs both. */
+  const sickWard = (reqData: UiRequestCell[]): ScenarioUiState =>
+    ward({
+      staff: people("ana", "ben", "cara"),
+      reqData,
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", 1),
+          requirement("night", "N", 1, { qualifiedPeople: ["ana", "ben"], date: NIGHTS }),
+          requirement("busy-night", "N", 2, {
+            qualifiedPeople: ["ana", "ben"],
+            date: ["2026-11-05"],
+          }),
+        ],
+      }),
+    });
+
+  it.each([
+    ["sick first", [sick, annual]],
+    ["annual first", [annual, sick]],
+  ])("never moves or cancels a day that also holds sick leave (%s)", (_label, reqData) => {
+    const state = sickWard(reqData);
+    expect(findStaffingShortfalls(state).length).toBeGreaterThan(0);
+    const ids = rank(state).map((o) => o.repairId);
+    expect(ids).not.toContain("move_leave");
+    expect(ids).not.toContain("ask_nurse_on_leave");
+    const ops: AssistantCommandV1[] = [
+      { type: "move_leave", personId: "ana", fromDate: "05", toDate: "04" },
+      { type: "clear_requests", personId: "ana", startDate: "2026-11-05", endDate: "2026-11-05" },
+    ];
+    for (const op of ops) {
+      const asked: RepairOption = {
+        repairId: op.type === "move_leave" ? "move_leave" : "ask_nurse_on_leave",
+        title: "t",
+        why: "w",
+        operations: [op],
+        confirmation: "named_nurse",
+        enforcedBy: "host_question",
+        confirmationQuestion: "q",
+        needsFromUser: [],
+        capabilityId: null,
+        evidence: "hypothesis",
+      };
+      expect(isSafeOption(state, asked), op.type).toBe(false);
+      // The final boundary refuses it as a repair; the manager may still clear it herself.
+      expect(violatesSafetyFloor(state, [op], { leaveAsked: true, repair: true })).toBe(
+        SAFETY_FLOOR[5],
+      );
+      expect(violatesSafetyFloor(state, [op], { leaveAsked: true })).toBeNull();
+    }
+  });
+
+  it("never moves leave to a date the others' pinned shifts and hard rest rules leave short", () => {
+    // Review P1: ben must work the night of the 3rd and may work neither shift on the 4th,
+    // so cara's leave on the 4th leaves ana alone for two shifts.
+    const benRest = (uid: string, pattern: string[]): SuccessionCard => ({
+      uid,
+      description: uid,
+      person: ["ben"],
+      pattern,
+      weight: -Infinity,
+    });
+    const state = ward({
+      staff: people("ana", "ben", "cara"),
+      reqData: [
+        leave("cara", "05"),
+        {
+          uid: "ben-night",
+          kind: "request",
+          person: "ben",
+          date: "03",
+          shiftType: "N",
+          weight: Infinity,
+        },
+      ],
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", 1, {
+            date: [
+              "2026-11-01",
+              "2026-11-02",
+              "2026-11-03",
+              "2026-11-04",
+              "2026-11-05",
+              "2026-11-07",
+            ],
+          }),
+          requirement("night", "N", 1, { date: NIGHTS }),
+          requirement("busy-night", "N", 2, { date: ["2026-11-05"] }),
+        ],
+        successions: [
+          benRest("no-day-after-night", ["N", "D"]),
+          benRest("no-two-nights", ["N", "N"]),
+        ],
+      }),
+    });
+    const move = pick(rank(state), "move_leave");
+    expect(move?.operations).toEqual([
+      { type: "move_leave", personId: "cara", fromDate: "05", toDate: "06" },
+    ]);
+    expect(move?.evidence).toBe("hypothesis");
+  });
+});
+
 describe("move a nurse's leave to a date the roster can spare", () => {
   it("moves cara's leave off the short 5th to the quiet 6th, after the borrow and run-one-short", () => {
     const state = busyWeek([leave("cara", "05")]);
@@ -90,11 +214,14 @@ describe("move a nurse's leave to a date the roster can spare", () => {
     expect(move).toMatchObject({
       confirmation: "named_nurse",
       enforcedBy: "host_question",
-      evidence: "static_check",
+      // The 5th's gap is proven, but the 6th staying staffed is not: a guess to test.
+      evidence: "hypothesis",
       capabilityId: "leave-and-requests",
     });
+    expect(move.why).not.toMatch(/fully staffed/);
+    expect(move.why).toMatch(/only a run can prove it/);
     expect(isSafeOption(state, move)).toBe(true);
-    // The host's own operation closes the gap, and the 6th stays fully staffed.
+    // The host's own operation closes the gap, and the static check finds the 6th staffed.
     const after = applied(state, move);
     expect(findStaffingShortfalls(after)).toEqual([]);
   });
@@ -420,7 +547,8 @@ describe("after a failed run with no static cause, the solver's core names the l
       },
     };
     const ids = (c: ResolvedCoreMember[] | null) => rank(ward2, c).map((o) => o.repairId);
-    expect(ids(null)).toEqual(["soften_hard_request", "soften_rest_rule"]);
+    // No repair ever relaxes the rest rule (user decision 2026-09-30).
+    expect(ids(null)).toEqual(["soften_hard_request"]);
     const leaveOnly = core.filter((m) => m.kind === "leave");
     expect(ids(leaveOnly)).toEqual(["move_leave", "ask_nurse_on_leave"]);
     // Once the core names them, each rule change is back, in the playbook's order.
@@ -437,7 +565,59 @@ describe("after a failed run with no static cause, the solver's core names the l
         must: false,
       },
     ];
-    expect(ids(named)).toEqual(["soften_hard_request", "soften_rest_rule", "move_leave"]);
+    expect(ids(named)).toEqual(["soften_hard_request", "move_leave", "ask_nurse_on_leave"]);
+  });
+
+  it("picks the rule the core names, whatever order the rules were written in", () => {
+    // Review P2: an unrelated hard request and limit come first; the core names later ones.
+    const s: ScenarioUiState = ward({
+      staff: people("ana", "ben", "cara"),
+      reqData: [
+        {
+          uid: "ben-off-core",
+          kind: "request",
+          person: "ben",
+          date: "01",
+          shiftType: "N",
+          weight: -Infinity,
+        },
+        {
+          uid: "ana-night",
+          kind: "request",
+          person: "ana",
+          date: "04",
+          shiftType: "N",
+          weight: Infinity,
+        },
+      ],
+      cardsByKind: cards({
+        requirements: [requirement("day", "D", 1), requirement("night", "N", 1)],
+        counts: [nightCap("cap-ben", "ben", 3), nightCap("cap-ana", "ana", 3)],
+      }),
+    });
+    const onCore: ResolvedCoreMember[] = [
+      {
+        kind: "request",
+        ruleId: "ana-night",
+        label: "ana N",
+        nurse: "ana",
+        date: "2026-11-04",
+        shift: ["N"],
+        must: true,
+      },
+      { kind: "count", ruleId: "cap-ana", label: "cap-ana" },
+    ];
+    const options = rank(s, onCore);
+    expect(pick(options, "soften_hard_request")?.operations).toEqual([
+      expect.objectContaining({
+        type: "set_shift_request",
+        personId: "ana",
+        startDate: "2026-11-04",
+      }),
+    ]);
+    expect(pick(options, "relax_count_rule")?.operations).toEqual([
+      expect.objectContaining({ type: "edit_count_rule", ruleId: "cap-ana" }),
+    ]);
   });
 
   it("reaches the report only after an infeasible run", () => {

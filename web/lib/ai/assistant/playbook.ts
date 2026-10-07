@@ -14,8 +14,10 @@
 // docs/research/2026-09-24-assistant/06-sg-rest-guidelines.md). The Employment Act
 // sets a rest day a week and working-hour caps; rest between shifts, the most nights
 // in a row and days off after nights are recommended practice with no MOH minimum.
-// So a manager may soften or turn off a rest rule, always with REST_PRACTICE_WARNING,
-// and a repair may soften one (never delete it) after the ward-internal fixes.
+// So a manager may soften or turn off a rest rule when they ask, always with
+// REST_PRACTICE_WARNING. A REPAIR NEVER OFFERS IT (user decision 2026-09-30, Timefold plan
+// decision 2; priority ladder tier H): rest rules are safety rules, so no repair softens,
+// turns off, deletes or narrows one, and `violatesSafetyFloor({ repair: true })` refuses it.
 //
 // CONTROLLER RULINGS (2026-09-24, binding over the spec draft; d582 of 2026-09-27):
 // - No `mark_person_off` arm exists, and a borrowed/float nurse is no longer a roster
@@ -40,7 +42,7 @@ import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/co
 import type { SuccessionCard } from "@/lib/scenario";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 
-export const PLAYBOOK_VERSION = "2026-10-06.1";
+export const PLAYBOOK_VERSION = "2026-10-07.1";
 
 /**
  * The priority ladder (spec docs/superpowers/specs/2026-09-29-priority-ladder-design.md,
@@ -257,7 +259,6 @@ export type RepairId =
   | "soften_hard_request"
   | "extra_shift_willing_nurse"
   | "relax_count_rule"
-  | "soften_rest_rule"
   | "borrow_temporary_nurse"
   | "add_staff_member"
   | "move_leave"
@@ -343,18 +344,6 @@ export const REPAIRS: readonly RepairEntry[] = [
       "Raise by the smallest amount that closes the gap, at most 2, and ask the manager to check legal limits.",
   },
   {
-    id: "soften_rest_rule",
-    title: "Turn a hard rest rule into a strong preference for this period",
-    whenToUse:
-      "The run failed with no certain cause and the ward has hard rest rules. Rest rules are recommended practice, not law.",
-    disruption: "medium",
-    confirmation: "manager",
-    enforcedBy: "apply",
-    opTypes: ["edit_shift_sequence_rule"],
-    guardrail:
-      "Soften only: never delete it or turn it off, keep who, which shifts and which dates it covers, and always pass on the rest-practice warning.",
-  },
-  {
     id: "borrow_temporary_nurse",
     title: "Book a temporary cover nurse for the short dates",
     whenToUse: "The ward has too few free nurses on some dates.",
@@ -394,7 +383,7 @@ export const REPAIRS: readonly RepairEntry[] = [
     enforcedBy: "host_question",
     opTypes: ["move_leave"],
     guardrail:
-      "Only with her agreement, only to a date that stays fully staffed, keeping her rest rules and contracted hours, and never sick or compassionate leave.",
+      "Only with her agreement, only to a date the static check finds staffed (a guess to test), keeping her rest rules and contracted hours, and never sick or compassionate leave.",
   },
   {
     // Bead msnp: the last resort, one leave day at a time on each short day.
@@ -466,15 +455,13 @@ export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
     "split_long_shift",
   ],
   // Spec: 1, 3, as hypotheses. A blind borrow is not a guess worth testing.
-  // Softening a rest rule comes last. Only here: the static check does not model rest
-  // rules, so it never blames them for a proven gap.
+  // No rest rule is ever relaxed (user decision 2026-09-30).
   // A contracted minimum first (4h5a): the only hard floor on working time, and one the
   // staffing findings never name. Its builder proves it when it can.
   unexplained: [
     "relax_contracted_hours",
     "soften_hard_request",
     "relax_count_rule",
-    "soften_rest_rule",
     // The solver's proven core names the leave days (msnp).
     "move_leave",
     "ask_nurse_on_leave",
@@ -497,7 +484,7 @@ export const SOFT_REQUEST_WEIGHT = 20;
 export const LONG_SHIFT_MINUTES = 660;
 
 export const SAFETY_FLOOR: readonly string[] = [
-  "Never delete a rest rule, such as no day shift straight after a night, or narrow who or what it covers. Softening it or turning it off is the manager's call and always carries the rest-practice warning.",
+  "Never offer to soften, turn off, delete or narrow a rest rule, such as no day shift straight after a night, to repair a roster: rest rules are safety rules.",
   "Never relax or turn off a supervision (preceptor) rule.",
   "Never remove or lower a skill-mix requirement, such as 1 RN on every night, change its group or delete that group, and never ban everyone else from a shift to stand in for one.",
   "Never set a staffing requirement to 0 or turn one off.",

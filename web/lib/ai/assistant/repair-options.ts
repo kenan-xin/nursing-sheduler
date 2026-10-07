@@ -35,6 +35,7 @@ import {
 } from "@/lib/proposal/commands";
 import { expandPersonRefs, expandShiftTypeRefs, flattenShiftTypeRefs } from "@/lib/rules/expansion";
 import type { ResolvedCoreMember } from "@/lib/optimize/explanation";
+import { stableStringify } from "@/lib/proposal/digest";
 import { applyAssistantCommands } from "@/lib/proposal/operations";
 import {
   capOf,
@@ -74,7 +75,6 @@ import {
   PLAYBOOK_VERSION,
   REPAIRS,
   REPAIR_ORDER,
-  REST_PRACTICE_WARNING,
   SAFETY_FLOOR,
   SOFT_REQUEST_WEIGHT,
   type Confirmation,
@@ -82,7 +82,6 @@ import {
   type RepairId,
   type Situation,
 } from "./playbook";
-import { TIER_BANDS } from "@/lib/rules/priority-ladder";
 
 export interface RepairOption {
   repairId: RepairId;
@@ -139,6 +138,16 @@ function makeCtx(state: ScenarioUiState, core: readonly ResolvedCoreMember[] | n
 }
 
 const range = (ctx: Ctx) => ({ start: ctx.state.rangeStart, end: ctx.state.rangeEnd });
+/**
+ * A rule a repair may change: any rule with no proven core, else one the core names. Each
+ * builder picks among these, so an unrelated rule written first never hides one that helps.
+ */
+const onCore = (ctx: Ctx, uid: string) =>
+  !ctx.core?.length || ctx.core.some((m) => m.ruleId === uid);
+/** A nurse's request on `iso` a repair may change: as `onCore`, by nurse and date. */
+const requestOnCore = (ctx: Ctx, person: string, iso: string | null) =>
+  !ctx.core?.length ||
+  ctx.core.some((m) => m.kind === "request" && m.nurse === person && m.date === iso);
 const dateLabel = (ctx: Ctx, dateId: string) =>
   ctx.items.find((i) => i.id === dateId)?.description ?? dateId;
 const isoOf = (ctx: Ctx, dateId: string) => ctx.items.find((i) => i.id === dateId)?.iso ?? null;
@@ -280,7 +289,10 @@ function editCount(
 // --- Builders, one per playbook entry -------------------------------------
 
 const alignOverlappingRequirements: Builder = (ctx, findings) => {
-  const conflicts = findings.filter((f) => f.kind === "requirement_conflict" && f.dateId);
+  const conflicts = findings.filter(
+    (f) =>
+      f.kind === "requirement_conflict" && f.dateId && onCore(ctx, f.ruleIds[f.ruleIds.length - 1]),
+  );
   if (conflicts.length === 0) return null;
   // ruleIds: the inner requirements, then the outer one.
   const outerId = conflicts[0].ruleIds[conflicts[0].ruleIds.length - 1];
@@ -332,6 +344,9 @@ const isHardCell = (c: UiRequestCell): c is HardCell =>
 
 const softenHardRequest: Builder = (ctx, findings, situation) => {
   const hard = ctx.state.reqData.filter(isHardCell);
+  const picked = (c: HardCell | undefined): c is HardCell =>
+    c !== undefined &&
+    requestOnCore(ctx, String(c.person), isoOf(ctx, toDateId(c.date, range(ctx))));
   const cellFor = (person: string, dateId: string | null, reason: string) =>
     hard.find(
       (c) =>
@@ -348,11 +363,15 @@ const softenHardRequest: Builder = (ctx, findings, situation) => {
         .filter((a) => a.reason === "never_request" || a.reason === "day_off")
         .map((a) => ({ f, cell: cellFor(a.person, f.dateId, a.reason) })),
     )
-    .find(({ f, cell }) => cell && f.dateId !== null && gapOn(findings, f.dateId) <= 1);
+    .find(({ f, cell }) => picked(cell) && f.dateId !== null && gapOn(findings, f.dateId) <= 1);
   const anyHit = findings.some((f) =>
     f.away.some((a) => a.reason === "never_request" || a.reason === "day_off"),
   );
-  const cell = hit ? hit.cell : !anyHit && situation === "unexplained" ? hard[0] : undefined;
+  const cell = hit
+    ? hit.cell
+    : !anyHit && situation === "unexplained"
+      ? hard.find(picked)
+      : undefined;
   if (!cell) return null;
   const at = (c: HardCell) => ctx.items.findIndex((i) => i.id === toDateId(c.date, range(ctx)));
   let first = at(cell);
@@ -430,7 +449,7 @@ const extraShiftWillingNurse: Builder = (ctx, findings) => {
     if (f.kind !== "cap_short" || f.required - f.available > 1) continue;
     for (const uid of f.capRuleIds) {
       const card = countCard(ctx, uid);
-      if (!editableCap(card)) continue;
+      if (!editableCap(card) || !onCore(ctx, uid)) continue;
       const people = staffIn(ctx, card.person);
       if (people.length !== 1) continue;
       const [person] = people;
@@ -460,7 +479,11 @@ const relaxCountRule: Builder = (ctx, findings, situation) => {
     // softening a hard count all break the safety floor. Relax the first true cap instead.
     // (A hard-negative "|x - T|^2" is exact too.)
     const card = ctx.state.cardsByKind.counts.find(
-      (c) => editableCap(c) && c.expression !== "x = T" && c.expression !== "|x - T|^2",
+      (c) =>
+        editableCap(c) &&
+        c.expression !== "x = T" &&
+        c.expression !== "|x - T|^2" &&
+        onCore(ctx, c.uid),
     );
     return editableCap(card) ? relaxOption(ctx, card, 1, null) : null;
   }
@@ -468,7 +491,7 @@ const relaxCountRule: Builder = (ctx, findings, situation) => {
     if (f.kind !== "cap_short") continue;
     for (const uid of f.capRuleIds) {
       const card = countCard(ctx, uid);
-      if (!editableCap(card)) continue;
+      if (!editableCap(card) || !onCore(ctx, uid)) continue;
       const capped = staffIn(ctx, card.person);
       if (capped.length < 2) continue;
       // Only nurses free on more days than the cap can use a higher one.
@@ -498,7 +521,7 @@ const contractCards = (ctx: Ctx) =>
  * numbers allow); otherwise one day less on the first contract, as a guess to test.
  */
 const relaxContractedHours: Builder = (ctx) => {
-  const cards = contractCards(ctx);
+  const cards = contractCards(ctx).filter((c) => onCore(ctx, c.uid));
   if (cards.length === 0) return null;
   const days = ctx.items.length;
   const step = (c: NurseContract) => Math.max(...c.workCoefs);
@@ -855,15 +878,33 @@ const addStaffMember: Builder = (ctx, all) => {
  */
 const PROTECTED_LEAVE = /sick|compassion|bereave|medical|hospital|\bmc\b/i;
 
-/** Her own leave cell on that date (a group's leave is not hers to give), unless protected. */
-const askableLeave = (state: ScenarioUiState, person: string, dateId: string) =>
-  state.reqData.find(
+const isProtected = (c: UiRequestCell) => PROTECTED_LEAVE.test(c.description ?? "");
+
+/**
+ * Her own leave cell on that date (a group's leave is not hers to give), unless ANY of her
+ * leave there is protected: a leave operation clears or moves the whole coordinate.
+ */
+const askableLeave = (state: ScenarioUiState, person: string, dateId: string) => {
+  const hers = state.reqData.filter(
     (c) =>
       c.kind === "leave" &&
       String(c.person) === person &&
-      toDateId(c.date, { start: state.rangeStart, end: state.rangeEnd }) === dateId &&
-      !PROTECTED_LEAVE.test(c.description ?? ""),
+      toDateId(c.date, { start: state.rangeStart, end: state.rangeEnd }) === dateId,
   );
+  return hers.some(isProtected) ? undefined : hers[0];
+};
+
+/**
+ * `op` touches her own unprotected leave and no one else's, judged by what it does: every
+ * leave cell it changes or removes, through the operation's own selector (operations.ts).
+ */
+function asksOwnLeave(state: ScenarioUiState, person: string, op: AssistantCommandV1): boolean {
+  const applied = applyAssistantCommands(state, [op]);
+  if (!applied.ok) return false;
+  const kept = new Set(applied.next.reqData.map(stableStringify));
+  const touched = state.reqData.filter((c) => c.kind === "leave" && !kept.has(stableStringify(c)));
+  return touched.length > 0 && touched.every((c) => String(c.person) === person && !isProtected(c));
+}
 
 /** A nurse's leave day a repair may ask about, and the shifts she would cover. */
 interface LeaveDay {
@@ -916,6 +957,44 @@ function coreLeaveDays(ctx: Ctx) {
 /** Short date ids the static check finds in `state`. */
 const shortIn = (state: ScenarioUiState) =>
   new Set(gapsOnly(findStaffingShortfalls(state)).flatMap((f) => (f.dateId ? [f.dateId] : [])));
+
+/**
+ * `state` with every nurse's availability on `dateId` resolved as the solver resolves it,
+ * written as hard "never" requests the static check reads: a nurse with a hard shift pin
+ * works only that shift, and a shift her hard rest rules forbid next to her pinned days
+ * is out. The static check reads neither (shortfalls.ts).
+ * ponytail: pins and rest from her own fixed days only; a rest clash with a shift the
+ * solver chooses stays unseen, so a moved leave day is still a guess to test.
+ */
+function withResolvedAvailability(state: ScenarioUiState, dateId: string): ScenarioUiState {
+  const range = { start: state.rangeStart, end: state.rangeEnd };
+  const worked = state.shifts.map((s) => String(s.id));
+  const out: UiRequestCell[] = [];
+  for (const { id } of state.staff) {
+    const person = String(id);
+    const pins = state.reqData.flatMap((c) =>
+      c.kind === "request" &&
+      c.weight === Infinity &&
+      String(c.person) === person &&
+      toDateId(c.date, range) === dateId
+        ? [String(c.shiftType)]
+        : [],
+    );
+    const pinned = pins.length ? expandShiftTypeRefs(pins, state) : null;
+    for (const shift of worked) {
+      if (pinned ? pinned.has(shift) : !restForbids(state, person, dateId, [shift])) continue;
+      out.push({
+        uid: `resolved-${person}-${dateId}-${shift}`,
+        kind: "request",
+        person: id,
+        date: dateId,
+        shiftType: shift,
+        weight: -Infinity,
+      });
+    }
+  }
+  return { ...state, reqData: [...state.reqData, ...out] };
+}
 
 /** The most half-hours her free and leave days can give her contract (relaxContractedHours' proof). */
 function mostContracted(state: ScenarioUiState, person: string, c: NurseContract): number {
@@ -1014,6 +1093,7 @@ const cancelStep: LeaveStep = (ctx, state, day) => {
     startDate: iso,
     endDate: iso,
   };
+  if (!asksOwnLeave(state, day.person, op)) return null;
   const applied = applyAssistantCommands(state, [op]);
   return applied.ok && stillFits(state, applied.next, day) ? { day, op, to: null } : null;
 };
@@ -1042,8 +1122,11 @@ const moveStep: LeaveStep = (ctx, state, day, avoid) => {
       fromDate: cell.date,
       toDate: item.id,
     };
+    if (!asksOwnLeave(state, day.person, op)) return null;
     const applied = applyAssistantCommands(state, [op]);
-    if (!applied.ok || shortIn(applied.next).has(item.id)) continue;
+    // The new date must stay staffed once the others' pins and hard rest rules are counted.
+    if (!applied.ok || shortIn(withResolvedAvailability(applied.next, item.id)).has(item.id))
+      continue;
     if (stillFits(state, applied.next, day)) return { day, op, to: item.id };
   }
   return null;
@@ -1134,7 +1217,7 @@ const moveLeave: Builder = (ctx, all) => {
       ctx,
       plan,
       all,
-      ` The new ${plan.picks.length === 1 ? "date stays" : "dates stay"} fully staffed, the leave keeps counting toward contracted hours, and no rest rule is relaxed.`,
+      ` The static check finds no gap on the new ${plan.picks.length === 1 ? "date" : "dates"}, counting pinned shifts and hard rest rules, but only a run can prove it. The leave keeps counting toward contracted hours, and no rest rule is relaxed.`,
     ),
     operations: plan.picks.map((p) => p.op),
     confirmationQuestion: `Has ${joinAnd(moves.map((m) => m.replace(/^(\S+) from/, "$1 agreed to move their leave from")))}?`,
@@ -1143,7 +1226,8 @@ const moveLeave: Builder = (ctx, all) => {
       `Whether ${joinAnd(names)} ${names.length === 1 ? "has" : "have"} agreed to the new ${plan.picks.length === 1 ? "date" : "dates"}.`,
     ],
     capabilityId: "leave-and-requests",
-    evidence: plan.proven ? "static_check" : "hypothesis",
+    // The new date is not proven to stay staffed: a guess to test, even for a proven gap.
+    evidence: "hypothesis",
   });
 };
 
@@ -1294,50 +1378,6 @@ const runOneShort: Builder = (ctx, all) => {
   });
 };
 
-/**
- * The same rest rule as a strong preference: who, which shifts and which dates stay; the
- * sign stays (a forbidden pattern stays discouraged). Null for a nested pattern the edit
- * arm cannot carry.
- */
-function softenedRest(
-  ctx: Ctx,
-  card: SuccessionCard,
-): Extract<AssistantCommandV1, { type: "edit_shift_sequence_rule" }> | null {
-  const pattern = asList(card.pattern);
-  if (pattern.some((p) => typeof p === "object")) return null;
-  return {
-    type: "edit_shift_sequence_rule",
-    ruleId: card.uid,
-    description: card.description ?? "",
-    people: asList(card.person),
-    pattern: pattern.map(String),
-    dates: card.date == null ? ["ALL"] : asList(card.date).map((d) => formDate(ctx, d)),
-    // A strong ward rule on the priority ladder, the tier the hard rest rules soften to.
-    weight: String(card.weight > 0 ? TIER_BANDS.strong.max : -TIER_BANDS.strong.max),
-  };
-}
-
-const isHardRest = (card: SuccessionCard | undefined): card is SuccessionCard =>
-  card !== undefined && !card.disabled && !Number.isFinite(card.weight);
-
-const softenRestRule: Builder = (ctx) => {
-  const card = ctx.state.cardsByKind.successions.find(isHardRest);
-  const op = card && softenedRest(ctx, card);
-  if (!card || !op) return null;
-  const name = ruleName(card, card.uid);
-  return makeOption("soften_rest_rule", {
-    title: `Make "${name}" a strong preference for this period instead of a hard rule`,
-    why: `The optimiser gave no reason, and a hard rest rule can leave no valid roster. As a strong preference the roster still keeps to it wherever it can. ${REST_PRACTICE_WARNING}`,
-    operations: [op],
-    confirmationQuestion: `As the manager, are you happy for "${name}" to be broken where the roster cannot keep to it?`,
-    needsFromUser: [
-      "Whether the manager accepts the rest rule as a strong preference this period.",
-    ],
-    capabilityId: "shift-successions",
-    evidence: "hypothesis",
-  });
-};
-
 const splitLongShift: Builder = (ctx, all) => {
   for (const f of gapsOnly(all)) {
     for (const id of f.shiftTypes) {
@@ -1368,7 +1408,6 @@ const BUILDERS: Record<RepairId, Builder> = {
   soften_hard_request: softenHardRequest,
   extra_shift_willing_nurse: extraShiftWillingNurse,
   relax_count_rule: relaxCountRule,
-  soften_rest_rule: softenRestRule,
   borrow_temporary_nurse: borrowTemporaryNurse,
   add_staff_member: addStaffMember,
   move_leave: moveLeave,
@@ -1384,7 +1423,6 @@ const RULE_CHANGES: ReadonlySet<RepairId> = new Set<RepairId>([
   "soften_hard_request",
   "extra_shift_willing_nurse",
   "relax_count_rule",
-  "soften_rest_rule",
 ]);
 
 /** The option changes a rule (by card uid) or a request (by nurse and date) the core names. */
@@ -1416,6 +1454,7 @@ export function rankRepairOptions(
   for (const id of REPAIR_ORDER[situation]) {
     const built = BUILDERS[id](ctx, findings, situation);
     // Coordinator ruling (msnp): relaxing a rule outside a proven core cannot resolve it.
+    // Each builder already picks on the core (`onCore`); this is the backstop.
     const offCore =
       built !== null && !!ctx.core?.length && RULE_CHANGES.has(id) && !touchesCore(ctx.core, built);
     if (built && !offCore && isSafeOption(state, built)) options.push(built);
@@ -1443,16 +1482,35 @@ const sameDates = (
   return sameSet(refs(a), refs(b));
 };
 
+/** A live rest rule `before` has that `after` deletes, turns off, narrows or makes weaker. */
+function weakensRest(before: ScenarioUiState, after: ScenarioUiState): boolean {
+  const scope = (c: SuccessionCard) => stableStringify([c.person, c.pattern, c.date ?? null]);
+  return before.cardsByKind.successions.some((card) => {
+    if (card.disabled) return false;
+    const now = after.cardsByKind.successions.find((c) => c.uid === card.uid);
+    return (
+      !now ||
+      !!now.disabled ||
+      scope(now) !== scope(card) ||
+      Math.sign(now.weight) !== Math.sign(card.weight) ||
+      Math.abs(now.weight) < Math.abs(card.weight)
+    );
+  });
+}
+
 /**
  * The SAFETY_FLOOR line these operations break, or null. A DENYLIST, so it can judge
  * any operations, including a candidate the model wrote itself. `leaveAsked`: the
  * host asks the nurse before leave is removed (a prepared Preview always does, through
  * its assumptions; a repair option only when it is a named-nurse host question).
+ * `repair`: the operations repair a roster (a ranked option or a tested candidate), not
+ * a change the manager asked for. A repair never weakens a rest rule (user decision
+ * 2026-09-30: rest rules are safety rules, tier H) and never touches protected leave.
  */
 export function violatesSafetyFloor(
   state: ScenarioUiState,
   operations: readonly AssistantCommandV1[],
-  opts: { leaveAsked: boolean },
+  opts: { leaveAsked: boolean; repair?: boolean },
 ): string | null {
   const [rest, supervision, skillMix, zero, limit, leave, skillGroup, invented] = SAFETY_FLOOR;
   const ctx = makeCtx(state);
@@ -1490,7 +1548,13 @@ export function violatesSafetyFloor(
     const card = requirementCard(ctx, uid);
     return loweredTo(card, card?.requiredNumPeople ?? Infinity, n);
   };
+  // A repair's operations are judged on the schedule the ones before them leave.
+  let current = state;
   for (const op of operations) {
+    const applied = opts.repair ? applyAssistantCommands(current, [op]) : null;
+    const before = current;
+    if (applied?.ok) current = applied.next;
+    if (applied?.ok && weakensRest(before, applied.next)) return rest;
     const broken = (() => {
       switch (op.type) {
         case "set_rule_enabled":
@@ -1502,6 +1566,8 @@ export function violatesSafetyFloor(
           return offByKind(op.ruleKind, op.ruleId);
         case "edit_shift_sequence_rule": {
           const card = ctx.state.cardsByKind.successions.find((c) => c.uid === op.ruleId);
+          // A repair's edit the host refuses is still an attempt on a rest rule.
+          if (card && applied && !applied.ok) return rest;
           if (!card || Number.isFinite(card.weight)) return null;
           // Softening is allowed (guidance, not law); people, pattern and dates all stay:
           // narrowing any of them deletes the rule where it no longer reaches.
@@ -1579,7 +1645,8 @@ export function violatesSafetyFloor(
         }
         case "clear_requests":
         case "move_leave":
-          return opts.leaveAsked ? null : leave;
+          if (!opts.leaveAsked) return leave;
+          return opts.repair && !asksOwnLeave(before, String(op.personId), op) ? leave : null;
         case "add_person":
           if (!PLACEHOLDER.test(op.name) || ctx.staffIds.has(op.name) || ctx.groupIds.has(op.name))
             return invented;
@@ -1654,7 +1721,9 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
   const loan = option.confirmation === "lending_ward";
   const nurseAsked = option.confirmation === "named_nurse" && option.enforcedBy === "host_question";
   if (option.operations.length > MAX_ASSISTANT_OPERATIONS) return false;
-  if (violatesSafetyFloor(state, option.operations, { leaveAsked: nurseAsked }) !== null)
+  if (
+    violatesSafetyFloor(state, option.operations, { leaveAsked: nurseAsked, repair: true }) !== null
+  )
     return false;
   if (option.operations.filter((op) => op.type === "add_person").length > MAX_BORROWED)
     return false;
@@ -1719,20 +1788,6 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
           op.minHours * 2 < floor
         );
       }
-      case "edit_shift_sequence_rule": {
-        // Soften a hard rest rule to a strong preference, nothing else about it changing.
-        const card = ctx.state.cardsByKind.successions.find((c) => c.uid === op.ruleId);
-        const want = isHardRest(card) ? softenedRest(ctx, card) : null;
-        const weight = Number(op.weight);
-        const keep = (o: typeof op) =>
-          JSON.stringify([o.description, o.people, o.pattern, o.dates]);
-        return (
-          want !== null &&
-          keep(op) === keep(want) &&
-          Number.isFinite(weight) &&
-          Math.sign(weight) === Math.sign(Number(want.weight))
-        );
-      }
       case "set_shift_request":
         // Soften a real nurse's request, or pin a nurse this loan adds to a shift.
         return typeof op.weight === "number"
@@ -1762,19 +1817,11 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
           );
         }
       case "clear_requests":
-        // One leave day at a time, and never sick or compassionate leave (msnp).
-        return (
-          nurseAsked &&
-          real(op.personId) &&
-          op.startDate === op.endDate &&
-          askableLeave(state, String(op.personId), toDateId(op.startDate, range(ctx))) !== undefined
-        );
+        // One leave day at a time, and never sick or compassionate leave (msnp): the
+        // floor above judged every leave cell the operation touches.
+        return nurseAsked && real(op.personId) && op.startDate === op.endDate;
       case "move_leave":
-        return (
-          nurseAsked &&
-          real(op.personId) &&
-          askableLeave(state, String(op.personId), String(op.fromDate)) !== undefined
-        );
+        return nurseAsked && real(op.personId);
       case "add_person":
         // bead 2vtv: a new staff member joins no group; the manager names one in chat.
         if (option.repairId === "add_staff_member") return op.groups.length === 0;

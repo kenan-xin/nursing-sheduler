@@ -112,20 +112,16 @@ describe("repair catalogue", () => {
 
   it("guesses only the spec's repairs when the cause is unknown", () => {
     // Spec "Ranking": Unexplained is 1, 3 as hypotheses. A blind borrow is not a guess to test.
-    // Softening a rest rule (guidance, not law; 2026-09-24 user decision) comes last.
+    // No repair relaxes a rest rule (user decision 2026-09-30: safety rules, tier H).
     // A hard contracted minimum comes first when one exists (4h5a): it is a floor the
     // static check cannot see in the staffing findings.
     expect(REPAIR_ORDER.unexplained).toEqual([
       "relax_contracted_hours",
       "soften_hard_request",
       "relax_count_rule",
-      "soften_rest_rule",
       "move_leave",
       "ask_nurse_on_leave",
     ]);
-    for (const [situation, order] of Object.entries(REPAIR_ORDER)) {
-      if (situation !== "unexplained") expect(order, situation).not.toContain("soften_rest_rule");
-    }
   });
 
   it("asks a named nurse only through a host question", () => {
@@ -139,11 +135,14 @@ describe("repair catalogue", () => {
     }
   });
 
-  it("softens a rest rule only through its own repair, and never turns one off or deletes it", () => {
-    const soften = REPAIRS.filter((repair) => repair.opTypes.includes("edit_shift_sequence_rule"));
-    expect(soften.map((repair) => repair.id)).toEqual(["soften_rest_rule"]);
-    expect(soften[0].opTypes).toEqual(["edit_shift_sequence_rule"]);
-    expect(soften[0].guardrail).toMatch(/warning/);
+  it("never offers to relax a rest rule (user decision 2026-09-30)", () => {
+    const rest = REPAIRS.filter((repair) =>
+      repair.opTypes.some((op) => op === "edit_shift_sequence_rule" || op === "set_rule_enabled"),
+    );
+    expect(rest).toEqual([]);
+    expect(SAFETY_FLOOR[0]).toMatch(
+      /Never offer to soften, turn off, delete or narrow a rest rule/,
+    );
   });
 
   it("never shows the model the 'succession rule' jargon (bead nj3q)", () => {
@@ -169,9 +168,8 @@ describe("repair catalogue", () => {
 
   it("states the safety floor in ward words", () => {
     const text = SAFETY_FLOOR.join(" ");
-    // Rest rules are guidance: they may be softened or turned off, never deleted.
-    expect(SAFETY_FLOOR[0]).toMatch(/Never delete .*rest rule/);
-    expect(text).not.toMatch(/Never relax or turn off a rest rule/);
+    // Rest rules are safety rules: a repair never relaxes one (user decision 2026-09-30).
+    expect(SAFETY_FLOOR[0]).toMatch(/soften, turn off, delete or narrow a rest rule/);
     expect(text).toMatch(/RN|skill/);
     expect(text).toMatch(/sick/i);
     expect(text).toMatch(/0|zero/);
@@ -410,7 +408,7 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS).toContain(TRUTHFUL_SUMMARY_RULE);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-10-06.1");
+    expect(PLAYBOOK_VERSION).toBe("2026-10-07.1");
   });
 });
 
